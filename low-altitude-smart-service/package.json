@@ -1,0 +1,34 @@
+{
+  "name": "low-altitude-smart-service",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "type-check": "vue-tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "axios": "^1.11.0",
+    "echarts": "^6.1.0",
+    "element-plus": "^2.11.1",
+    "leaflet": "^1.9.4",
+    "pinia": "^3.0.3",
+    "vue": "^3.5.21",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/leaflet": "^1.9.20",
+    "@vue/tsconfig": "^0.8.1",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "sass": "^1.92.0",
+    "typescript": "~5.8.3",
+    "unplugin-auto-import": "^20.0.0",
+    "unplugin-vue-components": "^29.0.0",
+    "vite": "^7.1.4",
+    "vue-tsc": "^3.0.6"
+  }
+}
