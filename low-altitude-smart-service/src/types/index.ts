@@ -42,3 +42,18 @@ export interface TaskItem {
   owner: string
   updatedAt: string
 }
+
+export interface AlgorithmModel {
+  id: string
+  name: string
+  scene: string
+  type: 'AI算法' | '大模型'
+  category: string
+  status: '已部署' | '在线'
+  description: string
+  tags: string[]
+  supportedMedia: string[]
+  visual: string
+  recommended?: boolean
+  comparison?: { before: string; after: string }
+}
