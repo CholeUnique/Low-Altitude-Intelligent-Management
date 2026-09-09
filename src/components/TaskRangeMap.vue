@@ -86,9 +86,9 @@ onBeforeUnmount(() => map?.remove())
 
 <style scoped lang="scss">
 .task-range-map { position: relative; width: 100%; height: 100%; min-height: 220px; overflow: hidden; background: #031a31; }.task-range-map__canvas { position: absolute; inset: 0; }
-.draw-tip { position: absolute; z-index: 500; top: 10px; left: 50%; transform: translateX(-50%); padding: 7px 12px; color: #bceeff; background: #05253ee8; border: 1px solid #186e94; font-size: 10px; white-space: nowrap; }
-.range-tools { position: absolute; z-index: 500; right: 10px; top: 45px; display: grid; gap: 5px; }.range-tools button { padding: 7px 10px; color: #b7eafa; background: #05213be8; border: 1px solid #17729b; font-size: 9px; cursor: pointer; }.range-tools button:hover { background: #0877a5; }
-.range-area { position: absolute; z-index: 500; left: 10px; bottom: 10px; padding: 8px 11px; color: #85b1c2; background: #031b31e8; border: 1px solid #155c7d; font-size: 8px; }.range-area b { color: #8cecff; font-size: 11px; }
+.draw-tip { position: absolute; z-index: 500; top: 10px; left: 50%; transform: translateX(-50%); padding: 7px 12px; color: #bceeff; background: #05253ee8; border: 1px solid #186e94; font-size: 15px; white-space: nowrap; }
+.range-tools { position: absolute; z-index: 500; right: 10px; top: 45px; display: grid; gap: 5px; }.range-tools button { padding: 7px 10px; color: #b7eafa; background: #05213be8; border: 1px solid #17729b; font-size: 14px; cursor: pointer; }.range-tools button:hover { background: #0877a5; }
+.range-area { position: absolute; z-index: 500; left: 10px; bottom: 10px; padding: 8px 11px; color: #85b1c2; background: #031b31e8; border: 1px solid #155c7d; font-size: 14px; }.range-area b { color: #8cecff; font-size: 16px; }
 .map-error { position: absolute; z-index: 700; inset: 0; display: grid; place-items: center; color: #ff8c95; background: #04182eea; }
 :deep(.leaflet-tile-pane) { filter: brightness(.65) saturate(1.15) hue-rotate(165deg) contrast(1.08); }
 </style>

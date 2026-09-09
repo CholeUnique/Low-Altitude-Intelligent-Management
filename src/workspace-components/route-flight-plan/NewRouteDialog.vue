@@ -140,7 +140,7 @@ function submit() {
 .new-route-dialog .el-dialog__title { font-size: 16px; font-weight: 700; color: #fff; }
 .new-route-dialog .el-dialog__body { padding: 16px 20px 8px; }
 .new-route-dialog .el-dialog__footer { padding: 12px 20px 18px; border-top: 1px solid #2f3640; }
-.field-label { display: block; margin: 12px 0 8px; color: #c8d0d8; font-size: 12px; }
+.field-label { display: block; margin: 12px 0 8px; color: #c8d0d8; font-size: 16px; }
 .field-label em { color: #ff6b6b; font-style: normal; }
 .field-control {
   width: 100%;
@@ -153,7 +153,7 @@ function submit() {
   outline: none;
 }
 .type-group { margin-bottom: 10px; }
-.type-group-title { margin-bottom: 8px; color: #8b97a5; font-size: 11px; }
+.type-group-title { margin-bottom: 8px; color: #8b97a5; font-size: 16px; }
 .type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .type-grid button {
   display: grid;
@@ -174,7 +174,7 @@ function submit() {
   box-shadow: inset 0 0 0 1px #3d8bfd55;
 }
 .type-grid i { font-size: 18px; font-style: normal; }
-.type-grid span { font-size: 11px; }
+.type-grid span { font-size: 16px; }
 .upload-box {
   position: relative;
   display: grid;
@@ -199,8 +199,8 @@ function submit() {
   border-radius: 8px;
   font-size: 18px;
 }
-.upload-box b { color: #e8eef4; font-size: 12px; }
-.upload-box small { font-size: 10px; }
+.upload-box b { color: #e8eef4; font-size: 16px; }
+.upload-box small { font-size: 15px; }
 .btn-cancel,
 .btn-next {
   min-width: 88px;
