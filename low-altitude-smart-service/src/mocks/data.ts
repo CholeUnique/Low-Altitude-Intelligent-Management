@@ -1,4 +1,4 @@
-import type { TaskItem, WorkflowEvent } from '@/types'
+import type { AlgorithmModel, TaskItem, WorkflowEvent } from '@/types'
 
 export const dashboardStats = [
   { label: '在线无人机', value: 48, unit: '台', primary: '总数 62 台', secondary: '在线率 77%', icon: 'drone', tone: 'cyan' },
@@ -41,17 +41,11 @@ export const droneFeeds = [
   { id: '无人机 D3-012', area: '农业示范区', status: '巡查中', altitude: '128m', speed: '4K · 30fps', image: 'field' },
 ]
 
-export const aiCapabilities = [
-  { name: '违建识别', icon: '楼', description: '建筑物变化检测' },
-  { name: '毁林开垦识别', icon: '林', description: '林地异常变化' },
-  { name: '非粮化识别', icon: '田', description: '耕地用途监测' },
-  { name: '变化检测', icon: '框', description: '多期影像比对' },
-]
-
-export const aiMetrics = [
-  { label: '已部署算法', value: '28', unit: '个' },
-  { label: '今日识别量', value: '12,560', unit: '次' },
-  { label: '平均准确率', value: '92.6', unit: '%' },
+const fallbackAiCapabilities = [
+  { id: undefined, name: '违建识别', icon: '楼', description: '建筑变化检测', visual: 'construction' },
+  { id: undefined, name: '毁林开垦识别', icon: '林', description: '林地异常变化', visual: 'forest-clearing' },
+  { id: undefined, name: '非粮化识别', icon: '田', description: '耕地用途监测', visual: 'farmland' },
+  { id: undefined, name: '变化检测', icon: '框', description: '多期影像比对', visual: 'change' },
 ]
 
 export const domainProgress = [
@@ -93,3 +87,43 @@ export const nodeFixtures = {
   'task-dispatch': { left: ['TB-2026-0908', 'TB-2026-0903', 'TB-2026-0886'], right: [['接收单位', '青云山林场'], ['完成时限', '2026-09-15'], ['优先级', '紧急']], bottom: ['核查要求', '接收单位', '任务日志'] },
   'review-archive': { left: ['待复核 · 8', '待归档 · 5', '已归档 · 126'], right: [['案件编号', 'AJ-2026-0368'], ['整改状态', '已完成'], ['材料完整度', '100%']], bottom: ['复核结论', '归档材料', '操作日志'] },
 } as const
+
+export const algorithmModels: AlgorithmModel[] = [
+  { id: 'ALG-001', name: '林地侵占识别', scene: '林业执法监管', type: 'AI算法', category: '目标识别', status: '已部署', description: '识别林地范围内新增构筑物、道路侵占、疑似非法占地行为，适用于林业执法监管场景。', tags: ['林业', '执法监管'], supportedMedia: ['图像', 'DJI拍摄图像', '视频', 'DJI拍摄视频'], visual: 'forest-building' },
+  { id: 'ALG-002', name: '毁林开垦识别', scene: '林业执法监管', type: 'AI算法', category: '变化检测', status: '在线', description: '识别林地被开垦、裸地扩张等变化现象，适用于林地资源保护与巡查监管。', tags: ['林业', '生态保护', '变化检测'], supportedMedia: ['图像', 'DJI拍摄图像', 'RTMP直播流'], visual: 'forest-clearing', recommended: true },
+  { id: 'ALG-003', name: '新增建设用地预警', scene: '新增违法违规用地智能预警', type: 'AI算法', category: '目标识别', status: '已部署', description: '识别新增硬化地面、建筑物和疑似建设活动，适用于新增违法违规用地智能预警。', tags: ['国土', '用地监管', '违法预警'], supportedMedia: ['图像', '视频', 'RTMP直播流'], visual: 'construction' },
+  { id: 'ALG-004', name: '非粮化地块识别', scene: '非粮化动态监测', type: 'AI算法', category: '分割提取', status: '在线', description: '识别耕地中疑似非粮化利用情况，服务于耕地种植用途管控。', tags: ['农业', '耕地保护', '用途监管'], supportedMedia: ['图像', 'DJI拍摄图像'], visual: 'farmland' },
+  { id: 'ALG-005', name: '整改复绿对比分析', scene: '存量违法违规用地整改', type: '大模型', category: '大模型', status: '已部署', description: '对比整改前后影像，识别复绿落实情况，适用于存量违法用地整改复核。', tags: ['国土', '生态修复', '督察核验'], supportedMedia: ['图像', 'DJI拍摄图像'], visual: 'restoration', comparison: { before: '整改前', after: '整改后' } },
+  { id: 'ALG-006', name: '道路违章堆料识别', scene: '交通巡检', type: 'AI算法', category: '目标识别', status: '在线', description: '识别道路周边堆料、临时占道等异常目标，适用于交通巡检与城市治理。', tags: ['交通', '城市治理', '道路巡检'], supportedMedia: ['图像', '视频', 'DJI拍摄视频', 'RTMP直播流'], visual: 'road' },
+  { id: 'ALG-007', name: '水体周边异常识别', scene: '城市治理', type: 'AI算法', category: '目标识别', status: '已部署', description: '识别水源地周边施工、裸地与垃圾堆放情况，适用于生态环境监管。', tags: ['生态环境', '水体保护', '违法监管'], supportedMedia: ['图像', 'DJI拍摄图像', '视频'], visual: 'water' },
+  { id: 'ALG-008', name: '多期影像变化检测', scene: '国土变更调查与举证', type: '大模型', category: '大模型', status: '在线', description: '支持多期影像自动比对，发现新增变化图斑并输出疑似问题区域。', tags: ['国土', '变化检测', '遥感分析'], supportedMedia: ['图像', 'DJI拍摄图像'], visual: 'change', comparison: { before: '2023年03月', after: '2024年03月' } },
+]
+
+const capabilityCategories = ['目标识别', '变化检测', '分割提取', '大模型']
+
+function capabilityIcon(model: AlgorithmModel) {
+  if (model.tags.includes('林业')) return '林'
+  if (model.tags.includes('农业')) return '田'
+  if (model.tags.includes('国土')) return '土'
+  if (model.tags.includes('交通')) return '路'
+  if (model.tags.includes('生态环境')) return '水'
+  return '智'
+}
+
+function capabilityDescription(model: AlgorithmModel) {
+  if (model.name.includes('非粮化')) return '耕地非粮监测'
+  if (model.name.includes('复绿')) return '复绿影像对比'
+  if (model.name.includes('多期影像')) return '多期影像比对'
+  return model.name.replace('识别', '检测').replace('分析', '比对').slice(0, 6)
+}
+
+export const aiCapabilities = capabilityCategories.map((category, index) => {
+  const model = algorithmModels.find((item) => item.category === category)
+  return model ? { id: model.id, name: model.name, icon: capabilityIcon(model), description: capabilityDescription(model), visual: model.visual } : fallbackAiCapabilities[index]!
+})
+
+export const aiMetrics = [
+  { label: '已部署算法', value: String(algorithmModels.length), unit: '个' },
+  { label: '今日识别量', value: '12,560', unit: '次' },
+  { label: '平均准确率', value: '92.6', unit: '%' },
+]

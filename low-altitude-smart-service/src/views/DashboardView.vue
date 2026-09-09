@@ -27,6 +27,10 @@ function logout() {
   router.replace('/login')
 }
 
+function openAlgorithm(id?: string) {
+  router.push({ name: 'algorithms', query: id ? { algorithm: id } : undefined })
+}
+
 onBeforeUnmount(() => window.clearInterval(timer))
 </script>
 
@@ -103,9 +107,9 @@ onBeforeUnmount(() => window.clearInterval(timer))
         </article>
 
         <article class="cockpit-panel ai-panel">
-          <div class="cockpit-panel__title"><h2>智能识别能力中心</h2><span>全部能力 〉</span></div>
+          <div class="cockpit-panel__title"><h2>智能识别能力中心</h2><router-link to="/algorithms">全部能力 〉</router-link></div>
           <div class="ai-capability-grid">
-            <div v-for="item in aiCapabilities" :key="item.name"><i>{{ item.icon }}</i><b>{{ item.name }}</b><small>{{ item.description }}</small></div>
+            <button v-for="item in aiCapabilities" :key="item.name" class="ai-capability" :class="`capability-${item.visual}`" @click="openAlgorithm(item.id)"><i>{{ item.icon }}</i><b>{{ item.name }}</b><small>{{ item.description }}</small></button>
           </div>
           <div class="ai-metric-row">
             <div v-for="metric in aiMetrics" :key="metric.label"><span>{{ metric.label }}</span><b>{{ metric.value }}<small>{{ metric.unit }}</small></b></div>
