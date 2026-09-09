@@ -105,6 +105,13 @@
 .flow-caption { display: grid; align-content: center; }.flow-caption b { font-size: 11px; }.flow-caption span { margin-top: 3px; color: #5a8497; font-size: 6px; }
 .flow-item { min-width: 0; display: flex; align-items: center; gap: 7px; justify-content: center; }.flow-item>i { width: 28px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; color: #69eaf6; border: 1px solid #12739a; border-radius: 50%; background: radial-gradient(circle, #0a5474, #042942); box-shadow: 0 0 8px #0bc5e633; font-size: 8px; font-style: normal; }.flow-item span { display: grid; grid-template-columns: auto 1fr; column-gap: 5px; min-width: 0; }.flow-item small { color: #2b91b2; font-size: 7px; }.flow-item b { font-size: 8px; white-space: nowrap; }.flow-item em { grid-column: 1/3; margin-top: 2px; color: #4d7486; font-size: 5px; font-style: normal; white-space: nowrap; }.flow-arrow { color: #159bc0; font-size: 24px; text-shadow: 0 0 8px #29d9f2; }
 
+.scene-entries { display: flex; gap: 7px; }
+.scene-entries .flow-caption { width: 145px; flex: 0 0 auto; }
+.scene-entry { min-width: 0; height: 42px; flex: 1; display: flex; align-items: center; gap: 7px; padding: 4px 8px; color: #bde8f3; background: linear-gradient(135deg, #073654, #04243d); border: 1px solid #0b5c82; cursor: pointer; }
+.scene-entry:hover,.scene-entry.active { border-color: #1ed3eb; background: linear-gradient(135deg, #09638a, #064061); box-shadow: inset 0 0 12px #16cde32b, 0 0 8px #10b9dc24; }
+.scene-entry>i { width: 27px; height: 27px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; color: #75f0fa; background: #075274; border: 1px solid #1283a4; font-size: 8px; font-style: normal; }
+.scene-entry span,.scene-entry b,.scene-entry em { min-width: 0; display: block; text-align: left; }.scene-entry b { overflow: hidden; text-overflow: ellipsis; font-size: 8px; white-space: nowrap; }.scene-entry em { margin-top: 3px; overflow: hidden; color: #527d90; font-size: 5px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 1450px) {
   .cockpit-header { grid-template-columns: minmax(280px, 1fr) auto minmax(360px, 1fr); }
   .cockpit-brand h1 { font-size: 18px; }.cockpit-user { gap: 6px; }.cockpit-nav { gap: 5px; }

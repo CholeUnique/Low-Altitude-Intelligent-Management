@@ -21,8 +21,8 @@ function logout() {
       </div>
       <nav>
         <router-link to="/dashboard" :class="{ active: route.path === '/dashboard' }"><span>◈</span>运行中枢</router-link>
-        <router-link to="/taskLists" :class="{ active: route.path === '/taskLists' }"><span>▤</span>任务总览</router-link>
-        <router-link to="/workspace/forestry/LY-20260908-001"><span>⌖</span>林业监管</router-link>
+        <router-link to="/tasks" :class="{ active: route.path.startsWith('/tasks') }"><span>▤</span>任务总览</router-link>
+        <router-link to="/workspace/forestry-enforcement/TASK-20260909-001"><span>⌖</span>场景工作台</router-link>
       </nav>
       <div class="sidebar-foot">系统运行正常<br><small>Mock 服务已启用</small></div>
     </aside>

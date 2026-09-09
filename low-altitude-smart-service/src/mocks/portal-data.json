@@ -1,0 +1,1179 @@
+{
+  "roles": [
+    {
+      "id": "admin",
+      "name": "管理员",
+      "description": "单位管理与业务统筹",
+      "permissions": [
+        "dashboard:view",
+        "task:view",
+        "task:create",
+        "task:manage",
+        "workspace:view"
+      ]
+    },
+    {
+      "id": "staff",
+      "name": "员工",
+      "description": "业务执行与任务处置",
+      "permissions": [
+        "dashboard:view",
+        "task:view",
+        "task:create",
+        "task:manage",
+        "workspace:view"
+      ]
+    }
+  ],
+  "organizations": [
+    {
+      "id": "natural-resources",
+      "name": "自然资源和规划局",
+      "shortName": "自规局",
+      "description": "自然资源全场景低空智慧监管",
+      "overview": {
+        "onlineDrones": 48,
+        "totalDrones": 62,
+        "todayTasks": 126,
+        "pendingTasks": 37,
+        "completionRate": 92,
+        "deployedAlgorithms": 28,
+        "todayIdentifications": 12560,
+        "accuracyRate": 92.6
+      },
+      "scenes": [
+        {
+          "id": "forestry-enforcement",
+          "name": "林业执法监管",
+          "shortName": "林业执法",
+          "icon": "林",
+          "description": "林地巡查、问题识别与执法闭环",
+          "workspaceEnabled": true
+        },
+        {
+          "id": "new-illegal-land-warning",
+          "name": "新增违法违规用地智能预警",
+          "shortName": "新增用地预警",
+          "icon": "警",
+          "description": "新增违法违规用地智能发现与预警",
+          "workspaceEnabled": false
+        },
+        {
+          "id": "existing-illegal-land-rectification",
+          "name": "全程监测存量违法违规用地整改",
+          "shortName": "存量用地整改",
+          "icon": "整",
+          "description": "存量违法用地整改全过程监测",
+          "workspaceEnabled": false
+        },
+        {
+          "id": "land-supply-inspection",
+          "name": "土地供后巡查与履约分析",
+          "shortName": "供后巡查",
+          "icon": "巡",
+          "description": "供后开发利用巡查和履约分析",
+          "workspaceEnabled": false
+        },
+        {
+          "id": "land-reclamation",
+          "name": "土地复垦全流程监管",
+          "shortName": "土地复垦",
+          "icon": "复",
+          "description": "土地复垦项目全生命周期监管",
+          "workspaceEnabled": false
+        }
+      ]
+    },
+    {
+      "id": "agriculture-rural",
+      "name": "农业农村局",
+      "shortName": "农业农村局",
+      "description": "农业农村多场景低空智慧监管",
+      "overview": {
+        "onlineDrones": 36,
+        "totalDrones": 45,
+        "todayTasks": 98,
+        "pendingTasks": 24,
+        "completionRate": 88,
+        "deployedAlgorithms": 23,
+        "todayIdentifications": 9860,
+        "accuracyRate": 91.8
+      },
+      "scenes": [
+        {
+          "id": "non-grain-monitoring",
+          "name": "耕地种植用途管控与“非粮化”动态监测",
+          "shortName": "非粮化监测",
+          "icon": "耕",
+          "description": "耕地用途变化和非粮化动态监测",
+          "workspaceEnabled": false
+        },
+        {
+          "id": "planting-subsidy",
+          "name": "种植面积精准核定与惠农补贴监管",
+          "shortName": "种植补贴",
+          "icon": "补",
+          "description": "种植面积核定和惠农补贴监管",
+          "workspaceEnabled": false
+        },
+        {
+          "id": "pond-archive",
+          "name": "塘口全域巡检与“一塘一档”数字建档",
+          "shortName": "塘口建档",
+          "icon": "塘",
+          "description": "塘口巡检和数字档案建设",
+          "workspaceEnabled": false
+        },
+        {
+          "id": "yangtze-fishing-ban",
+          "name": "长江禁捕全流程闭环执法",
+          "shortName": "长江禁捕",
+          "icon": "渔",
+          "description": "长江禁捕巡查、取证和执法闭环",
+          "workspaceEnabled": false
+        },
+        {
+          "id": "farmland-facilities",
+          "name": "高标准农田工程设施管理",
+          "shortName": "农田设施",
+          "icon": "设",
+          "description": "高标准农田工程设施常态化管理",
+          "workspaceEnabled": false
+        },
+        {
+          "id": "farmland-construction",
+          "name": "高标准农田在建工程管理",
+          "shortName": "在建农田",
+          "icon": "建",
+          "description": "高标准农田在建工程进度和质量管理",
+          "workspaceEnabled": false
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "TASK-20260909-001",
+      "organizationId": "natural-resources",
+      "sceneId": "forestry-enforcement",
+      "name": "西山林区全域巡查",
+      "status": "进行中",
+      "priority": "高",
+      "area": "西山林区片区A",
+      "areaSize": 36.2,
+      "owner": "西山市林业局",
+      "assignee": "张三",
+      "createdAt": "2026-09-09 08:30",
+      "updatedAt": "2026-09-09 14:26",
+      "plannedStart": "2026-09-09 08:30",
+      "plannedEnd": "2026-09-10 12:00",
+      "progress": 58,
+      "description": "针对西山林区重点区域开展无人机全覆盖巡查，识别违规砍伐、侵占林地和火情隐患。",
+      "contact": "张三",
+      "phone": "138****5678",
+      "resultRequirements": [
+        "照片",
+        "视频",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          119.68,
+          32.65
+        ],
+        [
+          119.77,
+          32.69
+        ],
+        [
+          119.84,
+          32.62
+        ],
+        [
+          119.8,
+          32.54
+        ],
+        [
+          119.7,
+          32.56
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "active",
+          "time": "进行中"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "pending"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "pending"
+        }
+      ],
+      "metrics": {
+        "flights": 8,
+        "flightHours": 2.6,
+        "patrolArea": 36.2,
+        "issues": 12,
+        "completedNodes": 2,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260909-002",
+      "organizationId": "natural-resources",
+      "sceneId": "new-illegal-land-warning",
+      "name": "城郊新增建设用地智能预警",
+      "status": "已完成",
+      "priority": "中",
+      "area": "城郊东部片区",
+      "areaSize": 12.5,
+      "owner": "执法监察支队",
+      "assignee": "李四",
+      "createdAt": "2026-09-08 09:20",
+      "updatedAt": "2026-09-09 12:10",
+      "plannedStart": "2026-09-08 09:30",
+      "plannedEnd": "2026-09-09 16:00",
+      "progress": 100,
+      "description": "比对多期影像，识别城郊新增建设和疑似违法用地。",
+      "contact": "李四",
+      "phone": "139****2368",
+      "resultRequirements": [
+        "照片",
+        "二维成果",
+        "巡检报告"
+      ],
+      "coordinates": [
+        [
+          120,
+          32.54
+        ],
+        [
+          120.1,
+          32.55
+        ],
+        [
+          120.12,
+          32.47
+        ],
+        [
+          120.02,
+          32.45
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "done",
+          "time": "已完成"
+        }
+      ],
+      "metrics": {
+        "flights": 5,
+        "flightHours": 1.8,
+        "patrolArea": 12.5,
+        "issues": 6,
+        "completedNodes": 5,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260908-006",
+      "organizationId": "natural-resources",
+      "sceneId": "existing-illegal-land-rectification",
+      "name": "存量违法用地整改效果复核",
+      "status": "待复核",
+      "priority": "高",
+      "area": "经开区西区",
+      "areaSize": 8.4,
+      "owner": "自然资源执法局",
+      "assignee": "王五",
+      "createdAt": "2026-09-08 10:15",
+      "updatedAt": "2026-09-09 11:03",
+      "plannedStart": "2026-09-08 13:00",
+      "plannedEnd": "2026-09-10 18:00",
+      "progress": 82,
+      "description": "对存量违法用地整改情况开展无人机复核取证。",
+      "contact": "王五",
+      "phone": "137****1026",
+      "resultRequirements": [
+        "照片",
+        "视频",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          119.85,
+          32.37
+        ],
+        [
+          119.95,
+          32.39
+        ],
+        [
+          119.97,
+          32.3
+        ],
+        [
+          119.87,
+          32.29
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "active",
+          "time": "处理中"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "pending"
+        }
+      ],
+      "metrics": {
+        "flights": 6,
+        "flightHours": 2.1,
+        "patrolArea": 8.4,
+        "issues": 4,
+        "completedNodes": 3,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260907-011",
+      "organizationId": "natural-resources",
+      "sceneId": "land-supply-inspection",
+      "name": "工业园供后履约专项巡查",
+      "status": "进行中",
+      "priority": "中",
+      "area": "高新工业园",
+      "areaSize": 24.1,
+      "owner": "利用处",
+      "assignee": "赵六",
+      "createdAt": "2026-09-07 14:10",
+      "updatedAt": "2026-09-09 09:45",
+      "plannedStart": "2026-09-08 08:00",
+      "plannedEnd": "2026-09-11 18:00",
+      "progress": 46,
+      "description": "检查供地项目开工、建设进度与合同履约情况。",
+      "contact": "赵六",
+      "phone": "136****7251",
+      "resultRequirements": [
+        "照片",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          120.1,
+          32.42
+        ],
+        [
+          120.2,
+          32.43
+        ],
+        [
+          120.22,
+          32.34
+        ],
+        [
+          120.12,
+          32.33
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "active",
+          "time": "进行中"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "pending"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "pending"
+        }
+      ],
+      "metrics": {
+        "flights": 3,
+        "flightHours": 1.2,
+        "patrolArea": 24.1,
+        "issues": 2,
+        "completedNodes": 2,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260906-016",
+      "organizationId": "natural-resources",
+      "sceneId": "land-reclamation",
+      "name": "北部矿区土地复垦验收巡查",
+      "status": "待处理",
+      "priority": "低",
+      "area": "北部矿区",
+      "areaSize": 28.6,
+      "owner": "修复处",
+      "assignee": "刘八",
+      "createdAt": "2026-09-06 11:30",
+      "updatedAt": "2026-09-08 16:20",
+      "plannedStart": "2026-09-10 09:00",
+      "plannedEnd": "2026-09-12 18:00",
+      "progress": 12,
+      "description": "核查矿区土地复垦工程完成度与植被恢复情况。",
+      "contact": "刘八",
+      "phone": "135****9008",
+      "resultRequirements": [
+        "照片",
+        "视频",
+        "二维成果",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          119.55,
+          32.47
+        ],
+        [
+          119.66,
+          32.49
+        ],
+        [
+          119.68,
+          32.39
+        ],
+        [
+          119.57,
+          32.38
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "active",
+          "time": "进行中"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "pending"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "pending"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "pending"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "pending"
+        }
+      ],
+      "metrics": {
+        "flights": 0,
+        "flightHours": 0,
+        "patrolArea": 28.6,
+        "issues": 0,
+        "completedNodes": 0,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260909-101",
+      "organizationId": "agriculture-rural",
+      "sceneId": "non-grain-monitoring",
+      "name": "秋季耕地非粮化动态监测",
+      "status": "进行中",
+      "priority": "高",
+      "area": "南部农业示范区",
+      "areaSize": 42.8,
+      "owner": "种植业管理处",
+      "assignee": "周明",
+      "createdAt": "2026-09-09 07:50",
+      "updatedAt": "2026-09-09 14:20",
+      "plannedStart": "2026-09-09 08:00",
+      "plannedEnd": "2026-09-11 18:00",
+      "progress": 62,
+      "description": "监测耕地种植用途变化，识别果树、苗木等非粮化疑似图斑。",
+      "contact": "周明",
+      "phone": "138****3108",
+      "resultRequirements": [
+        "照片",
+        "二维成果",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          119.82,
+          32.59
+        ],
+        [
+          119.92,
+          32.6
+        ],
+        [
+          119.94,
+          32.51
+        ],
+        [
+          119.84,
+          32.5
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "active",
+          "time": "进行中"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "pending"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "pending"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "pending"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "pending"
+        }
+      ],
+      "metrics": {
+        "flights": 7,
+        "flightHours": 2.3,
+        "patrolArea": 42.8,
+        "issues": 9,
+        "completedNodes": 0,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260909-102",
+      "organizationId": "agriculture-rural",
+      "sceneId": "planting-subsidy",
+      "name": "水稻种植面积精准核定",
+      "status": "待复核",
+      "priority": "中",
+      "area": "清河镇",
+      "areaSize": 31.6,
+      "owner": "农业发展中心",
+      "assignee": "吴桐",
+      "createdAt": "2026-09-08 08:40",
+      "updatedAt": "2026-09-09 13:18",
+      "plannedStart": "2026-09-08 09:00",
+      "plannedEnd": "2026-09-10 17:00",
+      "progress": 84,
+      "description": "精准核定水稻种植面积，为惠农补贴发放提供依据。",
+      "contact": "吴桐",
+      "phone": "137****6512",
+      "resultRequirements": [
+        "照片",
+        "二维成果",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          119.98,
+          32.68
+        ],
+        [
+          120.08,
+          32.69
+        ],
+        [
+          120.09,
+          32.6
+        ],
+        [
+          119.99,
+          32.59
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "active",
+          "time": "处理中"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "pending"
+        }
+      ],
+      "metrics": {
+        "flights": 6,
+        "flightHours": 2,
+        "patrolArea": 31.6,
+        "issues": 3,
+        "completedNodes": 3,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260908-103",
+      "organizationId": "agriculture-rural",
+      "sceneId": "pond-archive",
+      "name": "东湖片区塘口全域巡检建档",
+      "status": "已完成",
+      "priority": "中",
+      "area": "东湖水产区",
+      "areaSize": 18.2,
+      "owner": "渔业渔政处",
+      "assignee": "陈渔",
+      "createdAt": "2026-09-07 09:10",
+      "updatedAt": "2026-09-08 17:40",
+      "plannedStart": "2026-09-07 09:30",
+      "plannedEnd": "2026-09-09 17:00",
+      "progress": 100,
+      "description": "开展塘口全域巡检，完善一塘一档基础信息和影像资料。",
+      "contact": "陈渔",
+      "phone": "139****8023",
+      "resultRequirements": [
+        "照片",
+        "视频",
+        "二维成果",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          120.14,
+          32.55
+        ],
+        [
+          120.23,
+          32.56
+        ],
+        [
+          120.25,
+          32.47
+        ],
+        [
+          120.16,
+          32.46
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "done",
+          "time": "已完成"
+        }
+      ],
+      "metrics": {
+        "flights": 9,
+        "flightHours": 3.1,
+        "patrolArea": 18.2,
+        "issues": 5,
+        "completedNodes": 5,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260908-104",
+      "organizationId": "agriculture-rural",
+      "sceneId": "yangtze-fishing-ban",
+      "name": "长江重点水域禁捕夜间巡查",
+      "status": "进行中",
+      "priority": "高",
+      "area": "长江北岸段",
+      "areaSize": 56.4,
+      "owner": "渔政执法支队",
+      "assignee": "孙航",
+      "createdAt": "2026-09-08 18:00",
+      "updatedAt": "2026-09-09 10:30",
+      "plannedStart": "2026-09-08 19:00",
+      "plannedEnd": "2026-09-10 06:00",
+      "progress": 48,
+      "description": "利用红外无人机开展重点水域夜间禁捕巡查。",
+      "contact": "孙航",
+      "phone": "136****4980",
+      "resultRequirements": [
+        "照片",
+        "视频",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          119.86,
+          32.35
+        ],
+        [
+          119.96,
+          32.36
+        ],
+        [
+          120.05,
+          32.32
+        ],
+        [
+          119.94,
+          32.28
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "active",
+          "time": "进行中"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "pending"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "pending"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "pending"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "pending"
+        }
+      ],
+      "metrics": {
+        "flights": 4,
+        "flightHours": 1.7,
+        "patrolArea": 56.4,
+        "issues": 2,
+        "completedNodes": 0,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260907-105",
+      "organizationId": "agriculture-rural",
+      "sceneId": "farmland-facilities",
+      "name": "高标准农田灌排设施巡检",
+      "status": "待处理",
+      "priority": "低",
+      "area": "西南高标准农田",
+      "areaSize": 26.7,
+      "owner": "农田建设处",
+      "assignee": "徐工",
+      "createdAt": "2026-09-07 15:20",
+      "updatedAt": "2026-09-08 10:00",
+      "plannedStart": "2026-09-10 08:00",
+      "plannedEnd": "2026-09-12 18:00",
+      "progress": 8,
+      "description": "巡检农田灌排、机耕路和泵站设施运行情况。",
+      "contact": "徐工",
+      "phone": "135****2026",
+      "resultRequirements": [
+        "照片",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          119.65,
+          32.35
+        ],
+        [
+          119.75,
+          32.37
+        ],
+        [
+          119.77,
+          32.27
+        ],
+        [
+          119.67,
+          32.26
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "active",
+          "time": "进行中"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "pending"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "pending"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "pending"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "pending"
+        }
+      ],
+      "metrics": {
+        "flights": 0,
+        "flightHours": 0,
+        "patrolArea": 26.7,
+        "issues": 0,
+        "completedNodes": 0,
+        "totalNodes": 5
+      }
+    },
+    {
+      "id": "TASK-20260907-106",
+      "organizationId": "agriculture-rural",
+      "sceneId": "farmland-construction",
+      "name": "北部高标准农田在建工程巡查",
+      "status": "进行中",
+      "priority": "中",
+      "area": "北部项目区",
+      "areaSize": 33.9,
+      "owner": "项目监管中心",
+      "assignee": "郑建",
+      "createdAt": "2026-09-07 08:30",
+      "updatedAt": "2026-09-09 11:50",
+      "plannedStart": "2026-09-07 09:00",
+      "plannedEnd": "2026-09-13 18:00",
+      "progress": 54,
+      "description": "监测在建高标准农田工程形象进度、质量和安全。",
+      "contact": "郑建",
+      "phone": "137****8516",
+      "resultRequirements": [
+        "照片",
+        "视频",
+        "三维成果",
+        "报告"
+      ],
+      "coordinates": [
+        [
+          119.69,
+          32.75
+        ],
+        [
+          119.8,
+          32.76
+        ],
+        [
+          119.82,
+          32.66
+        ],
+        [
+          119.71,
+          32.65
+        ]
+      ],
+      "workflow": [
+        {
+          "key": "route-flight-plan",
+          "name": "航线规划与飞行计划",
+          "status": "done",
+          "time": "已完成"
+        },
+        {
+          "key": "realtime-cruise",
+          "name": "实时巡航",
+          "status": "active",
+          "time": "进行中"
+        },
+        {
+          "key": "spot-identification",
+          "name": "问题图斑识别",
+          "status": "pending"
+        },
+        {
+          "key": "task-dispatch",
+          "name": "核查任务下发",
+          "status": "pending"
+        },
+        {
+          "key": "review-archive",
+          "name": "复核与归档",
+          "status": "pending"
+        }
+      ],
+      "metrics": {
+        "flights": 5,
+        "flightHours": 1.9,
+        "patrolArea": 33.9,
+        "issues": 4,
+        "completedNodes": 1,
+        "totalNodes": 5
+      }
+    }
+  ],
+  "alerts": [
+    {
+      "id": "A-001",
+      "organizationId": "natural-resources",
+      "sceneId": "forestry-enforcement",
+      "level": "high",
+      "title": "无人机离线",
+      "description": "无人机 D3-007 失去连接",
+      "time": "14:35"
+    },
+    {
+      "id": "A-002",
+      "organizationId": "natural-resources",
+      "sceneId": "new-illegal-land-warning",
+      "level": "medium",
+      "title": "疑似新增违建",
+      "description": "AI识别发现疑似新增建筑物",
+      "time": "11:23"
+    },
+    {
+      "id": "A-003",
+      "organizationId": "natural-resources",
+      "sceneId": "existing-illegal-land-rectification",
+      "level": "high",
+      "title": "整改任务超期",
+      "description": "2个整改任务超过计划时限",
+      "time": "10:16"
+    },
+    {
+      "id": "A-004",
+      "organizationId": "natural-resources",
+      "sceneId": "land-supply-inspection",
+      "level": "medium",
+      "title": "履约进度异常",
+      "description": "1个项目建设进度偏离计划",
+      "time": "09:40"
+    },
+    {
+      "id": "A-101",
+      "organizationId": "agriculture-rural",
+      "sceneId": "non-grain-monitoring",
+      "level": "high",
+      "title": "非粮化疑似图斑",
+      "description": "发现新增果树种植疑似图斑",
+      "time": "14:18"
+    },
+    {
+      "id": "A-102",
+      "organizationId": "agriculture-rural",
+      "sceneId": "pond-archive",
+      "level": "medium",
+      "title": "塘口档案缺失",
+      "description": "3处塘口缺少最新巡检影像",
+      "time": "12:06"
+    },
+    {
+      "id": "A-103",
+      "organizationId": "agriculture-rural",
+      "sceneId": "yangtze-fishing-ban",
+      "level": "high",
+      "title": "疑似非法捕捞",
+      "description": "夜间红外识别到可疑船只",
+      "time": "02:32"
+    },
+    {
+      "id": "A-104",
+      "organizationId": "agriculture-rural",
+      "sceneId": "farmland-construction",
+      "level": "medium",
+      "title": "工程进度滞后",
+      "description": "北部项目区较计划滞后8%",
+      "time": "09:15"
+    }
+  ],
+  "cases": [
+    {
+      "id": "C-001",
+      "organizationId": "natural-resources",
+      "sceneId": "forestry-enforcement",
+      "taskId": "TASK-20260909-001",
+      "title": "林地违规占用整改复核",
+      "date": "2026-09-09",
+      "image": "forest"
+    },
+    {
+      "id": "C-002",
+      "organizationId": "natural-resources",
+      "sceneId": "new-illegal-land-warning",
+      "taskId": "TASK-20260909-002",
+      "title": "新增建设用地快速核查处置",
+      "date": "2026-09-08",
+      "image": "road"
+    },
+    {
+      "id": "C-003",
+      "organizationId": "natural-resources",
+      "sceneId": "land-reclamation",
+      "taskId": "TASK-20260906-016",
+      "title": "矿区土地复垦验收销号",
+      "date": "2026-09-07",
+      "image": "field"
+    },
+    {
+      "id": "C-101",
+      "organizationId": "agriculture-rural",
+      "sceneId": "non-grain-monitoring",
+      "taskId": "TASK-20260909-101",
+      "title": "耕地非粮化图斑整改复核",
+      "date": "2026-09-09",
+      "image": "field"
+    },
+    {
+      "id": "C-102",
+      "organizationId": "agriculture-rural",
+      "sceneId": "pond-archive",
+      "taskId": "TASK-20260908-103",
+      "title": "东湖片区塘口数字建档",
+      "date": "2026-09-08",
+      "image": "river"
+    },
+    {
+      "id": "C-103",
+      "organizationId": "agriculture-rural",
+      "sceneId": "yangtze-fishing-ban",
+      "taskId": "TASK-20260908-104",
+      "title": "禁捕水域联合执法归档",
+      "date": "2026-09-07",
+      "image": "river"
+    }
+  ]
+}
