@@ -1,18 +1,48 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { dashboardMapPoints } from '@/mocks/data'
+import type { DashboardMapLayer, DashboardMapTask, DronePatrolRoute } from '@/types'
 
+const props = defineProps<{
+  layers: DashboardMapLayer[]
+  routes: DronePatrolRoute[]
+}>()
+
+const TAIZHOU_CENTER: L.LatLngTuple = [32.4555, 119.9255]
+const TAIZHOU_ZOOM = 10
+const token = import.meta.env.VITE_TIANDITU_TOKEN
+const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
 const container = ref<HTMLElement>()
 const mapReady = ref(false)
+const mapError = ref('')
 const mapMode = ref<'vector' | 'image'>('vector')
-const token = import.meta.env.VITE_TIANDITU_TOKEN
+const visibleLayerIds = ref<string[]>(props.layers.map((layer) => layer.id))
+const routesVisible = ref(true)
+const searchKeyword = ref('')
+const toolMessage = ref('')
+const measureOpen = ref(false)
+const baseMapOpen = ref(false)
+const activeTool = ref<'distance' | 'area' | 'marker' | null>(null)
+const measureResult = ref('')
+const searchResults = computed(() => {
+  const keyword = searchKeyword.value.trim().toLowerCase()
+  if (!keyword) return []
+  return props.layers.flatMap((layer) => layer.tasks.map((task) => ({ ...task, layerName: layer.name })))
+    .filter((task) => `${task.name}${task.taskId}${task.area}`.toLowerCase().includes(keyword))
+    .slice(0, 6)
+})
+
 let map: L.Map | undefined
 let baseLayer: L.TileLayer | undefined
 let labelLayer: L.TileLayer | undefined
-
-const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
+let routeGroup: L.LayerGroup | undefined
+let measureGroup: L.LayerGroup | undefined
+let annotationGroup: L.LayerGroup | undefined
+let locationGroup: L.LayerGroup | undefined
+const sceneGroups = new Map<string, L.LayerGroup>()
+const taskTargets = new Map<string, { marker: L.Marker; polygon: L.Polygon }>()
+let measurePoints: L.LatLng[] = []
 
 function tileUrl(layer: 'vec' | 'img' | 'cva' | 'cia') {
   return `https://t{s}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}&tk=${token}`
@@ -24,116 +54,332 @@ function addBaseLayers(mode: 'vector' | 'image') {
   labelLayer?.remove()
   const base = mode === 'vector' ? 'vec' : 'img'
   const label = mode === 'vector' ? 'cva' : 'cia'
+  let loadedTiles = 0
   baseLayer = L.tileLayer(tileUrl(base), { subdomains, maxZoom: 18 })
   labelLayer = L.tileLayer(tileUrl(label), { subdomains, maxZoom: 18, pane: 'labels' })
+  baseLayer.on('tileload', () => {
+    loadedTiles += 1
+    if (loadedTiles === 1) {
+      mapReady.value = true
+      mapError.value = ''
+    }
+  })
+  baseLayer.on('tileerror', () => {
+    if (!loadedTiles) mapError.value = '天地图加载失败，请检查网络或 Token 域名白名单'
+  })
   baseLayer.addTo(map)
   labelLayer.addTo(map)
+}
+
+function taskIcon(color: string, status: string) {
+  return L.divIcon({
+    className: 'business-task-marker',
+    html: `<span style="--marker-color:${color}">${status === '已完成' ? '✓' : '◆'}</span>`,
+    iconSize: [25, 25],
+    iconAnchor: [12, 12],
+  })
+}
+
+function droneIcon(route: DronePatrolRoute) {
+  return L.divIcon({
+    className: 'business-drone-marker',
+    html: `<span>✦</span><b>${route.droneId}</b>`,
+    iconSize: [70, 26],
+    iconAnchor: [13, 13],
+  })
+}
+
+function taskPopup(task: DashboardMapTask, layerName: string) {
+  return `<div class="business-popup"><strong>${task.name}</strong><span>${layerName} · ${task.status}</span><span>任务区域：${task.area}</span><small>${task.taskId}</small></div>`
+}
+
+function renderBusinessLayers() {
+  if (!map) return
+  sceneGroups.forEach((group) => group.remove())
+  sceneGroups.clear()
+  taskTargets.clear()
+  props.layers.forEach((layer) => {
+    const group = L.layerGroup()
+    layer.tasks.forEach((task) => {
+      const polygon = L.polygon(task.polygon.map((point) => [point[1], point[0]] as L.LatLngTuple), {
+        color: layer.color,
+        weight: 2,
+        fillColor: layer.color,
+        fillOpacity: .16,
+        dashArray: task.status === '已完成' ? undefined : '7 5',
+      }).bindPopup(taskPopup(task, layer.name))
+      const marker = L.marker([task.center[1], task.center[0]], { icon: taskIcon(layer.color, task.status) })
+        .bindTooltip(task.name, { direction: 'right', className: 'business-task-label', offset: [9, 0] })
+        .bindPopup(taskPopup(task, layer.name))
+      polygon.addTo(group)
+      marker.addTo(group)
+      taskTargets.set(task.taskId, { marker, polygon })
+    })
+    sceneGroups.set(layer.id, group)
+    if (visibleLayerIds.value.includes(layer.id)) group.addTo(map!)
+  })
+}
+
+function renderRoutes() {
+  if (!map) return
+  routeGroup?.remove()
+  routeGroup = L.layerGroup()
+  props.routes.forEach((route) => {
+    const points = route.coordinates.map((point) => [point[1], point[0]] as L.LatLngTuple)
+    if (!points.length) return
+    L.polyline(points, { color: '#2ce4ff', weight: 3, opacity: .9, dashArray: '9 8' })
+      .bindPopup(`<strong>${route.name}</strong><br>${route.droneId} · ${route.status}<br>完成 ${route.progress}%`)
+      .addTo(routeGroup!)
+    const positionIndex = Math.min(Math.floor(points.length * route.progress / 100), points.length - 1)
+    L.marker(points[positionIndex]!, { icon: droneIcon(route), zIndexOffset: 500 }).addTo(routeGroup!)
+  })
+  if (routesVisible.value) routeGroup.addTo(map)
+}
+
+function toggleSceneLayer(layerId: string) {
+  const visible = visibleLayerIds.value.includes(layerId)
+  visibleLayerIds.value = visible
+    ? visibleLayerIds.value.filter((id) => id !== layerId)
+    : [...visibleLayerIds.value, layerId]
+  const group = sceneGroups.get(layerId)
+  if (!map || !group) return
+  if (visible) group.remove()
+  else group.addTo(map)
+}
+
+function setAllLayers(visible: boolean) {
+  visibleLayerIds.value = visible ? props.layers.map((layer) => layer.id) : []
+  sceneGroups.forEach((group) => {
+    if (!map) return
+    if (visible) group.addTo(map)
+    else group.remove()
+  })
+}
+
+function toggleRoutes() {
+  routesVisible.value = !routesVisible.value
+  if (!map || !routeGroup) return
+  if (routesVisible.value) routeGroup.addTo(map)
+  else routeGroup.remove()
+}
+
+function selectSearchResult(task: DashboardMapTask) {
+  const target = taskTargets.get(task.taskId)
+  if (!map || !target) return
+  if (!map.hasLayer(target.marker)) {
+    const layer = props.layers.find((item) => item.tasks.some((entry) => entry.taskId === task.taskId))
+    if (layer && !visibleLayerIds.value.includes(layer.id)) toggleSceneLayer(layer.id)
+  }
+  map.fitBounds(target.polygon.getBounds(), { padding: [70, 70], maxZoom: 14 })
+  window.setTimeout(() => target.marker.openPopup(), 350)
+  searchKeyword.value = ''
+}
+
+function locateUser() {
+  if (!map) return
+  if (!navigator.geolocation) {
+    toolMessage.value = '当前浏览器不支持定位'
+    return
+  }
+  toolMessage.value = '正在获取当前位置…'
+  navigator.geolocation.getCurrentPosition(
+    ({ coords }) => {
+      locationGroup?.clearLayers()
+      const point = L.latLng(coords.latitude, coords.longitude)
+      L.circle(point, { radius: Math.max(coords.accuracy, 20), color: '#33d9ff', fillOpacity: .12 }).addTo(locationGroup!)
+      L.circleMarker(point, { radius: 7, color: '#fff', fillColor: '#17bce0', fillOpacity: 1, weight: 2 })
+        .bindPopup(`当前位置<br>定位精度约 ${Math.round(coords.accuracy)} 米`).addTo(locationGroup!).openPopup()
+      map?.setView(point, 15)
+      toolMessage.value = '定位成功'
+    },
+    () => { toolMessage.value = '定位失败，请允许浏览器访问位置' },
+    { enableHighAccuracy: true, timeout: 10000 },
+  )
+}
+
+function resetNorth() {
+  map?.setView(TAIZHOU_CENTER, TAIZHOU_ZOOM)
+  toolMessage.value = '已回到江苏泰州，地图保持正北向上'
+}
+
+function startTool(tool: 'distance' | 'area' | 'marker') {
+  activeTool.value = activeTool.value === tool ? null : tool
+  measureOpen.value = tool !== 'marker'
+  baseMapOpen.value = false
+  measurePoints = []
+  if (tool !== 'marker') measureGroup?.clearLayers()
+  measureResult.value = tool === 'distance' ? '点击地图连续选取测距点，双击结束' : tool === 'area' ? '点击地图绘制范围，双击结束' : '点击地图添加可拖动标注'
+}
+
+function geodesicArea(points: L.LatLng[]) {
+  const radius = 6378137
+  let area = 0
+  points.forEach((point, index) => {
+    const next = points[(index + 1) % points.length]!
+    area += (next.lng - point.lng) * Math.PI / 180 * (2 + Math.sin(point.lat * Math.PI / 180) + Math.sin(next.lat * Math.PI / 180))
+  })
+  return Math.abs(area * radius * radius / 2)
+}
+
+function formatDistance(metres: number) {
+  return metres >= 1000 ? `${(metres / 1000).toFixed(2)} 公里` : `${metres.toFixed(1)} 米`
+}
+
+function formatArea(squareMetres: number) {
+  return squareMetres >= 1_000_000 ? `${(squareMetres / 1_000_000).toFixed(2)} 平方公里` : `${squareMetres.toFixed(0)} 平方米`
+}
+
+function redrawMeasurement() {
+  if (!map || !measureGroup) return
+  measureGroup.clearLayers()
+  measurePoints.forEach((point, index) => {
+    L.circleMarker(point, { radius: 4, color: '#fff', fillColor: '#21dff1', fillOpacity: 1, weight: 1 })
+      .bindTooltip(String(index + 1), { permanent: true, className: 'measure-index', direction: 'top' }).addTo(measureGroup!)
+  })
+  if (activeTool.value === 'distance' && measurePoints.length > 1) {
+    L.polyline(measurePoints, { color: '#22e5f4', weight: 3 }).addTo(measureGroup)
+    const distance = measurePoints.slice(1).reduce((sum, point, index) => sum + map!.distance(measurePoints[index]!, point), 0)
+    measureResult.value = `测量距离：${formatDistance(distance)}`
+  }
+  if (activeTool.value === 'area' && measurePoints.length > 2) {
+    L.polygon(measurePoints, { color: '#38e7c0', fillColor: '#1abf9b', fillOpacity: .22, weight: 2 }).addTo(measureGroup)
+    measureResult.value = `测量面积：${formatArea(geodesicArea(measurePoints))}`
+  }
+}
+
+function addAnnotation(point: L.LatLng) {
+  const icon = L.divIcon({ className: 'custom-annotation', html: '<span>⌖</span>', iconSize: [27, 27], iconAnchor: [13, 26] })
+  L.marker(point, { icon, draggable: true })
+    .bindPopup(`地图标注<br>${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}`)
+    .addTo(annotationGroup!).openPopup()
+}
+
+function clearMeasurements() {
+  measurePoints = []
+  measureGroup?.clearLayers()
+  activeTool.value = null
+  measureResult.value = ''
+}
+
+function clearAnnotations() {
+  annotationGroup?.clearLayers()
+  if (activeTool.value === 'marker') activeTool.value = null
+  toolMessage.value = '已清除全部标注'
 }
 
 function switchMode(mode: 'vector' | 'image') {
   mapMode.value = mode
   addBaseLayers(mode)
-}
-
-function markerIcon(type: string) {
-  const symbols: Record<string, string> = { drone: '✦', alert: '!', task: '◆', center: '⌂' }
-  return L.divIcon({
-    className: `cockpit-map-marker marker-${type}`,
-    html: `<span>${symbols[type] || '●'}</span>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-  })
+  baseMapOpen.value = false
 }
 
 async function initMap() {
-  if (!container.value || !token) return
-  await nextTick()
-  map = L.map(container.value, {
-    center: [26.0812, 119.3268],
-    zoom: 12,
-    zoomControl: false,
-    attributionControl: false,
-    preferCanvas: true,
-  })
-  const labelsPane = map.createPane('labels')
-  labelsPane.style.zIndex = '250'
-  labelsPane.style.pointerEvents = 'none'
-  addBaseLayers('vector')
+  if (!container.value) return
+  if (!token) {
+    mapError.value = '未配置天地图 Token'
+    return
+  }
+  try {
+    await nextTick()
+    map = L.map(container.value, {
+      center: TAIZHOU_CENTER,
+      zoom: TAIZHOU_ZOOM,
+      zoomControl: false,
+      attributionControl: false,
+      doubleClickZoom: false,
+      preferCanvas: true,
+    })
+    const labelsPane = map.createPane('labels')
+    labelsPane.style.zIndex = '250'
+    labelsPane.style.pointerEvents = 'none'
+    measureGroup = L.layerGroup().addTo(map)
+    annotationGroup = L.layerGroup().addTo(map)
+    locationGroup = L.layerGroup().addTo(map)
+    addBaseLayers('vector')
+    renderBusinessLayers()
+    renderRoutes()
+    map.on('click', (event) => {
+      if (activeTool.value === 'marker') addAnnotation(event.latlng)
+      if (activeTool.value === 'distance' || activeTool.value === 'area') {
+        measurePoints.push(event.latlng)
+        redrawMeasurement()
+      }
+    })
+    map.on('dblclick', () => { activeTool.value = null })
+    window.setTimeout(() => map?.invalidateSize(), 100)
+  } catch {
+    mapError.value = '地图初始化失败，请重新加载'
+  }
+}
 
-  const route = dashboardMapPoints.map((point) => [point.coordinates[1], point.coordinates[0]] as L.LatLngTuple)
-  L.polyline(route, { color: '#25d9ff', weight: 2, opacity: 0.9, dashArray: '8 9' }).addTo(map)
-  L.polyline(route.slice().reverse(), { color: '#8d6cff', weight: 5, opacity: 0.18 }).addTo(map)
-
-  dashboardMapPoints.forEach((point) => {
-    const marker = L.marker([point.coordinates[1], point.coordinates[0]], { icon: markerIcon(point.type) }).addTo(map!)
-    marker.bindTooltip(point.name, { permanent: true, direction: 'right', className: 'cockpit-map-label', offset: [10, 0] })
-    marker.bindPopup(`<div class="cockpit-popup"><strong>${point.name}</strong><span>${point.detail}</span><button>查看详情</button></div>`)
-  })
-
-  mapReady.value = true
-  window.setTimeout(() => map?.invalidateSize(), 100)
+function retryMap() {
+  map?.remove()
+  map = undefined
+  mapError.value = ''
+  initMap()
 }
 
 onMounted(initMap)
-onBeforeUnmount(() => {
-  map?.remove()
-  map = undefined
-})
+onBeforeUnmount(() => map?.remove())
 </script>
 
 <template>
   <div class="dashboard-map">
     <div ref="container" class="dashboard-map__canvas"></div>
-    <div v-if="!token" class="dashboard-map__empty">未配置天地图 Token</div>
-    <div v-else-if="!mapReady" class="dashboard-map__loading">正在加载天地图…</div>
+    <div v-if="mapError" class="dashboard-map__empty"><span>{{ mapError }}</span><button @click="retryMap">重新加载</button></div>
+    <div v-else-if="!mapReady" class="dashboard-map__loading">正在加载江苏泰州天地图…</div>
+
+    <aside class="layer-manager">
+      <div class="tool-title"><b>图层管理</b><span><button @click="setAllLayers(true)">全显</button><button @click="setAllLayers(false)">全隐</button></span></div>
+      <button v-for="layer in layers" :key="layer.id" class="layer-row" :class="{ active: visibleLayerIds.includes(layer.id) }" @click="toggleSceneLayer(layer.id)">
+        <i :style="{ background: layer.color }"></i><span><b>{{ layer.name }}</b><small>{{ layer.count }} 项任务</small></span><em>{{ visibleLayerIds.includes(layer.id) ? '●' : '○' }}</em>
+      </button>
+      <div class="layer-section-title">飞行动态</div>
+      <button class="layer-row" :class="{ active: routesVisible }" @click="toggleRoutes">
+        <i class="route-symbol"></i><span><b>无人机巡航路线</b><small>{{ routes.length }} 条执行中</small></span><em>{{ routesVisible ? '●' : '○' }}</em>
+      </button>
+    </aside>
 
     <div class="map-search">
-      <span>⌕</span><input placeholder="搜索区域、地点、任务…" /><kbd>搜索</kbd>
+      <span>⌕</span><input v-model="searchKeyword" placeholder="搜索任务名称、编号、区域…" />
+      <div v-if="searchResults.length" class="search-results">
+        <button v-for="task in searchResults" :key="task.taskId" @click="selectSearchResult(task)"><b>{{ task.name }}</b><small>{{ task.layerName }} · {{ task.area }}</small></button>
+      </div>
     </div>
-    <div class="map-left-tools">
-      <strong>图层管理</strong>
-      <button class="active">✦ 无人机</button>
-      <button>◇ 任务航线</button>
-      <button>● 事件点位</button>
-      <button>⬡ 行政区划</button>
-      <button>▱ 专题图层</button>
-      <strong>快捷工具</strong>
-      <button>╱ 测距</button>
-      <button>△ 测面积</button>
-      <button>⌖ 标注</button>
-      <button>× 清除</button>
-    </div>
-    <div class="map-right-tools">
-      <button :class="{ active: mapMode === 'vector' }" @click="switchMode('vector')">矢量图</button>
-      <button :class="{ active: mapMode === 'image' }" @click="switchMode('image')">卫星图</button>
-      <button @click="map?.zoomIn()">＋</button>
-      <button @click="map?.zoomOut()">－</button>
-    </div>
-    <div class="map-scale">天地图 · 实时态势图层</div>
+
+    <aside class="map-tools">
+      <button title="当前位置" @click="locateUser"><i>⌖</i><span>定位</span></button>
+      <button title="回到泰州并保持正北" @click="resetNorth"><i class="compass">N</i><span>指南针</span></button>
+      <button :class="{ active: measureOpen }" title="测量工具" @click="measureOpen = !measureOpen; baseMapOpen = false"><i>╱</i><span>测量</span></button>
+      <div v-if="measureOpen" class="tool-submenu">
+        <button :class="{ active: activeTool === 'distance' }" @click="startTool('distance')">距离测量</button>
+        <button :class="{ active: activeTool === 'area' }" @click="startTool('area')">面积测量</button>
+        <button @click="clearMeasurements">清除测量</button>
+      </div>
+      <button :class="{ active: activeTool === 'marker' }" title="添加标注" @click="startTool('marker')"><i>⚑</i><span>标注</span></button>
+      <button title="清除标注" @click="clearAnnotations"><i>×</i><span>清标注</span></button>
+      <button :class="{ active: baseMapOpen }" title="切换底图" @click="baseMapOpen = !baseMapOpen; measureOpen = false"><i>▱</i><span>底图</span></button>
+      <div v-if="baseMapOpen" class="tool-submenu base-submenu">
+        <button :class="{ active: mapMode === 'vector' }" @click="switchMode('vector')">电子地图</button>
+        <button :class="{ active: mapMode === 'image' }" @click="switchMode('image')">卫星影像</button>
+      </div>
+      <button @click="map?.zoomIn()"><i>＋</i><span>放大</span></button>
+      <button @click="map?.zoomOut()"><i>－</i><span>缩小</span></button>
+    </aside>
+
+    <div v-if="measureResult" class="measure-result">{{ measureResult }}</div>
+    <div v-if="toolMessage" class="tool-message" @click="toolMessage = ''">{{ toolMessage }}　×</div>
+    <div class="map-scale">天地图 · 江苏泰州　电子地图/卫星影像</div>
   </div>
 </template>
 
 <style scoped lang="scss">
-.dashboard-map { position: relative; width: 100%; height: 100%; overflow: hidden; background: #031a31; }
-.dashboard-map__canvas { position: absolute; inset: 0; }
-.dashboard-map__empty,.dashboard-map__loading { position: absolute; inset: 0; display: grid; place-items: center; color: #56ddef; background: #031a31; font-size: 13px; }
-.map-search { position: absolute; z-index: 500; top: 10px; right: 10px; width: 250px; height: 30px; display: flex; align-items: center; gap: 7px; padding: 0 7px; color: #55dff3; background: #031a31df; border: 1px solid #11618a; box-shadow: 0 0 10px #00a9de1f; }
-.map-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: #c6edf7; background: transparent; font-size: 11px; }.map-search input::placeholder { color: #5f8397; }.map-search kbd { padding: 3px 6px; color: #70ddec; background: #07517a; font: 9px inherit; }
-.map-left-tools { position: absolute; z-index: 500; top: 10px; left: 10px; width: 94px; padding-bottom: 5px; background: #03182ee8; border: 1px solid #0b527a; box-shadow: 0 0 12px #00a7d52b; }
-.map-left-tools strong { display: block; padding: 7px 9px; color: #86dff0; background: #08496f; font-size: 10px; }.map-left-tools strong:not(:first-child) { margin-top: 5px; }
-.map-left-tools button { width: 100%; padding: 6px 9px; border: 0; color: #8eb7c8; background: transparent; text-align: left; font-size: 9px; cursor: pointer; }.map-left-tools button:hover,.map-left-tools button.active { color: white; background: #0789ba77; }
-.map-right-tools { position: absolute; z-index: 500; right: 10px; top: 50px; display: grid; gap: 5px; }.map-right-tools button { min-width: 42px; padding: 6px; color: #92bed0; background: #031a30e8; border: 1px solid #155a7c; font-size: 9px; cursor: pointer; }.map-right-tools button.active,.map-right-tools button:hover { color: #fff; border-color: #24cbe3; background: #075477; }
-.map-scale { position: absolute; z-index: 500; right: 10px; bottom: 7px; padding: 4px 8px; color: #77a9b9; background: #021728cc; font-size: 8px; }
-:deep(.leaflet-tile-pane) { filter: brightness(.53) saturate(1.55) hue-rotate(155deg) contrast(1.18); }
-:deep(.leaflet-overlay-pane) { mix-blend-mode: screen; }
-:deep(.cockpit-map-marker) { display: grid; place-items: center; border: 0; background: transparent; }
-:deep(.cockpit-map-marker span) { width: 24px; height: 24px; display: grid; place-items: center; color: white; background: #079db7; border: 2px solid #6af3ff; border-radius: 50% 50% 50% 5px; transform: rotate(-45deg); box-shadow: 0 0 0 5px #04d9f31c, 0 0 14px #00e5ff; font-size: 11px; }
-:deep(.cockpit-map-marker span::first-letter) { transform: rotate(45deg); }
-:deep(.marker-alert span) { background: #bf2838; border-color: #ff727c; box-shadow: 0 0 0 5px #fa35451f, 0 0 14px #ff3145; }
-:deep(.marker-task span) { background: #c97413; border-color: #ffca68; box-shadow: 0 0 0 5px #f4a72b1f, 0 0 14px #ffad31; }
-:deep(.marker-center span) { background: #6f46c7; border-color: #c99cff; }
-:deep(.cockpit-map-label) { color: #c8f6ff; background: #04213cdd; border: 1px solid #17698e; box-shadow: 0 2px 8px #001; border-radius: 2px; font: 9px "Microsoft YaHei"; }
-:deep(.cockpit-map-label::before) { border-right-color: #17698e; }
-:deep(.leaflet-popup-content-wrapper),:deep(.leaflet-popup-tip) { color: #d9f8ff; background: #061d34; border: 1px solid #1685ad; border-radius: 2px; }
-:deep(.cockpit-popup) { min-width: 145px; }.cockpit-popup strong,.cockpit-popup span { display: block; }.cockpit-popup span { margin: 7px 0; color: #88adbd; font-size: 10px; }.cockpit-popup button { padding: 4px 8px; color: white; background: #078cb1; border: 0; font-size: 9px; }
+.dashboard-map { position: relative; width: 100%; height: 100%; overflow: hidden; background: #031a31; }.dashboard-map__canvas { position: absolute; inset: 0; }
+.dashboard-map__empty,.dashboard-map__loading { position: absolute; z-index: 700; inset: 0; display: grid; place-content: center; gap: 12px; justify-items: center; color: #56ddef; background: #031a31e8; font-size: 13px; }.dashboard-map__empty button { padding: 6px 14px; color: #d8faff; background: #075477; border: 1px solid #24cbe3; cursor: pointer; }
+.layer-manager { position: absolute; z-index: 500; top: 10px; left: 10px; width: 154px; max-height: calc(100% - 20px); overflow-y: auto; color: #bde6ef; background: #03182eed; border: 1px solid #0b6189; box-shadow: 0 0 14px #00a7d52b; }.tool-title { min-height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: #06476b; border-bottom: 1px solid #0d6388; font-size: 10px; }.tool-title button { padding: 2px 4px; color: #7bdcea; background: transparent; border: 0; font-size: 7px; cursor: pointer; }
+.layer-row { width: 100%; display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 7px; padding: 7px 8px; color: #6f99aa; background: transparent; border: 0; border-bottom: 1px solid #0a3e59; text-align: left; cursor: pointer; }.layer-row:hover,.layer-row.active { color: #d6f8ff; background: #07567866; }.layer-row>i { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }.layer-row span,.layer-row b,.layer-row small { min-width: 0; display: block; }.layer-row b { overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }.layer-row small { margin-top: 3px; color: #52798a; font-size: 6px; }.layer-row em { color: #39ddef; font-size: 8px; font-style: normal; }.layer-section-title { padding: 5px 8px; color: #6591a3; background: #04243d; font-size: 7px; }.route-symbol { width: 12px!important; height: 2px!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#2ce4ff 0 3px,transparent 3px 5px)!important; }
+.map-search { position: absolute; z-index: 550; top: 10px; right: 70px; width: 270px; min-height: 31px; display: flex; align-items: center; gap: 7px; padding: 0 9px; color: #55dff3; background: #031a31ef; border: 1px solid #11618a; box-shadow: 0 0 10px #00a9de1f; }.map-search input { min-width: 0; height: 29px; flex: 1; border: 0; outline: 0; color: #c6edf7; background: transparent; font-size: 9px; }.search-results { position: absolute; left: -1px; right: -1px; top: 31px; background: #031a31f5; border: 1px solid #11618a; }.search-results button { width: 100%; padding: 7px 9px; color: #bfe8f1; background: transparent; border: 0; border-bottom: 1px solid #0b405c; text-align: left; cursor: pointer; }.search-results button:hover { background: #075479; }.search-results b,.search-results small { display: block; font-size: 8px; }.search-results small { margin-top: 3px; color: #5c8293; font-size: 6px; }
+.map-tools { position: absolute; z-index: 600; right: 10px; top: 10px; width: 50px; display: grid; gap: 4px; }.map-tools>button { min-height: 40px; display: grid; place-items: center; gap: 2px; padding: 4px; color: #84b2c3; background: #031a30ed; border: 1px solid #155a7c; cursor: pointer; }.map-tools>button:hover,.map-tools>button.active { color: #fff; border-color: #24cbe3; background: #075477; }.map-tools i { font-size: 14px; font-style: normal; }.map-tools span { font-size: 6px; }.compass { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #31d9e9; border-radius: 50%; color: #ff7180; font-size: 8px!important; }.tool-submenu { position: absolute; top: 88px; right: 55px; width: 82px; padding: 4px; background: #031a31f5; border: 1px solid #157298; }.tool-submenu button { width: 100%; padding: 7px; color: #88b7c7; background: transparent; border: 0; text-align: left; font-size: 7px; cursor: pointer; }.tool-submenu button:hover,.tool-submenu button.active { color: #fff; background: #08698e; }.base-submenu { top: 220px; }
+.measure-result,.tool-message { position: absolute; z-index: 550; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; color: #c8f8ff; background: #03223aef; border: 1px solid #18a2c1; font-size: 9px; box-shadow: 0 0 10px #12bbd544; }.tool-message { bottom: 46px; cursor: pointer; }.map-scale { position: absolute; z-index: 500; right: 68px; bottom: 7px; padding: 4px 8px; color: #77a9b9; background: #021728cc; font-size: 7px; }
+:deep(.leaflet-tile-pane) { filter: brightness(.58) saturate(1.35) hue-rotate(155deg) contrast(1.13); }:deep(.business-task-marker),:deep(.business-drone-marker),:deep(.custom-annotation) { background: transparent; border: 0; }:deep(.business-task-marker span) { width: 23px; height: 23px; display: grid; place-items: center; color: white; background: color-mix(in srgb, var(--marker-color), #062239 35%); border: 2px solid var(--marker-color); border-radius: 50% 50% 50% 5px; transform: rotate(-45deg); box-shadow: 0 0 10px var(--marker-color); font-size: 8px; }:deep(.business-drone-marker) { display: flex; align-items: center; gap: 4px; color: #79eff9; }:deep(.business-drone-marker span) { width: 24px; height: 24px; display: grid; place-items: center; background: #087b9e; border: 1px solid #4defff; border-radius: 50%; box-shadow: 0 0 10px #22e5f4; }:deep(.business-drone-marker b) { padding: 2px 4px; background: #03233ddd; font-size: 7px; white-space: nowrap; }:deep(.business-task-label),:deep(.measure-index) { color: #c9f7ff; background: #03223ddd; border: 1px solid #17698e; box-shadow: none; border-radius: 2px; font: 7px "Microsoft YaHei"; }:deep(.leaflet-popup-content-wrapper),:deep(.leaflet-popup-tip) { color: #d9f8ff; background: #061d34; border: 1px solid #1685ad; border-radius: 2px; }:deep(.business-popup strong),:deep(.business-popup span),:deep(.business-popup small) { display: block; }:deep(.business-popup span) { margin-top: 5px; color: #8db5c3; font-size: 8px; }:deep(.business-popup small) { margin-top: 6px; color: #5d899b; }:deep(.custom-annotation span) { width: 25px; height: 25px; display: grid; place-items: center; color: #fff; background: #e86835; border: 2px solid #ffd7a8; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 0 8px #ff8a45; }
 </style>
