@@ -26,7 +26,6 @@ declare module 'vue' {
     ElSelect: typeof import('element-plus/es')['ElSelect']
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
-    ElDialog: typeof import('element-plus/es')['ElDialog']
     ElTag: typeof import('element-plus/es')['ElTag']
     NewTaskDialog: typeof import('./src/components/NewTaskDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
