@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DashboardMap from '@/components/DashboardMap.vue'
 import DomainProgressChart from '@/components/DomainProgressChart.vue'
+import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import { useUserStore } from '@/stores/user'
 import { getAlerts, getCases, getDashboardMapLayers, getDronePatrolRoutes, getScene, getSceneProgress, getTasks } from '@/mocks/portal'
 
@@ -82,7 +83,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
   <div class="cockpit">
     <header class="cockpit-header">
       <div class="cockpit-brand" @click="router.push('/dashboard')">
-        <span class="cockpit-logo">◆</span>
+        <span class="cockpit-logo"><DashboardSymbol name="brand" /></span>
         <h1>{{ organization.shortName }}低空智慧服务运行中枢</h1>
       </div>
       <nav class="cockpit-nav">
@@ -93,8 +94,8 @@ onBeforeUnmount(() => window.clearInterval(timer))
       <div class="cockpit-user">
         <span class="online-dot"></span><span>系统运行正常</span>
         <time>{{ dateText }}　{{ timeText }}</time>
-        <button class="notice">♟<b>3</b></button>
-        <button class="avatar">●</button>
+        <button class="notice" aria-label="消息通知"><DashboardSymbol name="notification" /><b>3</b></button>
+        <button class="avatar" aria-label="管理员账户"><DashboardSymbol name="avatar" /></button>
         <button @click="logout">{{ user.name }}　⌄</button>
       </div>
     </header>
@@ -102,7 +103,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
     <main class="cockpit-body">
       <section class="cockpit-stats">
         <article v-for="stat in dashboardStats" :key="stat.label" class="cockpit-stat" :class="`is-${stat.tone}`">
-          <div class="stat-icon"><span>{{ stat.icon === 'drone' ? '✦' : stat.icon === 'task' ? '▣' : stat.icon === 'pending' ? '◷' : '◉' }}</span></div>
+          <div class="stat-icon"><DashboardSymbol :name="stat.icon" /></div>
           <div class="stat-copy"><label>{{ stat.label }}</label><strong>{{ stat.value }}<small>{{ stat.unit }}</small></strong><p>{{ stat.primary }} <em v-if="stat.secondary">｜ {{ stat.secondary }}</em></p></div>
           <div class="spark-bars"><i v-for="n in 12" :key="n" :style="{ height: `${22 + ((n * 13) % 38)}%` }"></i></div>
         </article>
@@ -110,7 +111,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
 
       <section class="cockpit-primary">
         <article class="cockpit-panel map-overview">
-          <div class="cockpit-panel__title"><h2>{{ scopeTitle }}综合监管一张图</h2><span v-if="activeScene" @click="router.push('/dashboard')">返回单位总览 〉</span><span v-else>实时态势 · 数据每30秒更新</span></div>
+          <div class="cockpit-panel__title"><h2>{{ scopeTitle }}综合监管一张图</h2></div>
           <DashboardMap :key="activeScene?.id || organization.id" :layers="mapLayers" :routes="patrolRoutes" />
         </article>
 

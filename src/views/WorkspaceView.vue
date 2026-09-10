@@ -181,7 +181,7 @@ watch(
 .workspace-brand b,
 .workspace-brand small { display: block; }
 .workspace-brand b { font-size: 15px; }
-.workspace-brand small { margin-top: 3px; color: #78adbf; font-size: 10px; }
+.workspace-brand small { margin-top: 3px; color: #78adbf; font-size: 15px; }
 
 .flow-nav {
   display: flex;
@@ -201,7 +201,7 @@ watch(
   background: #ffffff12;
   border: 1px solid #7fb4c855;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 15px;
   white-space: nowrap;
 }
 .module-nodes {
@@ -239,10 +239,10 @@ watch(
   border-radius: 50%;
   background: #174e68;
   font-style: normal;
-  font-size: 10px;
+  font-size: 15px;
 }
 .module-nodes span {
-  font-size: 10px;
+  font-size: 15px;
   white-space: nowrap;
 }
 .module-nodes button.active {
@@ -273,7 +273,7 @@ watch(
   align-items: center;
   gap: 14px;
   color: #9cbac7;
-  font-size: 11px;
+  font-size: 16px;
 }
 .workspace-user b { color: #4ee1c2; }
 
@@ -298,7 +298,7 @@ watch(
   color: white;
   background: #0d8faa;
   border-radius: 4px;
-  font-size: 9px;
+  font-size: 14px;
 }
 .workspace-title h2 {
   margin: 0;
@@ -308,7 +308,7 @@ watch(
 .workspace-title p {
   margin: 2px 0 0;
   color: #8191a0;
-  font-size: 11px;
+  font-size: 16px;
 }
 .workspace-body {
   flex: 1;

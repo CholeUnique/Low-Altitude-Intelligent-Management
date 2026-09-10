@@ -287,27 +287,27 @@ onBeforeUnmount(() => map?.remove())
   display: flex; align-items: center; gap: 6px; padding: 0 8px; color: #7ed7ea;
   background: #031a31ef; border: 1px solid #1a6a8f;
 }
-.map-search input { flex: 1; border: 0; outline: 0; color: #d7f3fa; background: transparent; font-size: 10px; }
+.map-search input { flex: 1; border: 0; outline: 0; color: #d7f3fa; background: transparent; font-size: 15px; }
 .map-tools { position: absolute; z-index: 550; top: 10px; right: 10px; width: 48px; display: grid; gap: 4px; }
 .map-tools > button {
   min-height: 38px; display: grid; place-items: center; gap: 2px; color: #8eb8c8;
   background: #031a30ed; border: 1px solid #1a6286; cursor: pointer;
 }
 .map-tools > button.active, .map-tools > button:hover { color: #fff; background: #08618a; border-color: #2cc7e4; }
-.map-tools i { font-style: normal; font-size: 12px; }
-.map-tools span { font-size: 6px; }
+.map-tools i { font-style: normal; font-size: 16px; }
+.map-tools span { font-size: 11px; }
 .submenu {
   position: absolute; right: 52px; top: 84px; width: 86px; padding: 4px;
   background: #031a31f5; border: 1px solid #1a6f95;
 }
 .submenu.base { top: 210px; }
 .submenu button {
-  width: 100%; padding: 7px; border: 0; color: #8eb8c8; background: transparent; text-align: left; font-size: 8px; cursor: pointer;
+  width: 100%; padding: 7px; border: 0; color: #8eb8c8; background: transparent; text-align: left; font-size: 14px; cursor: pointer;
 }
 .submenu button:hover { color: #fff; background: #08618a; }
 .legend {
   position: absolute; z-index: 500; top: 10px; left: 176px; display: grid; gap: 4px;
-  padding: 8px 10px; color: #c7e6ef; background: #031a31ef; border: 1px solid #1a6a8f; font-size: 8px;
+  padding: 8px 10px; color: #c7e6ef; background: #031a31ef; border: 1px solid #1a6a8f; font-size: 14px;
 }
 .legend b { margin-bottom: 2px; }
 .legend span { display: flex; align-items: center; gap: 6px; }
@@ -317,21 +317,21 @@ onBeforeUnmount(() => map?.remove())
 .legend .home { width: 10px; height: 10px; border-radius: 50%; background: #1fbf6a; }
 .measure-result, .tool-message {
   position: absolute; z-index: 550; left: 50%; bottom: 10px; transform: translateX(-50%);
-  padding: 6px 12px; color: #d8f7ff; background: #03223aef; border: 1px solid #18a2c1; font-size: 9px;
+  padding: 6px 12px; color: #d8f7ff; background: #03223aef; border: 1px solid #18a2c1; font-size: 14px;
 }
 .tool-message { bottom: 42px; cursor: pointer; }
 :deep(.leaflet-tile-pane) { filter: brightness(.72) saturate(1.15) contrast(1.05); }
 :deep(.route-wp-marker), :deep(.home-marker), :deep(.anno-marker) { background: transparent; border: 0; }
 :deep(.route-wp-marker span) {
   width: 20px; height: 20px; display: grid; place-items: center; color: #fff;
-  background: #3d7ea0; border: 2px solid #fff; border-radius: 50%; font-size: 9px;
+  background: #3d7ea0; border: 2px solid #fff; border-radius: 50%; font-size: 14px;
 }
 :deep(.route-wp-marker span.active) { background: #1f8fff; box-shadow: 0 0 8px #1f8fff; }
 :deep(.home-marker span) {
   width: 22px; height: 22px; display: grid; place-items: center; color: #fff;
-  background: #1fbf6a; border: 2px solid #fff; border-radius: 50%; font-size: 10px; font-weight: 700;
+  background: #1fbf6a; border: 2px solid #fff; border-radius: 50%; font-size: 15px; font-weight: 700;
 }
-:deep(.home-label) { color: #dff8e8; background: #063a28dd; border: 1px solid #1fbf6a; font-size: 8px; }
+:deep(.home-label) { color: #dff8e8; background: #063a28dd; border: 1px solid #1fbf6a; font-size: 14px; }
 :deep(.anno-marker span) {
   width: 22px; height: 22px; display: grid; place-items: center; color: #fff;
   background: #e86835; border: 2px solid #ffd7a8; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);

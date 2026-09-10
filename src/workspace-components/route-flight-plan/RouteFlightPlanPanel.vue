@@ -338,7 +338,7 @@ function addPlan() {
   padding: 0 10px;
   border-bottom: 1px solid #e6eef3;
   color: #1f3d52;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
 }
 .panel-head {
@@ -352,7 +352,7 @@ function addPlan() {
   color: #6f8393;
   background: #f5f8fa;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 15px;
 }
 .panel-head button.active {
   color: #0b6f9a;
@@ -363,7 +363,7 @@ function addPlan() {
   display: grid;
   gap: 6px;
   padding: 8px 10px;
-  font-size: 10px;
+  font-size: 15px;
   color: #445868;
 }
 .tool-grid {
@@ -378,7 +378,7 @@ function addPlan() {
   background: #f3f8fb;
   border: 1px solid #d3e2eb;
   border-radius: 4px;
-  font-size: 9px;
+  font-size: 14px;
   cursor: pointer;
 }
 .tool-grid button:hover { background: #e7f4fb; border-color: #8fc5de; }
@@ -393,7 +393,7 @@ function addPlan() {
   padding: 0 8px;
   border: 1px solid #d3e2eb;
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 15px;
 }
 .route-list {
   max-height: 120px;
@@ -412,8 +412,8 @@ function addPlan() {
 .route-list button.active { background: #eaf6fc; }
 .route-list b,
 .route-list small { display: block; }
-.route-list b { color: #1f3d52; font-size: 10px; }
-.route-list small { margin-top: 3px; color: #7a8f9e; font-size: 8px; }
+.route-list b { color: #1f3d52; font-size: 15px; }
+.route-list small { margin-top: 3px; color: #7a8f9e; font-size: 14px; }
 .right-panel dl {
   display: grid;
   grid-template-columns: 72px 1fr;
@@ -425,7 +425,7 @@ function addPlan() {
   margin: 0;
   padding: 6px 0;
   border-bottom: 1px solid #eef3f6;
-  font-size: 10px;
+  font-size: 15px;
 }
 .right-panel dt { color: #7a8f9e; }
 .right-panel dd { color: #1f3d52; text-align: right; }
@@ -451,8 +451,8 @@ function addPlan() {
   background: #f4f8fb;
   border-radius: 4px;
 }
-.metrics b { color: #0b6f9a; font-size: 14px; }
-.metrics span { color: #7a8f9e; font-size: 8px; }
+.metrics b { color: #0b6f9a; font-size: 16px; }
+.metrics span { color: #7a8f9e; font-size: 14px; }
 .actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -462,7 +462,7 @@ function addPlan() {
   height: 36px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 16px;
 }
 .actions .ghost {
   color: #2d5368;
@@ -483,7 +483,7 @@ function addPlan() {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 10px;
+  font-size: 15px;
 }
 th, td {
   padding: 7px 8px;
@@ -500,7 +500,7 @@ th { color: #6f8393; background: #f7fafc; }
   background: transparent;
   border: 0;
   cursor: pointer;
-  font-size: 10px;
+  font-size: 15px;
 }
 .alert-row {
   display: flex;
@@ -509,7 +509,7 @@ th { color: #6f8393; background: #f7fafc; }
   padding: 8px 10px;
   border-bottom: 1px solid #eef3f6;
   color: #445868;
-  font-size: 10px;
+  font-size: 15px;
 }
 .alert-row i {
   width: 16px;
@@ -518,7 +518,7 @@ th { color: #6f8393; background: #f7fafc; }
   place-items: center;
   border-radius: 50%;
   font-style: normal;
-  font-size: 9px;
+  font-size: 14px;
 }
 .alert-row.success i { color: #fff; background: #1fbf6a; }
 .alert-row.info i { color: #fff; background: #1f7fe0; }
@@ -530,14 +530,14 @@ th { color: #6f8393; background: #f7fafc; }
   height: calc(100% - 34px);
 }
 .calendar { padding: 8px; border-right: 1px solid #eef3f6; }
-.cal-head { margin-bottom: 6px; color: #1f3d52; font-size: 11px; font-weight: 700; text-align: center; }
+.cal-head { margin-bottom: 6px; color: #1f3d52; font-size: 16px; font-weight: 700; text-align: center; }
 .cal-week, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .cal-week span, .cal-grid button {
   height: 22px;
   display: grid;
   place-items: center;
   color: #6f8393;
-  font-size: 9px;
+  font-size: 14px;
 }
 .cal-grid button {
   border: 0;
@@ -559,9 +559,9 @@ th { color: #6f8393; background: #f7fafc; }
   border-radius: 4px;
 }
 .plan-item b, .plan-item span, .plan-item small { display: block; }
-.plan-item b { color: #1f7fe0; font-size: 10px; }
-.plan-item span { margin-top: 3px; color: #1f3d52; font-size: 10px; }
-.plan-item small { margin-top: 2px; color: #7a8f9e; font-size: 8px; }
+.plan-item b { color: #1f7fe0; font-size: 15px; }
+.plan-item span { margin-top: 3px; color: #1f3d52; font-size: 15px; }
+.plan-item small { margin-top: 2px; color: #7a8f9e; font-size: 14px; }
 .add-plan {
   height: 32px;
   color: #1f7fe0;
@@ -569,7 +569,7 @@ th { color: #6f8393; background: #f7fafc; }
   border: 1px dashed #8fc5de;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 16px;
 }
 @media (max-width: 1450px) {
   .map-stage { grid-template-columns: 1fr 250px; }

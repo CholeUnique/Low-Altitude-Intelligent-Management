@@ -51,7 +51,7 @@ defineProps<{
   color: #0b6f9a;
   background: #e8f5fb;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 700;
 }
 h2 {
@@ -62,7 +62,7 @@ h2 {
 p {
   margin: 0;
   color: #6f8393;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.6;
 }
 dl {
@@ -77,8 +77,8 @@ dl > div {
   border-radius: 6px;
 }
 dt, dd { margin: 0; }
-dt { color: #7a8f9e; font-size: 11px; }
-dd { margin-top: 4px; color: #1f3d52; font-size: 13px; font-weight: 700; }
+dt { color: #7a8f9e; font-size: 16px; }
+dd { margin-top: 4px; color: #1f3d52; font-size: 15px; font-weight: 700; }
 .hint {
   margin-top: 16px;
   padding: 12px 14px;
@@ -86,6 +86,6 @@ dd { margin-top: 4px; color: #1f3d52; font-size: 13px; font-weight: 700; }
   background: #fff8e9;
   border-left: 3px solid #f0b429;
   border-radius: 0 6px 6px 0;
-  font-size: 12px;
+  font-size: 16px;
 }
 </style>
