@@ -2,10 +2,29 @@ export type EntityId = string
 export type AsyncStatus = 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELLED'
 
 export interface ApiResponse<T> {
-  code: number | string
-  message: string
+  code: string
+  msg: string
   data: T
-  traceId?: string
+}
+
+export interface UserDepartment {
+  deptId: string
+  deptName: string
+  deptCode?: string
+  isDefault?: boolean
+}
+
+export interface CurrentUser {
+  id: string
+  username: string
+  realName?: string
+  nickname?: string
+  avatar?: string
+  unit?: string
+  role: string
+  deptId?: string
+  deptName?: string
+  deptList: UserDepartment[]
 }
 
 export interface WorkspaceNodeConfig {
@@ -13,9 +32,10 @@ export interface WorkspaceNodeConfig {
   name: string
   shortName: string
   order: number
-  component: string
-  description: string
+  component?: string
+  description?: string
   module: 'discovery' | 'governance'
+  externalRoute?: string
 }
 
 export interface WorkspaceFieldConfig {
@@ -23,6 +43,16 @@ export interface WorkspaceFieldConfig {
   name: string
   nodes: WorkspaceNodeConfig[]
   modules: { key: 'discovery' | 'governance'; name: string }[]
+}
+
+export interface SceneWorkspaceConfig {
+  sceneId: string
+  name: string
+  modules: Array<{
+    key: 'discovery' | 'governance'
+    name: string
+  }>
+  nodes: WorkspaceNodeConfig[]
 }
 
 export interface WorkflowEvent {

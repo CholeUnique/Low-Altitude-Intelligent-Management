@@ -25,5 +25,14 @@ export default defineConfig({
       },
     },
   },
-  server: { port: 5173, host: true },
+  server: {
+    port: 5173,
+    host: true,
+    proxy: {
+      '/api': {
+        target: 'http://223.2.38.27:8080',
+        changeOrigin: true,
+      },
+    },
+  },
 })

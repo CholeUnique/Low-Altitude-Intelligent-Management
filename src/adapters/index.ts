@@ -22,6 +22,8 @@ export interface IntegrationAdapter {
   sync(resource: string): Promise<void>
 }
 
+export type { LiveStream } from './dasFly'
+
 // 正式 GIS、视频、WebSocket 和第三方协议确认后，在此注入具体实现。
 export const adapterStatus = {
   map: 'mock',

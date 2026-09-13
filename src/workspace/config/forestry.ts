@@ -1,69 +1,56 @@
-import type { WorkspaceFieldConfig } from '@/types'
+import type { SceneWorkspaceConfig } from '@/types'
+import { COMMON_DISCOVERY_NODES } from './common'
 
-export const forestryConfig: WorkspaceFieldConfig = {
-  field: 'forestry',
+export const forestryConfig: SceneWorkspaceConfig = {
+  sceneId: 'forestry-enforcement',
   name: '林业执法监管',
   modules: [
     { key: 'discovery', name: '低空巡查发现模块' },
     { key: 'governance', name: '治理模块' },
   ],
   nodes: [
-    {
-      key: 'route-flight-plan',
-      name: '航线规划与飞行计划',
-      shortName: '航线规划',
-      order: 1,
-      component: 'RouteFlightPlan',
-      description: '规划巡查航线、航点与飞行计划',
-      module: 'discovery',
-    },
-    {
-      key: 'realtime-cruise',
-      name: '实时巡航',
-      shortName: '实时巡航',
-      order: 2,
-      component: 'RealtimeCruise',
-      description: '监控无人机巡航与影像采集状态',
-      module: 'discovery',
-    },
+    ...COMMON_DISCOVERY_NODES,
     {
       key: 'spot-identification',
-      name: '问题图斑识别',
+      name: '图斑识别',
       shortName: '图斑识别',
       order: 3,
+      module: 'governance',
       component: 'SpotIdentification',
       description: 'AI 识别与人工研判问题图斑',
-      module: 'governance',
     },
     {
       key: 'task-dispatch',
-      name: '核查任务下发',
+      name: '任务下发',
       shortName: '任务下发',
       order: 4,
+      module: 'governance',
       component: 'TaskDispatch',
       description: '编制核查要求并下发至责任单位',
-      module: 'governance',
     },
     {
       key: 'review-archive',
-      name: '复核与归档',
+      name: '复核归档',
       shortName: '复核归档',
       order: 5,
+      module: 'governance',
       component: 'ReviewArchive',
       description: '核验整改成果并形成案件档案',
-      module: 'governance',
     },
   ],
 }
 
 export const WORKSPACE_NODE_KEYS = forestryConfig.nodes.map((node) => node.key)
 
-export function resolveWorkspaceNodeKey(workflow?: { key: string; status: string }[]) {
-  if (!workflow?.length) return forestryConfig.nodes[0]!.key
+export function resolveWorkspaceNodeKey(
+  workflow?: { key: string; status: string }[],
+  nodeKeys: string[] = WORKSPACE_NODE_KEYS,
+) {
+  if (!workflow?.length) return nodeKeys[0] ?? forestryConfig.nodes[0]!.key
   const active = workflow.find((item) => item.status === 'active')
-  if (active && WORKSPACE_NODE_KEYS.includes(active.key)) return active.key
-  const done = [...workflow].reverse().find((item) => item.status === 'done' && WORKSPACE_NODE_KEYS.includes(item.key))
-  return done?.key ?? forestryConfig.nodes[0]!.key
+  if (active && nodeKeys.includes(active.key)) return active.key
+  const done = [...workflow].reverse().find((item) => item.status === 'done' && nodeKeys.includes(item.key))
+  return done?.key ?? nodeKeys[0] ?? forestryConfig.nodes[0]!.key
 }
 
 export function getWorkflowNodeStatus(workflow: { key: string; status: string }[] | undefined, key: string) {
@@ -71,9 +58,13 @@ export function getWorkflowNodeStatus(workflow: { key: string; status: string }[
 }
 
 /** 已完成与当前节点可进入；后续 pending 节点锁定 */
-export function isWorkspaceNodeAccessible(workflow: { key: string; status: string }[] | undefined, key: string) {
-  if (!WORKSPACE_NODE_KEYS.includes(key)) return false
-  if (!workflow?.length) return key === forestryConfig.nodes[0]!.key
+export function isWorkspaceNodeAccessible(
+  workflow: { key: string; status: string }[] | undefined,
+  key: string,
+  nodeKeys: string[] = WORKSPACE_NODE_KEYS,
+) {
+  if (!nodeKeys.includes(key)) return false
+  if (!workflow?.length) return key === nodeKeys[0]
   const status = getWorkflowNodeStatus(workflow, key)
   return status === 'done' || status === 'active'
 }
