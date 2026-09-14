@@ -1,0 +1,487 @@
+{
+  "title": "TzScene 用户认证与管理 API",
+  "version": "v1.0.0",
+  "count": 60,
+  "rows": [
+    {
+      "method": "POST",
+      "path": "/api/v1/dept/add",
+      "tags": "部门管理",
+      "summary": "新增部门（管理员）",
+      "req": "DeptAddReq",
+      "res": "BaseRspDeptVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dept/delete",
+      "tags": "部门管理",
+      "summary": "删除部门（管理员）",
+      "req": "DeptIdReq",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dept/detail",
+      "tags": "部门管理",
+      "summary": "部门详情",
+      "req": "DeptIdReq",
+      "res": "BaseRspDeptVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dept/list",
+      "tags": "部门管理",
+      "summary": "部门列表",
+      "req": "DeptListReq",
+      "res": "BaseRspListDeptVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dept/options",
+      "tags": "部门管理",
+      "summary": "部门下拉选项",
+      "req": "",
+      "res": "BaseRspListDeptOptionVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dept/status",
+      "tags": "部门管理",
+      "summary": "启用/禁用部门（管理员）",
+      "req": "DeptStatusReq",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dept/update",
+      "tags": "部门管理",
+      "summary": "修改部门（管理员）",
+      "req": "DeptUpdateReq",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/dept-exclude/add",
+      "tags": "无人机-部门可见性例外",
+      "summary": "新增排除项",
+      "req": "DeptExcludeAddReq",
+      "res": "BaseRspDeptExcludeVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/dept-exclude/batch",
+      "tags": "无人机-部门可见性例外",
+      "summary": "批量排除/恢复",
+      "req": "DeptExcludeBatchReq",
+      "res": "BaseRspInteger"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/dept-exclude/page",
+      "tags": "无人机-部门可见性例外",
+      "summary": "例外项分页查询",
+      "req": "DeptExcludePageReq",
+      "res": "BaseRspPageVODeptExcludeVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/dept-exclude/preview",
+      "tags": "无人机-部门可见性例外",
+      "summary": "级联影响预览",
+      "req": "PreviewReq",
+      "res": "BaseRspCascadePreview"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/dept-exclude/remove",
+      "tags": "无人机-部门可见性例外",
+      "summary": "移除排除项（恢复可见）",
+      "req": "DeptExcludeRemoveReq",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/device/detail",
+      "tags": "无人机-设备",
+      "summary": "设备详情",
+      "req": "UavSnReq",
+      "res": "BaseRspUavDevice"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/device/hms/page",
+      "tags": "无人机-设备",
+      "summary": "设备 HMS 告警分页",
+      "req": "UavHmsPageReq",
+      "res": "BaseRspPageVOUavDeviceHms"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/device/page",
+      "tags": "无人机-设备",
+      "summary": "设备分页查询",
+      "req": "UavDevicePageReq",
+      "res": "BaseRspPageVOUavDevice"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/device/state",
+      "tags": "无人机-设备",
+      "summary": "设备最新物模型",
+      "req": "UavSnReq",
+      "res": "BaseRspUavDeviceState"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/device/statistics",
+      "tags": "无人机-设备",
+      "summary": "设备飞行统计",
+      "req": "UavSnReq",
+      "res": "BaseRspListUavFlightStatistics"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/flight-plan/detail",
+      "tags": "无人机-飞行计划",
+      "summary": "计划详情",
+      "req": "UavIdReq",
+      "res": "BaseRspUavFlightPlan"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/flight-plan/page",
+      "tags": "无人机-飞行计划",
+      "summary": "计划分页查询",
+      "req": "UavFlightPlanPageReq",
+      "res": "BaseRspPageVOUavFlightPlan"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/flight-task/detail",
+      "tags": "无人机-飞行任务",
+      "summary": "任务详情",
+      "req": "UavIdReq",
+      "res": "BaseRspUavFlightTask"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/flight-task/media/page",
+      "tags": "无人机-飞行任务",
+      "summary": "任务媒体素材分页",
+      "req": "UavTaskMediaPageReq",
+      "res": "BaseRspPageVOUavMediaFile"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/flight-task/page",
+      "tags": "无人机-飞行任务",
+      "summary": "任务分页查询",
+      "req": "UavFlightTaskPageReq",
+      "res": "BaseRspPageVOUavFlightTask"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/flight-task/progressing",
+      "tags": "无人机-飞行任务",
+      "summary": "正在执行的任务",
+      "req": "",
+      "res": "BaseRspListUavFlightTask"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/flight-task/trace",
+      "tags": "无人机-飞行任务",
+      "summary": "任务轨迹",
+      "req": "UavIdReq",
+      "res": "BaseRspUavFlightTrace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/live/share-code",
+      "tags": "无人机-直播",
+      "summary": "获取直播分享码",
+      "req": "UavSnReq",
+      "res": "BaseRspUavShareLiveVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/media/clean",
+      "tags": "无人机-媒体素材",
+      "summary": "手动触发清理（管理员）",
+      "req": "CleanTriggerReq",
+      "res": "BaseRspUavMediaCleanRecord"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/media/clean/config",
+      "tags": "无人机-媒体素材",
+      "summary": "查询清理配置（管理员）",
+      "req": "",
+      "res": "BaseRspCleanConfigVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/media/clean/record/page",
+      "tags": "无人机-媒体素材",
+      "summary": "清理记录分页（管理员）",
+      "req": "CleanRecordPageReq",
+      "res": "BaseRspPageVOUavMediaCleanRecord"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/media/download",
+      "tags": "无人机-媒体素材",
+      "summary": "手动触发素材下载",
+      "req": "MediaIdReq",
+      "res": "BaseRspBoolean"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/project/detail",
+      "tags": "无人机-项目",
+      "summary": "项目详情",
+      "req": "UavIdReq",
+      "res": "BaseRspUavProject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/project/options",
+      "tags": "无人机-项目",
+      "summary": "项目下拉选项",
+      "req": "",
+      "res": "BaseRspListUavProject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/project/page",
+      "tags": "无人机-项目",
+      "summary": "项目分页查询",
+      "req": "UavProjectPageReq",
+      "res": "BaseRspPageVOUavProject"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/statistics/count-by-dept",
+      "tags": "无人机-统计",
+      "summary": "按部门统计（管理员）",
+      "req": "",
+      "res": "BaseRspListUavDeptStatItemVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/statistics/device-summary",
+      "tags": "无人机-统计",
+      "summary": "设备汇总",
+      "req": "UavStatisticsReq",
+      "res": "BaseRspUavDeviceSummaryVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/statistics/flight-summary",
+      "tags": "无人机-统计",
+      "summary": "飞行汇总",
+      "req": "UavStatisticsReq",
+      "res": "BaseRspUavFlightSummaryVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/statistics/media-summary",
+      "tags": "无人机-统计",
+      "summary": "素材汇总",
+      "req": "UavStatisticsReq",
+      "res": "BaseRspUavMediaSummaryVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/statistics/overview",
+      "tags": "无人机-统计",
+      "summary": "总览统计",
+      "req": "UavStatisticsReq",
+      "res": "BaseRspUavOverviewVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/sync/all",
+      "tags": "无人机-同步触发",
+      "summary": "全量同步",
+      "req": "",
+      "res": "BaseRspUavSyncRsp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/sync/device",
+      "tags": "无人机-同步触发",
+      "summary": "单设备同步",
+      "req": "UavSyncDeviceReq",
+      "res": "BaseRspUavSyncRsp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/sync/flight-plan",
+      "tags": "无人机-同步触发",
+      "summary": "单计划同步",
+      "req": "UavSyncPlanReq",
+      "res": "BaseRspUavSyncRsp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/sync/flight-task",
+      "tags": "无人机-同步触发",
+      "summary": "单任务同步",
+      "req": "UavSyncTaskReq",
+      "res": "BaseRspUavSyncRsp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/sync/project",
+      "tags": "无人机-同步触发",
+      "summary": "单项目同步",
+      "req": "UavSyncProjectReq",
+      "res": "BaseRspUavSyncRsp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/sync/record",
+      "tags": "无人机-同步触发",
+      "summary": "同步记录详情",
+      "req": "UavSyncRecordReq",
+      "res": "BaseRspUavSyncRecord"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/wayline/detail",
+      "tags": "无人机-航线",
+      "summary": "航线详情",
+      "req": "UavIdReq",
+      "res": "BaseRspUavWayline"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/uav/wayline/page",
+      "tags": "无人机-航线",
+      "summary": "航线分页查询",
+      "req": "UavWaylinePageReq",
+      "res": "BaseRspPageVOUavWayline"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/add",
+      "tags": "用户认证与用户管理",
+      "summary": "新增用户（管理员）",
+      "req": "UserCreateReq",
+      "res": "BaseRspUserInfoVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/delete",
+      "tags": "用户认证与用户管理",
+      "summary": "删除用户（管理员）",
+      "req": "UserIdReq",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/dept/list",
+      "tags": "用户认证与用户管理",
+      "summary": "我的部门列表",
+      "req": "",
+      "res": "BaseRspListUserDeptItemVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/dept/switch",
+      "tags": "用户认证与用户管理",
+      "summary": "切换进入部门",
+      "req": "UserDeptSwitchReq",
+      "res": "BaseRspUserDeptSwitchRsp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/detail",
+      "tags": "用户认证与用户管理",
+      "summary": "查询用户详情（管理员）",
+      "req": "UserIdReq",
+      "res": "BaseRspUserInfoVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/info",
+      "tags": "用户认证与用户管理",
+      "summary": "查询本人信息",
+      "req": "",
+      "res": "BaseRspUserInfoVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/info/update",
+      "tags": "用户认证与用户管理",
+      "summary": "修改本人资料",
+      "req": "UpdateMyInfoReq",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/login",
+      "tags": "用户认证与用户管理",
+      "summary": "登录（密码登录，支持 RSA 加密传输）",
+      "req": "LoginReq",
+      "res": "BaseRspLoginRsp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/login/public-key",
+      "tags": "用户认证与用户管理",
+      "summary": "获取登录加密公钥（一次性）",
+      "req": "",
+      "res": "BaseRspLoginPublicKeyVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/logout",
+      "tags": "用户认证与用户管理",
+      "summary": "退出登录",
+      "req": "",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/page",
+      "tags": "用户认证与用户管理",
+      "summary": "分页查询用户（管理员）",
+      "req": "UserPageReq",
+      "res": "BaseRspPageVOUserInfoVO"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/password",
+      "tags": "用户认证与用户管理",
+      "summary": "修改本人密码",
+      "req": "ChangePasswordReq",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/password/reset",
+      "tags": "用户认证与用户管理",
+      "summary": "重置用户密码（管理员）",
+      "req": "ResetPasswordReq",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/status",
+      "tags": "用户认证与用户管理",
+      "summary": "启用/禁用用户（管理员）",
+      "req": "UpdateUserStatusReq",
+      "res": "BaseRspVoid"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user/update",
+      "tags": "用户认证与用户管理",
+      "summary": "修改用户（管理员）",
+      "req": "UserUpdateReq",
+      "res": "BaseRspVoid"
+    }
+  ]
+}

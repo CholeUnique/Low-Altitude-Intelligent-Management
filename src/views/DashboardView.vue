@@ -5,6 +5,7 @@ import DashboardMap from '@/components/DashboardMap.vue'
 import DomainProgressChart from '@/components/DomainProgressChart.vue'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import { useUserStore } from '@/stores/user'
+import { logoutFromServer } from '@/api/auth'
 import { getAlerts, getCases, getDashboardMapLayers, getDronePatrolRoutes, getScene, getSceneProgress, getTasks } from '@/mocks/portal'
 
 const router = useRouter()
@@ -34,16 +35,18 @@ const dashboardStats = computed(() => {
     ? Math.round(visibleTasks.value.reduce((sum, task) => sum + task.progress, 0) / visibleTasks.value.length)
     : overview.completionRate
   return [
-    { label: '在线无人机', value: Math.max(1, Math.round(overview.onlineDrones * scopeFactor)), unit: '台', primary: `总数 ${Math.max(1, Math.round(overview.totalDrones * scopeFactor))} 台`, secondary: '设备在线', icon: 'drone', tone: 'cyan' },
-    { label: '今日任务', value: activeScene.value ? visibleTasks.value.length : overview.todayTasks, unit: '个', primary: `已完成 ${activeScene.value ? completed : Math.round(overview.todayTasks * .7)}`, secondary: `场景 ${activeScene.value ? 1 : organization.value.scenes.length}`, icon: 'task', tone: 'blue' },
-    { label: '待完成任务', value: activeScene.value ? visibleTasks.value.length - completed : overview.pendingTasks, unit: '个', primary: `高优先级 ${visibleTasks.value.filter((task) => task.priority === '高').length}`, secondary: '实时统计', icon: 'pending', tone: 'indigo' },
-    { label: '任务完成率', value: completionRate, unit: '%', primary: `${scopeTitle.value}`, secondary: '', icon: 'rate', tone: 'green' },
+    { label: '在线无人机', value: Math.max(1, Math.round(overview.onlineDrones * scopeFactor)), unit: '台', primary: `总数 ${Math.max(1, Math.round(overview.totalDrones * scopeFactor))} 台`, secondary: '设备在线', icon: 'drone' as const, tone: 'cyan' },
+    { label: '今日任务', value: activeScene.value ? visibleTasks.value.length : overview.todayTasks, unit: '个', primary: `已完成 ${activeScene.value ? completed : Math.round(overview.todayTasks * .7)}`, secondary: `场景 ${activeScene.value ? 1 : organization.value.scenes.length}`, icon: 'task' as const, tone: 'blue' },
+    { label: '待完成任务', value: activeScene.value ? visibleTasks.value.length - completed : overview.pendingTasks, unit: '个', primary: `高优先级 ${visibleTasks.value.filter((task) => task.priority === '高').length}`, secondary: '实时统计', icon: 'pending' as const, tone: 'indigo' },
+    { label: '任务完成率', value: completionRate, unit: '%', primary: `${scopeTitle.value}`, secondary: '', icon: 'rate' as const, tone: 'green' },
   ]
 })
 const aiCapabilities = computed(() => organization.value.scenes.slice(0, 4).map((scene) => ({
+  id: scene.id,
   name: scene.shortName,
   icon: scene.icon,
   description: scene.description.slice(0, 8),
+  visual: scene.id.includes('forestry') || scene.id.includes('land') ? 'forest' : 'field',
 })))
 const aiMetrics = computed(() => [
   { label: '已部署算法', value: String(organization.value.overview.deployedAlgorithms), unit: '个' },
@@ -63,13 +66,21 @@ function openTaskList() {
   router.push({ name: 'tasks', query: activeScene.value ? { sceneId: activeScene.value.id } : {} })
 }
 
+function openPatrolLive() {
+  router.push({ path: '/patrol/live', query: { returnTo: route.fullPath } })
+}
+
 function enterScene(nextSceneId: string) {
   router.push({ name: 'dashboard-scene', params: { sceneId: nextSceneId } })
 }
 
-function logout() {
-  user.logout()
-  router.replace('/login')
+async function logout() {
+  try {
+    if (user.authMode === 'real') await logoutFromServer()
+  } finally {
+    user.logout()
+    await router.replace('/login')
+  }
 }
 
 function openAlgorithm(id?: string) {
@@ -141,7 +152,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
 
       <section class="cockpit-secondary">
         <article class="cockpit-panel feed-panel">
-          <div class="cockpit-panel__title"><h2>无人机直播</h2><span>全部直播 〉</span></div>
+          <div class="cockpit-panel__title"><h2>无人机直播</h2><span @click="openPatrolLive" class="linkish">全部直播 〉</span></div>
           <div class="feed-grid">
             <div v-for="feed in droneFeeds" :key="feed.id" class="feed-card" :class="`feed-${feed.image}`">
               <span class="feed-state">● {{ feed.status }}</span><span class="feed-expand">⌗</span>
@@ -187,3 +198,6 @@ onBeforeUnmount(() => window.clearInterval(timer))
 </template>
 
 <style scoped src="@/styles/dashboard.scss" lang="scss"></style>
+<style scoped lang="scss">
+.linkish { cursor: pointer; }
+</style>

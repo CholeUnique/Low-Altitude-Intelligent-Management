@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import L from 'leaflet'
+import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 import taizhouCityBoundary from '@/assets/geo/taizhou-city.json'
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
@@ -285,7 +286,7 @@ function renderAdministrativeBoundaries() {
   if (!map) return
   administrativeBoundaryGroup?.remove()
   administrativeBoundaryGroup = L.layerGroup()
-  L.geoJSON(taizhouDistrictBoundaries, {
+  L.geoJSON(taizhouDistrictBoundaries as GeoJsonObject, {
     pane: 'administrative-boundaries',
     style: {
       color: '#2bd8ff',
@@ -295,7 +296,7 @@ function renderAdministrativeBoundaries() {
       fillOpacity: .25,
     },
   }).addTo(administrativeBoundaryGroup)
-  L.geoJSON(taizhouCityBoundary, {
+  L.geoJSON(taizhouCityBoundary as GeoJsonObject, {
     pane: 'administrative-boundaries',
     style: {
       color: '#2bd8ff',

@@ -4,6 +4,7 @@ import TaskRangeMap from '@/components/TaskRangeMap.vue'
 import { addSessionTask } from '@/mocks/portal'
 import { useUserStore } from '@/stores/user'
 import type { PortalTask, TaskPriority } from '@/types'
+import { getWorkspaceConfig } from '@/workspace/config/registry'
 
 const props = defineProps<{ sceneId?: string }>()
 const emit = defineEmits<{ created: [task: PortalTask] }>()
@@ -31,6 +32,8 @@ watch(visible, (open) => {
 
 function createTask() {
   if (!form.name || !form.sceneId || !form.area || !form.owner) return
+  const workspaceConfig = getWorkspaceConfig(form.sceneId)
+  if (!workspaceConfig) return
   const now = new Date()
   const task: PortalTask = {
     id: `TASK-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(Date.now()).slice(-3)}`,
@@ -53,14 +56,20 @@ function createTask() {
     phone: form.phone || '-',
     resultRequirements: [...form.requirements],
     coordinates: [...form.coordinates],
-    workflow: [
-      { key: 'route-flight-plan', name: '航线规划与飞行计划', status: 'active', time: '刚刚' },
-      { key: 'realtime-cruise', name: '实时巡航', status: 'pending' },
-      { key: 'spot-identification', name: '问题图斑识别', status: 'pending' },
-      { key: 'task-dispatch', name: '核查任务下发', status: 'pending' },
-      { key: 'review-archive', name: '复核与归档', status: 'pending' },
-    ],
-    metrics: { flights: 0, flightHours: 0, patrolArea: 0, issues: 0, completedNodes: 0, totalNodes: 5 },
+    workflow: workspaceConfig.nodes.map((node, index) => ({
+      key: node.key,
+      name: node.name,
+      status: index === 0 ? 'active' as const : 'pending' as const,
+      ...(index === 0 ? { time: '刚刚' } : {}),
+    })),
+    metrics: {
+      flights: 0,
+      flightHours: 0,
+      patrolArea: 0,
+      issues: 0,
+      completedNodes: 0,
+      totalNodes: workspaceConfig.nodes.length,
+    },
   }
   addSessionTask(task)
   emit('created', task)
