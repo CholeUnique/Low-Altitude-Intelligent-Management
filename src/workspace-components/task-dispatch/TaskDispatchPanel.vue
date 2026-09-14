@@ -1,36 +1,38 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import type { PortalTask } from '@/types'
+import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { dispatchRecords, problemSpots } from '@/mocks/governance'
 
-const props = defineProps<{ task?: PortalTask }>()
+const props = defineProps<{ task?: PortalTask; sceneName?: string; node?: WorkspaceNodeConfig }>()
+const isForestry = computed(() => props.node?.key === 'task-dispatch')
+const objectLabel = computed(() => isForestry.value ? '图斑' : '业务对象')
 const selected = ref<string[]>([problemSpots.find((item) => item.status === '已确认')?.id || problemSpots[0]!.id])
 const preview = ref(false)
 const feedback = ref('')
 const form = reactive({
-  area: props.task?.area || '九龙镇西北林区',
+  area: props.task?.area || '任务巡查区域',
   unit: '九龙镇自然资源所',
   receiver: '王强',
   deadline: '2026-09-18',
   contact: '张明',
   phone: '138****6812',
   priority: '高',
-  requirement: '请现场核实图斑范围、土地现状与权属信息，拍摄全景及细节照片并在期限内反馈。',
+  requirement: '请现场核实业务对象范围与现状，拍摄全景及细节照片并在期限内反馈。',
 })
 const selectedSpots = computed(() => problemSpots.filter((item) => selected.value.includes(item.id)))
-function action(text: string) { feedback.value = `${text}成功：已选择 ${selected.value.length} 个图斑` }
+function action(text: string) { feedback.value = `${text}成功：已选择 ${selected.value.length} 个${objectLabel.value}` }
 </script>
 
 <template>
   <div class="dispatch-page">
     <aside class="panel spots">
-      <div class="panel-title">待下发图斑 <small>已选 {{ selected.length }}</small></div>
+      <div class="panel-title">待下发{{ objectLabel }} <small>已选 {{ selected.length }}</small></div>
       <label v-for="item in problemSpots.filter(s => s.status === '已确认')" :key="item.id" class="spot-row">
         <input v-model="selected" type="checkbox" :value="item.id" />
         <i></i><span><b>{{ item.type }}</b><small>{{ item.id }} · {{ item.area }} ha</small></span>
         <em>{{ item.risk }}</em>
       </label>
-      <div class="batch-tip">支持勾选多个已确认图斑，统一生成核查任务。</div>
+      <div class="batch-tip">支持勾选多个已确认{{ objectLabel }}，统一生成{{ node?.name || '核查' }}任务。</div>
     </aside>
 
     <section class="panel form-panel">
@@ -47,14 +49,14 @@ function action(text: string) { feedback.value = `${text}成功：已选择 ${se
         <label class="wide upload">附件<input type="file" multiple /><span>＋ 上传任务附件（支持图片、PDF、文档）</span></label>
       </div>
       <div class="selected-summary">
-        <b>关联图斑</b><span v-for="item in selectedSpots" :key="item.id">{{ item.id }} · {{ item.type }}</span>
+        <b>关联{{ objectLabel }}</b><span v-for="item in selectedSpots" :key="item.id">{{ item.id }} · {{ item.type }}</span>
       </div>
     </section>
 
     <aside class="right-col">
       <section class="panel preview">
         <div class="panel-title">任务预览</div>
-        <dl><dt>任务标题</dt><dd>{{ form.area }}林业问题核查</dd><dt>接收对象</dt><dd>{{ form.unit }} / {{ form.receiver }}</dd><dt>期限</dt><dd>{{ form.deadline }}</dd><dt>优先级</dt><dd>{{ form.priority }}</dd><dt>图斑数量</dt><dd>{{ selected.length }} 个</dd></dl>
+        <dl><dt>任务标题</dt><dd>{{ form.area }}{{ isForestry ? '林业问题核查' : (node?.name || '现场处置') }}</dd><dt>接收对象</dt><dd>{{ form.unit }} / {{ form.receiver }}</dd><dt>期限</dt><dd>{{ form.deadline }}</dd><dt>优先级</dt><dd>{{ form.priority }}</dd><dt>{{ objectLabel }}数量</dt><dd>{{ selected.length }} 个</dd></dl>
         <p v-if="preview">{{ form.requirement }}</p>
       </section>
       <section class="panel records">

@@ -6,13 +6,14 @@ import {
   getWorkflowNodeStatus,
   isWorkspaceNodeAccessible,
   resolveWorkspaceNodeKey,
-} from '@/workspace/config/forestry'
+} from '@/workspace/config/workflow'
 import { getWorkspaceConfig } from '@/workspace/config/registry'
 import { getScene, getTask } from '@/mocks/portal'
 import { useUserStore } from '@/stores/user'
 import SpotIdentificationPanel from '@/workspace-components/spot-identification/SpotIdentificationPanel.vue'
 import TaskDispatchPanel from '@/workspace-components/task-dispatch/TaskDispatchPanel.vue'
 import ReviewArchivePanel from '@/workspace-components/review-archive/ReviewArchivePanel.vue'
+import SceneNodePlaceholder from '@/workspace-components/shared/SceneNodePlaceholder.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -46,25 +47,27 @@ const activeKey = computed(() => {
     const node = workspaceConfig.value?.nodes.find((item) => item.key === queryKey)
     if (node && !node.externalRoute) return queryKey
   }
-  const accessibleGovernance = governanceNodes.value.find((node) =>
-    isWorkspaceNodeAccessible(task.value?.workflow, node.key, nodeKeys.value),
-  )
-  return accessibleGovernance?.key ?? ''
+  const defaultNode = workspaceConfig.value?.nodes.find((node) => node.key === defaultNodeKey.value)
+  return defaultNode?.module === 'governance' ? defaultNode.key : ''
 })
 
 const activeNode = computed(() =>
   workspaceConfig.value?.nodes.find((node) => node.key === activeKey.value),
 )
+const activeGovernanceIndex = computed(() =>
+  Math.max(0, governanceNodes.value.findIndex((node) => node.key === activeKey.value)) + 1,
+)
 
-const nodePanels = {
-  'spot-identification': SpotIdentificationPanel,
-  'task-dispatch': TaskDispatchPanel,
-  'review-archive': ReviewArchivePanel,
+const panelComponents = {
+  SpotIdentification: SpotIdentificationPanel,
+  TaskDispatch: TaskDispatchPanel,
+  ReviewArchive: ReviewArchivePanel,
+  ScenePlaceholder: SceneNodePlaceholder,
 } as const
 
 const ActivePanel = computed(() => {
-  const key = activeKey.value as keyof typeof nodePanels
-  return nodePanels[key] || SpotIdentificationPanel
+  const component = activeNode.value?.component as keyof typeof panelComponents
+  return panelComponents[component] || SceneNodePlaceholder
 })
 
 function nodeState(key: string) {
@@ -77,16 +80,21 @@ function nodeState(key: string) {
   }
 }
 
+function patrolQuery() {
+  return {
+    from: 'workspace',
+    sceneId: String(route.params.sceneId || ''),
+    taskId: String(route.params.taskId || ''),
+    returnTo: route.fullPath,
+  }
+}
+
 function selectNode(node: WorkspaceNodeConfig) {
   if (!isWorkspaceNodeAccessible(task.value?.workflow, node.key, nodeKeys.value)) return
   if (node.externalRoute) {
     router.push({
       path: node.externalRoute,
-      query: {
-        from: 'workspace',
-        sceneId: route.params.sceneId,
-        taskId: route.params.taskId,
-      },
+      query: patrolQuery(),
     })
     return
   }
@@ -102,25 +110,27 @@ watch(
   [() => workspaceConfig.value?.sceneId, defaultNodeKey, () => route.query.node, () => task.value?.id],
   () => {
     if (!workspaceConfig.value) return
+    const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
+    const queryNode = workspaceConfig.value.nodes.find((item) => item.key === queryKey)
+    if (queryNode && isWorkspaceNodeAccessible(task.value?.workflow, queryNode.key, nodeKeys.value)) {
+      if (queryNode.externalRoute) {
+        router.replace({
+          path: queryNode.externalRoute,
+          query: patrolQuery(),
+        })
+      }
+      return
+    }
     const preferred = workspaceConfig.value.nodes.find((item) => item.key === defaultNodeKey.value)
     if (preferred?.externalRoute) {
       router.replace({
         path: preferred.externalRoute,
-        query: {
-          from: 'workspace',
-          sceneId: route.params.sceneId,
-          taskId: route.params.taskId,
-        },
+        query: patrolQuery(),
       })
       return
     }
-    const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
-    const node = workspaceConfig.value.nodes.find((item) => item.key === queryKey)
-    if (queryKey && node && !node.externalRoute && isWorkspaceNodeAccessible(task.value?.workflow, queryKey, nodeKeys.value)) {
-      return
-    }
-    if (!activeKey.value || queryKey === activeKey.value) return
-    router.replace({ query: { ...route.query, node: activeKey.value } })
+    if (!preferred || queryKey === preferred.key) return
+    router.replace({ query: { ...route.query, node: preferred.key } })
   },
   { immediate: true },
 )
@@ -132,7 +142,7 @@ watch(
       <div class="workspace-brand" @click="$router.push('/dashboard')">
         <span class="brand-mark">翼</span>
         <div>
-          <b>{{ currentScene?.name || '场景作业' }}工作台</b>
+          <b :title="`${currentScene?.name || '场景作业'}工作台`">{{ currentScene?.shortName || currentScene?.name || '场景作业' }}工作台</b>
           <small>{{ sceneId || '未指定场景' }}</small>
         </div>
       </div>
@@ -152,7 +162,7 @@ watch(
       <div class="workspace-brand" @click="$router.push('/dashboard')">
         <span class="brand-mark">翼</span>
         <div>
-          <b>{{ workspaceConfig.name }}工作台</b>
+          <b :title="`${workspaceConfig.name}工作台`">{{ currentScene?.shortName || workspaceConfig.name }}工作台</b>
           <small>{{ task?.name || route.params.taskId || '综合工作台' }}</small>
         </div>
       </div>
@@ -211,7 +221,15 @@ watch(
     </div>
 
     <main class="workspace-body">
-      <component v-if="activeKey" :is="ActivePanel" :task="task" />
+      <component
+        v-if="activeKey && activeNode"
+        :is="ActivePanel"
+        :task="task"
+        :scene-name="workspaceConfig.name"
+        :node="activeNode"
+        :governance-index="activeGovernanceIndex"
+        :governance-total="governanceNodes.length"
+      />
       <div v-else class="empty-body">
         <div class="empty-card">
           <h2>请从公共巡查模块开始</h2>
@@ -233,7 +251,7 @@ watch(
 .workspace-header {
   flex: 0 0 78px;
   display: grid;
-  grid-template-columns: 260px 1fr 240px;
+  grid-template-columns: 280px minmax(0, 1fr) 240px;
   align-items: center;
   padding: 0 16px;
   color: white;
@@ -241,11 +259,13 @@ watch(
   box-shadow: 0 3px 10px #002b4633;
 }
 .workspace-brand {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
   cursor: pointer;
 }
+.workspace-brand > div { min-width: 0; }
 .brand-mark {
   width: 34px;
   height: 34px;
@@ -257,7 +277,12 @@ watch(
 }
 .workspace-brand b,
 .workspace-brand small { display: block; }
-.workspace-brand b { font-size: 15px; }
+.workspace-brand b {
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .workspace-brand small { margin-top: 3px; color: #78adbf; font-size: 11px; }
 
 .flow-nav {

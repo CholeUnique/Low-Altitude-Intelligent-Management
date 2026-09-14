@@ -67,7 +67,7 @@ function openTaskList() {
 }
 
 function openPatrolLive() {
-  router.push({ path: '/patrol/live' })
+  router.push({ path: '/patrol/live', query: { returnTo: route.fullPath } })
 }
 
 function enterScene(nextSceneId: string) {

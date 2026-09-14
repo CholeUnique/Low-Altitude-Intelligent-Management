@@ -39,32 +39,3 @@ export const forestryConfig: SceneWorkspaceConfig = {
     },
   ],
 }
-
-export const WORKSPACE_NODE_KEYS = forestryConfig.nodes.map((node) => node.key)
-
-export function resolveWorkspaceNodeKey(
-  workflow?: { key: string; status: string }[],
-  nodeKeys: string[] = WORKSPACE_NODE_KEYS,
-) {
-  if (!workflow?.length) return nodeKeys[0] ?? forestryConfig.nodes[0]!.key
-  const active = workflow.find((item) => item.status === 'active')
-  if (active && nodeKeys.includes(active.key)) return active.key
-  const done = [...workflow].reverse().find((item) => item.status === 'done' && nodeKeys.includes(item.key))
-  return done?.key ?? nodeKeys[0] ?? forestryConfig.nodes[0]!.key
-}
-
-export function getWorkflowNodeStatus(workflow: { key: string; status: string }[] | undefined, key: string) {
-  return workflow?.find((item) => item.key === key)?.status ?? 'pending'
-}
-
-/** 已完成与当前节点可进入；后续 pending 节点锁定 */
-export function isWorkspaceNodeAccessible(
-  workflow: { key: string; status: string }[] | undefined,
-  key: string,
-  nodeKeys: string[] = WORKSPACE_NODE_KEYS,
-) {
-  if (!nodeKeys.includes(key)) return false
-  if (!workflow?.length) return key === nodeKeys[0]
-  const status = getWorkflowNodeStatus(workflow, key)
-  return status === 'done' || status === 'active'
-}

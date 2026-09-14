@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { MapLocation, VideoCamera } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
 const props = defineProps<{
@@ -8,16 +9,17 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const route = useRoute()
 const user = useUserStore()
 
 const nodes = computed(() => [
-  { key: 'route-plan' as const, label: '航线规划', path: '/patrol/route-plan', order: 1 },
-  { key: 'live' as const, label: '实时巡航', path: '/patrol/live', order: 2 },
+  { key: 'route-plan' as const, label: '航线规划', path: '/patrol/route-plan', icon: MapLocation },
+  { key: 'live' as const, label: '实时巡航', path: '/patrol/live', icon: VideoCamera },
 ])
 
 function goBack() {
-  if (window.history.length > 1) router.back()
-  else router.push('/dashboard')
+  const returnTo = typeof route.query.returnTo === 'string' ? route.query.returnTo : ''
+  router.push(returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/dashboard')
 }
 
 function goNode(path: string) {
@@ -42,10 +44,10 @@ function goNode(path: string) {
           v-for="node in nodes"
           :key="node.key"
           type="button"
-          :class="{ active: node.key === activeNode, done: node.key === 'route-plan' && activeNode === 'live' }"
+          :class="{ active: node.key === activeNode }"
           @click="goNode(node.path)"
         >
-          <i>{{ node.key === 'route-plan' && activeNode === 'live' ? '✓' : node.order }}</i>
+          <i><component :is="node.icon" /></i>
           <span>{{ node.label }}</span>
         </button>
       </nav>
@@ -151,17 +153,13 @@ function goNode(path: string) {
   font-style: normal;
   font-size: 11px;
 }
+.patrol-flow i svg { width: 13px; height: 13px; }
 .patrol-flow span { font-size: 12px; }
 .patrol-flow button.active { color: #fff; }
 .patrol-flow button.active i {
   border-color: #3dd2e0;
   background: #13a6bb;
   box-shadow: 0 0 0 4px #37d3df1d;
-}
-.patrol-flow button.done i {
-  color: #064863;
-  border-color: #58d3b1;
-  background: #58d3b1;
 }
 .system-state {
   display: flex;

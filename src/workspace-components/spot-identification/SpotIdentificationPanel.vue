@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { PortalTask } from '@/types'
+import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { problemSpots, spotTimeline } from '@/mocks/governance'
 import SpotDistributionMap from './SpotDistributionMap.vue'
 
-defineProps<{ task?: PortalTask }>()
+const props = defineProps<{ task?: PortalTask; sceneName?: string; node?: WorkspaceNodeConfig }>()
+const isForestry = computed(() => props.node?.key === 'spot-identification')
+const objectLabel = computed(() => isForestry.value ? '问题图斑' : '识别对象')
 const keyword = ref('')
 const status = ref('')
 const source = ref('')
@@ -32,11 +34,11 @@ function judge(result: string) {
 <template>
   <div class="governance-page spot-page">
     <aside class="panel spot-list">
-      <div class="panel-title">问题图斑列表 <small>{{ filtered.length }} 处</small></div>
+      <div class="panel-title">{{ objectLabel }}列表 <small>{{ filtered.length }} 处</small></div>
       <div class="filters">
         <input v-model="keyword" placeholder="搜索编号或类型" />
         <select v-model="status"><option value="">全部状态</option><option>待研判</option><option>已确认</option><option>已排除</option></select>
-        <select v-model="source"><option value="">全部来源</option><option>无人机巡查发现</option><option>卫片疑似问题</option><option>AI 自动识别</option><option>森林督查图斑</option><option>多期变化检测</option></select>
+        <select v-model="source"><option value="">全部来源</option><option>无人机巡查发现</option><option>卫片疑似问题</option><option>AI 自动识别</option><option>{{ isForestry ? '森林督查图斑' : '场景专题数据' }}</option><option>多期变化检测</option></select>
         <select v-model="risk"><option value="">全部风险</option><option>高</option><option>中</option><option>低</option></select>
       </div>
       <button v-for="item in filtered" :key="item.id" class="spot-item" :class="{ active: item.id === activeId }" @click="activeId = item.id">
@@ -47,7 +49,7 @@ function judge(result: string) {
 
     <section class="center-column">
       <div class="panel map-panel">
-        <div class="panel-title">图斑分布 <small>泰州市 · 林业专题</small></div>
+        <div class="panel-title">{{ objectLabel }}分布 <small>泰州市 · {{ sceneName || '场景专题' }}</small></div>
         <SpotDistributionMap :spots="filtered" :active-id="activeId" @select="activeId = $event" />
       </div>
       <div class="panel analysis">
@@ -65,8 +67,8 @@ function judge(result: string) {
 
     <aside class="right-column">
       <div class="panel detail">
-        <div class="panel-title">图斑详细信息</div>
-        <dl><dt>图斑编号</dt><dd>{{ active.id }}</dd><dt>疑似类型</dt><dd>{{ active.type }}</dd><dt>置信度</dt><dd>{{ active.confidence }}%</dd><dt>风险等级</dt><dd>{{ active.risk }}</dd><dt>面积</dt><dd>{{ active.area }} ha</dd><dt>来源</dt><dd>{{ active.source }}</dd><dt>发现时间</dt><dd>{{ active.discoveredAt }}</dd></dl>
+        <div class="panel-title">{{ objectLabel }}详细信息</div>
+        <dl><dt>对象编号</dt><dd>{{ active.id }}</dd><dt>疑似类型</dt><dd>{{ active.type }}</dd><dt>置信度</dt><dd>{{ active.confidence }}%</dd><dt>风险等级</dt><dd>{{ active.risk }}</dd><dt>面积</dt><dd>{{ active.area }} ha</dd><dt>来源</dt><dd>{{ active.source }}</dd><dt>发现时间</dt><dd>{{ active.discoveredAt }}</dd></dl>
         <p>{{ active.description }}</p>
       </div>
       <div class="panel timeline">

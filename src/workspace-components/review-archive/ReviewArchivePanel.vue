@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { PortalTask } from '@/types'
+import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { archiveMaterials, operationLogs, reviewCases, reviewWorkflow } from '@/mocks/governance'
 
-defineProps<{ task?: PortalTask }>()
+const props = defineProps<{ task?: PortalTask; sceneName?: string; node?: WorkspaceNodeConfig }>()
+const isForestry = computed(() => props.node?.key === 'review-archive')
+const finalAction = computed(() => props.node?.name.includes('销号') ? '确认销号' : '确认归档')
 const tab = ref('待复核')
 const activeId = ref(reviewCases[0]!.id)
-const conclusion = ref('经复核，现场整改范围与问题图斑一致，林地植被恢复措施基本到位，建议通过复核。')
+const conclusion = ref(isForestry.value
+  ? '经复核，现场整改范围与问题图斑一致，林地植被恢复措施基本到位，建议通过复核。'
+  : '经复核，现场处置范围与任务要求一致，提交成果材料完整，建议通过复核。')
 const result = ref('整改完成')
 const feedback = ref('')
 const compare = ref(52)
@@ -27,14 +31,14 @@ function act(name: string) { feedback.value = `${active.value.id}：${name}操�
 
     <section class="center-col">
       <div class="panel compare-panel">
-        <div class="panel-title">整改前后影像对比 <small>{{ active.title }}</small></div>
+        <div class="panel-title">{{ isForestry ? '整改前后影像对比' : '处置前后影像对比' }} <small>{{ active.title }}</small></div>
         <div class="compare-view">
-          <div class="before"><span>整改前影像</span></div>
-          <div class="after" :style="{ width: `${compare}%` }"><span>整改后影像</span></div>
+          <div class="before"><span>{{ isForestry ? '整改前影像' : '处置前影像' }}</span></div>
+          <div class="after" :style="{ width: `${compare}%` }"><span>{{ isForestry ? '整改后影像' : '处置后影像' }}</span></div>
           <i :style="{ left: `${compare}%` }"></i>
         </div>
         <input v-model.number="compare" type="range" min="10" max="90" />
-        <div class="image-strip"><button class="active">整改前</button><button>整改后</button><button>无人机复核影像</button><p>变化说明：裸土区域已完成补植复绿，临时构筑物已拆除。</p></div>
+        <div class="image-strip"><button class="active">{{ isForestry ? '整改前' : '处置前' }}</button><button>{{ isForestry ? '整改后' : '处置后' }}</button><button>无人机复核影像</button><p>{{ isForestry ? '变化说明：裸土区域已完成补植复绿，临时构筑物已拆除。' : '变化说明：现场状态已按任务要求完成处置，影像变化清晰。' }}</p></div>
       </div>
       <div class="panel materials">
         <div class="panel-title">归档材料</div>
@@ -45,7 +49,7 @@ function act(name: string) { feedback.value = `${active.value.id}：${name}操�
     <aside class="right-col">
       <div class="panel result-panel">
         <div class="panel-title">复核结论</div>
-        <dl><dt>案件编号</dt><dd>{{ active.id }}</dd><dt>核查人员</dt><dd>{{ active.assignee }}</dd><dt>核查结果</dt><dd>问题属实</dd><dt>整改结果</dt><dd><select v-model="result"><option>整改完成</option><option>部分整改</option><option>未整改</option></select></dd></dl>
+        <dl><dt>事项编号</dt><dd>{{ active.id }}</dd><dt>核查人员</dt><dd>{{ active.assignee }}</dd><dt>核查结果</dt><dd>问题属实</dd><dt>{{ isForestry ? '整改结果' : '处置结果' }}</dt><dd><select v-model="result"><option>整改完成</option><option>部分整改</option><option>未整改</option></select></dd></dl>
         <label>复核意见<textarea v-model="conclusion"></textarea></label>
       </div>
       <div class="panel workflow">
@@ -58,7 +62,7 @@ function act(name: string) { feedback.value = `${active.value.id}：${name}操�
       </div>
     </aside>
 
-    <footer class="action-bar panel"><span>{{ feedback || '复核通过后可确认归档并导出完整案卷' }}</span><button @click="act('退回补充')">退回补充</button><button @click="act('复核通过')">复核通过</button><button class="primary" @click="act('确认归档')">确认归档</button><button @click="act('导出档案')">导出档案</button></footer>
+    <footer class="action-bar panel"><span>{{ feedback || `${node?.name || '复核'}通过后可完成闭环并导出完整材料` }}</span><button @click="act('退回补充')">退回补充</button><button @click="act('复核通过')">复核通过</button><button class="primary" @click="act(finalAction)">{{ finalAction }}</button><button @click="act('导出档案')">导出档案</button></footer>
   </div>
 </template>
 

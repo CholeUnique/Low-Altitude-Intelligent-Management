@@ -56,7 +56,7 @@
           "shortName": "新增用地预警",
           "icon": "警",
           "description": "新增违法违规用地智能发现与预警",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         },
         {
           "id": "existing-illegal-land-rectification",
@@ -64,7 +64,7 @@
           "shortName": "存量用地整改",
           "icon": "整",
           "description": "存量违法用地整改全过程监测",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         },
         {
           "id": "land-supply-inspection",
@@ -72,7 +72,7 @@
           "shortName": "供后巡查",
           "icon": "巡",
           "description": "供后开发利用巡查和履约分析",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         },
         {
           "id": "land-reclamation",
@@ -80,7 +80,7 @@
           "shortName": "土地复垦",
           "icon": "复",
           "description": "土地复垦项目全生命周期监管",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         }
       ]
     },
@@ -106,7 +106,7 @@
           "shortName": "非粮化监测",
           "icon": "耕",
           "description": "耕地用途变化和非粮化动态监测",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         },
         {
           "id": "planting-subsidy",
@@ -114,7 +114,7 @@
           "shortName": "种植补贴",
           "icon": "补",
           "description": "种植面积核定和惠农补贴监管",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         },
         {
           "id": "pond-archive",
@@ -122,7 +122,7 @@
           "shortName": "塘口建档",
           "icon": "塘",
           "description": "塘口巡检和数字档案建设",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         },
         {
           "id": "yangtze-fishing-ban",
@@ -130,7 +130,7 @@
           "shortName": "长江禁捕",
           "icon": "渔",
           "description": "长江禁捕巡查、取证和执法闭环",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         },
         {
           "id": "farmland-facilities",
@@ -138,7 +138,7 @@
           "shortName": "农田设施",
           "icon": "设",
           "description": "高标准农田工程设施常态化管理",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         },
         {
           "id": "farmland-construction",
@@ -146,7 +146,7 @@
           "shortName": "在建农田",
           "icon": "建",
           "description": "高标准农田在建工程进度和质量管理",
-          "workspaceEnabled": false
+          "workspaceEnabled": true
         }
       ]
     }
@@ -201,30 +201,27 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "done",
-          "time": "已完成"
+          "name": "航线规划",
+          "status": "done"
         },
         {
           "key": "realtime-cruise",
           "name": "实时巡航",
-          "status": "done",
-          "time": "已完成"
+          "status": "done"
         },
         {
           "key": "spot-identification",
-          "name": "问题图斑识别",
-          "status": "active",
-          "time": "进行中"
+          "name": "图斑识别",
+          "status": "active"
         },
         {
           "key": "task-dispatch",
-          "name": "核查任务下发",
+          "name": "任务下发",
           "status": "pending"
         },
         {
           "key": "review-archive",
-          "name": "复核与归档",
+          "name": "复核归档",
           "status": "pending"
         }
       ],
@@ -282,33 +279,33 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "done",
-          "time": "已完成"
+          "name": "航线规划",
+          "status": "done"
         },
         {
           "key": "realtime-cruise",
           "name": "实时巡航",
-          "status": "done",
-          "time": "已完成"
+          "status": "done"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
-          "status": "done",
-          "time": "已完成"
+          "key": "land-warning-identification",
+          "name": "新增用地识别",
+          "status": "done"
         },
         {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
-          "status": "done",
-          "time": "已完成"
+          "key": "land-warning-assessment",
+          "name": "预警研判",
+          "status": "done"
         },
         {
-          "key": "review-archive",
-          "name": "复核与归档",
-          "status": "done",
-          "time": "已完成"
+          "key": "land-warning-inspection",
+          "name": "核查处置",
+          "status": "done"
+        },
+        {
+          "key": "land-warning-closeout",
+          "name": "复核销号",
+          "status": "done"
         }
       ],
       "metrics": {
@@ -316,8 +313,8 @@
         "flightHours": 1.8,
         "patrolArea": 12.5,
         "issues": 6,
-        "completedNodes": 5,
-        "totalNodes": 5
+        "completedNodes": 6,
+        "totalNodes": 6
       }
     },
     {
@@ -365,31 +362,32 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "done",
-          "time": "已完成"
+          "name": "航线规划",
+          "status": "done"
         },
         {
           "key": "realtime-cruise",
           "name": "实时巡航",
-          "status": "done",
-          "time": "已完成"
+          "status": "done"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
-          "status": "done",
-          "time": "已完成"
+          "key": "rectification-monitoring",
+          "name": "整改监测",
+          "status": "done"
         },
         {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
-          "status": "active",
-          "time": "处理中"
+          "key": "rectification-comparison",
+          "name": "效果对比",
+          "status": "done"
         },
         {
-          "key": "review-archive",
-          "name": "复核与归档",
+          "key": "rectification-review",
+          "name": "复核确认",
+          "status": "active"
+        },
+        {
+          "key": "rectification-closeout",
+          "name": "整改销号",
           "status": "pending"
         }
       ],
@@ -398,8 +396,8 @@
         "flightHours": 2.1,
         "patrolArea": 8.4,
         "issues": 4,
-        "completedNodes": 3,
-        "totalNodes": 5
+        "completedNodes": 4,
+        "totalNodes": 6
       }
     },
     {
@@ -446,30 +444,32 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "done",
-          "time": "已完成"
+          "name": "航线规划",
+          "status": "done"
         },
         {
           "key": "realtime-cruise",
           "name": "实时巡航",
-          "status": "done",
-          "time": "已完成"
+          "status": "done"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
-          "status": "active",
-          "time": "进行中"
+          "key": "supply-project-matching",
+          "name": "项目匹配",
+          "status": "active"
         },
         {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
+          "key": "supply-performance-analysis",
+          "name": "履约分析",
           "status": "pending"
         },
         {
-          "key": "review-archive",
-          "name": "复核与归档",
+          "key": "supply-anomaly-inspection",
+          "name": "异常核查",
+          "status": "pending"
+        },
+        {
+          "key": "supply-disposal-archive",
+          "name": "处置归档",
           "status": "pending"
         }
       ],
@@ -479,7 +479,7 @@
         "patrolArea": 24.1,
         "issues": 2,
         "completedNodes": 2,
-        "totalNodes": 5
+        "totalNodes": 6
       }
     },
     {
@@ -528,9 +528,8 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "active",
-          "time": "进行中"
+          "name": "航线规划",
+          "status": "active"
         },
         {
           "key": "realtime-cruise",
@@ -538,18 +537,23 @@
           "status": "pending"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
+          "key": "reclamation-monitoring",
+          "name": "复垦监测",
           "status": "pending"
         },
         {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
+          "key": "reclamation-assessment",
+          "name": "完成度评估",
           "status": "pending"
         },
         {
-          "key": "review-archive",
-          "name": "复核与归档",
+          "key": "reclamation-acceptance",
+          "name": "验收核查",
+          "status": "pending"
+        },
+        {
+          "key": "reclamation-archive",
+          "name": "复核归档",
           "status": "pending"
         }
       ],
@@ -559,7 +563,7 @@
         "patrolArea": 28.6,
         "issues": 0,
         "completedNodes": 0,
-        "totalNodes": 5
+        "totalNodes": 6
       }
     },
     {
@@ -607,28 +611,32 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "active",
-          "time": "进行中"
+          "name": "航线规划",
+          "status": "done"
         },
         {
           "key": "realtime-cruise",
           "name": "实时巡航",
+          "status": "done"
+        },
+        {
+          "key": "non-grain-change-identification",
+          "name": "用途变化识别",
+          "status": "done"
+        },
+        {
+          "key": "non-grain-assessment",
+          "name": "非粮化研判",
+          "status": "active"
+        },
+        {
+          "key": "non-grain-rectification-dispatch",
+          "name": "整改下发",
           "status": "pending"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
-          "status": "pending"
-        },
-        {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
-          "status": "pending"
-        },
-        {
-          "key": "review-archive",
-          "name": "复核与归档",
+          "key": "non-grain-rectification-review",
+          "name": "整改复核",
           "status": "pending"
         }
       ],
@@ -637,8 +645,8 @@
         "flightHours": 2.3,
         "patrolArea": 42.8,
         "issues": 9,
-        "completedNodes": 0,
-        "totalNodes": 5
+        "completedNodes": 3,
+        "totalNodes": 6
       }
     },
     {
@@ -686,32 +694,33 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "done",
-          "time": "已完成"
+          "name": "航线规划",
+          "status": "done"
         },
         {
           "key": "realtime-cruise",
           "name": "实时巡航",
-          "status": "done",
-          "time": "已完成"
+          "status": "done"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
-          "status": "done",
-          "time": "已完成"
+          "key": "subsidy-planting-identification",
+          "name": "种植识别",
+          "status": "done"
         },
         {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
-          "status": "active",
-          "time": "处理中"
+          "key": "subsidy-area-verification",
+          "name": "面积核定",
+          "status": "done"
         },
         {
-          "key": "review-archive",
-          "name": "复核与归档",
-          "status": "pending"
+          "key": "subsidy-review",
+          "name": "补贴审核",
+          "status": "done"
+        },
+        {
+          "key": "subsidy-result-archive",
+          "name": "结果归档",
+          "status": "active"
         }
       ],
       "metrics": {
@@ -719,8 +728,8 @@
         "flightHours": 2,
         "patrolArea": 31.6,
         "issues": 3,
-        "completedNodes": 3,
-        "totalNodes": 5
+        "completedNodes": 5,
+        "totalNodes": 6
       }
     },
     {
@@ -769,33 +778,33 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "done",
-          "time": "已完成"
+          "name": "航线规划",
+          "status": "done"
         },
         {
           "key": "realtime-cruise",
           "name": "实时巡航",
-          "status": "done",
-          "time": "已完成"
+          "status": "done"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
-          "status": "done",
-          "time": "已完成"
+          "key": "pond-information-collection",
+          "name": "塘口信息采集",
+          "status": "done"
         },
         {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
-          "status": "done",
-          "time": "已完成"
+          "key": "pond-file-verification",
+          "name": "档案核验",
+          "status": "done"
         },
         {
-          "key": "review-archive",
-          "name": "复核与归档",
-          "status": "done",
-          "time": "已完成"
+          "key": "pond-file-establishment",
+          "name": "一塘一档建档",
+          "status": "done"
+        },
+        {
+          "key": "pond-update-archive",
+          "name": "更新归档",
+          "status": "done"
         }
       ],
       "metrics": {
@@ -803,8 +812,8 @@
         "flightHours": 3.1,
         "patrolArea": 18.2,
         "issues": 5,
-        "completedNodes": 5,
-        "totalNodes": 5
+        "completedNodes": 6,
+        "totalNodes": 6
       }
     },
     {
@@ -852,28 +861,32 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "active",
-          "time": "进行中"
+          "name": "航线规划",
+          "status": "done"
         },
         {
           "key": "realtime-cruise",
           "name": "实时巡航",
+          "status": "done"
+        },
+        {
+          "key": "fishing-target-identification",
+          "name": "可疑目标识别",
+          "status": "active"
+        },
+        {
+          "key": "fishing-violation-assessment",
+          "name": "违法研判",
           "status": "pending"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
+          "key": "fishing-enforcement-dispatch",
+          "name": "执法下发",
           "status": "pending"
         },
         {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
-          "status": "pending"
-        },
-        {
-          "key": "review-archive",
-          "name": "复核与归档",
+          "key": "fishing-evidence-archive",
+          "name": "证据归档",
           "status": "pending"
         }
       ],
@@ -882,8 +895,8 @@
         "flightHours": 1.7,
         "patrolArea": 56.4,
         "issues": 2,
-        "completedNodes": 0,
-        "totalNodes": 5
+        "completedNodes": 2,
+        "totalNodes": 6
       }
     },
     {
@@ -930,9 +943,8 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "active",
-          "time": "进行中"
+          "name": "航线规划",
+          "status": "active"
         },
         {
           "key": "realtime-cruise",
@@ -940,18 +952,23 @@
           "status": "pending"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
+          "key": "facility-identification",
+          "name": "设施识别",
           "status": "pending"
         },
         {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
+          "key": "facility-status-assessment",
+          "name": "状态评估",
           "status": "pending"
         },
         {
-          "key": "review-archive",
-          "name": "复核与归档",
+          "key": "facility-repair-dispatch",
+          "name": "维修下发",
+          "status": "pending"
+        },
+        {
+          "key": "facility-repair-review",
+          "name": "复核归档",
           "status": "pending"
         }
       ],
@@ -961,7 +978,7 @@
         "patrolArea": 26.7,
         "issues": 0,
         "completedNodes": 0,
-        "totalNodes": 5
+        "totalNodes": 6
       }
     },
     {
@@ -1010,29 +1027,32 @@
       "workflow": [
         {
           "key": "route-flight-plan",
-          "name": "航线规划与飞行计划",
-          "status": "done",
-          "time": "已完成"
+          "name": "航线规划",
+          "status": "done"
         },
         {
           "key": "realtime-cruise",
           "name": "实时巡航",
-          "status": "active",
-          "time": "进行中"
+          "status": "done"
         },
         {
-          "key": "spot-identification",
-          "name": "问题图斑识别",
+          "key": "construction-progress-identification",
+          "name": "进度识别",
+          "status": "done"
+        },
+        {
+          "key": "construction-quality-safety",
+          "name": "质量安全检查",
+          "status": "active"
+        },
+        {
+          "key": "construction-rectification-dispatch",
+          "name": "整改下发",
           "status": "pending"
         },
         {
-          "key": "task-dispatch",
-          "name": "核查任务下发",
-          "status": "pending"
-        },
-        {
-          "key": "review-archive",
-          "name": "复核与归档",
+          "key": "construction-acceptance-archive",
+          "name": "验收归档",
           "status": "pending"
         }
       ],
@@ -1041,8 +1061,8 @@
         "flightHours": 1.9,
         "patrolArea": 33.9,
         "issues": 4,
-        "completedNodes": 1,
-        "totalNodes": 5
+        "completedNodes": 3,
+        "totalNodes": 6
       }
     }
   ],
