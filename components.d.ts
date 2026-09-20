@@ -11,15 +11,22 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    BusinessTrendChart: typeof import('./src/components/BusinessTrendChart.vue')['default']
     DashboardMap: typeof import('./src/components/DashboardMap.vue')['default']
     DashboardSymbol: typeof import('./src/components/DashboardSymbol.vue')['default']
     DomainProgressChart: typeof import('./src/components/DomainProgressChart.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
+    ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
+    ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDialog: typeof import('element-plus/es')['ElDialog']
-    ElTag: typeof import('element-plus/es')['ElTag']
+    ElPopover: typeof import('element-plus/es')['ElPopover']
     NewTaskDialog: typeof import('./src/components/NewTaskDialog.vue')['default']
+    OrganizationSwitcher: typeof import('./src/components/OrganizationSwitcher.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     TaskRangeMap: typeof import('./src/components/TaskRangeMap.vue')['default']
+    TaskRangeThumbnail: typeof import('./src/components/TaskRangeThumbnail.vue')['default']
+    TaskSchedulePicker: typeof import('./src/components/TaskSchedulePicker.vue')['default']
+    UserAccountMenu: typeof import('./src/components/UserAccountMenu.vue')['default']
   }
 }

@@ -14,10 +14,14 @@ export interface LiveStream {
   status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'ERROR'
   protocol: 'HLS' | 'FLV' | 'WEBRTC' | 'OTHER'
   playUrl: string
+  /** 供应商返回的可嵌入直播页；没有直连流地址时使用。 */
+  embedUrl?: string
+  shareCode?: string
   expiresAt?: string
 }
 
 function asRecords(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
   if (!payload || typeof payload !== 'object') return []
   const data = payload as Record<string, unknown>
   if (Array.isArray(data.records)) return data.records as Record<string, unknown>[]
@@ -31,6 +35,63 @@ function asRecords(payload: unknown): Record<string, unknown>[] {
   return []
 }
 
+function parseJson(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return undefined
+  }
+}
+
+type Coordinate = [number, number]
+
+function coordinateOf(value: unknown): Coordinate | undefined {
+  if (Array.isArray(value) && value.length >= 2) {
+    const [lng, lat] = value
+    if (typeof lng === 'number' && typeof lat === 'number' && Math.abs(lng) <= 180 && Math.abs(lat) <= 90) return [lng, lat]
+  }
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const lng = record.lng ?? record.lon ?? record.longitude
+  const lat = record.lat ?? record.latitude
+  if (typeof lng === 'number' && typeof lat === 'number' && Math.abs(lng) <= 180 && Math.abs(lat) <= 90) return [lng, lat]
+  return undefined
+}
+
+function coordinatePath(value: unknown): Coordinate[] {
+  const parsed = parseJson(value)
+  const direct = coordinateOf(parsed)
+  if (direct) return [direct]
+  if (Array.isArray(parsed)) {
+    const directPoints = parsed.map(coordinateOf)
+    if (directPoints.every(Boolean)) return directPoints as Coordinate[]
+    return parsed.flatMap((item) => coordinatePath(item))
+  }
+  if (!parsed || typeof parsed !== 'object') return []
+  const record = parsed as Record<string, unknown>
+  if (record.type === 'FeatureCollection' && Array.isArray(record.features)) return coordinatePath(record.features)
+  if (record.type === 'Feature' && record.geometry) return coordinatePath(record.geometry)
+  if (record.coordinates) return coordinatePath(record.coordinates)
+  if (record.geometry) return coordinatePath(record.geometry)
+  if (record.waypoints) return coordinatePath(record.waypoints)
+  if (record.points) return coordinatePath(record.points)
+  return []
+}
+
+function routeTypeOf(value: unknown): FlightRoute['routeType'] {
+  const type = String(value || '').toUpperCase()
+  if (type.includes('MAPPING2D') || type.includes('MAPPING_2D') || type.includes('ORTHO')) return 'ortho'
+  if (type.includes('MAPPING3D') || type.includes('MAPPING_3D') || type.includes('OBLIQUE')) return 'oblique'
+  if (type.includes('STRIP') || type.includes('LINEAR')) return 'strip'
+  if (type.includes('AREA')) return 'area'
+  return 'waypoint'
+}
+
+function routeTypeLabel(type: FlightRoute['routeType']) {
+  return ({ ortho: '正射建图', oblique: '倾斜建模', strip: '带状航线', waypoint: '航点巡检', area: '面状巡检' } as const)[type]
+}
+
 function totalOf(payload: unknown, fallback: number) {
   if (!payload || typeof payload !== 'object') return fallback
   const data = payload as Record<string, unknown>
@@ -42,18 +103,22 @@ function totalOf(payload: unknown, fallback: number) {
 export function toRouteList(payload: unknown): { list: FlightRoute[]; total: number } {
   const records = asRecords(payload)
   const list = records.map((item, index) => {
+    const routeType = routeTypeOf(item.waylineType ?? item.type)
+    const waypoints = coordinatePath(item.locationJson ?? item.waypoints ?? item.coordinates)
+    const lastWaypoint = waypoints[waypoints.length - 1]
+    const isClosed = waypoints.length > 3 && waypoints[0]?.[0] === lastWaypoint?.[0] && waypoints[0]?.[1] === lastWaypoint?.[1]
     const id = String(item.id ?? item.projectId ?? `ROUTE-${index + 1}`)
     return {
       id,
       name: String(item.name ?? item.waylineName ?? `航线 ${index + 1}`),
       group: String(item.folderName ?? item.groupName ?? '默认分组'),
-      aircraft: String(item.deviceModelName ?? item.aircraftName ?? '待绑定飞行器'),
-      routeType: item.waylineType === 'MAPPING2D' ? 'ortho' as const : item.waylineType === 'AREA_WAYPOINT' ? 'area' as const : 'waypoint' as const,
-      routeTypeLabel: item.waylineType === 'MAPPING2D' ? '正射建图' : item.waylineType === 'AREA_WAYPOINT' ? '面状巡检' : '航点巡检',
+      aircraft: String(item.deviceModelName ?? item.aircraftName ?? item.droneModelKey ?? '待绑定飞行器'),
+      routeType,
+      routeTypeLabel: routeTypeLabel(routeType),
       area: String(item.areaName ?? item.regionName ?? '-'),
       status: '已规划' as const,
-      waypoints: [],
-      polygon: [],
+      waypoints,
+      polygon: isClosed ? waypoints.slice(0, -1) : [],
       height: Number(item.flightHeight ?? item.height ?? 120),
       speed: Number(item.flightSpeed ?? item.speed ?? 8),
       overlapFront: 75,
@@ -72,14 +137,27 @@ export function toFlightPlanList(payload: unknown): { list: FlightPlanItem[]; to
   const records = asRecords(payload)
   const list = records.map((item, index) => ({
     id: String(item.id ?? item.flightPlanId ?? `FP-${index + 1}`),
+    projectId: item.projectId === undefined ? undefined : String(item.projectId),
     date: String(item.executeDate ?? item.planDate ?? item.createTime ?? '').slice(0, 10),
     start: String(item.executeTime ?? item.startTime ?? '08:00').slice(0, 5),
     end: String(item.endTime ?? item.finishTime ?? '09:00').slice(0, 5),
     title: String(item.name ?? item.planName ?? `飞行计划 ${index + 1}`),
     area: String(item.waylineName ?? item.areaName ?? item.regionName ?? '-'),
-    routeId: String(item.routeId ?? item.waylineId ?? item.projectId ?? ''),
+    routeId: String(item.routeId ?? item.waylineId ?? ''),
   }))
   return { list, total: totalOf(payload, list.length) }
+}
+
+export interface PatrolProjectOption {
+  id: string
+  name: string
+}
+
+export function toProjectOptions(payload: unknown): PatrolProjectOption[] {
+  return asRecords(payload).map((item, index) => ({
+    id: String(item.id ?? item.projectId ?? index + 1),
+    name: String(item.name ?? item.projectName ?? `项目 ${index + 1}`),
+  }))
 }
 
 export function toFlightTaskDetail(payload: unknown): Partial<LiveCruiseSnapshot> {

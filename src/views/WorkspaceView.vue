@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { WorkspaceNodeConfig } from '@/types'
 import {
@@ -7,31 +7,54 @@ import {
   isWorkspaceNodeAccessible,
   resolveWorkspaceNodeKey,
 } from '@/workspace/config/workflow'
-import { getWorkspaceConfig } from '@/workspace/config/registry'
+import { getSharedWorkspaceConfig, resolveWorkspaceSceneId } from '@/workspace/config/registry'
 import { getScene, getTask } from '@/mocks/portal'
 import { useUserStore } from '@/stores/user'
+import { isMockMode } from '@/api/client'
+import { getGovernanceTaskDetail, toPatrolTask } from '@/api/governance-task'
+import type { PortalTask } from '@/types'
 import SpotIdentificationPanel from '@/workspace-components/spot-identification/SpotIdentificationPanel.vue'
 import TaskDispatchPanel from '@/workspace-components/task-dispatch/TaskDispatchPanel.vue'
 import ReviewArchivePanel from '@/workspace-components/review-archive/ReviewArchivePanel.vue'
 import SceneNodePlaceholder from '@/workspace-components/shared/SceneNodePlaceholder.vue'
+import RouteFlightPlanPanel from '@/workspace-components/route-flight-plan/RouteFlightPlanPanel.vue'
+import RealtimeCruisePanel from '@/workspace-components/realtime-cruise/RealtimeCruisePanel.vue'
 
 const route = useRoute()
 const router = useRouter()
 const user = useUserStore()
 
 const sceneId = computed(() => String(route.params.sceneId || ''))
-const workspaceConfig = computed(() => getWorkspaceConfig(sceneId.value))
-const currentScene = computed(() => getScene(user.organization, sceneId.value))
-const task = computed(() => {
-  const taskId = route.params.taskId
-  return typeof taskId === 'string' && taskId ? getTask(taskId) : undefined
-})
+const task = ref<PortalTask>()
+const taskLoading = ref(false)
+const taskError = ref('')
+const workspaceSceneId = computed(() => resolveWorkspaceSceneId(sceneId.value, task.value?.sceneId))
+// 不同场景使用各自任务数据，但统一复用林业执法监管的完整工作台流程与页面。
+const workspaceConfig = computed(() => getSharedWorkspaceConfig())
+const currentScene = computed(() => getScene(user.organization, workspaceSceneId.value))
+
+async function loadTaskContext() {
+  const taskId = typeof route.params.taskId === 'string' ? route.params.taskId : ''
+  task.value = undefined
+  taskError.value = ''
+  if (!taskId) return
+  if (isMockMode()) {
+    task.value = getTask(taskId)
+    return
+  }
+  taskLoading.value = true
+  try {
+    const detail = await getGovernanceTaskDetail(taskId)
+    task.value = detail ? toPatrolTask(detail.task) : undefined
+    if (!task.value) taskError.value = '未找到该真实业务任务，或当前账号没有查看权限。'
+  } catch (error) {
+    taskError.value = error instanceof Error ? error.message : '真实任务上下文加载失败。'
+  } finally {
+    taskLoading.value = false
+  }
+}
 
 const nodeKeys = computed(() => workspaceConfig.value?.nodes.map((node) => node.key) ?? [])
-
-const defaultNodeKey = computed(() =>
-  resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value),
-)
 
 const governanceNodes = computed(() =>
   workspaceConfig.value?.nodes.filter((node) => node.module === 'governance') ?? [],
@@ -41,14 +64,23 @@ const discoveryNodes = computed(() =>
   workspaceConfig.value?.nodes.filter((node) => node.module === 'discovery') ?? [],
 )
 
+/** 真实任务只有粗粒度 taskStatus 时，映射为工作台五节点中的当前节点。 */
+const defaultNodeKey = computed(() => {
+  const status = task.value?.status || ''
+  if (status.includes('完成')) return governanceNodes.value[governanceNodes.value.length - 1]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
+  if (status.includes('核查') || status.includes('复核')) return governanceNodes.value[0]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
+  if (status.includes('执行') || status.includes('进行')) return discoveryNodes.value.find((node) => node.key === 'realtime-cruise')?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
+  return discoveryNodes.value.find((node) => node.key === 'route-flight-plan')?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
+})
+
 const activeKey = computed(() => {
   const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
-  if (queryKey && isWorkspaceNodeAccessible(task.value?.workflow, queryKey, nodeKeys.value)) {
+  if (queryKey) {
     const node = workspaceConfig.value?.nodes.find((item) => item.key === queryKey)
-    if (node && !node.externalRoute) return queryKey
+    if (node && isNodeAvailable(node)) return queryKey
   }
   const defaultNode = workspaceConfig.value?.nodes.find((node) => node.key === defaultNodeKey.value)
-  return defaultNode?.module === 'governance' ? defaultNode.key : ''
+  return defaultNode && isNodeAvailable(defaultNode) ? defaultNode.key : ''
 })
 
 const activeNode = computed(() =>
@@ -62,6 +94,8 @@ const panelComponents = {
   SpotIdentification: SpotIdentificationPanel,
   TaskDispatch: TaskDispatchPanel,
   ReviewArchive: ReviewArchivePanel,
+  RouteFlightPlan: RouteFlightPlanPanel,
+  RealtimeCruise: RealtimeCruisePanel,
   ScenePlaceholder: SceneNodePlaceholder,
 } as const
 
@@ -70,34 +104,28 @@ const ActivePanel = computed(() => {
   return panelComponents[component] || SceneNodePlaceholder
 })
 
+/**
+ * 治理模块是工作台的常驻能力，不再因任务尚未写入节点级 workflow 而被锁定。
+ * 巡查节点仍遵循既有的任务阶段控制；治理节点无真实数据时由各面板显示空状态。
+ */
+function isNodeAvailable(node: WorkspaceNodeConfig) {
+  return node.module === 'governance'
+    || isWorkspaceNodeAccessible(task.value?.workflow, node.key, nodeKeys.value)
+}
+
 function nodeState(key: string) {
   const status = getWorkflowNodeStatus(task.value?.workflow, key)
+  const node = workspaceConfig.value?.nodes.find((item) => item.key === key)
   return {
     status,
-    accessible: isWorkspaceNodeAccessible(task.value?.workflow, key, nodeKeys.value),
-    active: key === activeKey.value,
+    accessible: Boolean(node && isNodeAvailable(node)),
+    active: key === activeKey.value || (!activeKey.value && status === 'active'),
     done: status === 'done',
   }
 }
 
-function patrolQuery() {
-  return {
-    from: 'workspace',
-    sceneId: String(route.params.sceneId || ''),
-    taskId: String(route.params.taskId || ''),
-    returnTo: route.fullPath,
-  }
-}
-
 function selectNode(node: WorkspaceNodeConfig) {
-  if (!isWorkspaceNodeAccessible(task.value?.workflow, node.key, nodeKeys.value)) return
-  if (node.externalRoute) {
-    router.push({
-      path: node.externalRoute,
-      query: patrolQuery(),
-    })
-    return
-  }
+  if (!isNodeAvailable(node)) return
   router.replace({
     query: {
       ...route.query,
@@ -112,38 +140,33 @@ watch(
     if (!workspaceConfig.value) return
     const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
     const queryNode = workspaceConfig.value.nodes.find((item) => item.key === queryKey)
-    if (queryNode && isWorkspaceNodeAccessible(task.value?.workflow, queryNode.key, nodeKeys.value)) {
-      if (queryNode.externalRoute) {
-        router.replace({
-          path: queryNode.externalRoute,
-          query: patrolQuery(),
-        })
-      }
+    if (queryNode && isNodeAvailable(queryNode)) {
       return
     }
     const preferred = workspaceConfig.value.nodes.find((item) => item.key === defaultNodeKey.value)
-    if (preferred?.externalRoute) {
-      router.replace({
-        path: preferred.externalRoute,
-        query: patrolQuery(),
-      })
-      return
-    }
     if (!preferred || queryKey === preferred.key) return
     router.replace({ query: { ...route.query, node: preferred.key } })
   },
   { immediate: true },
 )
+
+watch(() => route.params.taskId, () => void loadTaskContext())
+onMounted(() => void loadTaskContext())
 </script>
 
 <template>
-  <div v-if="!workspaceConfig" class="workspace workspace-empty">
+  <div v-if="taskLoading" class="workspace workspace-empty">
+    <header class="workspace-header"><div class="workspace-brand"><span class="brand-mark">翼</span><div><b>场景作业工作台</b><small>正在加载真实任务</small></div></div></header>
+    <main class="empty-body"><div class="empty-card"><h2>正在加载任务工作台…</h2></div></main>
+  </div>
+
+  <div v-else-if="!workspaceConfig" class="workspace workspace-empty">
     <header class="workspace-header">
       <div class="workspace-brand" @click="$router.push('/dashboard')">
         <span class="brand-mark">翼</span>
         <div>
           <b :title="`${currentScene?.name || '场景作业'}工作台`">{{ currentScene?.shortName || currentScene?.name || '场景作业' }}工作台</b>
-          <small>{{ sceneId || '未指定场景' }}</small>
+          <small>{{ taskError || sceneId || '未指定场景' }}</small>
         </div>
       </div>
       <div class="workspace-user"><span>{{ user.name }}</span></div>
@@ -159,7 +182,11 @@ watch(
 
   <div v-else class="workspace">
     <header class="workspace-header">
-      <div class="workspace-brand" @click="$router.push('/dashboard')">
+      <div class="workspace-return">
+        <el-button class="workspace-return-button" @click="$router.push(task ? `/tasks/${task.id}` : '/tasks')">‹ 返回任务</el-button>
+      </div>
+
+      <div class="workspace-brand workspace-brand--moved" @click="$router.push('/dashboard')">
         <span class="brand-mark">翼</span>
         <div>
           <b :title="`${workspaceConfig.name}工作台`">{{ currentScene?.shortName || workspaceConfig.name }}工作台</b>
@@ -208,18 +235,6 @@ watch(
       </div>
     </header>
 
-    <div class="workspace-title">
-      <div>
-        <span>节点 {{ activeNode?.order }}</span>
-        <h2>{{ activeNode?.name }}</h2>
-        <p>{{ activeNode?.description }}</p>
-      </div>
-      <div class="workspace-actions">
-        <el-button @click="$router.push(task ? `/tasks/${task.id}` : '/tasks')">返回任务</el-button>
-        <el-tag type="info">治理节点</el-tag>
-      </div>
-    </div>
-
     <main class="workspace-body">
       <component
         v-if="activeKey && activeNode"
@@ -249,6 +264,7 @@ watch(
   background: #eef3f6;
 }
 .workspace-header {
+  position: relative;
   flex: 0 0 78px;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 240px;
@@ -264,6 +280,31 @@ watch(
   align-items: center;
   gap: 10px;
   cursor: pointer;
+}
+.workspace-brand--moved {
+  position: absolute;
+  left: 122px;
+  z-index: 1;
+}
+.workspace-return {
+  z-index: 2;
+  justify-self: start;
+}
+.workspace-return :deep(.workspace-return-button) {
+  height: 32px;
+  padding: 0 12px;
+  color: #c7f4ff;
+  background: linear-gradient(180deg, #0a5075, #063451);
+  border-color: #2187af;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px #5be6f022, 0 0 10px #0e9fc033;
+  font-weight: 600;
+}
+.workspace-return :deep(.workspace-return-button:hover) {
+  color: #fff;
+  background: linear-gradient(180deg, #0e668e, #074765);
+  border-color: #4ee1ec;
+  box-shadow: 0 0 12px #23cfe066;
 }
 .workspace-brand > div { min-width: 0; }
 .brand-mark {
@@ -377,39 +418,6 @@ watch(
 }
 .workspace-user b { color: #4ee1c2; }
 
-.workspace-title {
-  flex: 0 0 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  background: white;
-  border-bottom: 1px solid #dce5eb;
-}
-.workspace-title > div:first-child {
-  display: grid;
-  grid-template-columns: auto auto;
-  align-items: center;
-  column-gap: 10px;
-}
-.workspace-title span {
-  grid-row: 1 / 3;
-  padding: 5px 7px;
-  color: white;
-  background: #0d8faa;
-  border-radius: 4px;
-  font-size: 11px;
-}
-.workspace-title h2 {
-  margin: 0;
-  font-size: 16px;
-  color: #16384c;
-}
-.workspace-title p {
-  margin: 2px 0 0;
-  color: #8191a0;
-  font-size: 12px;
-}
 .workspace-body {
   flex: 1;
   min-height: 0;
@@ -442,6 +450,7 @@ watch(
 
 @media (max-width: 1450px) {
   .workspace-header { grid-template-columns: 220px 1fr 180px; }
+  .workspace-brand--moved { left: 120px; }
   .module-nodes button { min-width: 76px; }
 }
 </style>

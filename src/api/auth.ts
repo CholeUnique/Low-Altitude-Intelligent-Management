@@ -16,6 +16,13 @@ export interface LoginResult {
   userInfo: CurrentUser
 }
 
+/** 后端部门下拉接口的最小返回模型。 */
+export interface DepartmentOption {
+  deptId: string
+  deptName: string
+  deptCode?: string
+}
+
 export async function getLoginPublicKey() {
   return apiClient.post<never, LoginPublicKey>('/v1/user/login/public-key', {})
 }
@@ -42,6 +49,19 @@ export async function logoutFromServer() {
 
 export async function getMyDepartments() {
   return apiClient.post<never, UserDepartment[]>('/v1/user/dept/list', {})
+}
+
+/**
+ * ADMIN 可读取全部已启用部门，用于把前端的两个业务入口映射到真实部门 ID。
+ * 不在前端写死部门 ID，避免测试、生产环境的主键不一致。
+ */
+export async function getDepartmentOptions(): Promise<DepartmentOption[]> {
+  const options = await apiClient.post<never, Array<{ id: string | number; name: string; code?: string }>>('/v1/dept/options', {})
+  return options.map((item) => ({
+    deptId: String(item.id),
+    deptName: item.name,
+    deptCode: item.code,
+  }))
 }
 
 export async function switchDepartment(targetDeptId?: string) {

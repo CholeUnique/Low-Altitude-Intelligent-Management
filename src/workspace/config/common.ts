@@ -10,7 +10,6 @@ export const COMMON_DISCOVERY_NODES: WorkspaceNodeConfig[] = [
     module: 'discovery',
     component: 'RouteFlightPlan',
     description: '规划巡查航线、航点与飞行计划',
-    externalRoute: '/patrol/route-plan',
   },
   {
     key: 'realtime-cruise',
@@ -20,7 +19,6 @@ export const COMMON_DISCOVERY_NODES: WorkspaceNodeConfig[] = [
     module: 'discovery',
     component: 'RealtimeCruise',
     description: '监控无人机巡航与影像采集状态',
-    externalRoute: '/patrol/live',
   },
 ]
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
 import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
@@ -10,11 +10,22 @@ import type { DashboardMapLayer, DashboardMapTask, DronePatrolRoute } from '@/ty
 const props = defineProps<{
   layers: DashboardMapLayer[]
   routes: DronePatrolRoute[]
+  /** 从场景入口进入时，自动聚焦该场景实际任务范围。 */
+  focusLayerId?: string
 }>()
 
 const TAIZHOU_CENTER: L.LatLngTuple = [32.4555, 119.9255]
 const TAIZHOU_ZOOM = 10
 const token = import.meta.env.VITE_TIANDITU_TOKEN
+// 临时验证用。生产环境应由后端按任务返回可访问的影像服务地址。
+const domTileJsonUrl = import.meta.env.VITE_DOM_TMS_TILE_JSON_URL?.trim()
+const domXyzTileUrl = import.meta.env.VITE_DOM_XYZ_TILE_URL?.trim()
+const domTileUrl = domXyzTileUrl || (domTileJsonUrl ? domTileTemplate(domTileJsonUrl) : '')
+const domBounds = L.latLngBounds(
+  [32.48574015140688, 119.8412888155381],
+  [32.49689672806349, 119.85940753661878],
+)
+const showAdministrativeBoundaries = false
 const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
 const fillOnlySceneIds = new Set(['land-reclamation', 'land-supply-inspection', 'existing-illegal-land-rectification', 'new-illegal-land-warning', 'forestry-enforcement'])
 const container = ref<HTMLElement>()
@@ -22,7 +33,9 @@ const mapReady = ref(false)
 const mapError = ref('')
 const mapMode = ref<'vector' | 'image'>('image')
 const visibleLayerIds = ref<string[]>(props.layers.map((layer) => layer.id))
-const routesVisible = ref(true)
+const routesVisible = ref(props.routes.length > 0)
+const domImageryVisible = ref(false)
+const domImageryStatus = ref(domTileUrl ? '临时验证图层' : '未配置')
 const searchKeyword = ref('')
 const toolMessage = ref('')
 const measureOpen = ref(false)
@@ -42,14 +55,33 @@ const searchResults = computed(() => {
 let map: L.Map | undefined
 let baseLayer: L.TileLayer | undefined
 let labelLayer: L.TileLayer | undefined
+let domImageryLayer: L.TileLayer | undefined
+let domImageryBoundary: L.Rectangle | undefined
 let routeGroup: L.LayerGroup | undefined
 let measureGroup: L.LayerGroup | undefined
 let annotationGroup: L.LayerGroup | undefined
 let locationGroup: L.LayerGroup | undefined
 let administrativeBoundaryGroup: L.LayerGroup | undefined
+let toolMessageTimer: ReturnType<typeof window.setTimeout> | undefined
+let sceneFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 const sceneGroups = new Map<string, L.LayerGroup>()
-const taskTargets = new Map<string, { marker: L.Marker; polygon: L.Polygon }>()
+const taskTargets = new Map<string, { marker: L.Marker; bounds: L.LatLngBounds }>()
 let measurePoints: L.LatLng[] = []
+
+function dismissToolMessage() {
+  if (toolMessageTimer) window.clearTimeout(toolMessageTimer)
+  toolMessageTimer = undefined
+  toolMessage.value = ''
+}
+
+function showToolMessage(message: string, duration = 3200) {
+  if (toolMessageTimer) window.clearTimeout(toolMessageTimer)
+  toolMessage.value = message
+  toolMessageTimer = window.setTimeout(() => {
+    toolMessageTimer = undefined
+    toolMessage.value = ''
+  }, duration)
+}
 
 function tileUrl(layer: 'vec' | 'img' | 'cva' | 'cia') {
   return `https://t{s}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}&tk=${token}`
@@ -62,8 +94,8 @@ function addBaseLayers(mode: 'vector' | 'image') {
   const base = mode === 'vector' ? 'vec' : 'img'
   const label = mode === 'vector' ? 'cva' : 'cia'
   let loadedTiles = 0
-  baseLayer = L.tileLayer(tileUrl(base), { subdomains, maxZoom: 18 })
-  labelLayer = L.tileLayer(tileUrl(label), { subdomains, maxZoom: 18, pane: 'labels' })
+  baseLayer = L.tileLayer(tileUrl(base), { subdomains, maxNativeZoom: 18, maxZoom: 22 })
+  labelLayer = L.tileLayer(tileUrl(label), { subdomains, maxNativeZoom: 18, maxZoom: 22, pane: 'labels' })
   baseLayer.on('tileload', () => {
     loadedTiles += 1
     if (loadedTiles === 1) {
@@ -76,6 +108,67 @@ function addBaseLayers(mode: 'vector' | 'image') {
   })
   baseLayer.addTo(map)
   labelLayer.addTo(map)
+}
+
+function domTileTemplate(tileJsonUrl: string) {
+  const [jsonPath = '', query = ''] = tileJsonUrl.split('?', 2)
+  const separatorIndex = jsonPath.lastIndexOf('/')
+  const tileRoot = separatorIndex >= 0 ? jsonPath.slice(0, separatorIndex + 1) : jsonPath
+  return `${tileRoot}{z}/{x}/{-y}.png${query ? `?${query}` : ''}`
+}
+
+function toggleDomImagery() {
+  if (!map) return
+  if (!domTileUrl) {
+    showToolMessage('未配置 DOM 影像服务地址')
+    return
+  }
+  if (!domImageryLayer) {
+    let hasLoadedTile = false
+    domImageryLayer = L.tileLayer(domTileUrl, {
+      bounds: domBounds,
+      minZoom: 16,
+      maxNativeZoom: 22,
+      maxZoom: 22,
+      // 影像元数据声明为 TMS；Leaflet 会将标准 XYZ 的 Y 行号转换为目录中的 TMS 行号。
+      tms: Boolean(domXyzTileUrl),
+      opacity: .9,
+      noWrap: true,
+      attribution: 'DOM 正射影像（临时验证）',
+    })
+    domImageryLayer.on('tileload', () => {
+      hasLoadedTile = true
+      domImageryStatus.value = '已叠加'
+    })
+    domImageryLayer.on('tileerror', () => {
+      if (!hasLoadedTile) {
+        domImageryStatus.value = '瓦片加载失败'
+        showToolMessage('DOM 影像瓦片加载失败，请检查瓦片地址、跨域或服务访问权限')
+      }
+    })
+  }
+  if (map.hasLayer(domImageryLayer)) {
+    domImageryLayer.remove()
+    domImageryBoundary?.remove()
+    domImageryVisible.value = false
+    domImageryStatus.value = '已隐藏'
+    return
+  }
+  domImageryLayer.addTo(map)
+  if (!domImageryBoundary) {
+    domImageryBoundary = L.rectangle(domBounds, {
+      color: '#20b9ff',
+      weight: 2,
+      opacity: .95,
+      dashArray: '7 5',
+      fill: false,
+      interactive: false,
+    })
+  }
+  domImageryBoundary.addTo(map)
+  domImageryVisible.value = true
+  domImageryStatus.value = '正在加载…'
+  map.setView(domBounds.getCenter(), 17)
 }
 
 function taskIcon(color: string, status: string) {
@@ -109,23 +202,52 @@ function renderBusinessLayers() {
     const group = L.layerGroup()
     layer.tasks.forEach((task) => {
       const fillOnly = fillOnlySceneIds.has(layer.id)
-      const polygon = L.polygon(task.polygon.map((point) => [point[1], point[0]] as L.LatLngTuple), {
-        color: layer.color,
-        stroke: !fillOnly,
-        weight: 2,
-        fillColor: layer.color,
-        fillOpacity: fillOnly ? .75 : .16,
-        dashArray: task.status === '已完成' ? undefined : '7 5',
-      }).bindPopup(taskPopup(task, layer.name))
+      const polygons = (task.polygons?.length ? task.polygons : [task.polygon]).map((points) => L.polygon(
+        points.map((point) => [point[1], point[0]] as L.LatLngTuple),
+        {
+          color: layer.color,
+          stroke: !fillOnly,
+          weight: 2,
+          fillColor: layer.color,
+          fillOpacity: .4,
+          dashArray: task.status === '已完成' ? undefined : '7 5',
+        },
+      ).bindPopup(taskPopup(task, layer.name)))
       const marker = L.marker([task.center[1], task.center[0]], { icon: taskIcon(layer.color, task.status) })
         .bindTooltip(task.name, { direction: 'right', className: 'business-task-label', offset: [9, 0] })
         .bindPopup(taskPopup(task, layer.name))
-      polygon.addTo(group)
+      const bounds = L.latLngBounds([])
+      polygons.forEach((polygon) => {
+        polygon.addTo(group)
+        bounds.extend(polygon.getBounds())
+      })
       marker.addTo(group)
-      taskTargets.set(task.taskId, { marker, polygon })
+      taskTargets.set(task.taskId, { marker, bounds })
     })
     sceneGroups.set(layer.id, group)
     if (visibleLayerIds.value.includes(layer.id)) group.addTo(map!)
+  })
+}
+
+function focusSceneLayer() {
+  if (!map || !props.focusLayerId) return
+  const sceneGroup = sceneGroups.get(props.focusLayerId)
+  if (!sceneGroup) return
+  const bounds = L.featureGroup(sceneGroup.getLayers()).getBounds()
+  if (!bounds.isValid()) return
+  // 仅聚焦当前场景的真实任务边界；不以任务点或城市中心替代，避免看起来像定位偏移。
+  map.invalidateSize({ pan: false })
+  map.fitBounds(bounds, { padding: [48, 48], maxZoom: 18, animate: false })
+}
+
+function scheduleSceneFocus() {
+  if (!props.focusLayerId) return
+  if (sceneFocusTimer) window.clearTimeout(sceneFocusTimer)
+  // 场景入口会触发路由和地图重建。图层绘制、容器尺寸稳定后再聚焦，避免
+  // 初始尺寸尚未计算时 fitBounds 被忽略。
+  window.requestAnimationFrame(() => {
+    focusSceneLayer()
+    sceneFocusTimer = window.setTimeout(focusSceneLayer, 180)
   })
 }
 
@@ -179,7 +301,7 @@ function selectSearchResult(task: DashboardMapTask) {
     const layer = props.layers.find((item) => item.tasks.some((entry) => entry.taskId === task.taskId))
     if (layer && !visibleLayerIds.value.includes(layer.id)) toggleSceneLayer(layer.id)
   }
-  map.fitBounds(target.polygon.getBounds(), { padding: [70, 70], maxZoom: 14 })
+  map.fitBounds(target.bounds, { padding: [70, 70] })
   window.setTimeout(() => target.marker.openPopup(), 350)
   searchKeyword.value = ''
 }
@@ -187,10 +309,10 @@ function selectSearchResult(task: DashboardMapTask) {
 function locateUser() {
   if (!map) return
   if (!navigator.geolocation) {
-    toolMessage.value = '当前浏览器不支持定位'
+    showToolMessage('当前浏览器不支持定位')
     return
   }
-  toolMessage.value = '正在获取当前位置…'
+  showToolMessage('正在获取当前位置…', 10000)
   navigator.geolocation.getCurrentPosition(
     ({ coords }) => {
       locationGroup?.clearLayers()
@@ -199,16 +321,16 @@ function locateUser() {
       L.circleMarker(point, { radius: 7, color: '#fff', fillColor: '#17bce0', fillOpacity: 1, weight: 2 })
         .bindPopup(`当前位置<br>定位精度约 ${Math.round(coords.accuracy)} 米`).addTo(locationGroup!).openPopup()
       map?.setView(point, 15)
-      toolMessage.value = '定位成功'
+      showToolMessage('定位成功')
     },
-    () => { toolMessage.value = '定位失败，请允许浏览器访问位置' },
+    () => { showToolMessage('定位失败，请允许浏览器访问位置') },
     { enableHighAccuracy: true, timeout: 10000 },
   )
 }
 
 function resetNorth() {
   map?.setView(TAIZHOU_CENTER, TAIZHOU_ZOOM)
-  toolMessage.value = '已回到江苏泰州，地图保持正北向上'
+  showToolMessage('已回到江苏泰州，地图保持正北向上')
 }
 
 function startTool(tool: 'distance' | 'area' | 'marker') {
@@ -268,12 +390,13 @@ function clearMeasurements() {
   measureGroup?.clearLayers()
   activeTool.value = null
   measureResult.value = ''
+  showToolMessage('已清除测量结果')
 }
 
 function clearAnnotations() {
   annotationGroup?.clearLayers()
   if (activeTool.value === 'marker') activeTool.value = null
-  toolMessage.value = '已清除全部标注'
+  showToolMessage('已清除全部标注')
 }
 
 function switchMode(mode: 'vector' | 'image') {
@@ -336,6 +459,7 @@ async function initMap() {
     map = L.map(container.value, {
       center: TAIZHOU_CENTER,
       zoom: TAIZHOU_ZOOM,
+      maxZoom: 22,
       zoomControl: false,
       attributionControl: false,
       doubleClickZoom: false,
@@ -351,8 +475,9 @@ async function initMap() {
     annotationGroup = L.layerGroup().addTo(map)
     locationGroup = L.layerGroup().addTo(map)
     addBaseLayers('image')
-    renderAdministrativeBoundaries()
+    if (showAdministrativeBoundaries) renderAdministrativeBoundaries()
     renderBusinessLayers()
+    scheduleSceneFocus()
     renderRoutes()
     updateScale()
     map.on('moveend zoomend resize', updateScale)
@@ -378,7 +503,29 @@ function retryMap() {
 }
 
 onMounted(initMap)
-onBeforeUnmount(() => map?.remove())
+watch(() => props.layers, () => {
+  if (!map) return
+  const previousLayerIds = new Set(sceneGroups.keys())
+  const previousVisibleIds = new Set(visibleLayerIds.value)
+  visibleLayerIds.value = props.layers.map((layer) => layer.id)
+    .filter((layerId) => !previousLayerIds.has(layerId) || previousVisibleIds.has(layerId))
+  renderBusinessLayers()
+  scheduleSceneFocus()
+}, { deep: true })
+watch(() => props.focusLayerId, () => {
+  // 保留全场景默认视图；只有从底部场景入口切入时才自动缩放。
+  scheduleSceneFocus()
+})
+watch(() => props.routes, (routes) => {
+  // 图层管理入口始终保留；真实模式暂未返回航线时仅显示为空图层，默认关闭。
+  if (!routes.length) routesVisible.value = false
+  if (map) renderRoutes()
+}, { deep: true })
+onBeforeUnmount(() => {
+  if (toolMessageTimer) window.clearTimeout(toolMessageTimer)
+  if (sceneFocusTimer) window.clearTimeout(sceneFocusTimer)
+  map?.remove()
+})
 </script>
 
 <template>
@@ -394,6 +541,9 @@ onBeforeUnmount(() => map?.remove())
       </button>
       <button class="layer-row" :class="{ active: routesVisible }" @click="toggleRoutes">
         <i class="route-symbol"></i><span><b>无人机航线</b></span><em>{{ routesVisible ? '●' : '○' }}</em>
+      </button>
+      <button class="layer-row" :class="{ active: domImageryVisible, disabled: !domTileUrl }" :title="domImageryStatus" @click="toggleDomImagery">
+        <i class="dom-imagery-symbol"></i><span><b>DOM 正射影像</b></span><em>{{ domImageryVisible ? '●' : '○' }}</em>
       </button>
     </aside>
 
@@ -424,7 +574,7 @@ onBeforeUnmount(() => map?.remove())
     </aside>
 
     <div v-if="measureResult" class="measure-result">{{ measureResult }}</div>
-    <div v-if="toolMessage" class="tool-message" @click="toolMessage = ''">{{ toolMessage }}　×</div>
+    <Transition name="tool-message"><div v-if="toolMessage" class="tool-message" @click="dismissToolMessage">{{ toolMessage }}　×</div></Transition>
     <div class="map-scale" :style="{ width: `${scaleWidth}px` }" :aria-label="`比例尺 ${scaleLabel}`"><b>{{ scaleLabel }}</b><i></i></div>
   </div>
 </template>
@@ -436,8 +586,8 @@ onBeforeUnmount(() => map?.remove())
 .layer-row { width: 100%; display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 7px; padding: 7px 8px; color: #6f99aa; background: transparent; border: 0; border-bottom: 1px solid #0a3e59; text-align: left; cursor: pointer; }.layer-row:hover,.layer-row.active { color: #d6f8ff; background: #07567866; }.layer-row>i { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }.layer-row span,.layer-row b,.layer-row small { min-width: 0; display: block; }.layer-row b { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }.layer-row small { margin-top: 3px; color: #52798a; font-size: 11px; }.layer-row em { color: #39ddef; font-size: 14px; font-style: normal; }.layer-section-title { padding: 5px 8px; color: #6591a3; background: #04243d; font-size: 12px; }.route-symbol { width: 12px!important; height: 2px!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#ff4d5b 0 3px,transparent 3px 5px)!important; }
 .map-search { position: absolute; z-index: 550; top: 10px; right: 70px; width: 270px; min-height: 31px; display: flex; align-items: center; gap: 7px; padding: 0 9px; color: #55dff3; background: #031a31ef; border: 1px solid #11618a; box-shadow: 0 0 10px #00a9de1f; }.map-search input { min-width: 0; height: 29px; flex: 1; border: 0; outline: 0; color: #c6edf7; background: transparent; font-size: 14px; }.search-results { position: absolute; left: -1px; right: -1px; top: 31px; background: #031a31f5; border: 1px solid #11618a; }.search-results button { width: 100%; padding: 7px 9px; color: #bfe8f1; background: transparent; border: 0; border-bottom: 1px solid #0b405c; text-align: left; cursor: pointer; }.search-results button:hover { background: #075479; }.search-results b,.search-results small { display: block; font-size: 14px; }.search-results small { margin-top: 3px; color: #5c8293; font-size: 11px; }
 .map-tools { position: absolute; z-index: 600; right: 10px; top: 10px; width: 50px; display: grid; gap: 4px; }.map-tools>button { min-height: 40px; display: grid; place-items: center; gap: 2px; padding: 4px; color: #84b2c3; background: #031a30ed; border: 1px solid #155a7c; cursor: pointer; }.map-tools>button:hover,.map-tools>button.active { color: #fff; border-color: #24cbe3; background: #075477; }.map-tools i { font-size: 16px; font-style: normal; }.map-tools span { font-size: 11px; }.compass { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #31d9e9; border-radius: 50%; color: #ff7180; font-size: 14px!important; }.tool-submenu { position: absolute; top: 88px; right: 55px; width: 82px; padding: 4px; background: #031a31f5; border: 1px solid #157298; }.tool-submenu button { width: 100%; padding: 7px; color: #88b7c7; background: transparent; border: 0; text-align: left; font-size: 12px; cursor: pointer; }.tool-submenu button:hover,.tool-submenu button.active { color: #fff; background: #08698e; }.base-submenu { top: 220px; }
-.measure-result,.tool-message { position: absolute; z-index: 550; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; color: #c8f8ff; background: #03223aef; border: 1px solid #18a2c1; font-size: 14px; box-shadow: 0 0 10px #12bbd544; }.tool-message { bottom: 46px; cursor: pointer; }.map-scale { position: absolute; z-index: 500; right: 68px; bottom: 7px; padding: 4px 8px; color: #77a9b9; background: #021728cc; font-size: 12px; }
-:deep(.leaflet-tile-pane) { filter: brightness(.58) saturate(1.35) hue-rotate(155deg) contrast(1.13); }:deep(.business-task-marker),:deep(.business-drone-marker),:deep(.custom-annotation) { background: transparent; border: 0; }:deep(.business-task-marker span) { width: 23px; height: 23px; display: grid; place-items: center; color: white; background: color-mix(in srgb, var(--marker-color), #062239 35%); border: 2px solid var(--marker-color); border-radius: 50% 50% 50% 5px; transform: rotate(-45deg); box-shadow: 0 0 10px var(--marker-color); font-size: 14px; }:deep(.business-drone-marker) { display: flex; align-items: center; gap: 4px; color: #79eff9; }:deep(.business-drone-marker span) { width: 24px; height: 24px; display: grid; place-items: center; background: #087b9e; border: 1px solid #4defff; border-radius: 50%; box-shadow: 0 0 10px #22e5f4; }:deep(.business-drone-marker b) { padding: 2px 4px; background: #03233ddd; font-size: 12px; white-space: nowrap; }:deep(.business-task-label),:deep(.measure-index) { color: #c9f7ff; background: #03223ddd; border: 1px solid #17698e; box-shadow: none; border-radius: 2px; font: 11px "Microsoft YaHei"; }:deep(.leaflet-popup-content-wrapper),:deep(.leaflet-popup-tip) { color: #d9f8ff; background: #061d34; border: 1px solid #1685ad; border-radius: 2px; }:deep(.business-popup strong),:deep(.business-popup span),:deep(.business-popup small) { display: block; }:deep(.business-popup span) { margin-top: 5px; color: #8db5c3; font-size: 14px; }:deep(.business-popup small) { margin-top: 6px; color: #5d899b; }:deep(.custom-annotation span) { width: 25px; height: 25px; display: grid; place-items: center; color: #fff; background: #e86835; border: 2px solid #ffd7a8; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 0 8px #ff8a45; }
+.measure-result,.tool-message { position: absolute; z-index: 550; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; color: #c8f8ff; background: #03223aef; border: 1px solid #18a2c1; font-size: 14px; box-shadow: 0 0 10px #12bbd544; }.tool-message { bottom: 46px; cursor: pointer; }.tool-message-enter-active,.tool-message-leave-active { transition: opacity .2s ease, transform .2s ease; }.tool-message-enter-from,.tool-message-leave-to { opacity: 0; transform: translate(-50%, 6px); }.map-scale { position: absolute; z-index: 500; right: 68px; bottom: 7px; padding: 4px 8px; color: #77a9b9; background: #021728cc; font-size: 12px; }
+:deep(.business-task-marker),:deep(.business-drone-marker),:deep(.custom-annotation) { background: transparent; border: 0; }:deep(.business-task-marker span) { width: 23px; height: 23px; display: grid; place-items: center; color: white; background: color-mix(in srgb, var(--marker-color), #062239 35%); border: 2px solid var(--marker-color); border-radius: 50% 50% 50% 5px; transform: rotate(-45deg); box-shadow: 0 0 10px var(--marker-color); font-size: 14px; }:deep(.business-drone-marker) { display: flex; align-items: center; gap: 4px; color: #79eff9; }:deep(.business-drone-marker span) { width: 24px; height: 24px; display: grid; place-items: center; background: #087b9e; border: 1px solid #4defff; border-radius: 50%; box-shadow: 0 0 10px #22e5f4; }:deep(.business-drone-marker b) { padding: 2px 4px; background: #03233ddd; font-size: 12px; white-space: nowrap; }:deep(.business-task-label),:deep(.measure-index) { color: #c9f7ff; background: #03223ddd; border: 1px solid #17698e; box-shadow: none; border-radius: 2px; font: 11px "Microsoft YaHei"; }:deep(.leaflet-popup-content-wrapper),:deep(.leaflet-popup-tip) { color: #d9f8ff; background: #061d34; border: 1px solid #1685ad; border-radius: 2px; }:deep(.business-popup strong),:deep(.business-popup span),:deep(.business-popup small) { display: block; }:deep(.business-popup span) { margin-top: 5px; color: #8db5c3; font-size: 14px; }:deep(.business-popup small) { margin-top: 6px; color: #5d899b; }:deep(.custom-annotation span) { width: 25px; height: 25px; display: grid; place-items: center; color: #fff; background: #e86835; border: 2px solid #ffd7a8; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 0 8px #ff8a45; }
 
 /* Compact, grouped controls keep the map surface visually open. */
 .layer-manager { top: 44px; width: 126px; max-height: calc(100% - 52px); overflow: visible; border: 0; background: transparent; box-shadow: none; }
@@ -450,7 +600,7 @@ onBeforeUnmount(() => map?.remove())
 .map-tools { top: 52px; right: 10px; width: 72px; gap: 4px; }.map-tools>button { min-height: 36px; grid-template-columns: 20px 1fr; justify-content: start; padding: 4px 6px; }.map-tools i { font-size: 14px; }.map-tools span { font-size: 11px; }.compass { width: 18px; height: 18px; font-size: 12px!important; }
 
 /* The layer panel is the only left-side control; operational tools form one right-side rail. */
-.layer-manager { top: 50%; width: 255px; height: 74%; max-height: none; display: flex; flex-direction: column; transform: translateY(-50%); overflow: hidden; border: 1px solid #1688bf; border-radius: 14px; background: #031c37b8; box-shadow: 0 0 18px #00a7d534; }.tool-title { min-height: 46px; padding: 0 15px; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg, #056ea7c9, #073f6dc9); font-size: 18px; }.tool-title button { font-size: 14px; }.layer-row { min-height: 0; flex: 1; grid-template-columns: 18px 1fr auto; gap: 10px; padding: 9px 16px; border: 0; border-bottom: 1px solid #0d5278; background: #031c37b8; }.layer-row:last-child { border-bottom: 0; }.layer-row b { font-size: 17px; }.layer-row em { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; font-size: 0; transform: translateX(-8px); }.layer-row.active em { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }.layer-row>i { width: 16px; height: 16px; border-radius: 1px; box-shadow: none; }
+.layer-manager { top: 58px; width: 255px; height: auto; max-height: calc(100% - 68px); display: flex; flex-direction: column; transform: none; overflow-y: auto; border: 1px solid #1688bf; border-radius: 14px; background: #031c37b8; box-shadow: 0 0 18px #00a7d534; }.tool-title { min-height: 46px; padding: 0 15px; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg, #056ea7c9, #073f6dc9); font-size: 18px; }.tool-title button { font-size: 14px; }.layer-row { box-sizing: border-box; min-height: 43px; flex: 0 0 43px; grid-template-columns: 18px 1fr auto; gap: 10px; padding: 9px 16px; border: 0; border-bottom: 1px solid #0d5278; background: #031c37b8; }.layer-row:last-child { border-bottom: 0; }.layer-row b { font-size: 17px; }.layer-row em { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; font-size: 0; transform: translateX(-8px); }.layer-row.active em { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }.layer-row>i { width: 16px; height: 16px; border-radius: 1px; box-shadow: none; }.layer-row.disabled { cursor: not-allowed; opacity: .55; }.dom-imagery-symbol { width: 16px!important; height: 2px!important; border: 0!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#20b9ff 0 4px,transparent 4px 7px)!important; }
 .map-search { width: 310px; min-height: 42px; padding: 0 12px; border-color: #188fc0; border-radius: 12px; background: #031a31b8; }.map-search span { order: 2; margin-left: 4px; font-size: 26px; line-height: 1; transform: scaleX(-1); }.map-search input { order: 1; height: 40px; font-size: 14px; }.search-results { top: 42px; overflow: hidden; border-radius: 0 0 12px 12px; }
 .map-tools { top: 56px; right: 10px; bottom: 34px; width: 120px; display: flex; flex-direction: column; justify-content: center; gap: 4px; overflow: visible; border: 0; border-radius: 0; background: transparent; }.map-tools>button { min-height: 33px; flex: 0 0 33px; grid-template-columns: 22px 1fr; gap: 6px; padding: 4px 10px; border: 1px solid #155a7c; border-radius: 8px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-tools>button:last-of-type { border-bottom: 1px solid #155a7c; }.map-tools>button:hover,.map-tools>button.active { border-color: #24cbe3; background: #075477d0; }.map-tools i { font-size: 16px; }.map-tools span { font-size: 12px; white-space: nowrap; }.compass { width: 20px; height: 20px; font-size: 12px!important; }.right-submenu { top: 50%; right: 126px; width: 108px; transform: translateY(-50%); }.right-submenu button { font-size: 12px; }
 .map-mode-switch { flex: 0 0 68px; display: grid; grid-template-rows: 1fr 1fr; overflow: hidden; border: 1px solid #155a7c; border-radius: 8px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-mode-switch button { display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 6px; padding: 3px 10px; color: #84b2c3; background: transparent; border: 0; cursor: pointer; }.map-mode-switch button+button { border-top: 1px solid #155a7c; }.map-mode-switch button:hover,.map-mode-switch button.active { color: #fff; background: #075477d0; }.map-mode-switch span { font-size: 12px; white-space: nowrap; }.mode-indicator { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; }.map-mode-switch button.active .mode-indicator { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }

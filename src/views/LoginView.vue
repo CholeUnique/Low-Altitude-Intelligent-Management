@@ -2,10 +2,8 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { portalData } from '@/mocks/portal'
-import { loginWithPassword } from '@/api/auth'
+import { getDepartmentOptions, loginWithPassword, switchDepartment } from '@/api/auth'
 import { ApiBusinessError } from '@/api/client'
-import type { OrganizationId, RoleId } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -14,9 +12,6 @@ const loading = ref(false)
 const username = ref('admin')
 const password = ref('')
 const loginError = ref('')
-const mockOpen = ref(false)
-const organizationId = ref<OrganizationId>('natural-resources')
-const roleId = ref<RoleId>('admin')
 
 async function submitReal() {
   if (!username.value.trim() || !password.value) {
@@ -27,7 +22,36 @@ async function submitReal() {
   loginError.value = ''
   try {
     const result = await loginWithPassword(username.value.trim(), password.value)
-    user.setRealSession(result.accessToken, result.userInfo, result.expiresIn, result.activeDeptId)
+    // 部分后端部署会在登录响应中给出部门 ID，但只有 /user/dept/switch 换签后的
+    // token 才真正携带当前部门的数据权限。手动切换单位本来就走此流程，因此首次
+    // 登录也在进入首页前完成同样的部门确认，避免首页首批统计请求处于无部门上下文。
+    const initialDeptId = result.activeDeptId
+      || result.userInfo.deptId
+      || result.userInfo.deptList.find((department) => department.isDefault)?.deptId
+    user.setRealSession(result.accessToken, result.userInfo, result.expiresIn, initialDeptId)
+    // 与右上角“切换单位”使用完全相同的部门定位规则。登录响应里的 deptId 在
+    // 部分部署中是用户所属根部门，不是业务数据所属的局级部门；必须以部门选项
+    // 接口返回的实际 ID 为准，避免首屏按错误部门查询而切换一次后才恢复数据。
+    let scopedDeptId = initialDeptId
+    try {
+      const departments = await getDepartmentOptions()
+      const matcher = user.organizationId === 'agriculture-rural' ? /农业农村/ : /自然资源.*规划|自然资源/
+      scopedDeptId = departments.find((department) => matcher.test(department.deptName))?.deptId || scopedDeptId
+    } catch {
+      // 没有部门选项权限时仍尝试使用登录接口返回的部门 ID。
+    }
+    if (scopedDeptId) {
+      try {
+        const scopedSession = await switchDepartment(scopedDeptId)
+        user.setDepartmentSession(
+          scopedSession.accessToken,
+          scopedSession.expiresIn,
+          scopedSession.activeDeptId || scopedDeptId,
+        )
+      } catch {
+        // 普通账号或旧版后端可能不允许重复切换部门，保留登录接口已签发的 token。
+      }
+    }
     const target = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
     await router.replace(target)
   } catch (error) {
@@ -39,11 +63,6 @@ async function submitReal() {
   }
 }
 
-async function submitMock() {
-  user.loginMock(organizationId.value, roleId.value)
-  const target = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
-  await router.replace(target)
-}
 </script>
 
 <template>
@@ -69,25 +88,6 @@ async function submitMock() {
         <p v-if="loginError" class="login-error">{{ loginError }}</p>
         <el-button type="primary" size="large" :loading="loading" class="login-button" @click="submitReal">安全登录</el-button>
 
-        <button class="mock-toggle" type="button" @click="mockOpen = !mockOpen">
-          {{ mockOpen ? '收起' : '使用' }} Mock 身份演示
-        </button>
-        <div v-if="mockOpen" class="mock-area">
-          <label class="identity-label">所属单位</label>
-          <div class="organization-options">
-            <button v-for="item in portalData.organizations" :key="item.id" :class="{ active: organizationId === item.id }" @click="organizationId = item.id">
-              <i>{{ item.id === 'natural-resources' ? '规' : '农' }}</i>
-              <span><b>{{ item.name }}</b><small>{{ item.description }}</small></span>
-            </button>
-          </div>
-          <label class="identity-label">职级身份</label>
-          <div class="role-options">
-            <button v-for="item in portalData.roles" :key="item.id" :class="{ active: roleId === item.id }" @click="roleId = item.id">
-              <b>{{ item.name }}</b><small>{{ item.description }}</small>
-            </button>
-          </div>
-          <el-button class="login-button" @click="submitMock">以 Mock 身份进入</el-button>
-        </div>
       </div>
       <footer>低空智慧服务平台 v0.4 · 技术支持中心</footer>
     </div>
@@ -99,13 +99,5 @@ async function submitMock() {
 .login-input { width: 100%; height: 44px; box-sizing: border-box; padding: 0 13px; color: #243e52; border: 1px solid #cddde7; border-radius: 6px; outline: 0; font-size: 14px; }
 .login-input:focus { border-color: #1597b7; box-shadow: 0 0 0 3px #159bc015; }
 .login-error { margin: 10px 0 0!important; color: #d94b5d!important; font-size: 12px!important; }
-.mock-toggle { width: 100%; margin-top: 14px; padding: 8px; color: #547282; border: 0; background: transparent; cursor: pointer; }
-.mock-area { max-height: 360px; overflow: auto; padding: 0 4px 4px; border-top: 1px solid #e6eef3; }
 .identity-label { display: block; margin: 20px 0 9px; color: #344b5f; font-size: 13px; font-weight: bold; }
-.organization-options { display: grid; gap: 9px; }
-.organization-options button { display: flex; align-items: center; gap: 12px; padding: 13px; border: 1px solid #d9e5ec; border-radius: 7px; color: #30485c; background: #fff; text-align: left; cursor: pointer; transition: .2s; }
-.organization-options button:hover,.organization-options button.active { border-color: #158db2; background: #eef9fc; box-shadow: 0 0 0 2px #159bc015; }
-.organization-options i { width: 38px; height: 38px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 6px; color: white; background: linear-gradient(135deg, #0c789d, #14abc0); font-style: normal; font-weight: bold; }
-.organization-options span,.organization-options b,.organization-options small { display: block; }.organization-options b { font-size: 14px; }.organization-options small { margin-top: 5px; color: #8495a3; font-size: 10px; }
-.role-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 22px; }.role-options button { padding: 12px; border: 1px solid #d9e5ec; border-radius: 6px; color: #40566a; background: white; cursor: pointer; }.role-options button.active { color: #075a80; border-color: #1597b7; background: #eef9fc; }.role-options b,.role-options small { display: block; }.role-options small { margin-top: 5px; color: #8b99a5; font-size: 9px; }
 </style>

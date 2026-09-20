@@ -1,7 +1,13 @@
 import axios from 'axios'
 import type { ApiResponse } from '@/types'
 
-export const useMock = import.meta.env.VITE_USE_MOCK !== 'false'
+/** Mock 开关由构建环境优先决定；显式关闭时不可被浏览器残留状态覆盖。 */
+export function isMockMode() {
+  const configured = import.meta.env.VITE_USE_MOCK
+  if (configured === 'true') return true
+  if (configured === 'false') return false
+  return localStorage.getItem('auth_mode') === 'mock'
+}
 
 const BIG_INTEGER_PATTERN = /(:\s*)(-?\d{16,})(\s*[,}])/g
 
@@ -46,10 +52,17 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('access_token')
-      const current = `${window.location.pathname}${window.location.search}`
-      if (window.location.pathname !== '/login') {
-        window.location.assign(`/login?redirect=${encodeURIComponent(current)}`)
+      // 请求发出后可能已切换到 Mock 或换签了新的真实 token。旧请求的 401 不能
+      // 清掉新会话，否则会造成演示登录后立刻被重定向回登录页的“闪退”现象。
+      const requestAuthorization = String(error.config?.headers?.Authorization || '')
+      const requestToken = requestAuthorization.replace(/^Bearer\s+/i, '')
+      const activeToken = localStorage.getItem('access_token') || ''
+      if (!isMockMode() && requestToken && requestToken === activeToken) {
+        localStorage.removeItem('access_token')
+        const current = `${window.location.pathname}${window.location.search}`
+        if (window.location.pathname !== '/login') {
+          window.location.assign(`/login?redirect=${encodeURIComponent(current)}`)
+        }
       }
     }
     return Promise.reject(error)

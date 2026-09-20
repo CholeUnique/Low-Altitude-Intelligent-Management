@@ -127,6 +127,10 @@ export interface PortalTask {
   organizationId: OrganizationId
   sceneId: string
   name: string
+  /** 真实业务任务关联的对象类型，例如 PLAN、TASK、NONE。 */
+  refType?: string
+  /** 真实业务任务关联的对象 ID。 */
+  refId?: string
   status: string
   priority: TaskPriority
   area: string
@@ -189,6 +193,8 @@ export interface DashboardMapTask {
   status: string
   center: [number, number]
   polygon: [number, number][]
+  /** 一个任务可由后端返回多个面要素；polygon 保留为兼容单面渲染。 */
+  polygons?: [number, number][][]
 }
 
 export interface DashboardMapLayer {

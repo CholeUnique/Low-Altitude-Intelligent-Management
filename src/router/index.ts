@@ -19,6 +19,11 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
+  // 旧版本可通过 Mock 身份进入。升级后禁止继续复用此类本地 token。
+  if (localStorage.getItem('auth_mode') === 'mock') {
+    ;['access_token', 'current_user', 'active_dept_id', 'token_expires_at'].forEach((key) => localStorage.removeItem(key))
+    localStorage.setItem('auth_mode', 'real')
+  }
   const loggedIn = Boolean(localStorage.getItem('access_token'))
   if (!to.meta.public && !loggedIn) return { name: 'login', query: { redirect: to.fullPath } }
   if (to.name === 'login' && loggedIn) return { name: 'dashboard' }

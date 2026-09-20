@@ -122,3 +122,11 @@ export function getDronePatrolRoutes(organizationId: OrganizationId, sceneId?: s
 export function addSessionTask(task: PortalTask) {
   portalData.tasks.unshift(task)
 }
+
+/** 仅供 Mock 演示模式删除当前会话内的数据。 */
+export function removeSessionTasks(taskIds: string[]) {
+  const targets = new Set(taskIds)
+  for (let index = portalData.tasks.length - 1; index >= 0; index -= 1) {
+    if (targets.has(portalData.tasks[index]!.id)) portalData.tasks.splice(index, 1)
+  }
+}
