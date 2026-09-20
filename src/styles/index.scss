@@ -7,6 +7,13 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 1180px; min-height: 100vh; background: #f3f6f9; }
 button, input { font: inherit; }
+/* 所有可操作按钮/菜单提供一致的悬停反馈；具体模块可用更高优先级样式覆盖颜色。 */
+button:not(:disabled), select:not(:disabled), [role="button"] { transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, filter .16s ease, transform .16s ease; }
+button:not(:disabled), [role="button"] { cursor: pointer; }
+button:not(:disabled):hover, [role="button"]:hover { filter: brightness(.88) saturate(1.16); box-shadow: inset 0 0 0 999px #001a2a1c; }
+select:not(:disabled):hover { border-color: #35b6e4!important; background-color: #052c48!important; }
+button:focus-visible, select:focus-visible, [role="button"]:focus-visible { outline: 2px solid #57e3f4; outline-offset: 2px; }
+button:disabled, select:disabled, [role="button"][aria-disabled="true"] { cursor: not-allowed; }
 a { color: inherit; text-decoration: none; }
 .brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; color: white; font-size: 20px; font-weight: 800; background: linear-gradient(135deg, #21bdd1, #0870aa); box-shadow: 0 5px 16px #0288a755; }
 

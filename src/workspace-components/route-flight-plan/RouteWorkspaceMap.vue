@@ -43,8 +43,8 @@ function addBaseLayers(mode: 'vector' | 'image') {
   const base = mode === 'vector' ? 'vec' : 'img'
   const label = mode === 'vector' ? 'cva' : 'cia'
   let loaded = 0
-  baseLayer = L.tileLayer(tileUrl(base), { subdomains, maxZoom: 18 })
-  labelLayer = L.tileLayer(tileUrl(label), { subdomains, maxZoom: 18, pane: 'labels' })
+  baseLayer = L.tileLayer(tileUrl(base), { subdomains, maxNativeZoom: 18, maxZoom: 22 })
+  labelLayer = L.tileLayer(tileUrl(label), { subdomains, maxNativeZoom: 18, maxZoom: 22, pane: 'labels' })
   baseLayer.on('tileload', () => {
     loaded += 1
     if (loaded === 1) {
@@ -110,7 +110,6 @@ function renderRoutes() {
   if (active?.waypoints.length) {
     map.fitBounds(L.latLngBounds(active.waypoints.map((p) => [p[1], p[0]] as L.LatLngTuple)), {
       padding: [50, 50],
-      maxZoom: 14,
     })
   }
 }
@@ -200,6 +199,7 @@ async function initMap() {
   map = L.map(container.value, {
     center: TAIZHOU_CENTER,
     zoom: 11,
+    maxZoom: 22,
     zoomControl: false,
     attributionControl: false,
     doubleClickZoom: false,
@@ -279,7 +279,16 @@ onBeforeUnmount(() => map?.remove())
 </template>
 
 <style scoped lang="scss">
-.route-map { position: relative; width: 100%; height: 100%; min-height: 320px; overflow: hidden; background: #0a1c2c; }
+.route-map {
+  position: relative;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  overflow: hidden;
+  isolation: isolate;
+  background: #0a1c2c;
+}
 .route-map__canvas { position: absolute; inset: 0; }
 .map-state { position: absolute; z-index: 700; inset: 0; display: grid; place-items: center; color: #7ed7ea; background: #031a31e8; }
 .map-search {
@@ -306,7 +315,7 @@ onBeforeUnmount(() => map?.remove())
 }
 .submenu button:hover { color: #fff; background: #08618a; }
 .legend {
-  position: absolute; z-index: 500; top: 10px; left: 176px; display: grid; gap: 4px;
+  position: absolute; z-index: 500; top: 10px; left: 192px; display: grid; gap: 4px;
   padding: 8px 10px; color: #c7e6ef; background: #031a31ef; border: 1px solid #1a6a8f; font-size: 14px;
 }
 .legend b { margin-bottom: 2px; }
@@ -320,7 +329,6 @@ onBeforeUnmount(() => map?.remove())
   padding: 6px 12px; color: #d8f7ff; background: #03223aef; border: 1px solid #18a2c1; font-size: 14px;
 }
 .tool-message { bottom: 42px; cursor: pointer; }
-:deep(.leaflet-tile-pane) { filter: brightness(.72) saturate(1.15) contrast(1.05); }
 :deep(.route-wp-marker), :deep(.home-marker), :deep(.anno-marker) { background: transparent; border: 0; }
 :deep(.route-wp-marker span) {
   width: 20px; height: 20px; display: grid; place-items: center; color: #fff;
@@ -335,5 +343,8 @@ onBeforeUnmount(() => map?.remove())
 :deep(.anno-marker span) {
   width: 22px; height: 22px; display: grid; place-items: center; color: #fff;
   background: #e86835; border: 2px solid #ffd7a8; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+}
+@media (max-width: 1450px) {
+  .legend { left: 178px; }
 }
 </style>

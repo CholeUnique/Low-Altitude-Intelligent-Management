@@ -26,6 +26,7 @@ export interface FlightRoute {
 
 export interface FlightPlanItem {
   id: string
+  projectId?: string
   date: string
   start: string
   end: string

@@ -6,6 +6,11 @@ import { useUserStore } from '@/stores/user'
 
 const props = defineProps<{
   activeNode: 'route-plan' | 'live'
+  /** 全局直播总览可覆盖巡查模块默认标题。 */
+  title?: string
+  subtitle?: string
+  showFlow?: boolean
+  centerTitle?: boolean
 }>()
 
 const router = useRouter()
@@ -29,17 +34,26 @@ function goNode(path: string) {
 
 <template>
   <div class="patrol-layout">
-    <header class="patrol-header">
+    <header class="patrol-header" :class="{ 'without-flow': showFlow === false, 'center-title': centerTitle }">
       <div class="header-left">
         <button class="back-button" type="button" @click="goBack">〈 返回</button>
+        <template v-if="!centerTitle">
+          <span class="page-logo">◆</span>
+          <div class="page-title">
+            <h1>{{ title || '低空巡查发现模块' }}</h1>
+            <small>{{ subtitle || '航线规划 · 实时巡航' }}</small>
+          </div>
+        </template>
+      </div>
+      <div v-if="centerTitle" class="centered-title">
         <span class="page-logo">◆</span>
         <div class="page-title">
-          <h1>低空巡查发现模块</h1>
-          <small>航线规划 · 实时巡航</small>
+          <h1>{{ title || '低空巡查发现模块' }}</h1>
+          <small>{{ subtitle || '航线规划 · 实时巡航' }}</small>
         </div>
       </div>
 
-      <nav class="patrol-flow">
+      <nav v-if="showFlow !== false" class="patrol-flow">
         <button
           v-for="node in nodes"
           :key="node.key"
@@ -83,6 +97,17 @@ function goNode(path: string) {
   border-bottom: 1px solid #0b648e;
   box-shadow: 0 3px 14px #0009;
 }
+.patrol-header.without-flow { grid-template-columns: 1fr auto; }
+.centered-title {
+  position: absolute;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transform: translateX(-50%);
+}
+.centered-title .page-title { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.centered-title .page-title small { margin-top: 0; }
 .header-left,
 .header-right {
   min-width: 0;

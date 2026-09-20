@@ -1,13 +1,23 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import type { FlightRoute } from '@/mocks/route-planning'
 
-const props = defineProps<{
-  routeCoordinates: [number, number][]
-  flownIndex: number
-  dronePosition: [number, number]
-}>()
+const props = withDefaults(defineProps<{
+  routeCoordinates?: [number, number][]
+  flownIndex?: number
+  dronePosition?: [number, number]
+  /** 直播总览传入时，展示多个任务的航线；未传入时保持单任务实时轨迹模式。 */
+  routes?: FlightRoute[]
+  selectedTaskId?: string
+}>(), {
+  routeCoordinates: () => [],
+  flownIndex: 0,
+  dronePosition: () => [119.9255, 32.4555],
+  routes: () => [],
+  selectedTaskId: '',
+})
 
 const TAIZHOU_CENTER: L.LatLngTuple = [32.4555, 119.9255]
 const token = import.meta.env.VITE_TIANDITU_TOKEN
@@ -15,7 +25,8 @@ const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
 
 let map: L.Map | undefined
 let routeGroup: L.LayerGroup | undefined
-let containerEl: HTMLElement | undefined
+const containerEl = ref<HTMLElement>()
+const routeColors = ['#20c6d8', '#2ccf85', '#f5aa42', '#a781ff', '#ff6c83', '#58a6ff']
 
 function tileUrl(layer: 'img' | 'cia') {
   return `https://t{s}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}&tk=${token}`
@@ -23,7 +34,29 @@ function tileUrl(layer: 'img' | 'cia') {
 
 function renderTrack() {
   if (!map || !routeGroup) return
-  routeGroup.clearLayers()
+  const activeRouteGroup = routeGroup
+  activeRouteGroup.clearLayers()
+  if (props.routes.length) {
+    const visibleRoutes = props.selectedTaskId
+      ? props.routes.filter((route) => (route.taskId || '__unassigned__') === props.selectedTaskId)
+      : props.routes
+    const allPoints: L.LatLngTuple[] = []
+    visibleRoutes.forEach((route, index) => {
+      const points = (route.waypoints.length ? route.waypoints : route.polygon)
+        .map(([lng, lat]) => [lat, lng] as L.LatLngTuple)
+      if (!points.length) return
+      allPoints.push(...points)
+      const color = routeColors[index % routeColors.length]!
+      L.polyline(points, { color, weight: props.selectedTaskId ? 5 : 3, opacity: props.selectedTaskId ? 1 : 0.84 })
+        .bindTooltip(`${route.name}<br/>${route.routeTypeLabel}`, { sticky: true })
+        .addTo(activeRouteGroup)
+      L.circleMarker(points[0]!, { radius: 5, color: '#fff', weight: 1, fillColor: color, fillOpacity: 1 })
+        .bindTooltip(`${route.name} · 起点`, { direction: 'top' })
+        .addTo(activeRouteGroup)
+    })
+    if (allPoints.length) map.fitBounds(L.latLngBounds(allPoints), { padding: [42, 42] })
+    return
+  }
   const latlngs = props.routeCoordinates.map((p) => [p[1], p[0]] as L.LatLngTuple)
   if (!latlngs.length) return
 
@@ -57,23 +90,26 @@ function renderTrack() {
     }),
   }).bindPopup('当前无人机位置').addTo(routeGroup)
 
-  map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], maxZoom: 14 })
+  map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40] })
 }
 
 onMounted(async () => {
   await nextTick()
-  containerEl = document.getElementById('live-cruise-map') || undefined
-  if (!containerEl || !token) return
-  map = L.map(containerEl, { zoomControl: false, attributionControl: false }).setView(TAIZHOU_CENTER, 12)
+  if (!containerEl.value) return
+  map = L.map(containerEl.value, { maxZoom: 22, zoomControl: false, attributionControl: false }).setView(TAIZHOU_CENTER, 12)
   map.createPane('labels')
   map.getPane('labels')!.style.zIndex = '450'
-  L.tileLayer(tileUrl('img'), { subdomains, maxZoom: 18 }).addTo(map)
-  L.tileLayer(tileUrl('cia'), { subdomains, maxZoom: 18, pane: 'labels' }).addTo(map)
+  if (token) {
+    L.tileLayer(tileUrl('img'), { subdomains, maxNativeZoom: 18, maxZoom: 22 }).addTo(map)
+    L.tileLayer(tileUrl('cia'), { subdomains, maxNativeZoom: 18, maxZoom: 22, pane: 'labels' }).addTo(map)
+  } else {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxNativeZoom: 18, maxZoom: 22 }).addTo(map)
+  }
   routeGroup = L.layerGroup().addTo(map)
   renderTrack()
 })
 
-watch(() => [props.routeCoordinates, props.flownIndex, props.dronePosition], () => renderTrack(), { deep: true })
+watch(() => [props.routeCoordinates, props.flownIndex, props.dronePosition, props.routes, props.selectedTaskId], () => renderTrack(), { deep: true })
 
 onBeforeUnmount(() => {
   map?.remove()
@@ -82,7 +118,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div id="live-cruise-map" class="live-map"></div>
+  <div ref="containerEl" class="live-map"></div>
 </template>
 
 <style scoped lang="scss">
