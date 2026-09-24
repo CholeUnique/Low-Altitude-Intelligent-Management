@@ -6,6 +6,7 @@ import 'leaflet/dist/leaflet.css'
 import taizhouCityBoundary from '@/assets/geo/taizhou-city.json'
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
 import type { DashboardMapLayer, DashboardMapTask, DronePatrolRoute } from '@/types'
+import { installJiulongArcGisLayers } from '@/utils/jiulong-arcgis-layers'
 
 const props = defineProps<{
   layers: DashboardMapLayer[]
@@ -36,7 +37,9 @@ const visibleLayerIds = ref<string[]>(props.layers.map((layer) => layer.id))
 const routesVisible = ref(props.routes.length > 0)
 const domImageryVisible = ref(false)
 const domImageryStatus = ref(domTileUrl ? '临时验证图层' : '未配置')
+const searchExpanded = ref(false)
 const searchKeyword = ref('')
+const searchInput = ref<HTMLInputElement>()
 const toolMessage = ref('')
 const measureOpen = ref(false)
 const baseMapOpen = ref(false)
@@ -51,8 +54,11 @@ const searchResults = computed(() => {
     .filter((task) => `${task.name}${task.taskId}${task.area}`.toLowerCase().includes(keyword))
     .slice(0, 6)
 })
+const showSearchSuggestions = computed(() => searchExpanded.value && Boolean(searchKeyword.value.trim()))
 
 let map: L.Map | undefined
+let resizeObserver: ResizeObserver | undefined
+let resizeFrame: number | undefined
 let baseLayer: L.TileLayer | undefined
 let labelLayer: L.TileLayer | undefined
 let domImageryLayer: L.TileLayer | undefined
@@ -64,8 +70,11 @@ let locationGroup: L.LayerGroup | undefined
 let administrativeBoundaryGroup: L.LayerGroup | undefined
 let toolMessageTimer: ReturnType<typeof window.setTimeout> | undefined
 let sceneFocusTimer: ReturnType<typeof window.setTimeout> | undefined
+let searchFocusTimer: ReturnType<typeof window.setTimeout> | undefined
+let focusedSceneLayerId = ''
 const sceneGroups = new Map<string, L.LayerGroup>()
 const taskTargets = new Map<string, { marker: L.Marker; bounds: L.LatLngBounds }>()
+const layerVisibility = new Map(props.layers.map((layer) => [layer.id, true]))
 let measurePoints: L.LatLng[] = []
 
 function dismissToolMessage() {
@@ -238,6 +247,7 @@ function focusSceneLayer() {
   // 仅聚焦当前场景的真实任务边界；不以任务点或城市中心替代，避免看起来像定位偏移。
   map.invalidateSize({ pan: false })
   map.fitBounds(bounds, { padding: [48, 48], maxZoom: 18, animate: false })
+  focusedSceneLayerId = props.focusLayerId
 }
 
 function scheduleSceneFocus() {
@@ -269,6 +279,7 @@ function renderRoutes() {
 
 function toggleSceneLayer(layerId: string) {
   const visible = visibleLayerIds.value.includes(layerId)
+  layerVisibility.set(layerId, !visible)
   visibleLayerIds.value = visible
     ? visibleLayerIds.value.filter((id) => id !== layerId)
     : [...visibleLayerIds.value, layerId]
@@ -279,6 +290,7 @@ function toggleSceneLayer(layerId: string) {
 }
 
 function setAllLayers(visible: boolean) {
+  props.layers.forEach((layer) => layerVisibility.set(layer.id, visible))
   visibleLayerIds.value = visible ? props.layers.map((layer) => layer.id) : []
   sceneGroups.forEach((group) => {
     if (!map) return
@@ -294,7 +306,7 @@ function toggleRoutes() {
   else routeGroup.remove()
 }
 
-function selectSearchResult(task: DashboardMapTask) {
+function focusSearchResult(task: DashboardMapTask, clearKeyword = false) {
   const target = taskTargets.get(task.taskId)
   if (!map || !target) return
   if (!map.hasLayer(target.marker)) {
@@ -303,7 +315,26 @@ function selectSearchResult(task: DashboardMapTask) {
   }
   map.fitBounds(target.bounds, { padding: [70, 70] })
   window.setTimeout(() => target.marker.openPopup(), 350)
-  searchKeyword.value = ''
+  if (clearKeyword) searchKeyword.value = ''
+}
+
+function selectSearchResult(task: DashboardMapTask) {
+  focusSearchResult(task, true)
+}
+
+async function toggleSearch() {
+  searchExpanded.value = !searchExpanded.value
+  if (!searchExpanded.value) {
+    searchKeyword.value = ''
+    return
+  }
+  await nextTick()
+  searchInput.value?.focus()
+}
+
+function focusFirstSearchResult() {
+  const task = searchResults.value[0]
+  if (task) focusSearchResult(task)
 }
 
 function locateUser() {
@@ -475,6 +506,7 @@ async function initMap() {
     annotationGroup = L.layerGroup().addTo(map)
     locationGroup = L.layerGroup().addTo(map)
     addBaseLayers('image')
+    installJiulongArcGisLayers(map, { collapsed: false })
     if (showAdministrativeBoundaries) renderAdministrativeBoundaries()
     renderBusinessLayers()
     scheduleSceneFocus()
@@ -489,6 +521,14 @@ async function initMap() {
       }
     })
     map.on('dblclick', () => { activeTool.value = null })
+    resizeObserver = new ResizeObserver(() => {
+      if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+      resizeFrame = window.requestAnimationFrame(() => {
+        map?.invalidateSize({ pan: false })
+        updateScale()
+      })
+    })
+    resizeObserver.observe(container.value)
     window.setTimeout(() => map?.invalidateSize(), 100)
   } catch {
     mapError.value = '地图初始化失败，请重新加载'
@@ -505,15 +545,20 @@ function retryMap() {
 onMounted(initMap)
 watch(() => props.layers, () => {
   if (!map) return
-  const previousLayerIds = new Set(sceneGroups.keys())
-  const previousVisibleIds = new Set(visibleLayerIds.value)
+  // 数据轮询会创建新的图层对象，但同一业务图层的显隐偏好必须保持不变。
+  // 即使某次请求短暂返回空数组，也不删除已记录的用户选择。
+  props.layers.forEach((layer) => {
+    if (!layerVisibility.has(layer.id)) layerVisibility.set(layer.id, true)
+  })
   visibleLayerIds.value = props.layers.map((layer) => layer.id)
-    .filter((layerId) => !previousLayerIds.has(layerId) || previousVisibleIds.has(layerId))
+    .filter((layerId) => layerVisibility.get(layerId) !== false)
   renderBusinessLayers()
-  scheduleSceneFocus()
+  // 场景数据首次异步到达时需要定位一次；后续轮询不得打断用户缩放和平移。
+  if (props.focusLayerId && focusedSceneLayerId !== props.focusLayerId) scheduleSceneFocus()
 }, { deep: true })
 watch(() => props.focusLayerId, () => {
   // 保留全场景默认视图；只有从底部场景入口切入时才自动缩放。
+  focusedSceneLayerId = ''
   scheduleSceneFocus()
 })
 watch(() => props.routes, (routes) => {
@@ -521,9 +566,23 @@ watch(() => props.routes, (routes) => {
   if (!routes.length) routesVisible.value = false
   if (map) renderRoutes()
 }, { deep: true })
+watch(searchKeyword, (value) => {
+  if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
+  const keyword = value.trim().toLowerCase()
+  if (!keyword) return
+  searchFocusTimer = window.setTimeout(() => {
+    const exact = searchResults.value.find((task) =>
+      [task.name, task.taskId, task.area].some((field) => field.toLowerCase() === keyword))
+    const target = exact || (searchResults.value.length === 1 ? searchResults.value[0] : undefined)
+    if (target) focusSearchResult(target)
+  }, 260)
+})
 onBeforeUnmount(() => {
   if (toolMessageTimer) window.clearTimeout(toolMessageTimer)
   if (sceneFocusTimer) window.clearTimeout(sceneFocusTimer)
+  if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
+  if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+  resizeObserver?.disconnect()
   map?.remove()
 })
 </script>
@@ -547,10 +606,16 @@ onBeforeUnmount(() => {
       </button>
     </aside>
 
-    <div class="map-search">
-      <span>⌕</span><input v-model="searchKeyword" placeholder="搜索任务名称、编号、区域…" />
-      <div v-if="searchResults.length" class="search-results">
-        <button v-for="task in searchResults" :key="task.taskId" @click="selectSearchResult(task)"><b>{{ task.name }}</b><small>{{ task.layerName }} · {{ task.area }}</small></button>
+    <div class="map-search" :class="{ expanded: searchExpanded }">
+      <input v-if="searchExpanded" ref="searchInput" v-model="searchKeyword" placeholder="请输入任务名称、编号或区域名称" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="toggleSearch" />
+      <button class="map-search-toggle" type="button" :aria-label="searchExpanded ? '收起地图搜索' : '展开地图搜索'" :title="searchExpanded ? '收起搜索' : '搜索任务'" @click="toggleSearch">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/></svg>
+      </button>
+      <div v-if="showSearchSuggestions" class="search-results" aria-live="polite">
+        <template v-if="searchResults.length">
+          <button v-for="task in searchResults" :key="task.taskId" @click="selectSearchResult(task)"><b>{{ task.name }}</b><small>{{ task.taskId }} · {{ task.area }}</small></button>
+        </template>
+        <p v-else>未找到相关任务或区域</p>
       </div>
     </div>
 
@@ -584,7 +649,7 @@ onBeforeUnmount(() => {
 .dashboard-map__empty,.dashboard-map__loading { position: absolute; z-index: 700; inset: 0; display: grid; place-content: center; gap: 12px; justify-items: center; color: #56ddef; background: #031a31e8; font-size: 15px; }.dashboard-map__empty button { padding: 6px 14px; color: #d8faff; background: #075477; border: 1px solid #24cbe3; cursor: pointer; }
 .layer-manager { position: absolute; z-index: 500; top: 10px; left: 10px; width: 198px; max-height: calc(100% - 20px); overflow-y: auto; color: #bde6ef; background: #03182eed; border: 1px solid #0b6189; box-shadow: 0 0 14px #00a7d52b; }.tool-title { min-height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: #06476b; border-bottom: 1px solid #0d6388; font-size: 15px; }.tool-title button { padding: 2px 4px; color: #7bdcea; background: transparent; border: 0; font-size: 12px; cursor: pointer; }
 .layer-row { width: 100%; display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 7px; padding: 7px 8px; color: #6f99aa; background: transparent; border: 0; border-bottom: 1px solid #0a3e59; text-align: left; cursor: pointer; }.layer-row:hover,.layer-row.active { color: #d6f8ff; background: #07567866; }.layer-row>i { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }.layer-row span,.layer-row b,.layer-row small { min-width: 0; display: block; }.layer-row b { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }.layer-row small { margin-top: 3px; color: #52798a; font-size: 11px; }.layer-row em { color: #39ddef; font-size: 14px; font-style: normal; }.layer-section-title { padding: 5px 8px; color: #6591a3; background: #04243d; font-size: 12px; }.route-symbol { width: 12px!important; height: 2px!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#ff4d5b 0 3px,transparent 3px 5px)!important; }
-.map-search { position: absolute; z-index: 550; top: 10px; right: 70px; width: 270px; min-height: 31px; display: flex; align-items: center; gap: 7px; padding: 0 9px; color: #55dff3; background: #031a31ef; border: 1px solid #11618a; box-shadow: 0 0 10px #00a9de1f; }.map-search input { min-width: 0; height: 29px; flex: 1; border: 0; outline: 0; color: #c6edf7; background: transparent; font-size: 14px; }.search-results { position: absolute; left: -1px; right: -1px; top: 31px; background: #031a31f5; border: 1px solid #11618a; }.search-results button { width: 100%; padding: 7px 9px; color: #bfe8f1; background: transparent; border: 0; border-bottom: 1px solid #0b405c; text-align: left; cursor: pointer; }.search-results button:hover { background: #075479; }.search-results b,.search-results small { display: block; font-size: 14px; }.search-results small { margin-top: 3px; color: #5c8293; font-size: 11px; }
+.map-search { position: absolute; z-index: 550; top: 10px; right: 70px; width: 42px; min-height: 31px; display: flex; align-items: center; padding: 0; color: #55dff3; background: #031a31ef; border: 1px solid #11618a; box-shadow: 0 0 10px #00a9de1f; transition: width .18s ease, padding .18s ease; }.map-search.expanded { width: 270px; padding: 0 9px; }.map-search input { min-width: 0; height: 29px; flex: 1; border: 0; outline: 0; color: #c6edf7; background: transparent; font-size: 14px; }.map-search-toggle { width: 40px; height: 100%; flex: 0 0 40px; padding: 0; color: currentColor; background: transparent; border: 0; cursor: pointer; font-size: 23px; line-height: 1; transform: scaleX(-1); }.search-results { position: absolute; left: -1px; right: -1px; top: 31px; background: #031a31f5; border: 1px solid #11618a; }.search-results button { width: 100%; padding: 7px 9px; color: #bfe8f1; background: transparent; border: 0; border-bottom: 1px solid #0b405c; text-align: left; cursor: pointer; }.search-results button:hover { background: #075479; }.search-results b,.search-results small { display: block; font-size: 14px; }.search-results small { margin-top: 3px; color: #5c8293; font-size: 11px; }
 .map-tools { position: absolute; z-index: 600; right: 10px; top: 10px; width: 50px; display: grid; gap: 4px; }.map-tools>button { min-height: 40px; display: grid; place-items: center; gap: 2px; padding: 4px; color: #84b2c3; background: #031a30ed; border: 1px solid #155a7c; cursor: pointer; }.map-tools>button:hover,.map-tools>button.active { color: #fff; border-color: #24cbe3; background: #075477; }.map-tools i { font-size: 16px; font-style: normal; }.map-tools span { font-size: 11px; }.compass { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #31d9e9; border-radius: 50%; color: #ff7180; font-size: 14px!important; }.tool-submenu { position: absolute; top: 88px; right: 55px; width: 82px; padding: 4px; background: #031a31f5; border: 1px solid #157298; }.tool-submenu button { width: 100%; padding: 7px; color: #88b7c7; background: transparent; border: 0; text-align: left; font-size: 12px; cursor: pointer; }.tool-submenu button:hover,.tool-submenu button.active { color: #fff; background: #08698e; }.base-submenu { top: 220px; }
 .measure-result,.tool-message { position: absolute; z-index: 550; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; color: #c8f8ff; background: #03223aef; border: 1px solid #18a2c1; font-size: 14px; box-shadow: 0 0 10px #12bbd544; }.tool-message { bottom: 46px; cursor: pointer; }.tool-message-enter-active,.tool-message-leave-active { transition: opacity .2s ease, transform .2s ease; }.tool-message-enter-from,.tool-message-leave-to { opacity: 0; transform: translate(-50%, 6px); }.map-scale { position: absolute; z-index: 500; right: 68px; bottom: 7px; padding: 4px 8px; color: #77a9b9; background: #021728cc; font-size: 12px; }
 :deep(.business-task-marker),:deep(.business-drone-marker),:deep(.custom-annotation) { background: transparent; border: 0; }:deep(.business-task-marker span) { width: 23px; height: 23px; display: grid; place-items: center; color: white; background: color-mix(in srgb, var(--marker-color), #062239 35%); border: 2px solid var(--marker-color); border-radius: 50% 50% 50% 5px; transform: rotate(-45deg); box-shadow: 0 0 10px var(--marker-color); font-size: 14px; }:deep(.business-drone-marker) { display: flex; align-items: center; gap: 4px; color: #79eff9; }:deep(.business-drone-marker span) { width: 24px; height: 24px; display: grid; place-items: center; background: #087b9e; border: 1px solid #4defff; border-radius: 50%; box-shadow: 0 0 10px #22e5f4; }:deep(.business-drone-marker b) { padding: 2px 4px; background: #03233ddd; font-size: 12px; white-space: nowrap; }:deep(.business-task-label),:deep(.measure-index) { color: #c9f7ff; background: #03223ddd; border: 1px solid #17698e; box-shadow: none; border-radius: 2px; font: 11px "Microsoft YaHei"; }:deep(.leaflet-popup-content-wrapper),:deep(.leaflet-popup-tip) { color: #d9f8ff; background: #061d34; border: 1px solid #1685ad; border-radius: 2px; }:deep(.business-popup strong),:deep(.business-popup span),:deep(.business-popup small) { display: block; }:deep(.business-popup span) { margin-top: 5px; color: #8db5c3; font-size: 14px; }:deep(.business-popup small) { margin-top: 6px; color: #5d899b; }:deep(.custom-annotation span) { width: 25px; height: 25px; display: grid; place-items: center; color: #fff; background: #e86835; border: 2px solid #ffd7a8; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 0 8px #ff8a45; }
@@ -600,10 +665,10 @@ onBeforeUnmount(() => {
 .map-tools { top: 52px; right: 10px; width: 72px; gap: 4px; }.map-tools>button { min-height: 36px; grid-template-columns: 20px 1fr; justify-content: start; padding: 4px 6px; }.map-tools i { font-size: 14px; }.map-tools span { font-size: 11px; }.compass { width: 18px; height: 18px; font-size: 12px!important; }
 
 /* The layer panel is the only left-side control; operational tools form one right-side rail. */
-.layer-manager { top: 58px; width: 255px; height: auto; max-height: calc(100% - 68px); display: flex; flex-direction: column; transform: none; overflow-y: auto; border: 1px solid #1688bf; border-radius: 14px; background: #031c37b8; box-shadow: 0 0 18px #00a7d534; }.tool-title { min-height: 46px; padding: 0 15px; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg, #056ea7c9, #073f6dc9); font-size: 18px; }.tool-title button { font-size: 14px; }.layer-row { box-sizing: border-box; min-height: 43px; flex: 0 0 43px; grid-template-columns: 18px 1fr auto; gap: 10px; padding: 9px 16px; border: 0; border-bottom: 1px solid #0d5278; background: #031c37b8; }.layer-row:last-child { border-bottom: 0; }.layer-row b { font-size: 17px; }.layer-row em { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; font-size: 0; transform: translateX(-8px); }.layer-row.active em { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }.layer-row>i { width: 16px; height: 16px; border-radius: 1px; box-shadow: none; }.layer-row.disabled { cursor: not-allowed; opacity: .55; }.dom-imagery-symbol { width: 16px!important; height: 2px!important; border: 0!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#20b9ff 0 4px,transparent 4px 7px)!important; }
-.map-search { width: 310px; min-height: 42px; padding: 0 12px; border-color: #188fc0; border-radius: 12px; background: #031a31b8; }.map-search span { order: 2; margin-left: 4px; font-size: 26px; line-height: 1; transform: scaleX(-1); }.map-search input { order: 1; height: 40px; font-size: 14px; }.search-results { top: 42px; overflow: hidden; border-radius: 0 0 12px 12px; }
-.map-tools { top: 56px; right: 10px; bottom: 34px; width: 120px; display: flex; flex-direction: column; justify-content: center; gap: 4px; overflow: visible; border: 0; border-radius: 0; background: transparent; }.map-tools>button { min-height: 33px; flex: 0 0 33px; grid-template-columns: 22px 1fr; gap: 6px; padding: 4px 10px; border: 1px solid #155a7c; border-radius: 8px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-tools>button:last-of-type { border-bottom: 1px solid #155a7c; }.map-tools>button:hover,.map-tools>button.active { border-color: #24cbe3; background: #075477d0; }.map-tools i { font-size: 16px; }.map-tools span { font-size: 12px; white-space: nowrap; }.compass { width: 20px; height: 20px; font-size: 12px!important; }.right-submenu { top: 50%; right: 126px; width: 108px; transform: translateY(-50%); }.right-submenu button { font-size: 12px; }
-.map-mode-switch { flex: 0 0 68px; display: grid; grid-template-rows: 1fr 1fr; overflow: hidden; border: 1px solid #155a7c; border-radius: 8px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-mode-switch button { display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 6px; padding: 3px 10px; color: #84b2c3; background: transparent; border: 0; cursor: pointer; }.map-mode-switch button+button { border-top: 1px solid #155a7c; }.map-mode-switch button:hover,.map-mode-switch button.active { color: #fff; background: #075477d0; }.map-mode-switch span { font-size: 12px; white-space: nowrap; }.mode-indicator { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; }.map-mode-switch button.active .mode-indicator { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }
+.layer-manager { top: 80px; width: 255px; height: auto; max-height: calc(100% - 90px); display: flex; flex-direction: column; transform: none; overflow-y: auto; border: 1px solid #1688bf; border-radius: 14px; background: #031c37b8; box-shadow: 0 0 18px #00a7d534; }.tool-title { min-height: 46px; padding: 0 15px; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg, #056ea7c9, #073f6dc9); font-size: 18px; }.tool-title button { font-size: 14px; }.layer-row { box-sizing: border-box; min-height: 43px; flex: 0 0 43px; grid-template-columns: 18px 1fr auto; gap: 10px; padding: 9px 16px; border: 0; border-bottom: 1px solid #0d5278; background: #031c37b8; }.layer-row:last-child { border-bottom: 0; }.layer-row b { font-size: 17px; }.layer-row em { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; font-size: 0; transform: translateX(-8px); }.layer-row.active em { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }.layer-row>i { width: 16px; height: 16px; border-radius: 1px; box-shadow: none; }.layer-row.disabled { cursor: not-allowed; opacity: .55; }.dom-imagery-symbol { width: 16px!important; height: 2px!important; border: 0!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#20b9ff 0 4px,transparent 4px 7px)!important; }
+.map-search { width: 42px; min-height: 42px; padding: 0; border-color: #188fc0; border-radius: 12px; background: #031a31b8; }.map-search.expanded { width: 310px; padding: 0 12px; }.map-search input { order: 1; height: 40px; font-size: 14px; }.map-search-toggle { order: 2; width: 42px; height: 42px; flex-basis: 42px; display: grid; place-items: center; margin-left: 4px; transform: none; }.map-search-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }.search-results { top: 42px; max-height: 286px; overflow-y: auto; border-radius: 0 0 12px 12px; box-shadow: 0 8px 16px #00101b77; }.search-results button { padding: 9px 12px; }.search-results button:last-child { border-bottom: 0; }.search-results b { color: #d6f8ff; font-size: 14px; }.search-results small { color: #78a8b9; font-size: 12px; }.search-results p { margin: 0; padding: 13px 12px; color: #7da7b8; font-size: 13px; }
+.map-tools { top: 56px; right: 12px; bottom: 34px; width: 138px; display: flex; flex-direction: column; justify-content: center; gap: 5px; overflow: visible; border: 0; border-radius: 0; background: transparent; }.map-tools>button { min-height: 40px; flex: 0 0 40px; grid-template-columns: 26px 1fr; gap: 8px; padding: 5px 12px; border: 1px solid #155a7c; border-radius: 9px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-tools>button:last-of-type { border-bottom: 1px solid #155a7c; }.map-tools>button:hover,.map-tools>button.active { border-color: #24cbe3; background: #075477d0; }.map-tools i { font-size: 19px; }.map-tools span { font-size: 14px; white-space: nowrap; }.compass { width: 23px; height: 23px; font-size: 14px!important; }.right-submenu { top: 50%; right: 146px; width: 118px; transform: translateY(-50%); }.right-submenu button { font-size: 13px; }
+.map-mode-switch { flex: 0 0 82px; display: grid; grid-template-rows: 1fr 1fr; overflow: hidden; border: 1px solid #155a7c; border-radius: 9px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-mode-switch button { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 8px; padding: 4px 12px; color: #84b2c3; background: transparent; border: 0; cursor: pointer; }.map-mode-switch button+button { border-top: 1px solid #155a7c; }.map-mode-switch button:hover,.map-mode-switch button.active { color: #fff; background: #075477d0; }.map-mode-switch span { font-size: 14px; white-space: nowrap; }.mode-indicator { width: 15px; height: 15px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; }.map-mode-switch button.active .mode-indicator { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }
 .map-scale { right: 14px; bottom: 10px; width: 96px; height: 18px; padding: 0; color: #b9e7f4; background: transparent; font-size: 11px; text-align: center; }.map-scale b { position: relative; z-index: 1; display: block; font-size: 11px; font-weight: 600; line-height: 12px; }.map-scale i { position: absolute; right: 0; bottom: 0; left: 0; height: 7px; border-right: 2px solid #b9e7f4; border-bottom: 2px solid #b9e7f4; border-left: 2px solid #b9e7f4; }
 :deep(.leaflet-administrative-boundaries-pane path) { filter: drop-shadow(0 0 4px #168fe2cc); }
 </style>

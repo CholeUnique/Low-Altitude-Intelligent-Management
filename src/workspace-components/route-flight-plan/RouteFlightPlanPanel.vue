@@ -11,9 +11,10 @@ import {
   getRoutes,
   getUavComponentUrl,
   getUavDeviceOptions,
+  getUavFlightTaskOptions,
   getUavProjectOptions,
 } from '@/api/patrol'
-import type { PatrolProjectOption, UavDeviceOption, UavOpenComponentType } from '@/api/patrol'
+import type { PatrolProjectOption, UavDeviceOption, UavFlightTaskOption, UavOpenComponentType } from '@/api/patrol'
 import {
   buildRouteMetrics,
   createFlightPlans,
@@ -26,11 +27,15 @@ import {
 import NewRouteDialog from './NewRouteDialog.vue'
 import RouteWorkspaceMap from './RouteWorkspaceMap.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   task?: PortalTask
   taskLoading?: boolean
   taskError?: string
-}>()
+  /** 是否显示编辑、座舱、回放等航线组件工具栏。 */
+  showComponentNav?: boolean
+}>(), {
+  showComponentNav: true,
+})
 
 const routes = ref<FlightRoute[]>(createRoutesForTask(props.task))
 const historyRoutes = ref<FlightRoute[]>(createHistoryRoutes(props.task))
@@ -59,15 +64,16 @@ const openComponentItems: Array<{ type: UavOpenComponentType; label: string; ico
   { type: 'COCKPIT', label: '进入虚拟座舱', icon: VideoCamera },
   { type: 'TRAJECTORY_PLAYBACK', label: '轨迹回放', icon: RefreshRight },
 ]
+/** 创建飞行计划由飞行作业主导航承载，避免在两级菜单重复出现。 */
+const openComponentNavItems = computed(() => openComponentItems.filter((item) => item.type !== 'FLIGHT_CREATE'))
 const activeOpenComponentType = ref<UavOpenComponentType>('WAYLINE_CREATE')
 const activeOpenComponent = computed(() =>
   openComponentItems.find((item) => item.type === activeOpenComponentType.value) || openComponentItems[0],
 )
 const dasFlyComponentUrl = ref('')
 /**
- * 后端生成授权时当前返回 fly-api.get3d.cn（开放 API 域名），该域名禁止 iframe。
- * 航线组件实际展示页为 fly.get3d.cn；保留后端返回的 path/query（尤其是实时分享码），
- * 仅在确定是该 API 域名时替换为页面域名，兼容原先可内嵌的组件链接。
+ * fly-api.get3d.cn 只负责签发开放组件 URL，浏览器会拒绝将该 API 域嵌入 iframe。
+ * 将后端签发的 path/query/hash 原样保留，仅替换为供应商可展示的 fly.get3d.cn 域名。
  */
 const dasFlyComponentEmbedUrl = computed(() => {
   if (!dasFlyComponentUrl.value) return ''
@@ -86,11 +92,37 @@ const dasFlyComponentEmbedUrl = computed(() => {
 const dasFlyEmbedLoading = ref(false)
 const dasFlyEmbedError = ref('')
 let dasFlyEmbedRequestVersion = 0
+type OpenComponentSelection = {
+  id: string
+  title: string
+  detail: string
+  state: string
+  waylineId?: string
+  flightTaskId?: string
+}
+const componentSelectorVisible = ref(false)
+const componentSelectorLoading = ref(false)
+const componentSelectorError = ref('')
+const componentSelectorKeyword = ref('')
+const componentSelectorItems = ref<OpenComponentSelection[]>([])
+const selectedComponentSelectionId = ref('')
+let componentSelectorRequestVersion = 0
 const taskReferenceType = computed(() => String(props.task?.refType || 'NONE').toUpperCase())
 const taskReferenceId = computed(() => props.task?.refId || '')
 const isTaskPlanBound = computed(() => Boolean(props.task && taskReferenceType.value === 'PLAN' && taskReferenceId.value))
+const componentRequiresSelection = (type: UavOpenComponentType) =>
+  type === 'WAYLINE_EDIT' || type === 'COCKPIT' || type === 'TRAJECTORY_PLAYBACK'
+const componentSelectorTitle = computed(() => activeOpenComponentType.value === 'WAYLINE_EDIT' ? '选择待编辑航线' : '选择关联飞行任务')
+const componentSelectorHint = computed(() => activeOpenComponentType.value === 'WAYLINE_EDIT'
+  ? '请选择具有有效航线 ID 的航线，确认后将进入对应航线的编辑界面。'
+  : '请选择具有有效飞行任务 ID 的任务，确认后将进入对应的开放组件。')
+const filteredComponentSelectorItems = computed(() => {
+  const keyword = componentSelectorKeyword.value.trim().toLowerCase()
+  if (!keyword) return componentSelectorItems.value
+  return componentSelectorItems.value.filter((item) => `${item.title}${item.detail}${item.id}`.toLowerCase().includes(keyword))
+})
 
-async function loadDasFlyComponentUrl() {
+async function loadDasFlyComponentUrl(target: { waylineId?: string; flightTaskId?: string } = {}) {
   const requestVersion = ++dasFlyEmbedRequestVersion
   if (!useDasFlyEmbed.value) {
     dasFlyComponentUrl.value = ''
@@ -100,10 +132,7 @@ async function loadDasFlyComponentUrl() {
   dasFlyEmbedLoading.value = true
   dasFlyEmbedError.value = ''
   try {
-    // 仅当关联对象确为数字型飞行任务 ID 时传入；接口省略该字段即创建通用航线。
-    const refId = taskReferenceType.value === 'TASK' ? taskReferenceId.value : ''
-    const flightTaskId = /^\d+$/.test(refId) ? refId : undefined
-    const url = await getUavComponentUrl(activeOpenComponentType.value, flightTaskId)
+    const url = await getUavComponentUrl(activeOpenComponentType.value, target)
     if (requestVersion === dasFlyEmbedRequestVersion) dasFlyComponentUrl.value = url
   } catch (error) {
     if (requestVersion === dasFlyEmbedRequestVersion) {
@@ -117,10 +146,116 @@ async function loadDasFlyComponentUrl() {
   }
 }
 
+function routeSelections(source: FlightRoute[]): OpenComponentSelection[] {
+  return source.filter((route) => Boolean(route.id)).map((route) => ({
+    id: `wayline:${route.id}`,
+    title: route.name,
+    detail: `${route.routeTypeLabel} · ${route.area || '未填写区域'} · 航线 ID：${route.id}`,
+    state: route.status,
+    waylineId: route.id,
+  }))
+}
+
+function flightTaskSelections(source: UavFlightTaskOption[]): OpenComponentSelection[] {
+  return source.filter((task) => Boolean(task.id)).map((task) => ({
+    id: `flight:${task.id}`,
+    title: task.name,
+    detail: `${task.waylineName} · ${task.deviceName} · 飞行任务 ID：${task.id}`,
+    state: task.status,
+    flightTaskId: task.id,
+    waylineId: task.waylineId || undefined,
+  }))
+}
+
+async function openComponentSelector(type: UavOpenComponentType) {
+  activeOpenComponentType.value = type
+  dasFlyComponentUrl.value = ''
+  dasFlyEmbedError.value = ''
+  componentSelectorVisible.value = true
+  componentSelectorLoading.value = true
+  componentSelectorError.value = ''
+  componentSelectorKeyword.value = ''
+  componentSelectorItems.value = []
+  selectedComponentSelectionId.value = ''
+  const requestVersion = ++componentSelectorRequestVersion
+  try {
+    if (type === 'WAYLINE_EDIT') {
+      let source = routes.value
+      if (!source.length && !isMockMode()) source = (await getRoutes({ pageNum: 1, pageSize: 200, projectId: selectedProjectId.value || undefined })).list
+      const items = routeSelections(source)
+      if (!items.length) throw new Error('未查询到可编辑的航线，请先创建或同步航线。')
+      if (requestVersion === componentSelectorRequestVersion) componentSelectorItems.value = items
+    } else {
+      const result = await getUavFlightTaskOptions({ pageNum: 1, pageSize: 200, projectId: selectedProjectId.value || undefined })
+      const items = flightTaskSelections(result.list)
+      if (!items.length) throw new Error('未查询到可用飞行任务，请先创建飞行计划并生成飞行任务。')
+      if (requestVersion === componentSelectorRequestVersion) componentSelectorItems.value = items
+    }
+  } catch (error) {
+    if (requestVersion === componentSelectorRequestVersion) componentSelectorError.value = error instanceof Error ? error.message : '选择数据加载失败，请重试。'
+  } finally {
+    if (requestVersion === componentSelectorRequestVersion) componentSelectorLoading.value = false
+  }
+}
+
+/** 切换开放组件时关闭选择层，并废弃尚未返回的选项请求。 */
+function dismissComponentSelector() {
+  componentSelectorRequestVersion += 1
+  componentSelectorVisible.value = false
+  componentSelectorLoading.value = false
+  componentSelectorError.value = ''
+  componentSelectorKeyword.value = ''
+  componentSelectorItems.value = []
+  selectedComponentSelectionId.value = ''
+}
+
 function selectOpenComponent(type: UavOpenComponentType) {
+  if (componentRequiresSelection(type)) {
+    void openComponentSelector(type)
+    return
+  }
+  dismissComponentSelector()
   if (activeOpenComponentType.value === type && dasFlyComponentUrl.value) return
   activeOpenComponentType.value = type
+  dasFlyComponentUrl.value = ''
   void loadDasFlyComponentUrl()
+}
+
+function openFlightPlanCreate() {
+  selectOpenComponent('FLIGHT_CREATE')
+}
+
+function openWaylineCreate() {
+  selectOpenComponent('WAYLINE_CREATE')
+}
+
+function openWaylineEdit() {
+  selectOpenComponent('WAYLINE_EDIT')
+}
+
+function openCockpit() {
+  selectOpenComponent('COCKPIT')
+}
+
+function openTrajectoryPlayback() {
+  selectOpenComponent('TRAJECTORY_PLAYBACK')
+}
+
+defineExpose({ openFlightPlanCreate, openWaylineCreate, openWaylineEdit, openCockpit, openTrajectoryPlayback })
+
+function confirmComponentSelection() {
+  const selected = componentSelectorItems.value.find((item) => item.id === selectedComponentSelectionId.value)
+  if (!selected) {
+    componentSelectorError.value = '请先选择一条记录。'
+    return
+  }
+  dismissComponentSelector()
+  void loadDasFlyComponentUrl({ waylineId: selected.waylineId, flightTaskId: selected.flightTaskId })
+}
+
+function retryActiveOpenComponent() {
+  if (componentRequiresSelection(activeOpenComponentType.value)) void openComponentSelector(activeOpenComponentType.value)
+  else void loadDasFlyComponentUrl()
 }
 
 function clearScopedData() {
@@ -245,7 +380,7 @@ async function loadScopedPatrolData() {
 }
 
 watch(() => props.task?.id, () => void loadPatrolData(), { immediate: true })
-watch([useDasFlyEmbed, taskReferenceType, taskReferenceId], () => void loadDasFlyComponentUrl(), { immediate: true })
+watch(useDasFlyEmbed, () => void loadDasFlyComponentUrl(), { immediate: true })
 
 const activeRoute = computed(() => routes.value.find((item) => item.id === activeRouteId.value) || routes.value[0])
 const filteredRoutes = computed(() =>
@@ -358,11 +493,11 @@ function addPlan() {
 </script>
 
 <template>
-  <div class="route-flight-plan" :class="{ 'route-flight-plan--embed': useDasFlyEmbed }">
+  <div class="route-flight-plan" :class="{ 'route-flight-plan--embed': useDasFlyEmbed, 'route-flight-plan--without-component-nav': useDasFlyEmbed && !props.showComponentNav }">
     <section v-if="useDasFlyEmbed" class="das-fly-wayline-embed">
-      <nav class="das-fly-component-nav" aria-label="低空云开放组件">
+      <nav v-if="props.showComponentNav" class="das-fly-component-nav" aria-label="低空云开放组件">
         <button
-          v-for="item in openComponentItems"
+          v-for="item in openComponentNavItems"
           :key="item.type"
           class="das-fly-component-nav__item"
           :class="{ active: item.type === activeOpenComponentType }"
@@ -373,8 +508,37 @@ function addPlan() {
         </button>
       </nav>
       <div class="das-fly-component-main">
-        <div v-if="dasFlyEmbedLoading" class="das-fly-wayline-state">正在获取{{ activeOpenComponent?.label }}授权…</div>
-        <div v-else-if="dasFlyEmbedError" class="das-fly-wayline-state is-error"><span>{{ dasFlyEmbedError }}</span><button @click="loadDasFlyComponentUrl">重新获取</button></div>
+        <section v-if="componentSelectorVisible" class="component-selector" aria-live="polite">
+          <header>
+            <div><h2>{{ componentSelectorTitle }}</h2><p>{{ componentSelectorHint }}</p></div>
+            <button type="button" aria-label="关闭选择面板" @click="dismissComponentSelector">×</button>
+          </header>
+          <input v-model="componentSelectorKeyword" class="component-selector__search" placeholder="搜索名称、区域、设备或 ID" />
+          <div v-if="componentSelectorLoading" class="component-selector__state">正在读取可选择记录…</div>
+          <div v-else-if="componentSelectorError" class="component-selector__state is-error">
+            <span>{{ componentSelectorError }}</span>
+            <button type="button" @click="openComponentSelector(activeOpenComponentType)">重新加载</button>
+          </div>
+          <div v-else class="component-selector__list">
+            <button
+              v-for="item in filteredComponentSelectorItems"
+              :key="item.id"
+              type="button"
+              :class="{ active: item.id === selectedComponentSelectionId }"
+              @click="selectedComponentSelectionId = item.id"
+            >
+              <span><b>{{ item.title }}</b><small>{{ item.detail }}</small></span>
+              <em>{{ item.state }}</em>
+            </button>
+            <div v-if="!filteredComponentSelectorItems.length" class="component-selector__state">没有匹配的记录。</div>
+          </div>
+          <footer>
+            <button type="button" class="component-selector__cancel" @click="dismissComponentSelector">取消</button>
+            <button type="button" class="component-selector__confirm" :disabled="!selectedComponentSelectionId" @click="confirmComponentSelection">确认进入{{ activeOpenComponent?.label }}</button>
+          </footer>
+        </section>
+        <div v-else-if="dasFlyEmbedLoading" class="das-fly-wayline-state">正在获取{{ activeOpenComponent?.label }}授权…</div>
+        <div v-else-if="dasFlyEmbedError" class="das-fly-wayline-state is-error"><span>{{ dasFlyEmbedError }}</span><button @click="retryActiveOpenComponent">重新选择并获取</button></div>
         <iframe
           v-else-if="dasFlyComponentEmbedUrl"
           :key="activeOpenComponentType"
@@ -564,6 +728,7 @@ function addPlan() {
 }
 .route-flight-plan--embed { display: block; padding: 0; background: #031a31; }
 .das-fly-wayline-embed { width: 100%; height: 100%; min-height: 0; display: grid; grid-template-columns: 154px minmax(0, 1fr); overflow: hidden; background: #031a31; }
+.route-flight-plan--without-component-nav .das-fly-wayline-embed { grid-template-columns: minmax(0, 1fr); }
 .das-fly-component-nav { z-index: 2; display: grid; align-content: start; gap: 4px; padding: 16px 9px; color: #aeadb5; background: #302f37; border-right: 1px solid #403f48; box-shadow: 3px 0 14px #00000035; }
 .das-fly-component-nav__item { width: 100%; min-height: 38px; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 8px; padding: 6px 9px; color: #bebcc4; background: transparent; border: 1px solid transparent; border-radius: 6px; cursor: pointer; text-align: left; transition: .18s ease; }
 .das-fly-component-nav__item:hover { color: #fff; background: #ffffff12; }
@@ -571,9 +736,10 @@ function addPlan() {
 .das-fly-component-nav__item i { width: 22px; height: 22px; display: grid; place-items: center; color: currentColor; font-style: normal; line-height: 1; }
 .das-fly-component-nav__item i :deep(svg) { width: 20px; height: 20px; stroke-width: 1.7; }
 .das-fly-component-nav__item span { overflow: hidden; font-size: 14px; font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
-.das-fly-component-main { min-width: 0; min-height: 0; background: #031a31; }
+.das-fly-component-main { position: relative; min-width: 0; min-height: 0; background: #031a31; }
 .das-fly-component-main iframe { width: 100%; height: 100%; display: block; border: 0; background: #031a31; }
 .das-fly-wayline-state { width: 100%; height: 100%; display: grid; place-content: center; gap: 14px; justify-items: center; padding: 28px; box-sizing: border-box; color: #a9eaf4; font-size: 16px; text-align: center; background: #031a31; }.das-fly-wayline-state.is-error { color: #ffb5bb; }.das-fly-wayline-state button { padding: 9px 16px; color: #d7f8ff; background: #075477; border: 1px solid #24cbe3; cursor: pointer; font-size: 15px; }
+.component-selector { width: min(720px, calc(100% - 48px)); max-height: min(700px, calc(100% - 48px)); display: grid; grid-template-rows: auto auto minmax(120px, 1fr) auto; gap: 14px; padding: 24px; box-sizing: border-box; color: #cceaf6; background: linear-gradient(145deg, #073253, #03182f 70%); border: 1px solid #1d8fbc; border-radius: 10px; box-shadow: 0 18px 45px #000b, 0 0 22px #0ac6e333; position: absolute; z-index: 4; inset: 50% auto auto 50%; transform: translate(-50%, -50%); }.component-selector header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }.component-selector h2 { margin: 0; color: #e3fbff; font-size: 21px; }.component-selector p { margin: 8px 0 0; color: #81abbc; font-size: 14px; line-height: 1.5; }.component-selector header>button { width: 30px; height: 30px; color: #82aec0; background: transparent; border: 0; cursor: pointer; font-size: 26px; line-height: 1; }.component-selector header>button:hover { color: #fff; }.component-selector__search { width: 100%; height: 38px; padding: 0 12px; box-sizing: border-box; color: #d8f7ff; background: #02192e; border: 1px solid #176a8d; border-radius: 5px; outline: none; font-size: 14px; }.component-selector__search:focus { border-color: #2ad8ee; box-shadow: 0 0 0 2px #1bd4ea22; }.component-selector__list { min-height: 0; overflow: auto; border: 1px solid #0b5277; background: #031d35; }.component-selector__list>button { width: 100%; min-height: 62px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 14px; color: #bfdeea; background: transparent; border: 0; border-bottom: 1px solid #0b415f; cursor: pointer; text-align: left; }.component-selector__list>button:last-child { border-bottom: 0; }.component-selector__list>button:hover,.component-selector__list>button.active { background: #08628470; }.component-selector__list>button.active { box-shadow: inset 3px 0 #2ce2ef; }.component-selector__list span,.component-selector__list b,.component-selector__list small { min-width: 0; display: block; }.component-selector__list b { overflow: hidden; color: #e2f8fc; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }.component-selector__list small { margin-top: 5px; overflow: hidden; color: #77a7ba; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.component-selector__list em { padding: 4px 7px; color: #6de5cf; background: #075f4a66; border: 1px solid #12725e; font-size: 12px; font-style: normal; white-space: nowrap; }.component-selector__state { min-height: 120px; display: grid; place-content: center; gap: 12px; justify-items: center; color: #89b8c8; text-align: center; }.component-selector__state.is-error { color: #ffb6bc; }.component-selector__state button { padding: 7px 13px; color: #d7f8ff; background: #075477; border: 1px solid #24cbe3; cursor: pointer; }.component-selector footer { display: flex; justify-content: flex-end; gap: 10px; }.component-selector footer button { min-height: 36px; padding: 0 15px; border-radius: 4px; cursor: pointer; font-size: 14px; }.component-selector__cancel { color: #9fc7d6; background: transparent; border: 1px solid #28617b; }.component-selector__confirm { color: #021625; background: #34dce9; border: 1px solid #79f5fc; }.component-selector__confirm:disabled { color: #69899a; background: #17445a; border-color: #255a70; cursor: not-allowed; }
 .map-stage {
   position: relative;
   isolation: isolate;

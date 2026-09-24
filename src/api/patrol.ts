@@ -6,11 +6,12 @@ import { apiClient, isMockMode } from '@/api/client'
 import {
   toFlightPlanList,
   toFlightTaskDetail,
+  toFlightTaskOptionList,
   toMediaList,
   toProjectOptions,
   toRouteList,
 } from '@/adapters/dasFly'
-import type { PatrolProjectOption } from '@/adapters/dasFly'
+import type { PatrolProjectOption, UavFlightTaskOption } from '@/adapters/dasFly'
 
 export interface PageQuery {
   pageNum?: number
@@ -26,9 +27,13 @@ export interface UavDeviceOption {
   label: string
   sn?: string
   online?: boolean
+  model?: string
+  longitude?: number
+  latitude?: number
 }
 
 export type { PatrolProjectOption }
+export type { UavFlightTaskOption }
 
 /** 低空云开放组件类型，与后端 UavComponentUrlReq 的 type 枚举保持一致。 */
 export type UavOpenComponentType =
@@ -42,13 +47,24 @@ export type UavOpenComponentType =
  * 获取低空大师开放组件的短时效访问地址。
  * 后端会代为向低空大师换取分享码，并将完整组件 URL 作为 data 返回。
  */
-export async function getUavComponentUrl(type: UavOpenComponentType, flightTaskId?: string | number): Promise<string> {
+export interface UavComponentTarget {
+  flightTaskId?: string | number
+  waylineId?: string | number
+}
+
+export async function getUavComponentUrl(type: UavOpenComponentType, target: UavComponentTarget = {}): Promise<string> {
   if (isMockMode()) throw new Error('Mock 模式不调用低空大师开放组件接口。')
-  const data = await apiClient.post<never, unknown>('/v1/uav/component/url', {
-    type,
-    // Swagger 示例明确给出 0；即使后端说明可省略，也显式传值以兼容其请求 DTO 校验。
-    flightTaskId: flightTaskId !== undefined && flightTaskId !== '' ? flightTaskId : 0,
-  })
+  const request: Record<string, string | number> = { type }
+  if (type === 'WAYLINE_EDIT') {
+    if (target.waylineId === undefined || target.waylineId === '') throw new Error('编辑航线必须选择有效航线。')
+    // 以当前 Swagger 和已验证成功的请求为准，开放接口使用 camelCase 字段名。
+    request.waylineId = target.waylineId
+  }
+  if (type === 'COCKPIT' || type === 'TRAJECTORY_PLAYBACK') {
+    if (target.flightTaskId === undefined || target.flightTaskId === '') throw new Error(`${type === 'COCKPIT' ? '虚拟座舱' : '轨迹回放'}必须选择有效飞行任务。`)
+    request.flightTaskId = target.flightTaskId
+  }
+  const data = await apiClient.post<never, unknown>('/v1/uav/component/url', request)
   if (typeof data !== 'string' || !data.trim()) throw new Error('开放组件接口未返回有效访问地址。')
   return data.trim()
 }
@@ -85,11 +101,16 @@ export async function getUavDeviceOptions(): Promise<UavDeviceOption[]> {
     const model = item.deviceModelName && item.deviceModelName !== item.nickname && item.deviceModelName !== item.deviceName
       ? ` · ${String(item.deviceModelName)}`
       : ''
+    const longitude = Number(item.longitude ?? item.lng ?? item.lon)
+    const latitude = Number(item.latitude ?? item.lat)
     return {
       id,
       label: `${name}${model}`,
       sn,
       online: Number(item.deviceOnlineStatus ?? item.onlineStatus ?? item.online ?? 0) === 1,
+      model: item.deviceModelName ? String(item.deviceModelName) : undefined,
+      longitude: Number.isFinite(longitude) && Math.abs(longitude) <= 180 ? longitude : undefined,
+      latitude: Number.isFinite(latitude) && Math.abs(latitude) <= 90 ? latitude : undefined,
     }
   })
 }
@@ -170,7 +191,7 @@ export async function getFlightTaskMedia(params: PageQuery) {
   return toMediaList(data)
 }
 
-export async function getLiveStreams(): Promise<{ list: LiveStream[]; total: number }> {
+export async function getLiveStreams(): Promise<{ list: LiveStream[]; total: number; onlineDeviceCount: number }> {
   if (isMockMode()) {
     const snap = createLiveCruiseSnapshot()
     return {
@@ -186,6 +207,7 @@ export async function getLiveStreams(): Promise<{ list: LiveStream[]; total: num
         },
       ],
       total: 1,
+      onlineDeviceCount: 1,
     }
   }
   // 直播由在线设备提供，与是否存在执行中的飞行任务无关。
@@ -202,7 +224,28 @@ export async function getLiveStreams(): Promise<{ list: LiveStream[]; total: num
     return toDeviceLiveStream(device, await getLiveShareCode(sn))
   }))
   const list = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
-  return { list, total: list.length }
+  return { list, total: list.length, onlineDeviceCount: onlineDevices.length }
+}
+
+/** 开放组件选择器使用；统一适配后端飞行任务分页记录。 */
+export async function getUavFlightTaskOptions(params: PageQuery = {}): Promise<{ list: UavFlightTaskOption[]; total: number }> {
+  if (isMockMode()) {
+    const snapshot = createLiveCruiseSnapshot()
+    return {
+      list: snapshot.history.map((item) => ({
+        id: item.id,
+        name: item.title,
+        waylineId: '',
+        waylineName: '模拟历史航线',
+        deviceName: snapshot.aircraftName,
+        status: item.status,
+        createTime: item.date || '—',
+      })),
+      total: snapshot.history.length,
+    }
+  }
+  const data = await getFlightTaskPage({ pageNum: 1, pageSize: 200, ...params })
+  return toFlightTaskOptionList(data)
 }
 
 function valueOf(record: Record<string, unknown>, ...keys: string[]) {

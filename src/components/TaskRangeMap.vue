@@ -44,6 +44,8 @@ const hasAreaGeometry = computed(() => props.geoJson?.features.some((feature) =>
   return geometryType === 'POLYGON' || geometryType === 'MULTIPOLYGON'
 }) ?? false)
 let map: L.Map | undefined
+let resizeObserver: ResizeObserver | undefined
+let resizeFrame: number | undefined
 let polygon: L.Polygon | L.Polyline | undefined
 let preview: L.Polygon | L.Polyline | undefined
 let vertexLayer: L.LayerGroup | undefined
@@ -477,7 +479,10 @@ onMounted(async () => {
   map = L.map(container.value, { center: [32.455, 119.923], zoom: 10, maxZoom: 22, zoomControl: false, attributionControl: false })
   // 地图本身不限制放大级别；18 级以上复用最高级底图瓦片进行放大。
   const base = L.tileLayer(tileUrl('img'), { subdomains, maxNativeZoom: 18, maxZoom: 22 }).addTo(map)
-  L.tileLayer(tileUrl('cia'), { subdomains, maxNativeZoom: 18, maxZoom: 22 }).addTo(map)
+  const labelsPane = map.createPane('labels')
+  labelsPane.style.zIndex = '450'
+  labelsPane.style.pointerEvents = 'none'
+  L.tileLayer(tileUrl('cia'), { subdomains, maxNativeZoom: 18, maxZoom: 22, pane: 'labels' }).addTo(map)
   renderDomImagery()
   base.once('tileerror', () => { error.value = '天地图加载失败' })
   // move / zoom 会在拖拽、滚轮缩放过程中持续触发，两个窗口无需等鼠标松开便能同步。
@@ -485,6 +490,11 @@ onMounted(async () => {
   if (props.initialDrawingComplete && props.coordinates.length >= 3) drawingFinished.value = true
   renderRange()
   applyExternalView(props.view)
+  resizeObserver = new ResizeObserver(() => {
+    if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+    resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: false }))
+  })
+  resizeObserver.observe(container.value)
   if (props.editable) {
     map.on('click', (event) => {
       if (drawingFinished.value) return
@@ -507,6 +517,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearPreview()
   if (autoFitFrame !== undefined) window.cancelAnimationFrame(autoFitFrame)
+  if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+  resizeObserver?.disconnect()
   window.clearTimeout(releaseExternalViewTimer)
   domImageryLayer?.remove()
   map?.remove()

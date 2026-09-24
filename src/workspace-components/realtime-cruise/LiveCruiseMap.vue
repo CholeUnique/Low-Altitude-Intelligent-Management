@@ -24,6 +24,8 @@ const token = import.meta.env.VITE_TIANDITU_TOKEN
 const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
 
 let map: L.Map | undefined
+let resizeObserver: ResizeObserver | undefined
+let resizeFrame: number | undefined
 let routeGroup: L.LayerGroup | undefined
 const containerEl = ref<HTMLElement>()
 const routeColors = ['#20c6d8', '#2ccf85', '#f5aa42', '#a781ff', '#ff6c83', '#58a6ff']
@@ -107,11 +109,18 @@ onMounted(async () => {
   }
   routeGroup = L.layerGroup().addTo(map)
   renderTrack()
+  resizeObserver = new ResizeObserver(() => {
+    if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+    resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: false }))
+  })
+  resizeObserver.observe(containerEl.value)
 })
 
 watch(() => [props.routeCoordinates, props.flownIndex, props.dronePosition, props.routes, props.selectedTaskId], () => renderTrack(), { deep: true })
 
 onBeforeUnmount(() => {
+  if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+  resizeObserver?.disconnect()
   map?.remove()
   map = undefined
 })

@@ -290,4 +290,7 @@ th { color: #6f8393; background: #f7fafc; }
   .top-grid { grid-template-columns: 200px 1fr 250px; }
   .bottom-grid { grid-template-columns: 1fr 1fr 0.85fr 1fr; }
 }
+@media (max-width: 1120px) {
+  .top-grid { grid-template-columns: 190px minmax(0,1fr) 220px; gap: 7px; }.bottom-grid { gap: 7px; }
+}
 </style>

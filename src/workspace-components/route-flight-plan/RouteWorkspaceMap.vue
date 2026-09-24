@@ -24,6 +24,8 @@ const measureResult = ref('')
 const toolMessage = ref('')
 
 let map: L.Map | undefined
+let resizeObserver: ResizeObserver | undefined
+let resizeFrame: number | undefined
 let baseLayer: L.TileLayer | undefined
 let labelLayer: L.TileLayer | undefined
 let routeGroup: L.LayerGroup | undefined
@@ -227,13 +229,22 @@ async function initMap() {
     }
   })
   map.on('dblclick', () => { activeTool.value = null })
+  resizeObserver = new ResizeObserver(() => {
+    if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+    resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: false }))
+  })
+  resizeObserver.observe(container.value)
   window.setTimeout(() => map?.invalidateSize(), 120)
 }
 
 watch(() => [props.routes, props.activeRouteId, searchKeyword.value], () => renderRoutes(), { deep: true })
 
 onMounted(initMap)
-onBeforeUnmount(() => map?.remove())
+onBeforeUnmount(() => {
+  if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+  resizeObserver?.disconnect()
+  map?.remove()
+})
 </script>
 
 <template>
