@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { getTaskAbnormalPage } from '@/api/governance-task'
 import type { TaskAbnormal } from '@/api/governance-task'
@@ -7,7 +7,6 @@ import { getTaskEvidenceImages } from '@/api/governance-result'
 import type { TaskEvidenceImage } from '@/api/governance-result'
 import SpotDistributionMap from './SpotDistributionMap.vue'
 import type { ComparisonPeriod } from './SpotDistributionMap.vue'
-import { refreshComparisonMaps } from './mapViewSync'
 
 const props = defineProps<{ task?: PortalTask; sceneName?: string; node?: WorkspaceNodeConfig }>()
 const keyword = ref('')
@@ -20,6 +19,9 @@ const loadError = ref('')
 const records = ref<TaskAbnormal[]>([])
 const evidenceImages = ref<TaskEvidenceImage[]>([])
 const activeImageIndex = ref(0)
+const uploadInput = ref<HTMLInputElement>()
+const hiddenImageIds = ref<string[]>([])
+const pendingDeleteImage = ref<RelatedImagery>()
 let requestVersion = 0
 
 const typeOptions = computed(() => [...new Map(records.value.map((item) => [item.abnormalType, item.abnormalTypeDesc])).entries()])
@@ -31,27 +33,29 @@ const filtered = computed(() => records.value.filter((item) => {
 }))
 const active = computed(() => filtered.value.find((item) => item.id === activeId.value) || filtered.value[0])
 
-type RelatedImagery = { id: string; label: string; url?: string; date?: string }
+type RelatedImagery = { id: string; label: string; url?: string; date?: string; local?: boolean }
+const manualImagery = ref<RelatedImagery[]>([])
 const relatedImagery = computed<RelatedImagery[]>(() => {
   const spot = active.value
-  if (!spot) return []
+  if (!spot) return manualImagery.value
   const media = spot.imageMediaId ? evidenceImages.value.find((item) => item.id === spot.imageMediaId) : undefined
   const url = spot.imageUrl || media?.originalUrl || media?.imageUrl || media?.thumbnailUrl
-  if (!url && !spot.imageMediaId) return []
+  if (!url && !spot.imageMediaId) return manualImagery.value
   return [{
     id: spot.imageMediaId || `abnormal-${spot.id}`,
     label: media?.fileName || '异常图斑关联影像',
     url,
     date: media?.shootTime || spot.foundTime,
-  }]
+  }, ...manualImagery.value]
 })
-const displayableImagery = computed(() => relatedImagery.value.filter((item) => Boolean(item.url)))
+const displayableImagery = computed(() => relatedImagery.value.filter((item) => Boolean(item.url) && !hiddenImageIds.value.includes(item.id)))
+const domThumbnailPeriod: ComparisonPeriod = { number: 1, label: 'DOM 基准地图', kind: 'dom' }
 const comparisonPeriods = computed<ComparisonPeriod[]>(() => {
   const images = displayableImagery.value
   return Array.from({ length: periods.value }, (_, index) => {
     if (index === 0) return { number: 1, label: 'DOM 基准地图', kind: 'dom' }
-    if (!images.length) return { number: index + 1, label: '暂无影像', kind: 'empty' }
-    const image = images[(activeImageIndex.value + index - 1) % images.length]!
+    const image = images[activeImageIndex.value + index - 1]
+    if (!image) return { number: index + 1, label: '暂无多期影像', kind: 'empty' }
     return { number: index + 1, label: image.label, kind: 'image', imageUrl: image.url }
   })
 })
@@ -72,14 +76,43 @@ function selectSpot(id: string) {
 function selectImage(index: number) {
   activeImageIndex.value = index
 }
-
-async function syncComparisonLayout() {
-  await nextTick()
-  // 子地图自身也会在 nextTick 后初始化；连续两帧可覆盖新增地图注册与 CSS 网格重排。
-  requestAnimationFrame(() => {
-    refreshComparisonMaps()
-    requestAnimationFrame(refreshComparisonMaps)
+function openImageUpload() {
+  uploadInput.value?.click()
+}
+function clearManualImagery() {
+  manualImagery.value.forEach((image) => {
+    if (image.local && image.url) URL.revokeObjectURL(image.url)
   })
+  manualImagery.value = []
+}
+function addLocalImagery(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || []).filter((file) => file.type.startsWith('image/'))
+  if (!files.length) return
+  manualImagery.value.push(...files.map((file) => ({
+    id: `local-${crypto.randomUUID()}`,
+    label: `本地上传 · ${file.name}`,
+    url: URL.createObjectURL(file),
+    date: new Date().toISOString(),
+    local: true,
+  })))
+  activeImageIndex.value = Math.max(0, relatedImagery.value.length - files.length)
+  input.value = ''
+}
+function requestImageDelete(image: RelatedImagery) {
+  pendingDeleteImage.value = image
+}
+function confirmImageDelete() {
+  const image = pendingDeleteImage.value
+  if (!image) return
+  if (image.local) {
+    if (image.url) URL.revokeObjectURL(image.url)
+    manualImagery.value = manualImagery.value.filter((item) => item.id !== image.id)
+  } else if (!hiddenImageIds.value.includes(image.id)) {
+    hiddenImageIds.value.push(image.id)
+  }
+  pendingDeleteImage.value = undefined
+  activeImageIndex.value = 0
 }
 
 async function loadTaskAbnormals(taskId?: string) {
@@ -114,14 +147,19 @@ async function loadTaskAbnormals(taskId?: string) {
   }
 }
 
-watch(() => props.task?.id, (taskId) => void loadTaskAbnormals(taskId), { immediate: true })
+watch(() => props.task?.id, (taskId) => {
+  clearManualImagery()
+  hiddenImageIds.value = []
+  pendingDeleteImage.value = undefined
+  void loadTaskAbnormals(taskId)
+}, { immediate: true })
 watch(filtered, (items) => {
   if (!items.some((item) => item.id === activeId.value)) {
     activeId.value = items[0]?.id || ''
     activeImageIndex.value = 0
   }
 })
-watch(periods, () => { void syncComparisonLayout() })
+onBeforeUnmount(clearManualImagery)
 </script>
 
 <template>
@@ -167,15 +205,18 @@ watch(periods, () => { void syncComparisonLayout() })
           <span>当前对比：{{ active?.title || '未选择图斑' }}</span>
         </div>
         <div class="imagery">
-          <button class="image-card image-card--dom" @click="activeImageIndex = 0">
-            <b>第 1 期 · DOM 基准地图</b><small>任务区域正射影像</small>
-          </button>
-          <button v-for="(image, index) in relatedImagery" :key="image.id" class="image-card" :class="{ active: activeImageIndex === index, unavailable: !image.url }" :disabled="!image.url" @click="selectImage(index)">
+          <input ref="uploadInput" class="imagery-upload-input" type="file" accept="image/*" multiple @change="addLocalImagery" />
+          <div class="image-card image-card--dom" role="button" tabindex="0" @click="activeImageIndex = 0" @keydown.enter="activeImageIndex = 0">
+            <div class="image-card__dom-caption"><b>第 1 期 · DOM 基准地图</b></div>
+            <SpotDistributionMap v-if="active" class="image-card__dom-thumbnail" :spot="active" :period="domThumbnailPeriod" thumbnail />
+            <span v-else>暂无图斑范围缩略图</span>
+          </div>
+          <button v-for="(image, index) in displayableImagery" :key="image.id" class="image-card" :class="{ active: activeImageIndex === index }" @click="selectImage(index)">
             <img v-if="image.url" :src="image.url" :alt="image.label" />
-            <span v-else>暂无可访问影像</span>
             <b>关联影像 {{ index + 1 }}</b><small>{{ image.label }} · {{ formatTime(image.date) }}</small>
+            <span class="image-card__delete" role="button" tabindex="0" aria-label="删除关联影像" title="删除关联影像" @click.stop="requestImageDelete(image)" @keydown.enter.stop="requestImageDelete(image)">×</span>
           </button>
-          <div v-if="!relatedImagery.length" class="imagery-empty">该异常图斑暂未关联可展示影像；选择 3 / 4 期对比时，其余窗口会显示灰底占位。</div>
+          <button class="image-card image-card--add" type="button" @click="openImageUpload"><i>＋</i><b>添加影像</b><small>从本地选择图斑不同时期影像</small></button>
         </div>
       </div>
     </section>
@@ -199,10 +240,17 @@ watch(periods, () => { void syncComparisonLayout() })
       </div>
       <div class="panel explain">
         <div class="panel-title">影像对比说明</div>
-        <p>DOM 基准地图始终显示在第 1 个窗口。后续窗口按当前异常图斑关联影像顺序显示；未关联影像或影像不足时，将展示灰色占位图。</p>
-        <p>若后端未提供影像覆盖范围，关联影像将以图斑边界范围作为对比参考，不能代表精确正射叠加。</p>
+        <p>DOM 基准地图仅显示在第 1 个窗口。后续窗口只显示关联影像；未关联或影像不足时显示灰色底图。</p>
+        <p>各期关联影像可在其窗口中独立缩放、平移，不与基准影像同步。</p>
       </div>
     </aside>
+    <div v-if="pendingDeleteImage" class="image-delete-mask" @click.self="pendingDeleteImage = undefined">
+      <section class="image-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="image-delete-title">
+        <h3 id="image-delete-title">确认删除关联影像</h3>
+        <p>确定删除“{{ pendingDeleteImage.label }}”吗？删除后将不再参与当前图斑的影像对比。</p>
+        <footer><button @click="pendingDeleteImage = undefined">取消</button><button class="danger" @click="confirmImageDelete">确认删除</button></footer>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -213,6 +261,14 @@ watch(periods, () => { void syncComparisonLayout() })
 .spot-list { display: flex; flex-direction: column; }.filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-bottom: 1px solid #e8eff3; }.filters input { grid-column: 1 / -1; }.filters input,.filters select { min-width: 0; height: 34px; padding: 0 9px; color: #38586a; background: #fbfdfe; border: 1px solid #c9dce7; border-radius: 4px; font-size: 12px; outline: none; }.filters input:focus,.filters select:focus { border-color: #1a9ac0; box-shadow: 0 0 0 2px #1a9ac01c; }
 .spot-scroll { min-height: 0; overflow: auto; }.spot-item { width: 100%; display: grid; grid-template-columns: 31px minmax(0,1fr) auto; gap: 9px; align-items: center; padding: 11px 10px; border: 0; border-bottom: 1px solid #e8eef2; background: #fff; color: #29475a; text-align: left; cursor: pointer; transition: background .15s; }.spot-item:hover { background: #f2f9fc; }.spot-item.active { background: #e5f5fb; border-left: 4px solid #129bc3; padding-left: 6px; }.spot-item>i { display: grid; width: 28px; height: 28px; place-items: center; color: #ffffff; background: #3e91b1; border-radius: 50%; font-style: normal; font-size: 13px; font-weight: 700; }.spot-item>i.level-2 { background: #d79228; }.spot-item>i.level-3 { background: #d55762; }.spot-item b,.spot-item small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.spot-item b { color:#1d435b; font-size:14px; }.spot-item small { margin-top:4px;color:#6f8796;font-size:11px; }.spot-item em { padding:4px 6px;border-radius:3px;font-style:normal;font-size:11px;white-space:nowrap; }.status-0 { color:#9a680f;background:#fff3d9; }.status-1 { color:#1b79a2;background:#e2f3fa; }.status-2 { color:#21875e;background:#e3f6ed; }.status-3 { color:#667986;background:#ecf0f2; }.list-empty { display:grid; min-height:150px; place-items:center; padding:16px; color:#6f8796; font-size:13px; text-align:center; }.list-empty--error { color:#c7535e; }
 .center-column { min-width: 0; display: grid; grid-template-rows: minmax(360px, 1fr) 202px; gap: 10px; }.map-panel { display:flex; flex-direction:column; }.map-compare { flex:1; min-height:0; display:grid; gap:4px; padding:4px; background:#c9d8df; }.map-compare.compare-2,.map-compare.compare-3 { grid-template-columns:repeat(var(--period-count),minmax(0,1fr)); }.map-compare.compare-2 { --period-count:2; }.map-compare.compare-3 { --period-count:3; }.map-compare.compare-4 { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }.map-compare :deep(.spot-map) { min-width:0; min-height:0; border:1px solid #adc6d2; }.map-empty { display:grid; flex:1; place-items:center; color:#6b8493; background:#eef3f5; font-size:14px; }
-.analysis { display:flex; flex-direction:column; }.periods { display:flex; align-items:center; gap:7px; padding:9px 11px 7px; }.periods button { padding:7px 11px; color:#426478; background:#f5f9fb; border:1px solid #cbdde7; border-radius:4px; font-size:12px; cursor:pointer; }.periods button.active { color:#fff; background:#168db5; border-color:#168db5; box-shadow:0 2px 5px #168db544; }.periods span { margin-left:auto; overflow:hidden; color:#6f8796; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.imagery { flex:1; min-height:0; display:flex; gap:8px; padding:0 11px 11px; overflow-x:auto; }.image-card { position:relative; flex:0 0 180px; height:112px; overflow:hidden; padding:9px; color:#f4fcff; background:linear-gradient(135deg,#276c80,#17445b); border:1px solid transparent; border-radius:5px; text-align:left; cursor:pointer; }.image-card:hover,.image-card.active { border-color:#13a9d3; box-shadow:0 0 0 2px #13a9d325; }.image-card--dom { background:linear-gradient(145deg,#1f6372,#78a668); }.image-card img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.66; }.image-card>span { display:grid; height:100%; place-items:center; color:#d5e1e6; background:#53616a; font-size:12px; }.image-card b,.image-card small { position:relative; z-index:1; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card b { margin-top:48px; font-size:13px; }.image-card small { margin-top:4px; font-size:11px; }.image-card.unavailable { cursor:not-allowed; opacity:.7; }.imagery-empty { display:grid; min-width:260px; place-items:center; padding:0 16px; color:#728796; background:#f3f6f8; border:1px dashed #c4d3db; border-radius:5px; font-size:12px; line-height:1.6; }
+.analysis { display:flex; flex-direction:column; }.periods { display:flex; align-items:center; gap:7px; padding:9px 11px 7px; }.periods button { padding:7px 11px; color:#426478; background:#f5f9fb; border:1px solid #cbdde7; border-radius:4px; font-size:12px; cursor:pointer; }.periods button.active { color:#fff; background:#168db5; border-color:#168db5; box-shadow:0 2px 5px #168db544; }.periods span { margin-left:auto; overflow:hidden; color:#6f8796; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.imagery { flex:1; min-height:0; display:flex; gap:8px; padding:0 11px 11px; overflow-x:auto; }.image-card { position:relative; flex:0 0 180px; height:112px; overflow:hidden; padding:9px; color:#f4fcff; background:linear-gradient(135deg,#276c80,#17445b); border:1px solid transparent; border-radius:5px; text-align:left; cursor:pointer; }.image-card:hover,.image-card.active { border-color:#13a9d3; box-shadow:0 0 0 2px #13a9d325; }.image-card--dom { background:linear-gradient(145deg,#1f6372,#78a668); }.image-card--dom:focus-visible { outline:2px solid #13a9d3; outline-offset:2px; }.image-card__dom-thumbnail { position:absolute; inset:0; display:block; pointer-events:none; }.image-card>img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.66; }.image-card>span { display:grid; height:100%; place-items:center; color:#d5e1e6; background:#53616a; font-size:12px; }.image-card b,.image-card small { position:relative; z-index:1; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card b { margin-top:48px; font-size:13px; }.image-card small { margin-top:4px; font-size:11px; }.image-card.unavailable { cursor:not-allowed; opacity:.7; }.imagery-empty { display:grid; min-width:260px; place-items:center; padding:0 16px; color:#728796; background:#f3f6f8; border:1px dashed #c4d3db; border-radius:5px; font-size:12px; line-height:1.6; }
+.imagery-upload-input { display:none; }.image-card--add { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:#377b95; background:#f4fafc; border:1px dashed #69aec4; text-align:center; }.image-card--add:hover { color:#0b86ae; background:#e9f7fb; border-color:#159bc4; }.image-card--add i { width:30px; height:30px; display:grid; place-items:center; border:1px solid currentColor; border-radius:50%; font-size:22px; font-style:normal; line-height:1; }.image-card--add b { margin:4px 0 0; color:currentColor; text-shadow:none; }.image-card--add small { color:#6d92a2; text-shadow:none; }
+.image-card--dom { display:block; padding:0; }.image-card__dom-caption { position:absolute; z-index:10; top:5px; left:6px; right:6px; min-width:0; padding:0; color:#fff; background:transparent; border:0; pointer-events:none; }.image-card__dom-caption b { display:block; overflow:hidden; margin:0; color:currentColor; font-size:13px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card--dom .image-card__dom-thumbnail { position:absolute; z-index:0; inset:0; min-width:0; min-height:0; width:100%; height:100%; overflow:hidden; pointer-events:none; }
+.image-card > .image-card__delete { position:absolute; z-index:3; top:5px; right:5px; width:14px; height:14px; min-height:14px; padding:0; display:grid; place-items:center; color:#fff; background:#d64755; border:1px solid #fff8; border-radius:50%; box-shadow:0 1px 3px #3e1420aa; font-size:12px; font-weight:400; line-height:1; text-shadow:none; }.image-card > .image-card__delete:hover,.image-card > .image-card__delete:focus-visible { background:#b92739; outline:2px solid #ffd2d7; outline-offset:1px; }
+.image-delete-mask { position:fixed; z-index:3100; inset:0; display:grid; place-items:center; padding:20px; background:#10243180; }.image-delete-dialog { width:min(390px,calc(100vw - 40px)); overflow:hidden; color:#29475a; background:#fff; border:1px solid #b9d1dc; border-radius:7px; box-shadow:0 12px 32px #102a3d66; }.image-delete-dialog h3 { margin:0; padding:15px 18px; color:#203f53; border-bottom:1px solid #e0eaef; font-size:17px; }.image-delete-dialog p { margin:0; padding:18px; color:#5c7481; font-size:14px; line-height:1.7; }.image-delete-dialog footer { display:flex; justify-content:flex-end; gap:8px; padding:11px 18px; background:#f5f8fa; border-top:1px solid #e1ebef; }.image-delete-dialog button { min-width:76px; padding:7px 12px; color:#466877; background:#fff; border:1px solid #bfd4df; border-radius:4px; cursor:pointer; }.image-delete-dialog button.danger { color:#fff; background:#cf4655; border-color:#cf4655; }.image-delete-dialog button.danger:hover { background:#b92e40; }
 .right-column { min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto; gap:10px; }.detail { min-height:0; }.detail dl { display:grid; grid-template-columns:94px 1fr; margin:0; padding:9px 13px; }.detail dt,.detail dd { margin:0; padding:8px 0; border-bottom:1px solid #edf2f5; font-size:12px; }.detail dt { color:#718895; }.detail dd { color:#29485a; font-weight:700; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.text-level-2 { color:#bd7a18!important; }.text-level-3 { color:#c94856!important; }.detail p,.explain p { margin:0 13px 11px; padding:10px; color:#607987; background:#f3f7f9; font-size:12px; line-height:1.7; }.detail-empty { display:grid; min-height:160px; place-items:center; color:#728796; font-size:13px; }.explain p + p { margin-top:-3px; }
+@media (max-width: 1180px) {
+  .governance-page { grid-template-columns: clamp(215px, 23vw, 270px) minmax(400px, 1fr) clamp(235px, 24vw, 280px); gap: 7px; padding: 7px; }
+  .center-column { grid-template-rows: minmax(300px,1fr) 180px; gap: 7px; }.right-column { gap: 7px; }.filters { padding: 7px; }
+}
 </style>

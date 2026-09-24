@@ -10,6 +10,8 @@ const props = defineProps<{
 
 const container = ref<HTMLElement>()
 let map: L.Map | undefined
+let resizeObserver: ResizeObserver | undefined
+let resizeFrame: number | undefined
 let rangeLayer: L.GeoJSON | undefined
 const token = import.meta.env.VITE_TIANDITU_TOKEN
 const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
@@ -75,10 +77,19 @@ onMounted(() => {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxNativeZoom: 19, maxZoom: 22 }).addTo(map)
   }
   void renderRange()
+  resizeObserver = new ResizeObserver(() => {
+    if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+    resizeFrame = window.requestAnimationFrame(() => void renderRange())
+  })
+  resizeObserver.observe(container.value)
 })
 
 watch(() => props.geoJson, () => void renderRange(), { deep: true })
-onBeforeUnmount(() => map?.remove())
+onBeforeUnmount(() => {
+  if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+  resizeObserver?.disconnect()
+  map?.remove()
+})
 </script>
 
 <template>

@@ -4,12 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import DashboardMap from '@/components/DashboardMap.vue'
 import BusinessTrendChart from '@/components/BusinessTrendChart.vue'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
-import OrganizationSwitcher from '@/components/OrganizationSwitcher.vue'
-import UserAccountMenu from '@/components/UserAccountMenu.vue'
+import PrimaryHeader from '@/components/PrimaryHeader.vue'
 import { useUserStore } from '@/stores/user'
 import { getGovernanceTaskGeometry, getGovernanceTaskPage, getTaskAbnormalPage, type GovernanceTask, type TaskGeometryFeatureCollection } from '@/api/governance-task'
 import { getScene } from '@/mocks/portal'
 import { getBusinessDashboardStatistics, type BusinessDashboardStatistics } from '@/api/business-statistics'
+import { getDepartmentOptions, getMyDepartments, switchDepartment } from '@/api/auth'
 import { getLiveStreams } from '@/api/patrol'
 import type { LiveStream } from '@/adapters/dasFly'
 import { findOrganizationScene, isTaskVisibleForOrganization } from '@/utils/scene-visibility'
@@ -18,8 +18,6 @@ import type { DashboardMapLayer } from '@/types'
 const router = useRouter()
 const route = useRoute()
 const user = useUserStore()
-const now = ref(new Date())
-const timer = window.setInterval(() => { now.value = new Date() }, 1000)
 const statistics = ref<BusinessDashboardStatistics>()
 const statisticsLoading = ref(false)
 const statisticsError = ref('')
@@ -32,12 +30,11 @@ const taskRanges = ref<Record<string, TaskGeometryFeatureCollection>>({})
 const livePreviews = ref<LiveStream[]>([])
 const livePreviewLoading = ref(true)
 const livePreviewLoaded = ref(false)
+const onlineUavCount = ref<number>()
 let statisticsRequestVersion = 0
 let geometryRequestVersion = 0
 let abnormalCountRequestVersion = 0
 let livePreviewRequestVersion = 0
-const dateText = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' }).format(now.value))
-const timeText = computed(() => now.value.toLocaleTimeString('zh-CN', { hour12: false }))
 const sceneId = computed(() => typeof route.params.sceneId === 'string' ? route.params.sceneId : '')
 const organization = computed(() => user.organization)
 const currentUnitStatisticsLabel = computed(() => `当前单位：${organization.value.name}`)
@@ -89,10 +86,10 @@ const dashboardStats = computed(() => {
   const taskSummary = unitTaskSummary.value
   const abnormalSummary = statistics.value?.abnormalSummary
   return [
-    { label: '业务场景', value: overview?.sceneCount ?? '—', unit: '个', primary: `任务总数 ${taskSummary?.total ?? '—'} 个`, secondary: currentUnitStatisticsLabel.value, icon: 'drone' as const, tone: 'cyan' },
-    { label: '执行中任务', value: taskSummary?.executing ?? '—', unit: '个', primary: `待执行 ${taskSummary?.pending ?? '—'} · 待核查 ${taskSummary?.pendingVerify ?? '—'}`, secondary: '当前单位任务状态', icon: 'task' as const, tone: 'blue' },
+    { label: '在线无人机', value: onlineUavCount.value ?? '—', unit: '架', primary: livePreviewLoading.value ? '正在获取在线状态…' : '已接入设备在线状态', secondary: '', icon: 'drone' as const, tone: 'cyan' },
+    { label: '业务场景', value: overview?.sceneCount ?? '—', unit: '个', primary: `任务总数 ${taskSummary?.total ?? '—'} 个`, secondary: currentUnitStatisticsLabel.value, icon: 'task' as const, tone: 'blue' },
     { label: '异常图斑', value: abnormalSummary?.total ?? '—', unit: '个', primary: `待核查 ${overview?.abnormalPendingCount ?? '—'} 个`, secondary: `当前单位面积 ${formatNumber(abnormalSummary?.areaTotal)} ㎡`, icon: 'pending' as const, tone: 'indigo' },
-    { label: '成果批次', value: overview?.resultCount ?? '—', unit: '批', primary: `已解析要素 ${overview?.geometryCount ?? '—'} 个`, secondary: statisticsLoading.value ? '当前单位统计加载中…' : statisticsError.value ? '当前单位统计加载异常' : '当前单位成果汇总', icon: 'rate' as const, tone: 'green' },
+    { label: '任务统计', value: taskSummary?.total ?? '—', unit: '个', primary: `执行中 ${taskSummary?.executing ?? '—'} · 待执行 ${taskSummary?.pending ?? '—'} · 待核查 ${taskSummary?.pendingVerify ?? '—'}`, secondary: statisticsLoading.value ? '当前单位统计加载中…' : statisticsError.value ? '当前单位统计加载异常' : '当前单位任务状态', icon: 'rate' as const, tone: 'green' },
   ]
 })
 /**
@@ -175,15 +172,10 @@ const activeSceneEntries = computed(() => {
   })
   return organization.value.scenes.filter((scene) => realSceneIds.has(scene.id))
 })
-const dashboardTaskList = computed(() => currentUnitTasks.value.slice(0, 6))
 const livePreviewSlots = computed<(LiveStream | undefined)[]>(() => [livePreviews.value[0], livePreviews.value[1]])
 
 function livePreviewLabel(preview?: LiveStream) {
   return preview?.aircraftName || preview?.aircraftId || '在线设备'
-}
-
-function openTaskList() {
-  router.push({ name: 'tasks', query: activeScene.value ? { sceneId: activeScene.value.id } : {} })
 }
 
 function openSceneTaskList(sceneId: string) {
@@ -192,10 +184,6 @@ function openSceneTaskList(sceneId: string) {
 
 function formatNumber(value: number | undefined) {
   return typeof value === 'number' ? value.toLocaleString('zh-CN', { maximumFractionDigits: 1 }) : '—'
-}
-
-function formatTaskListDate(value?: string) {
-  return value ? value.slice(5, 16).replace('T', ' ') : '暂无时间'
 }
 
 function geometryPolygons(collection?: TaskGeometryFeatureCollection): [number, number][][] {
@@ -280,33 +268,75 @@ async function loadSceneAbnormalCounts(tasks: GovernanceTask[], requestVersion: 
   }
 }
 
-async function loadBusinessStatistics() {
+const departmentNameMatchers = {
+  'natural-resources': /自然资源.*规划|自然资源/,
+  'agriculture-rural': /农业农村/,
+} as const
+
+/**
+ * 修复旧会话或管理员无默认部门时缺失的数据权限上下文。
+ * 必须通过部门切换接口换签 Token，不能只在前端补写 activeDeptId。
+ */
+async function establishDepartmentContext() {
+  const rawDepartments = user.currentUser?.role === 'ADMIN'
+    ? await getDepartmentOptions()
+    : await getMyDepartments()
+  const departments = rawDepartments.map((department) => ({
+    deptId: String(department.deptId),
+    deptName: department.deptName,
+    isDefault: 'isDefault' in department && Boolean(department.isDefault),
+  }))
+  const matcher = departmentNameMatchers[user.organizationId]
+  const department = departments.find((item) => matcher.test(item.deptName))
+    || departments.find((item) => item.isDefault)
+    || (departments.length === 1 ? departments[0] : undefined)
+  if (!department) {
+    throw new Error(`当前账号未配置“${user.organization.name}”部门身份，无法加载该单位数据。`)
+  }
+
+  const scopedSession = await switchDepartment(department.deptId)
+  const activeDeptId = scopedSession.activeDeptId || department.deptId
+  user.setDepartmentSession(scopedSession.accessToken, scopedSession.expiresIn, activeDeptId)
+  return activeDeptId
+}
+
+async function loadBusinessStatistics(resetExisting = false) {
   // 身份、部门和单位可在登录/切换时连续变更。每次都递增版本号，令旧请求的
   // 返回值失效；不能以 statisticsLoading 拦截新请求，否则首个请求会使用旧 token
   // 或旧部门，后续正确上下文的加载又被忽略，最终首页只会显示空数据。
   const requestVersion = ++statisticsRequestVersion
-  const deptId = user.activeDeptId
+  let deptId = user.activeDeptId
   const organizationId = user.organizationId
-  if (user.authMode === 'real' && !deptId) {
-    // 不将未带部门条件的统计作为“当前单位”数据展示。
+  // 首次进入或切换认证上下文时显示前台加载状态；定时轮询只在后台静默更新，
+  // 不能先清空现有数据，否则地图图层会被销毁重建，用户的勾选和视野也会重置。
+  const foregroundLoad = resetExisting || !currentUnitTasksLoaded.value || !statistics.value
+  if (foregroundLoad) statisticsLoading.value = true
+  if (resetExisting) {
+    statisticsError.value = ''
+    // 切换身份期间不可继续展示上一单位数据；待本次请求完成后再呈现新单位结果。
     statistics.value = undefined
     currentUnitTasks.value = []
     currentUnitTasksLoaded.value = false
     taskRanges.value = {}
     sceneAbnormalCounts.value = {}
     sceneAbnormalCountsLoading.value = false
-    statisticsError.value = '未获取到当前单位标识，无法加载单位统计数据。'
-    return
   }
-  statisticsLoading.value = true
-  statisticsError.value = ''
-  // 切换身份期间不可继续展示上一单位数据；待本次请求完成后再呈现新单位结果。
-  statistics.value = undefined
-  currentUnitTasks.value = []
-  currentUnitTasksLoaded.value = false
-  taskRanges.value = {}
-  sceneAbnormalCounts.value = {}
-  sceneAbnormalCountsLoading.value = false
+
+  if (user.authMode === 'real' && !deptId) {
+    try {
+      deptId = await establishDepartmentContext()
+      // setDepartmentSession 会触发新的、携带正确 Token 的加载；旧请求立即失效。
+      if (requestVersion !== statisticsRequestVersion) return
+    } catch (error) {
+      if (requestVersion !== statisticsRequestVersion) return
+      statisticsError.value = error instanceof Error
+        ? `部门身份初始化失败：${error.message}`
+        : '部门身份初始化失败，请重新登录后重试。'
+      statisticsLoading.value = false
+      return
+    }
+  }
+
   const statisticsPromise = getBusinessDashboardStatistics({ deptId })
   const taskPromise = getGovernanceTaskPage({ pageNum: 1, pageSize: 100, deptId, organizationId })
 
@@ -322,7 +352,8 @@ async function loadBusinessStatistics() {
       currentUnitTasksLoaded.value = true
       void loadTaskRanges(currentUnitTasks.value, requestVersion)
       void loadSceneAbnormalCounts(currentUnitTasks.value, requestVersion)
-    } else {
+    } else if (!currentUnitTasksLoaded.value) {
+      // 首次加载失败时保持明确的空状态；后台刷新失败则保留最后一次成功数据。
       currentUnitTasks.value = []
       currentUnitTasksLoaded.value = false
       taskRanges.value = {}
@@ -335,8 +366,10 @@ async function loadBusinessStatistics() {
     const statisticsPage = statisticsResult[0]
     if (statisticsPage?.status === 'fulfilled') {
       statistics.value = statisticsPage.value
+      statisticsError.value = ''
     } else {
-      statistics.value = undefined
+      // 后台轮询失败不能把当前统计卡片清空，只更新错误提示供用户主动重试。
+      if (!statistics.value) statistics.value = undefined
       statisticsError.value = statisticsPage?.status === 'rejected' && statisticsPage.reason instanceof Error
         ? statisticsPage.reason.message
         : '统计接口请求失败'
@@ -345,7 +378,7 @@ async function loadBusinessStatistics() {
     // 防御性兜底：无论任何解析/渲染异常，均不可让首页永久处于加载状态。
     statisticsError.value = error instanceof Error ? error.message : '首页数据加载失败'
   } finally {
-    if (requestVersion === statisticsRequestVersion) statisticsLoading.value = false
+    if (requestVersion === statisticsRequestVersion && foregroundLoad) statisticsLoading.value = false
   }
 }
 
@@ -356,6 +389,7 @@ async function loadLivePreview() {
   try {
     const result = await getLiveStreams()
     if (requestVersion !== livePreviewRequestVersion) return
+    onlineUavCount.value = result.onlineDeviceCount
     const previousById = new Map(livePreviews.value.map((preview) => [preview.id, preview]))
     livePreviews.value = result.list.slice(0, 2).map((preview) => {
       const previous = previousById.get(preview.id)
@@ -393,42 +427,25 @@ const dashboardRefreshTimer = window.setInterval(() => {
   void loadLivePreview()
 }, 60_000)
 onBeforeUnmount(() => {
-  window.clearInterval(timer)
   window.clearInterval(dashboardRefreshTimer)
 })
 // 登录完成、部门切换或单位切换时，始终按最终的认证上下文重新拉取。flush: 'post'
 // 会把 setRealSession 内的多项同步状态更新合并后再执行，避免中间态请求。
 watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => user.organizationId], () => {
-  void loadBusinessStatistics()
+  void loadBusinessStatistics(true)
   void loadLivePreview()
 }, { immediate: true, flush: 'post' })
 </script>
 
 <template>
   <div class="cockpit">
-    <header class="cockpit-header">
-      <div class="cockpit-brand" @click="router.push('/dashboard')">
-        <span class="cockpit-logo"><DashboardSymbol name="brand" /></span>
-        <h1>{{ organization.shortName }}低空智慧服务运行中枢</h1>
-      </div>
-      <nav class="cockpit-nav">
-        <button class="active" @click="router.push('/dashboard')">单位总览</button><i></i>
-        <button @click="openTaskList">任务总览</button><i></i>
-        <button>{{ scopeTitle }}</button>
-      </nav>
-      <div class="cockpit-user">
-        <time>{{ dateText }}　{{ timeText }}</time>
-        <button class="notice" aria-label="消息通知"><DashboardSymbol name="notification" /><b>3</b></button>
-        <OrganizationSwitcher />
-        <UserAccountMenu icon-only />
-      </div>
-    </header>
+    <PrimaryHeader />
 
     <main class="cockpit-body">
       <section class="cockpit-stats">
         <article v-for="stat in dashboardStats" :key="stat.label" class="cockpit-stat" :class="`is-${stat.tone}`">
           <div class="stat-icon"><DashboardSymbol :name="stat.icon" /></div>
-          <div class="stat-copy"><label>{{ stat.label }}</label><strong>{{ stat.value }}<small>{{ stat.unit }}</small></strong><p>{{ stat.primary }} <em v-if="stat.secondary">｜ {{ stat.secondary }}</em><button v-if="statisticsError && stat.label === '成果批次'" class="statistics-retry" :title="statisticsError" @click="loadBusinessStatistics">重试</button></p></div>
+          <div class="stat-copy"><label>{{ stat.label }}</label><strong>{{ stat.value }}<small>{{ stat.unit }}</small></strong><p>{{ stat.primary }} <em v-if="stat.secondary">｜ {{ stat.secondary }}</em><button v-if="statisticsError && stat.label === '任务统计'" class="statistics-retry" :title="statisticsError" @click="loadBusinessStatistics()">重试</button></p></div>
           <div class="spark-bars"><i v-for="n in 12" :key="n" :style="{ height: `${22 + ((n * 13) % 38)}%` }"></i></div>
         </article>
       </section>
@@ -438,20 +455,6 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
           <div class="cockpit-panel__title"><h2>{{ scopeTitle }}综合监管一张图</h2></div>
           <DashboardMap :key="activeScene?.id || organization.id" :layers="mapLayers" :routes="patrolRoutes" :focus-layer-id="activeScene?.id" />
         </article>
-
-        <aside class="cockpit-side">
-          <article class="cockpit-panel task-list-panel">
-            <div class="cockpit-panel__title"><h2>任务列表</h2><button type="button" class="linkish" @click="openTaskList">全部任务 〉</button></div>
-            <div class="compact-list">
-              <button v-for="task in dashboardTaskList" :key="task.id" class="task-list-item" @click="router.push(`/tasks/${task.id}`)">
-                <span class="item-icon">{{ findOrganizationScene(organization, task.sceneCode, task.sceneName)?.icon }}</span>
-                <span class="item-main"><b>{{ task.name }}</b><small>⌖ {{ task.area || task.deptName }}　·　{{ formatTaskListDate(task.updateTime || task.createTime) }}</small></span>
-                <em :class="task.taskStatus === 5 ? 'tag-done' : task.taskStatus === 0 || task.taskStatus === 2 ? 'tag-pending' : 'tag-running'">{{ task.taskStatusDesc }}</em>
-              </button>
-              <div v-if="!dashboardTaskList.length && !statisticsLoading" class="dashboard-empty">暂无真实任务</div>
-            </div>
-          </article>
-        </aside>
       </section>
 
       <section class="cockpit-secondary">

@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { getDepartmentOptions, loginWithPassword, switchDepartment } from '@/api/auth'
+import { getDepartmentOptions, getMyDepartments, loginWithPassword, switchDepartment } from '@/api/auth'
 import { ApiBusinessError } from '@/api/client'
 
 const router = useRouter()
@@ -29,32 +29,50 @@ async function submitReal() {
       || result.userInfo.deptId
       || result.userInfo.deptList.find((department) => department.isDefault)?.deptId
     user.setRealSession(result.accessToken, result.userInfo, result.expiresIn, initialDeptId)
-    // 与右上角“切换单位”使用完全相同的部门定位规则。登录响应里的 deptId 在
-    // 部分部署中是用户所属根部门，不是业务数据所属的局级部门；必须以部门选项
-    // 接口返回的实际 ID 为准，避免首屏按错误部门查询而切换一次后才恢复数据。
-    let scopedDeptId = initialDeptId
+    // 补齐当前用户的全部所属部门：普通用户若归属多个部门，登录后也可切换部门身份。
+    let memberships = result.userInfo.deptList
     try {
-      const departments = await getDepartmentOptions()
-      const matcher = user.organizationId === 'agriculture-rural' ? /农业农村/ : /自然资源.*规划|自然资源/
-      scopedDeptId = departments.find((department) => matcher.test(department.deptName))?.deptId || scopedDeptId
-    } catch {
-      // 没有部门选项权限时仍尝试使用登录接口返回的部门 ID。
-    }
-    if (scopedDeptId) {
-      try {
-        const scopedSession = await switchDepartment(scopedDeptId)
-        user.setDepartmentSession(
-          scopedSession.accessToken,
-          scopedSession.expiresIn,
-          scopedSession.activeDeptId || scopedDeptId,
-        )
-      } catch {
-        // 普通账号或旧版后端可能不允许重复切换部门，保留登录接口已签发的 token。
+      const loadedMemberships = await getMyDepartments()
+      if (loadedMemberships.length) {
+        memberships = loadedMemberships
+        user.setCurrentUser({ ...result.userInfo, deptList: loadedMemberships })
       }
+    } catch {
+      // 部门列表暂不可用时，继续使用登录响应中的 deptList。
+    }
+
+    const matcher = user.organizationId === 'agriculture-rural' ? /农业农村/ : /自然资源.*规划|自然资源/
+    let scopedDeptId = memberships.find((department) => matcher.test(department.deptName))?.deptId
+      || initialDeptId
+      || memberships.find((department) => department.isDefault)?.deptId
+      || (memberships.length === 1 ? memberships[0]?.deptId : undefined)
+
+    // 管理员无所属部门时，从全部启用部门中解析当前单位对应的真实部门 ID。
+    if (result.userInfo.role === 'ADMIN') {
+      try {
+        const departments = await getDepartmentOptions()
+        scopedDeptId = departments.find((department) => matcher.test(department.deptName))?.deptId || scopedDeptId
+      } catch (error) {
+        if (!scopedDeptId) throw error
+      }
+    }
+    if (!scopedDeptId) throw new Error(`当前账号未配置“${user.organization.name}”部门身份。`)
+
+    try {
+      const scopedSession = await switchDepartment(scopedDeptId)
+      user.setDepartmentSession(
+        scopedSession.accessToken,
+        scopedSession.expiresIn,
+        scopedSession.activeDeptId || scopedDeptId,
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '部门切换接口请求失败'
+      throw new Error(`部门身份初始化失败：${message}`)
     }
     const target = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
     await router.replace(target)
   } catch (error) {
+    user.logout()
     loginError.value = error instanceof ApiBusinessError || error instanceof Error
       ? error.message
       : '登录失败，请稍后重试'

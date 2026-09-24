@@ -57,20 +57,17 @@ async function loadTaskContext() {
 const nodeKeys = computed(() => workspaceConfig.value?.nodes.map((node) => node.key) ?? [])
 
 const governanceNodes = computed(() =>
-  workspaceConfig.value?.nodes.filter((node) => node.module === 'governance') ?? [],
+  workspaceConfig.value?.nodes.filter((node) => node.key === 'task-dispatch' || node.key === 'review-archive') ?? [],
 )
 
-const discoveryNodes = computed(() =>
-  workspaceConfig.value?.nodes.filter((node) => node.module === 'discovery') ?? [],
-)
+const discoveryNodes = computed<WorkspaceNodeConfig[]>(() => [])
 
 /** 真实任务只有粗粒度 taskStatus 时，映射为工作台五节点中的当前节点。 */
 const defaultNodeKey = computed(() => {
   const status = task.value?.status || ''
   if (status.includes('完成')) return governanceNodes.value[governanceNodes.value.length - 1]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
   if (status.includes('核查') || status.includes('复核')) return governanceNodes.value[0]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
-  if (status.includes('执行') || status.includes('进行')) return discoveryNodes.value.find((node) => node.key === 'realtime-cruise')?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
-  return discoveryNodes.value.find((node) => node.key === 'route-flight-plan')?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
+  return governanceNodes.value[0]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
 })
 
 const activeKey = computed(() => {
@@ -195,7 +192,7 @@ onMounted(() => void loadTaskContext())
       </div>
 
       <div class="flow-nav">
-        <div class="flow-module">
+        <div v-if="discoveryNodes.length" class="flow-module">
           <span class="module-label">低空巡查发现模块</span>
           <div class="module-nodes">
             <button
@@ -210,7 +207,7 @@ onMounted(() => void loadTaskContext())
             </button>
           </div>
         </div>
-        <div class="flow-divider"></div>
+        <div v-if="discoveryNodes.length" class="flow-divider"></div>
         <div class="flow-module">
           <span class="module-label">治理模块</span>
           <div class="module-nodes">
@@ -257,8 +254,9 @@ onMounted(() => void loadTaskContext())
 
 <style scoped lang="scss">
 .workspace {
-  height: 100vh;
-  min-height: 720px;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: #eef3f6;
@@ -453,4 +451,9 @@ onMounted(() => void loadTaskContext())
   .workspace-brand--moved { left: 120px; }
   .module-nodes button { min-width: 76px; }
 }
+@media (max-width: 1120px) {
+  .workspace-header { grid-template-columns: 205px minmax(0, 1fr) 150px; padding-inline: 10px; }
+  .workspace-brand--moved { left: 105px; }.module-label { display: none; }.module-nodes button { min-width: 64px; }.module-nodes span { font-size: 10px; }.workspace-user { gap: 7px; font-size: 11px; }
+}
+@media (max-height: 700px) { .workspace-header { flex-basis: 62px; } }
 </style>

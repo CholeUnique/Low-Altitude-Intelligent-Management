@@ -20,6 +20,17 @@ export interface LiveStream {
   expiresAt?: string
 }
 
+/** 可用于开放组件跳转的真实飞行任务。 */
+export interface UavFlightTaskOption {
+  id: string
+  name: string
+  waylineId: string
+  waylineName: string
+  deviceName: string
+  status: string
+  createTime: string
+}
+
 function asRecords(payload: unknown): Record<string, unknown>[] {
   if (Array.isArray(payload)) return payload as Record<string, unknown>[]
   if (!payload || typeof payload !== 'object') return []
@@ -145,6 +156,24 @@ export function toFlightPlanList(payload: unknown): { list: FlightPlanItem[]; to
     area: String(item.waylineName ?? item.areaName ?? item.regionName ?? '-'),
     routeId: String(item.routeId ?? item.waylineId ?? ''),
   }))
+  return { list, total: totalOf(payload, list.length) }
+}
+
+export function toFlightTaskOptionList(payload: unknown): { list: UavFlightTaskOption[]; total: number } {
+  const records = asRecords(payload)
+  const list = records.map((item, index) => {
+    const id = String(item.id ?? item.flightTaskId ?? item.flight_task_id ?? '')
+    const waylineId = String(item.waylineId ?? item.wayline_id ?? item.routeId ?? item.route_id ?? '')
+    return {
+      id,
+      name: String(item.name ?? item.taskName ?? item.flightTaskName ?? `飞行任务 ${index + 1}`),
+      waylineId,
+      waylineName: String(item.waylineName ?? item.wayline_name ?? item.routeName ?? item.route_name ?? '未返回航线名称'),
+      deviceName: String(item.deviceName ?? item.droneName ?? item.droneSn ?? item.sn ?? '未返回飞行器'),
+      status: String(item.statusName ?? item.statusDesc ?? item.status ?? '未知状态'),
+      createTime: String(item.createTime ?? item.startTime ?? item.executeTime ?? '').replace('T', ' ').slice(0, 16) || '—',
+    }
+  }).filter((item) => Boolean(item.id))
   return { list, total: totalOf(payload, list.length) }
 }
 

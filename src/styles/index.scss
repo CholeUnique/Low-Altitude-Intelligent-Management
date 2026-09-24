@@ -5,7 +5,8 @@
   --success: #00a878; --warning: #f59d2a; --border: #dfe7ee; --muted: #76879a;
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 1180px; min-height: 100vh; background: #f3f6f9; }
+html, body, #app { width: 100%; min-width: 0; min-height: 100%; }
+body { margin: 0; min-height: 100vh; background: #f3f6f9; }
 button, input { font: inherit; }
 /* 所有可操作按钮/菜单提供一致的悬停反馈；具体模块可用更高优先级样式覆盖颜色。 */
 button:not(:disabled), select:not(:disabled), [role="button"] { transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, filter .16s ease, transform .16s ease; }
@@ -55,7 +56,7 @@ a { color: inherit; text-decoration: none; }
 .filter-panel { display: grid; grid-template-columns: 2fr 1fr 1fr 1.4fr; gap: 12px; padding: 16px; margin-bottom: 16px; }.table-panel .panel-title { border-bottom: 0; }.table-sub { display: block; margin-top: 5px; color: #8a99a8; }.pagination { display: flex; justify-content: flex-end; padding: 18px; }
 
 // Workspace
-.workspace { height: 100vh; min-height: 680px; display: flex; flex-direction: column; background: #eef3f6; }.workspace-header { flex: 0 0 72px; display: grid; grid-template-columns: 280px 1fr 290px; align-items: center; padding: 0 20px; color: white; background: linear-gradient(100deg, #043654, #075070); box-shadow: 0 3px 10px #002b4633; }.workspace-brand { cursor: pointer; }.workspace-brand b,.workspace-brand small { display: block; }.workspace-brand b { font-size: 16px; }.workspace-brand small { margin-top: 4px; color: #78adbf; font-size: 9px; }
+.workspace { width: 100%; min-width: 0; height: 100dvh; min-height: 0; display: flex; flex-direction: column; background: #eef3f6; }.workspace-header { flex: 0 0 72px; display: grid; grid-template-columns: 280px 1fr 290px; align-items: center; padding: 0 20px; color: white; background: linear-gradient(100deg, #043654, #075070); box-shadow: 0 3px 10px #002b4633; }.workspace-brand { cursor: pointer; }.workspace-brand b,.workspace-brand small { display: block; }.workspace-brand b { font-size: 16px; }.workspace-brand small { margin-top: 4px; color: #78adbf; font-size: 9px; }
 .flow-nav { height: 100%; display: flex; justify-content: center; }.flow-nav button { position: relative; min-width: 94px; display: grid; place-content: center; justify-items: center; gap: 5px; padding: 0 5px; border: 0; color: #94b4c3; background: transparent; cursor: pointer; }.flow-nav button:not(:last-child)::after { content: ""; position: absolute; top: 28px; left: calc(50% + 14px); width: calc(100% - 28px); border-top: 1px solid #54788a; }.flow-nav i { z-index: 1; width: 23px; height: 23px; display: grid; place-items: center; border: 1px solid #66899a; border-radius: 50%; background: #174e68; font-style: normal; font-size: 10px; }.flow-nav span { font-size: 10px; white-space: nowrap; }.flow-nav button.active { color: white; background: #ffffff0a; }.flow-nav button.active i { border-color: #3dd2e0; background: #13a6bb; box-shadow: 0 0 0 4px #37d3df1d; }.flow-nav button.done i { color: #064863; border-color: #58d3b1; background: #58d3b1; }.workspace-user { display: flex; justify-content: flex-end; align-items: center; gap: 16px; color: #9cbac7; font-size: 11px; }.workspace-user b { color: #4ee1c2; }
 .workspace-title { flex: 0 0 78px; display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: white; border-bottom: 1px solid var(--border); }.workspace-title>div:first-child { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 10px; }.workspace-title span { grid-row: 1/3; padding: 5px 7px; color: white; background: var(--primary); border-radius: 4px; font-size: 9px; }.workspace-title h2 { margin: 0; font-size: 18px; }.workspace-title p { margin: 4px 0 0; color: #8191a0; font-size: 10px; }
 .work-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px 1fr 280px; grid-template-rows: 1fr 142px; gap: 10px; padding: 10px; }.work-panel,.work-center,.bottom-panel { min-height: 0; overflow: hidden; background: white; border: 1px solid #dce5eb; border-radius: 5px; }.work-panel-title { height: 43px; display: flex; align-items: center; justify-content: space-between; padding: 0 13px; border-bottom: 1px solid #e8edf1; font-size: 12px; font-weight: bold; }.left-search { margin: 10px; padding: 8px 10px; color: #97a5b2; background: #f4f7f8; border: 1px solid #e3e9ed; border-radius: 4px; font-size: 10px; }.list-item { width: 100%; display: flex; gap: 9px; align-items: center; padding: 10px 12px; border: 0; border-bottom: 1px solid #eef2f4; text-align: left; background: white; cursor: pointer; }.list-item>i { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px; color: #22718f; background: #e8f4f7; font-style: normal; font-size: 10px; }.list-item span { font-size: 11px; }.list-item small { display: block; margin-top: 4px; color: #97a4af; font-size: 9px; }.list-item.selected { background: #edf8fb; border-left: 3px solid #1598b3; }.left-tools { margin: 15px 12px; padding-top: 12px; border-top: 1px solid #e8edf1; font-size: 10px; }.left-tools>div { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }.left-tools button { padding: 6px; border: 1px solid #dfe7eb; color: #60788a; background: white; border-radius: 3px; font-size: 9px; }
@@ -63,3 +64,86 @@ a { color: inherit; text-decoration: none; }
 .detail-state { display: flex; justify-content: space-between; align-items: center; margin: 12px; padding: 10px; background: #f2f8f9; font-size: 10px; }.right-panel dl { display: grid; grid-template-columns: 1fr 1fr; margin: 4px 13px 14px; }.right-panel dt,.right-panel dd { margin: 0; padding: 8px 0; border-bottom: 1px solid #edf1f3; font-size: 10px; }.right-panel dt { color: #7f8e9c; }.right-panel dd { text-align: right; font-weight: bold; }.summary-box { margin: 12px; padding: 11px; color: #547282; background: #fff8e9; border-left: 3px solid #f5a52f; font-size: 10px; }.summary-box p { margin: 7px 0 0; line-height: 1.7; }.timeline-title { margin: 12px; font-size: 11px; font-weight: bold; }.mini-timeline { display: grid; grid-template-columns: 10px 1fr; gap: 8px; margin: 0 13px; padding: 0 0 10px; border-left: 1px solid #d5e2e7; }.mini-timeline i { width: 7px; height: 7px; margin-left: -4px; border-radius: 50%; background: #16a7bd; }.mini-timeline b,.mini-timeline small { display: block; font-size: 9px; }.mini-timeline small { margin-top: 3px; color: #8c9aa6; }
 .bottom-panel { grid-column: 1/4; }.bottom-tabs { height: 38px; display: flex; gap: 4px; border-bottom: 1px solid #e4eaee; }.bottom-tabs button { padding: 0 18px; border: 0; color: #728594; background: white; font-size: 10px; }.bottom-tabs button.active { color: var(--primary); border-bottom: 2px solid #0d8faa; font-weight: bold; }.bottom-tabs small { padding: 1px 5px; color: white; background: #10a2b9; border-radius: 8px; }.bottom-content { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px; }.data-cell { padding: 13px; background: #f5f8f9; border: 1px solid #e5ebee; border-radius: 4px; }.data-cell span,.data-cell small { display: block; font-size: 10px; }.data-cell small { margin-top: 7px; color: #8a99a5; font-size: 8px; }
 @media (max-width: 1450px) { .flow-nav button { min-width: 82px; }.workspace-header { grid-template-columns: 255px 1fr 230px; }.work-grid { grid-template-columns: 210px 1fr 250px; }.page-content { padding: 18px; } }
+/* 九龙镇 ArcGIS 专题图层：统一使用紧凑的深色控件，避免遮挡地图业务按钮。 */
+.leaflet-control-layers.jiulong-arcgis-control {
+  color: #d9f8ff;
+  background: rgb(4 35 57 / 94%);
+  border: 1px solid #1f7898;
+  border-radius: 4px;
+  box-shadow: 0 3px 12px rgb(0 14 29 / 32%);
+  font-family: "Microsoft YaHei", sans-serif;
+}
+
+.jiulong-arcgis-control .leaflet-control-layers-toggle {
+  width: 34px;
+  height: 34px;
+  background-image: none;
+}
+
+.jiulong-arcgis-control .leaflet-control-layers-toggle::before {
+  content: "层";
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: #7eeeff;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.jiulong-arcgis-control .leaflet-control-layers-list {
+  min-width: 238px;
+  padding: 5px 4px;
+}
+
+.jiulong-arcgis-control .leaflet-control-layers-list::before {
+  content: "九龙镇专题图层";
+  display: block;
+  margin: 0 0 7px;
+  padding: 0 4px 7px;
+  color: #8feeff;
+  border-bottom: 1px solid rgb(62 180 212 / 28%);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.jiulong-arcgis-control label {
+  margin: 0;
+  padding: 5px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.jiulong-arcgis-control label:hover {
+  background: rgb(38 153 187 / 16%);
+}
+
+.jiulong-arcgis-control input {
+  accent-color: #28c5e8;
+}
+
+.leaflet-tooltip.jiulong-feature-tooltip {
+  padding: 7px 10px;
+  color: #f4fbff;
+  background: rgb(4 35 57 / 96%);
+  border: 1px solid #35c8e7;
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgb(0 14 29 / 38%);
+  font-family: "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.leaflet-tooltip-top.jiulong-feature-tooltip::before {
+  border-top-color: #35c8e7;
+}
+
+.jiulong-feature-tooltip span {
+  color: #8fc8d6;
+}
+
+.jiulong-feature-tooltip strong {
+  color: #fff;
+  font-weight: 700;
+}

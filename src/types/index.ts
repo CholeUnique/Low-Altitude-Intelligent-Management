@@ -19,12 +19,22 @@ export interface CurrentUser {
   username: string
   realName?: string
   nickname?: string
+  gender?: number
   avatar?: string
+  phone?: string
+  email?: string
   unit?: string
   role: string
   deptId?: string
+  defaultDeptId?: string
   deptName?: string
   deptList: UserDepartment[]
+  department?: string
+  position?: string
+  status?: number
+  loginType?: string
+  lastLoginTime?: string
+  createTime?: string
 }
 
 export interface WorkspaceNodeConfig {

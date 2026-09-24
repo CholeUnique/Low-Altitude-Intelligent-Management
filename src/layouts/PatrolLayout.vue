@@ -79,9 +79,10 @@ function goNode(path: string) {
 
 <style scoped lang="scss">
 .patrol-layout {
-  height: 100vh;
-  min-height: 720px;
-  min-width: 1180px;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   color: #d6f4ff;
@@ -213,4 +214,10 @@ function goNode(path: string) {
   background: #eef3f6;
   color: #1f3d52;
 }
+@media (max-width: 1100px) {
+  .patrol-header { padding-inline: 8px; }
+  .header-left,.header-right { gap: 7px; }.page-title h1 { font-size: 16px; }.page-title small,.header-user { display: none; }
+  .patrol-flow button { min-width: 88px; }.system-state { font-size: 12px; }
+}
+@media (max-height: 700px) { .patrol-header { flex-basis: 56px; } }
 </style>

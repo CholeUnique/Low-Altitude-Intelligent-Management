@@ -7,8 +7,12 @@
   --dash-text: #d8f4ff;
   --dash-muted: #6f99ad;
   --dash-cyan: #16d9ee;
-  min-width: 1180px;
-  height: 100vh;
+  width: 100%;
+  min-width: 0;
+  height: 100dvh;
+  min-height: 620px;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   color: var(--dash-text);
   background:
@@ -18,7 +22,7 @@
 }
 
 .cockpit-header {
-  height: 72px;
+  flex: 0 0 72px;
   display: grid;
   grid-template-columns: minmax(320px, 1fr) auto minmax(430px, 1fr);
   align-items: center;
@@ -51,7 +55,8 @@
 .avatar { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; border: 0!important; border-radius: 50%; background: transparent!important; }.avatar :deep(svg) { width: 29px; height: 29px; filter: drop-shadow(0 0 5px #2caef588); }
 
 .cockpit-body {
-  height: calc(100vh - 72px);
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-rows: 88px minmax(300px, 1.7fr) minmax(188px, .9fr) 66px;
   gap: 7px;
@@ -70,7 +75,7 @@
 .spark-bars { height: 30px; display: flex; align-items: flex-end; gap: 3px; opacity: .55; }.spark-bars i { width: 3px; min-height: 4px; background: linear-gradient(#3fe5f6, #096e9a); box-shadow: 0 0 4px #2bdff1; }
 .is-blue .stat-icon { color: #64bfff; }.is-indigo .stat-icon { color: #8da3ff; }.is-green .stat-icon,.is-green .stat-copy strong { color: #48efd0; }
 
-.cockpit-primary { min-height: 0; display: grid; grid-template-columns: minmax(0, 2.45fr) minmax(310px, 1fr); gap: 7px; }
+.cockpit-primary { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; }
 .cockpit-secondary { min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .cockpit-panel { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: linear-gradient(145deg, #04233e, #02172d); border: 1px solid var(--dash-line); box-shadow: inset 0 0 18px #0a5c8117, 0 2px 8px #0009; }
 .cockpit-panel::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 22px; height: 2px; background: #147ba1; }
@@ -81,7 +86,7 @@
 .map-overview>.cockpit-panel__title h2 { font-size: 15px; }
 .cockpit-side { min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); }
 
-.compact-list { height: calc(100% - 38px); overflow: hidden; }
+.compact-list { height: calc(100% - 38px); overflow: auto; }
 .task-list-item,.alert-list-item { width: 100%; height: 25%; min-height: 44px; display: grid; grid-template-columns: 32px 1fr auto; gap: 8px; align-items: center; padding: 6px 10px; color: var(--dash-text); background: transparent; border: 0; border-bottom: 1px solid #0a3853; text-align: left; cursor: pointer; }
 .task-list-panel .compact-list { display: flex; flex-direction: column; }
 .task-list-panel .task-list-item { height: 58px; min-height: 58px; flex: 0 0 58px; }
@@ -135,9 +140,18 @@
   .cockpit-header { grid-template-columns: minmax(280px, 1fr) auto minmax(360px, 1fr); }
   .cockpit-brand h1 { font-size: 26px; }.cockpit-user { gap: 6px; }.cockpit-nav { gap: 5px; }
   .cockpit-stat { grid-template-columns: 48px 1fr 45px; padding-inline: 8px; }.spark-bars { gap: 2px; }.spark-bars i { width: 2px; }
-  .cockpit-primary { grid-template-columns: minmax(0, 2.25fr) minmax(290px, 1fr); }
   .cockpit-secondary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .governance-flow { grid-template-columns: 125px repeat(11, auto); padding-inline: 8px; }.flow-item { gap: 4px; }.flow-item>i { width: 25px; height: 25px; }
+}
+
+@media (max-width: 1180px) {
+  .cockpit-header { grid-template-columns: minmax(230px, 1fr) auto minmax(180px, 1fr); padding-inline: 10px; }
+  .cockpit-brand { gap: 8px; }.cockpit-logo { width: 31px; height: 31px; }.cockpit-logo :deep(svg) { width: 30px; height: 30px; }
+  .cockpit-brand h1 { font-size: 21px; letter-spacing: 1px; }.cockpit-nav { gap: 3px; }.cockpit-nav button { font-size: 15px; }.cockpit-user { gap: 5px; font-size: 13px; }.cockpit-user time { display: none; }
+  .cockpit-stat { grid-template-columns: 42px minmax(0, 1fr); }.cockpit-stat .spark-bars { display: none; }.stat-icon { transform: none; }.stat-copy p { overflow: hidden; text-overflow: ellipsis; }
+  .cockpit-panel__title { padding-inline: 9px; }.cockpit-panel__title h2 { font-size: 14px; }
+  .task-list-panel .task-list-item { min-height: 52px; flex-basis: 52px; }.task-list-panel .item-main b { font-size: 14px; }.task-list-panel .item-main small { font-size: 12px; }
+  .scene-entry { flex-basis: min(250px, 28vw); }.scene-entries .flow-caption { width: 145px; }
 }
 
 @media (max-height: 820px) {
@@ -146,4 +160,11 @@
   .cockpit-stat { padding-block: 4px; }.stat-icon { width: 38px; height: 38px; }.stat-copy strong { font-size: 22px; }
   .cockpit-panel__title { height: 34px; }.map-overview,.feed-panel,.chart-panel,.archive-panel { grid-template-rows: 34px 1fr; }.ai-panel { grid-template-rows: 34px 1fr 44px; }
   .compact-list { height: calc(100% - 34px); }
+}
+
+@media (max-height: 700px) {
+  .cockpit { min-height: 560px; }
+  .cockpit-header { flex-basis: 60px; }
+  .cockpit-body { grid-template-rows: 68px minmax(250px, 1.7fr) minmax(150px, .8fr) 54px; }
+  .cockpit-stat { padding-block: 3px; }.stat-icon { width: 34px; height: 34px; }.stat-copy strong { font-size: 19px; }.stat-copy p { font-size: 12px; }
 }

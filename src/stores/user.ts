@@ -26,8 +26,23 @@ export const useUserStore = defineStore('user', () => {
   const roleId = ref<RoleId>((localStorage.getItem('role_id') as RoleId) || 'admin')
   const isLoggedIn = computed(() => Boolean(token.value))
   const organization = computed(() => getOrganization(organizationId.value))
-  // 当前演示账号被授予两套业务单位的查看与切换能力；后端部门权限不在此处改写。
-  const availableOrganizations = computed(() => portalData.organizations)
+  const availableOrganizations = computed(() => {
+    if (currentUser.value?.role === 'ADMIN') return portalData.organizations
+
+    const departmentNames = currentUser.value?.deptList?.map((department) => department.deptName) || []
+    const matched = portalData.organizations.filter((item) => departmentNames.some((name) => (
+      item.id === 'agriculture-rural'
+        ? /\u519c\u4e1a\u519c\u6751/.test(name)
+        : /\u81ea\u7136\u8d44\u6e90.*\u89c4\u5212|\u81ea\u7136\u8d44\u6e90/.test(name)
+    )))
+
+    // 兼容旧会话或后端未返回 deptList 的情况，至少保留当前部门。
+    return matched.length ? matched : [organization.value]
+  })
+  // 管理员可切换全部部门；普通用户只有归属多个部门时才可切换。
+  const canSwitchDepartment = computed(() => (
+    currentUser.value?.role === 'ADMIN' || availableOrganizations.value.length > 1
+  ))
   const role = computed(() => getRole(roleId.value))
   const name = computed(() => currentUser.value?.realName || currentUser.value?.nickname || currentUser.value?.username || `${organization.value.shortName}${role.value.name}`)
   const permissions = computed(() => role.value.permissions)
@@ -73,7 +88,15 @@ export const useUserStore = defineStore('user', () => {
     else localStorage.removeItem('active_dept_id')
   }
 
+  function setCurrentUser(userInfo: CurrentUser) {
+    currentUser.value = userInfo
+    roleId.value = userInfo.role === 'ADMIN' ? 'admin' : 'staff'
+    localStorage.setItem('current_user', JSON.stringify(userInfo))
+    localStorage.setItem('role_id', roleId.value)
+  }
+
   function switchOrganization(nextOrganizationId: OrganizationId) {
+    if (!availableOrganizations.value.some((item) => item.id === nextOrganizationId)) return
     organizationId.value = nextOrganizationId
     localStorage.setItem('organization_id', nextOrganizationId)
   }
@@ -90,6 +113,8 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function hasPermission(code: string) {
+    // 管理员不受普通用户的部门菜单授权限制，始终拥有系统全部功能权限。
+    if (currentUser.value?.role === 'ADMIN') return true
     return permissions.value.includes(code)
   }
 
@@ -102,6 +127,7 @@ export const useUserStore = defineStore('user', () => {
     organizationId,
     roleId,
     organization,
+    canSwitchDepartment,
     availableOrganizations,
     role,
     name,
@@ -109,6 +135,7 @@ export const useUserStore = defineStore('user', () => {
     isLoggedIn,
     setRealSession,
     setDepartmentSession,
+    setCurrentUser,
     switchOrganization,
     logout,
     hasPermission,
