@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import CockpitPageLayout from '@/layouts/CockpitPageLayout.vue'
-import NewTaskDialog from '@/components/NewTaskDialog.vue'
+import PlatformLayout from '@/layouts/PlatformLayout.vue'
 import TaskRangeThumbnail from '@/components/TaskRangeThumbnail.vue'
 import { deleteGovernanceTask, getGovernanceTaskGeometry, getGovernanceTaskPage } from '@/api/governance-task'
 import { getSceneDictionary, toMockSceneDictionaryItem } from '@/api/scene'
@@ -24,7 +23,6 @@ const priority = ref<number | ''>('')
 const plannedDate = ref('')
 const sceneFilter = ref(typeof route.query.sceneId === 'string' ? route.query.sceneId : '')
 const initialSceneCode = typeof route.query.sceneCode === 'string' ? route.query.sceneCode : ''
-const newTaskVisible = ref(false)
 const selectedIds = ref<string[]>([])
 const deleteConfirmVisible = ref(false)
 const deleteLoading = ref(false)
@@ -42,6 +40,13 @@ const sceneLoading = ref(true)
 const sceneError = ref('')
 const taskRangeGeometries = ref<Record<string, TaskGeometryFeatureCollection>>({})
 const taskRangePreviewLoading = ref(false)
+const taskMenu = [
+  { label: '任务总览', path: '/task-center/overview', icon: '总' },
+  { label: '任务列表', path: '/tasks', icon: '列' },
+  { label: '整改跟踪', path: '/task-center/rectification', icon: '改' },
+  { label: '复核归档', path: '/task-center/review', icon: '核' },
+  { label: '需求工单', path: '/task-center/work-orders', icon: '单' },
+]
 let latestRequest = 0
 let latestSceneRequest = 0
 let latestRangePreviewRequest = 0
@@ -223,10 +228,6 @@ function updateMaximumRows() {
   maximumRows.value = Math.max(5, Math.floor((window.innerHeight - taskTable.value.getBoundingClientRect().top - headerHeight - paginationHeight - safeGap) / rowHeight))
 }
 
-function handleCreated(task: { id: string }) {
-  router.push(`/tasks/${task.id}`)
-}
-
 function requestBatchDelete() {
   deleteError.value = ''
   if (!selectedIds.value.length) {
@@ -317,8 +318,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
 </script>
 
 <template>
-  <CockpitPageLayout center-subtitle variant="repository" title="低空治理任务总览" :subtitle="`${user.organization.name} · ${sceneFilter ? selectedScene?.name || '已选场景' : '全部场景'}`">
-    <template #action><button class="primary-action" @click="newTaskVisible = true">＋ 新增任务</button></template>
+  <PlatformLayout section="task" title="任务中心" subtitle="任务执行、整改、复核与归档" :menu="taskMenu">
+    <div class="page-head"><div><h2>任务列表</h2><p>{{ user.organization.name }} · {{ sceneFilter ? selectedScene?.name || '已选场景' : '全部场景' }}</p></div><span class="update">任务数据实时同步</span></div>
     <section class="task-filters">
       <div class="search-box">⌕<input v-model="keyword" placeholder="请输入任务名称、编号或关键词" /></div>
       <label>所属场景<select v-model="sceneFilter" :disabled="sceneLoading"><option value="">{{ sceneLoading ? '场景字典加载中…' : '全部场景' }}</option><option v-for="scene in sceneOptions" :key="scene.id" :value="scene.id">{{ scene.shortName }}</option></select></label>
@@ -361,7 +362,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
       <div v-else-if="!taskRows.length" class="empty-tasks">当前筛选条件下暂无真实任务</div>
     </section>
     <footer class="task-pagination"><span>共 <b>{{ taskTotal }}</b> 条记录　每页显示 <b>{{ requestPageSize }}</b> 条</span><div class="page-controls"><button :disabled="currentPage === 1" @click="setPage(currentPage - 1)">‹</button><template v-for="(item, index) in paginationItems" :key="`${item}-${index}`"><span v-if="item === 'ellipsis'">…</span><button v-else :class="{ active: currentPage === item }" @click="setPage(item)">{{ item }}</button></template><button :disabled="currentPage === pageCount" @click="setPage(currentPage + 1)">›</button><label>前往 <input v-model="gotoPage" inputmode="numeric" @keyup.enter="applyGoToPage" @blur="applyGoToPage" /> 页</label></div></footer>
-    <NewTaskDialog v-model="newTaskVisible" :scene-id="sceneFilter || undefined" :scenes="sceneOptions" @created="handleCreated" />
     <div v-if="deleteConfirmVisible" class="delete-confirm-mask" @click.self="!deleteLoading && (deleteConfirmVisible = false)">
       <section class="delete-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-confirm-title">
         <h3 id="delete-confirm-title">确认批量删除</h3>
@@ -371,7 +371,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
         <footer><button :disabled="deleteLoading" @click="deleteConfirmVisible = false">取消</button><button class="confirm-danger" :disabled="deleteLoading" @click="confirmBatchDelete">{{ deleteLoading ? '正在删除…' : '确认删除' }}</button></footer>
       </section>
     </div>
-  </CockpitPageLayout>
+  </PlatformLayout>
 </template>
 
 <style scoped lang="scss">
@@ -409,4 +409,19 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
 :global(.task-date-popper .el-picker__popper-arrow::before) { background: #052540; border-color: #168bbd; }
 .task-progress { display: flex; align-items: center; gap: 8px; color: #88adc1; }.task-progress i { width: 10px; height: 10px; border: 1px solid #6589a2; border-radius: 50%; }.task-progress.running i { background: #168ff0; border-color: #5bc9ff; box-shadow: 0 0 7px #168ff0; }.task-progress.done i { background: #21dbb1; border-color: #21dbb1; }.task-progress.pending i { background: #d59a24; border-color: #ffc85a; }.task-progress.failed i { background: #ff6574; border-color: #ff8d99; }.task-progress small { font-size: 13px; }.task-actions button:disabled { opacity: .45; cursor: not-allowed; }
 @media (max-height: 820px) { .task-table-row { min-height: 51px; }.task-summary { height: 65px; }.task-filters { height: 52px; } }
+
+/* 平台菜单统一后，任务记录区采用浅色业务台账样式。 */
+.task-filters { background: #fff; border-color: #d5e3ea; box-shadow: 0 3px 12px #183c5110; }
+.task-filters label { color: #506d7c; }
+.task-filters select,.task-filters label>input,.search-box { color: #23495c; background: #f8fbfd; border-color: #bdd6e2; }
+.search-box input { color: #23495c; }
+.task-summary>div { color: #315467; background: linear-gradient(135deg,#fff,#f1f8fb); border-color: #d3e3ea; box-shadow: 0 3px 10px #173d5110; }
+.task-summary span { color: #54717f; }.task-summary span b { color: #087aa4; }.task-summary span small { color: #879ba6; }
+.batch-box button { color: #167a9f; background: #edf7fb; border-color: #b9d7e3; }
+.task-table { background: #fff; border-color: #d2e1e8; box-shadow: 0 3px 12px #183c5110; }
+.task-table-head { color: #31566a; background: linear-gradient(90deg,#e9f4f8,#f6fafc); }
+.task-table-row { border-bottom-color: #e5edf1; }.task-table-row>span { color: #496676; }
+.task-name b,.task-owner b { color: #183e52; }.task-name small,.task-owner small,.task-table-row>span>small { color: #8196a1; }
+.workflow-step i { background: #fff; }.workflow-step.done small,.workflow-step.active small { color: #31566a; }
+.task-pagination { color: #6f8794; }.task-pagination button { color: #527688; background: #fff; border-color: #c2d5df; }.task-pagination b { color: #087ea7; }.page-controls input { color: #23495c; background: #fff; border-color: #bdd2dd; }
 </style>

@@ -1,0 +1,152 @@
+[
+  {
+    "name": "01-unit-overview",
+    "route": "/dashboard",
+    "file": "01-unit-overview.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "02-flight-fleet",
+    "route": "/flight/fleet",
+    "file": "02-flight-fleet.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "03-flight-route-planning",
+    "route": "/patrol/route-plan",
+    "file": "03-flight-route-planning.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "04-flight-plans",
+    "route": "/flight/plans",
+    "file": "04-flight-plans.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "05-flight-live",
+    "route": "/patrol/live",
+    "file": "05-flight-live.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "06-recognition-intelligent",
+    "route": "/recognition/intelligent",
+    "file": "06-recognition-intelligent.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "07-recognition-algorithms",
+    "route": "/algorithms",
+    "file": "07-recognition-algorithms.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "08-task-overview",
+    "route": "/task-center/overview",
+    "file": "08-task-overview.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "09-task-list",
+    "route": "/tasks",
+    "file": "09-task-list.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "10-task-scenes",
+    "route": "/task-center/scenes",
+    "file": "10-task-scenes.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "11-task-todo",
+    "route": "/task-center/todo",
+    "file": "11-task-todo.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "12-assets-map-services",
+    "route": "/assets/map-services",
+    "file": "12-assets-map-services.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "13-assets-recognition-results",
+    "route": "/assets/recognition-results",
+    "file": "13-assets-recognition-results.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "14-assets-routes",
+    "route": "/assets/routes",
+    "file": "14-assets-routes.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "15-assets-flight-results",
+    "route": "/assets/flight-results",
+    "file": "15-assets-flight-results.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "16-assets-other",
+    "route": "/assets/other",
+    "file": "16-assets-other.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "17-workspace-forestry-enforcement-task-detail",
+    "route": "/workspace/forestry-enforcement?node=task-detail",
+    "file": "17-workspace-forestry-enforcement-task-detail.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "18-workspace-forestry-enforcement-director-review",
+    "route": "/workspace/forestry-enforcement?node=director-review",
+    "file": "18-workspace-forestry-enforcement-director-review.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "19-workspace-forestry-enforcement-section-review",
+    "route": "/workspace/forestry-enforcement?node=section-review",
+    "file": "19-workspace-forestry-enforcement-section-review.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "20-workspace-forestry-enforcement-task-dispatch",
+    "route": "/workspace/forestry-enforcement?node=task-dispatch",
+    "file": "20-workspace-forestry-enforcement-task-dispatch.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "21-workspace-forestry-enforcement-field-verification",
+    "route": "/workspace/forestry-enforcement?node=field-verification",
+    "file": "21-workspace-forestry-enforcement-field-verification.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "22-workspace-forestry-enforcement-rectification-tracking",
+    "route": "/workspace/forestry-enforcement?node=rectification-tracking",
+    "file": "22-workspace-forestry-enforcement-rectification-tracking.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "23-workspace-forestry-enforcement-review-archive",
+    "route": "/workspace/forestry-enforcement?node=review-archive",
+    "file": "23-workspace-forestry-enforcement-review-archive.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "24-demand-work-orders",
+    "route": "/task-center/work-orders",
+    "file": "24-demand-work-orders.png",
+    "title": "低空智慧服务平台"
+  },
+  {
+    "name": "25-flight-results",
+    "route": "/recognition/flight-results",
+    "file": "25-flight-results.png",
+    "title": "低空智慧服务平台"
+  }
+]

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
-import type { GeoJsonObject } from 'geojson'
+import type { FeatureCollection, GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 import taizhouCityBoundary from '@/assets/geo/taizhou-city.json'
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
@@ -12,6 +12,8 @@ const props = defineProps<{
   routes: DronePatrolRoute[]
   /** 从场景入口进入时，自动聚焦该场景实际任务范围。 */
   focusLayerId?: string
+  /** 总览大屏可聚焦并高亮单个行政区。 */
+  highlightDistrict?: string
 }>()
 
 const TAIZHOU_CENTER: L.LatLngTuple = [32.4555, 119.9255]
@@ -432,6 +434,23 @@ function renderAdministrativeBoundaries() {
   administrativeBoundaryGroup.addTo(map)
 }
 
+function renderHighlightedDistrict() {
+  if (!map || !props.highlightDistrict) return
+  const district = (taizhouDistrictBoundaries as unknown as FeatureCollection).features
+    .find((feature) => feature.properties?.name === props.highlightDistrict)
+  if (!district) return
+
+  L.geoJSON(district, {
+    pane: 'administrative-boundaries',
+    style: { color: '#159fff', weight: 10, opacity: .45, fillColor: '#138de0', fillOpacity: .17 },
+  }).addTo(map)
+  const outline = L.geoJSON(district, {
+    pane: 'administrative-boundaries',
+    style: { color: '#9befff', weight: 2.5, opacity: 1, fillOpacity: 0 },
+  }).addTo(map)
+  map.fitBounds(outline.getBounds(), { padding: [72, 72], maxZoom: 12, animate: false })
+}
+
 function updateScale() {
   if (!map) return
   const referenceWidth = 110
@@ -476,6 +495,7 @@ async function initMap() {
     locationGroup = L.layerGroup().addTo(map)
     addBaseLayers('image')
     if (showAdministrativeBoundaries) renderAdministrativeBoundaries()
+    renderHighlightedDistrict()
     renderBusinessLayers()
     scheduleSceneFocus()
     renderRoutes()

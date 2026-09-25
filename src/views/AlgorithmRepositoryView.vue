@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import PlatformLayout from '@/layouts/PlatformLayout.vue'
 import { algorithmModels } from '@/mocks/data'
 import type { AlgorithmModel } from '@/types'
 
-const router = useRouter()
 const route = useRoute()
+const recognitionMenu = [
+  { label: '飞行结果', path: '/recognition/flight-results', icon: '飞' },
+  { label: '智能识别', path: '/recognition/intelligent', icon: '识' },
+  { label: '算法仓库', path: '/algorithms', icon: '算' },
+]
 const keyword = ref('')
 const scene = ref('全部场景')
 const category = ref('全部算法')
@@ -15,8 +20,6 @@ const currentPage = ref(1)
 const gotoPage = ref('1')
 const selected = ref<AlgorithmModel>()
 const activeDetailTab = ref<'info' | 'validation'>('info')
-const now = ref(new Date())
-const timer = window.setInterval(() => { now.value = new Date() }, 1000)
 
 const scenes = computed(() => ['全部场景', ...Array.from(new Set(algorithmModels.map((item) => item.scene)))])
 const categories = ['全部算法', '目标识别', '变化检测', '分割提取', 'OCR识别', '大模型', '三维重建']
@@ -41,8 +44,6 @@ const paginationItems = computed<(number | 'ellipsis')[]>(() => {
   const sorted = [...numbers].filter((item) => item > 0 && item <= total).sort((a, b) => a - b)
   return sorted.flatMap((item, index) => index && item - sorted[index - 1]! > 1 ? ['ellipsis', item] : [item]) as (number | 'ellipsis')[]
 })
-const dateText = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' }).format(now.value))
-const timeText = computed(() => now.value.toLocaleTimeString('zh-CN', { hour12: false }))
 
 function openDetail(model: AlgorithmModel) {
   selected.value = model
@@ -73,21 +74,12 @@ watch([keyword, scene, category, source], () => setPage(1))
 watch(pageCount, () => setPage(currentPage.value))
 watch(() => route.query.algorithm, openAlgorithmFromRoute, { immediate: true })
 
-onBeforeUnmount(() => window.clearInterval(timer))
 </script>
 
 <template>
+  <PlatformLayout section="recognition" title="识别研判" subtitle="智能识别与算法能力管理" :menu="recognitionMenu">
   <div class="algorithm-page">
-    <header class="algorithm-header">
-      <div class="algorithm-title">
-        <button class="back-button" aria-label="返回运行中枢" @click="router.push('/dashboard')">‹ <span>返回</span></button>
-        <span class="algorithm-logo">◆</span>
-        <h1>算法能力仓库</h1><i></i>
-        <p>天地协同 · 智慧感知 · 精准治理 · 服务发展</p>
-      </div>
-      <div class="algorithm-user"><span class="system-online"><i></i>系统运行正常</span><span class="header-time">{{ dateText }}　{{ timeText }}</span><button class="notification">♧<b>3</b></button><button class="user-button">●　管理员　⌄</button></div>
-    </header>
-
+    <div class="page-head"><div><h2>算法仓库</h2><p>统一管理视觉识别、变化检测、分割提取与行业大模型能力</p></div><span class="update">已部署 16 个 · 运行正常</span></div>
     <main class="algorithm-main">
       <section class="algorithm-controls">
         <div class="search-row">
@@ -122,6 +114,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
       </section>
     </div>
   </div>
+  </PlatformLayout>
 </template>
 
 <style scoped lang="scss">
@@ -131,4 +124,11 @@ onBeforeUnmount(() => window.clearInterval(timer))
 .algorithm-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr)); grid-template-rows: repeat(var(--grid-rows), minmax(0, 1fr)); gap: 16px; margin-top: 18px; }.algorithm-card { min-height: 0; display: grid; grid-template-rows: minmax(64px, .95fr) minmax(78px, 1.05fr); overflow: hidden; border: 1px solid #1477b2; border-radius: 5px; background: #082347e6; box-shadow: 0 0 14px #001b3c; cursor: pointer; transition: transform .2s, border-color .2s, box-shadow .2s; }.algorithm-card:hover,.algorithm-card:focus { outline: 0; border-color: #39cfff; box-shadow: 0 0 20px #0393e666; transform: translateY(-3px); }.algorithm-visual { position: relative; min-height: 0; overflow: hidden; background-color: #31585a; background-image: linear-gradient(117deg, #fff1 0 2%, transparent 2% 15%, #fff1 15% 17%, transparent 17% 42%, #fff1 42% 44%, transparent 44%), repeating-linear-gradient(24deg, #0017 0 2px, transparent 2px 29px), linear-gradient(135deg, #487754, #193d3d); background-size: 100% 100%, 54px 54px, cover; }.visual-forest-building { background-image: radial-gradient(ellipse at 52% 52%, #cfc8a2 0 9%, transparent 10%), linear-gradient(135deg, #1c5135, #60924e 48%, #1a4c36); }.visual-forest-clearing { background-image: radial-gradient(ellipse at 50% 50%, #bc7e50 0 25%, transparent 26%), repeating-linear-gradient(35deg, #1c5539 0 14px, #396a3d 14px 28px); }.visual-construction { background-image: repeating-linear-gradient(90deg, #d3d1c4 0 10%, #727e7e 10% 18%, #d5c48d 18% 28%), linear-gradient(45deg, #5d716e, #c9c9ba); }.visual-farmland { background-image: repeating-linear-gradient(140deg, #456b26 0 24px, #85a843 24px 45px, #d0af5a 45px 68px); }.visual-road { background-image: linear-gradient(75deg, transparent 40%, #6b7073 40% 60%, transparent 60%), repeating-linear-gradient(12deg, #406c3a 0 18px, #8baa54 18px 33px); }.visual-water { background-image: linear-gradient(135deg, #4597a8 0 46%, #466e48 47% 70%, #b68051 71%), radial-gradient(circle, #7fae57, #346c4c); }.type-badge,.deployment { position: absolute; top: 10px; padding: 5px 9px; border: 1px solid #3e8fd0; border-radius: 3px; background: #07396fcf; color: #e1f4ff; font-size: 12px; }.type-badge { left: 10px; }.deployment { right: 10px; color: #40eab0; background: #042f2bd9; border-color: #148467; }.detection-box { position: absolute; left: 41%; top: 31%; width: 31%; height: 40%; border: 4px solid #ff4d4f; box-shadow: 0 0 0 1px #fbccca, 0 0 14px #ff2020; }.detection-box.secondary { left: 16%; top: 18%; width: 16%; height: 22%; border-width: 2px; }.media-overlay { position: absolute; right: 0; bottom: 0; left: 0; min-height: 42px; display: flex; align-items: center; padding: 8px 12px; color: #eef4f8; background: #252933dc; font-size: 12px; line-height: 1.5; transform: translateY(100%); transition: transform .25s ease; }.algorithm-card:hover .media-overlay,.algorithm-card:focus .media-overlay { transform: translateY(0); }.comparison-side { position: absolute; top: 0; bottom: 0; width: 50%; background: linear-gradient(45deg, #6c7779, #bd9c7c); }.comparison-side.before { left: 0; filter: saturate(.55); }.comparison-side.after { right: 0; background: linear-gradient(45deg, #2f6b43, #9bc76b); }.comparison-side span { position: absolute; bottom: 8px; left: 10px; padding: 3px 5px; color: white; background: #02182caa; font-size: 11px; }.comparison-slider { position: absolute; z-index: 2; top: 50%; left: calc(50% - 15px); display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: #183d5d; color: white; transform: translateY(-50%); }.algorithm-card__body { min-height: 0; padding: clamp(8px, 1vw, 14px); overflow: hidden; }.algorithm-card__body h2 { margin: 0 0 8px; overflow: hidden; color: #f6fbff; font-size: clamp(14px, 1.1vw, 18px); text-overflow: ellipsis; white-space: nowrap; }.algorithm-card__body p { display: -webkit-box; margin: 0; overflow: hidden; color: #adc8de; font-size: clamp(11px, .8vw, 13px); line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }.algorithm-tags { display: flex; align-items: center; gap: 8px; margin-top: 10px; overflow: hidden; }.algorithm-tags span { padding: 3px 8px; border: 1px solid #2d79bd; border-radius: 3px; color: #b9deff; background: #093665; font-size: 11px; white-space: nowrap; }.algorithm-tags b { margin-left: auto; padding: 4px 7px; border: 1px solid #d59d31; border-radius: 3px; color: #ffcf65; background: #60440d99; font-size: 11px; white-space: nowrap; }.algorithm-pagination { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; margin-top: 19px; color: #a9c6db; font-size: 13px; }.algorithm-pagination b { color: #37cbff; }.algorithm-pagination select { margin: 0 5px; padding-right: 28px; color: #e7f7ff; }.algorithm-pagination button:disabled { opacity: .4; cursor: not-allowed; }.algorithm-pagination>div>button { min-width: 31px; margin-left: 8px; padding: 0 8px; }.page-controls { display: flex; align-items: center; }.page-controls label { margin-left: 20px; }.page-controls input { width: 38px; height: 31px; margin: 0 4px; border: 1px solid #2d6693; border-radius: 3px; color: white; background: #0a2949; text-align: center; }
 .algorithm-modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 32px; background: #000a; }.algorithm-modal { width: min(1180px, 94vw); max-height: calc(100vh - 64px); overflow: auto; border: 1px solid #737889; border-radius: 10px; background: #292a35; box-shadow: 0 24px 60px #000b; }.algorithm-modal>header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 74px; padding: 0 24px; border-bottom: 1px solid #4b4e5e; }.algorithm-modal h2 { margin: 0; color: white; font-size: 20px; }.modal-tabs { display: flex; overflow: hidden; border: 1px solid #535a70; border-radius: 4px; }.modal-tabs button { padding: 9px 26px; border: 0; color: #c1c6d4; background: transparent; cursor: pointer; }.modal-tabs button.active { color: white; background: #5179ee; }.modal-close { justify-self: end; border: 0; color: #c2c6d2; background: transparent; font-size: 25px; cursor: pointer; }.modal-content { padding: 20px; }.modal-content dl { margin: 0; border: 1px solid #494d5e; border-radius: 5px; }.modal-content dl>div { padding: 11px 15px; border-bottom: 1px solid #434655; }.modal-content dl>div:last-child { border: 0; }.modal-content dt { margin-bottom: 6px; color: #989dac; font-size: 13px; }.modal-content dd { margin: 0; color: #eef0f6; font-size: 14px; line-height: 1.6; }.modal-status { color: #36e6ab; }.modal-content h3 { margin: 22px 0 10px; color: #68b3ff; font-size: 15px; }.detail-placeholder { padding: 15px; border: 1px solid #494d5e; border-radius: 5px; color: #9da3b0; }.validation-empty { padding: 70px; color: #b2b8c6; text-align: center; }
 @media (max-width: 1500px) { .algorithm-title p { display: none; } }
+
+/* 与智能识别页共用平台壳层，仓库内容保留深色专业工作区。 */
+.algorithm-page { min-width: 0; min-height: 0; height: calc(100vh - 106px); color: #e8f5ff; border-radius: 8px; background: radial-gradient(circle at 50% -20%, #0873bd55, transparent 35%), linear-gradient(135deg, #03162c, #052747 58%, #03182f); box-shadow: 0 4px 18px #153a5126; }
+.algorithm-page>.page-head { flex: 0 0 auto; margin: 0; padding: 14px 18px 0; }
+.algorithm-page>.page-head h2 { color: #fff; }
+.algorithm-page>.page-head p,.algorithm-page>.page-head .update { color: #89b5c9; }
+.algorithm-main { padding: 12px 18px 16px; }
 </style>

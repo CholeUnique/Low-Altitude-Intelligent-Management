@@ -22,6 +22,13 @@ const evidenceImages = ref<TaskEvidenceImage[]>([])
 const activeImageIndex = ref(0)
 let requestVersion = 0
 
+const demoRecords: TaskAbnormal[] = [
+  { id:'SPOT-0918-001', bizTaskId:'preview', sceneCode:'FORESTRY', abnormalType:'FOREST_OCCUPATION', abnormalTypeDesc:'疑似林地变化', abnormalLevel:3, title:'西山林区疑似违规占地', description:'多期影像发现林地边界内新增硬化地面与构筑物。', area:2840, longitude:119.758, latitude:32.612, handleStatus:0, foundTime:'2026-09-18T09:26:00' },
+  { id:'SPOT-0918-002', bizTaskId:'preview', sceneCode:'FORESTRY', abnormalType:'FOREST_CLEARING', abnormalTypeDesc:'疑似毁林开垦', abnormalLevel:2, title:'东部农田疑似林地退化', description:'植被覆盖率较基准期明显下降，建议人工复核。', area:1680, longitude:119.782, latitude:32.598, handleStatus:0, foundTime:'2026-09-18T10:42:00' },
+  { id:'SPOT-0918-003', bizTaskId:'preview', sceneCode:'FORESTRY', abnormalType:'NEW_BUILDING', abnormalTypeDesc:'新增构筑物', abnormalLevel:2, title:'城郊疑似新增构筑物', description:'识别到两处新增屋面目标。', area:960, longitude:119.736, latitude:32.626, handleStatus:1, foundTime:'2026-09-18T11:08:00' },
+  { id:'SPOT-0918-004', bizTaskId:'preview', sceneCode:'FORESTRY', abnormalType:'ROAD_OCCUPATION', abnormalTypeDesc:'道路侵占', abnormalLevel:1, title:'西山林区道路拓宽', description:'疑似临时施工便道侵占林地。', area:720, longitude:119.748, latitude:32.604, handleStatus:2, foundTime:'2026-09-18T13:20:00' },
+]
+
 const typeOptions = computed(() => [...new Map(records.value.map((item) => [item.abnormalType, item.abnormalTypeDesc])).entries()])
 const filtered = computed(() => records.value.filter((item) => {
   const matchKeyword = !keyword.value.trim() || `${item.id} ${item.title} ${item.description} ${item.abnormalTypeDesc}`.toLowerCase().includes(keyword.value.trim().toLowerCase())
@@ -89,7 +96,11 @@ async function loadTaskAbnormals(taskId?: string) {
   activeId.value = ''
   activeImageIndex.value = 0
   loadError.value = ''
-  if (!taskId) return
+  if (!taskId) {
+    records.value = demoRecords
+    activeId.value = demoRecords[0]!.id
+    return
+  }
   loading.value = true
   try {
     // 后端可能对 pageSize 设置上限，因此按首屏实际返回条数继续读取所有页。

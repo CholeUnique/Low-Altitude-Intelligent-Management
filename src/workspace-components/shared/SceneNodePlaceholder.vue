@@ -1,93 +1,28 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
-
-defineProps<{
-  sceneName: string
-  node: WorkspaceNodeConfig
-  governanceIndex: number
-  governanceTotal: number
-  task?: PortalTask
-}>()
+const props=defineProps<{sceneName:string;node:WorkspaceNodeConfig;governanceIndex:number;governanceTotal:number;task?:PortalTask}>()
+const selected=ref(0)
+const type=computed(()=>{const n=props.node.name;if(/识别|采集|监测/.test(n))return'analysis';if(/研判|评估|分析|核定|匹配|检查/.test(n))return'assessment';if(/下发|处置|维修/.test(n))return'dispatch';return'archive'})
+const typeLabel=computed(()=>({analysis:'监测对象',assessment:'待研判记录',dispatch:'待处置事项',archive:'待复核档案'}[type.value]))
+const records=computed(()=>[
+ {id:'A-20260921-036',name:`${props.node.shortName}对象 036`,area:'海陵区城东街道',risk:'高',score:'94.8%',state:'待处理'},
+ {id:'A-20260921-028',name:`${props.node.shortName}对象 028`,area:'高港区口岸街道',risk:'中',score:'89.2%',state:'处理中'},
+ {id:'A-20260920-019',name:`${props.node.shortName}对象 019`,area:'姜堰区罗塘街道',risk:'中',score:'86.7%',state:'待处理'},
+ {id:'A-20260920-011',name:`${props.node.shortName}对象 011`,area:'医药高新区',risk:'低',score:'78.5%',state:'已核验'},
+])
+const action=computed(()=>type.value==='assessment'?'确认研判':type.value==='archive'?'复核通过':type.value==='dispatch'?'提交处置':'生成成果')
 </script>
-
-<template>
-  <section class="placeholder">
-    <div class="placeholder-card">
-      <span class="scene-label">{{ sceneName }}</span>
-      <div class="node-number">{{ governanceIndex }}<small>/{{ governanceTotal }}</small></div>
-      <h3>{{ node.name }}</h3>
-      <p>{{ node.description || '该治理节点将承载对应场景的业务处理能力。' }}</p>
-
-      <dl v-if="task" class="task-summary">
-        <div><dt>关联任务</dt><dd>{{ task.name }}</dd></div>
-        <div><dt>任务区域</dt><dd>{{ task.area }}</dd></div>
-        <div><dt>当前进度</dt><dd>{{ task.progress }}%</dd></div>
-        <div><dt>负责人</dt><dd>{{ task.assignee }}</dd></div>
-      </dl>
-
-      <div class="notice">
-        <i>i</i>
-        <div>
-          <b>场景流程已接入</b>
-          <span>该节点业务页面后续完善，当前可继续查看流程状态与任务上下文。</span>
-        </div>
-      </div>
-    </div>
-  </section>
-</template>
-
+<template><section class="node-page">
+ <header class="node-head"><div><span>{{sceneName}}</span><h2>{{node.name}}</h2><p>{{node.description}}</p></div><div class="node-step"><b>{{governanceIndex}}</b><small>/ {{governanceTotal}} 治理节点</small></div></header>
+ <section class="node-kpis"><article><span>{{typeLabel}}总量</span><b>36</b><small>今日新增 8</small></article><article><span>待处理</span><b>12</b><small>高风险 3</small></article><article><span>本周已完成</span><b>24</b><small>完成率 92.3%</small></article><article><span>平均处理时长</span><b>4.6<em>小时</em></b><small>较上周 -0.8h</small></article></section>
+ <section class="node-work">
+  <aside class="panel record-list"><div class="title"><b>{{typeLabel}}</b><span>36 条</span></div><div class="search">⌕　搜索编号、区域或状态</div><div class="filters"><button class="active">全部</button><button>高风险</button><button>待处理</button></div><button v-for="(r,i) in records" :key="r.id" class="record" :class="{active:selected===i}" @click="selected=i"><i>{{i+1}}</i><span><b>{{r.name}}</b><small>{{r.id}} · {{r.area}}</small></span><em :class="r.risk==='高'?'high':''">{{r.state}}</em></button></aside>
+  <main class="panel visual"><div class="title"><b>空间位置与多源证据</b><span>二维地图　影像对比　⌄</span></div><div class="map"><div class="river"></div><div class="roads"></div><div class="boundary"><i></i><b>{{records[selected]?.name}}</b><small>{{records[selected]?.area}}</small></div><div class="map-tools"><button>＋</button><button>－</button><button>◎</button></div><div class="coordinates">CGCS2000　119.758000, 32.612000</div></div><div class="evidence"><article><i>前</i><span><b>基准期正射影像</b><small>2026-08-18 · 0.08m</small></span></article><article><i>后</i><span><b>本期巡查影像</b><small>2026-09-21 · 0.06m</small></span></article><article><i>AI</i><span><b>变化分析结果</b><small>置信度 {{records[selected]?.score}}</small></span></article></div></main>
+  <aside class="panel form"><div class="title"><b>{{node.name}}处理</b><span>{{records[selected]?.id}}</span></div><dl><div><dt>所属区域</dt><dd>{{records[selected]?.area}}</dd></div><div><dt>风险等级</dt><dd class="risk">{{records[selected]?.risk}}风险</dd></div><div><dt>智能置信度</dt><dd>{{records[selected]?.score}}</dd></div><div><dt>关联任务</dt><dd>{{task?.name||'西山林区专项巡查'}}</dd></div></dl><label>处理结论<select><option>确认结果有效</option><option>退回补充材料</option><option>标记为无效</option></select></label><label>处理说明<textarea :placeholder="`请输入${node.name}意见与依据`"></textarea></label><div class="attachment"><b>支撑材料</b><span>现场照片 6 张　报告 1 份</span><button>＋ 添加材料</button></div></aside>
+ </section>
+ <footer class="action-bar"><span>流程留痕已开启 · 本次操作将写入任务日志</span><div><button>暂存</button><button>转交协同</button><button class="primary">{{action}}</button></div></footer>
+</section></template>
 <style scoped lang="scss">
-.placeholder {
-  height: 100%;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background:
-    radial-gradient(circle at 78% 15%, #0ba0ba12, transparent 28%),
-    linear-gradient(145deg, #edf4f7, #f7fafb);
-}
-.placeholder-card {
-  width: min(720px, 100%);
-  padding: 42px 48px;
-  border: 1px solid #d8e5eb;
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 14px 38px #173b4c14;
-}
-.scene-label {
-  display: inline-block;
-  padding: 5px 10px;
-  color: #087b91;
-  border: 1px solid #9cd6df;
-  border-radius: 999px;
-  background: #eaf9fb;
-  font-size: 12px;
-}
-.node-number {
-  float: right;
-  color: #0e91a8;
-  font-size: 30px;
-  font-weight: 700;
-}
-.node-number small { color: #9aaeb9; font-size: 14px; font-weight: 400; }
-h3 { margin: 24px 0 8px; color: #16384c; font-size: 26px; }
-p { margin: 0; color: #708795; line-height: 1.7; }
-.task-summary {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  margin: 30px 0;
-  overflow: hidden;
-  border: 1px solid #e0e9ee;
-  border-radius: 8px;
-  background: #e0e9ee;
-}
-.task-summary div { display: flex; justify-content: space-between; padding: 14px 16px; background: #f8fbfc; }
-dt { color: #8798a3; font-size: 12px; }
-dd { margin: 0; color: #284a5b; font-size: 13px; font-weight: 600; }
-.notice { display: flex; gap: 12px; padding: 16px; border-left: 3px solid #0ea4b8; background: #eef9fa; }
-.notice i { width: 22px; height: 22px; display: grid; place-items: center; color: white; border-radius: 50%; background: #0ea4b8; font-style: normal; }
-.notice b, .notice span { display: block; }
-.notice b { margin-bottom: 4px; color: #245466; font-size: 13px; }
-.notice span { color: #718c98; font-size: 12px; }
+.node-page{height:100%;min-height:0;display:flex;flex-direction:column;padding:10px;background:#edf3f6;color:#28495a}.node-head{height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;margin-bottom:8px;background:#fff;border:1px solid #d8e5eb;border-radius:6px}.node-head span{color:#0a8ba3;font-size:9px}.node-head h2{display:inline;margin:0 10px;color:#163d50;font-size:18px}.node-head p{display:inline;color:#78909a;font-size:9px}.node-step{display:flex;align-items:baseline;color:#75909b}.node-step b{margin-right:4px;color:#0b96ad;font-size:24px}.node-step small{font-size:9px}.node-kpis{height:66px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px}.node-kpis article{position:relative;padding:9px 12px;background:#fff;border:1px solid #d9e5ea;border-radius:6px}.node-kpis span{display:block;color:#778d98;font-size:8px}.node-kpis b{display:block;margin-top:3px;color:#173f51;font-size:20px}.node-kpis b em{margin-left:3px;font-size:8px;font-style:normal}.node-kpis small{position:absolute;right:10px;bottom:11px;color:#659285;font-size:7px}.node-work{flex:1;min-height:0;display:grid;grid-template-columns:260px 1fr 280px;gap:8px}.panel{min-height:0;overflow:hidden;background:#fff;border:1px solid #d7e4e9;border-radius:6px}.title{height:39px;display:flex;align-items:center;justify-content:space-between;padding:0 11px;border-bottom:1px solid #e5edef}.title b{font-size:10px}.title span{color:#7f949e;font-size:8px}.search{margin:8px;padding:8px;color:#7d919a;background:#f5f8f9;border:1px solid #dce6ea;border-radius:4px;font-size:8px}.filters{display:flex;gap:4px;padding:0 8px 7px}.filters button{padding:4px 7px;color:#718893;background:#fff;border:1px solid #d8e3e8;border-radius:3px;font-size:7px}.filters button.active{color:#078198;background:#e7f6f8;border-color:#acdce2}.record{width:100%;display:grid;grid-template-columns:25px 1fr auto;gap:7px;align-items:center;padding:9px;border:0;border-top:1px solid #edf2f4;background:#fff;text-align:left}.record>i{width:23px;height:23px;display:grid;place-items:center;color:#fff;background:#3b92ae;border-radius:50%;font-style:normal;font-size:8px}.record span{min-width:0}.record b,.record small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.record b{font-size:9px}.record small{margin-top:3px;color:#84979f;font-size:7px}.record em{padding:3px 5px;color:#188466;background:#e3f5ee;border-radius:8px;font-size:7px;font-style:normal}.record em.high{color:#bd6049;background:#ffe8df}.record.active{background:#eaf7f9;border-left:3px solid #11a4ba;padding-left:6px}.visual{display:grid;grid-template-rows:39px 1fr 84px}.map{position:relative;overflow:hidden;background:radial-gradient(ellipse at 32% 38%,#a9c6a5 0 12%,transparent 13%),radial-gradient(ellipse at 70% 58%,#9fbea1 0 16%,transparent 17%),linear-gradient(140deg,#dbe5ca,#c6d9c6)}.map:before{content:"";position:absolute;inset:0;opacity:.45;background-image:linear-gradient(25deg,transparent 48%,#fff 49% 50%,transparent 51%),linear-gradient(95deg,transparent 48%,#abbc9f 49% 50%,transparent 51%);background-size:100px 80px,130px 110px}.river{position:absolute;left:15%;top:-20%;width:55px;height:150%;background:#8fc4d0;transform:rotate(-13deg)}.roads{position:absolute;left:-10%;top:48%;width:120%;height:5px;background:#efc26b;transform:rotate(-4deg)}.boundary{position:absolute;left:48%;top:28%;width:180px;height:125px;padding:46px 12px 0;background:#f054493d;border:3px solid #e84f43;clip-path:polygon(12% 0,95% 10%,100% 72%,65% 100%,0 82%)}.boundary i{position:absolute;left:48%;top:42%;width:8px;height:8px;background:#e9453b;border:2px solid #fff;border-radius:50%}.boundary b,.boundary small{display:block;color:#74241f;text-shadow:0 1px #fff;font-size:9px}.boundary small{margin-top:3px;font-size:7px}.map-tools{position:absolute;right:9px;top:9px;display:grid}.map-tools button{width:27px;height:27px;color:#476875;background:#fffffff2;border:1px solid #c9d8de;font-size:11px}.coordinates{position:absolute;left:0;right:0;bottom:0;padding:5px 8px;color:#526d78;background:#ffffffd9;text-align:right;font-size:7px}.evidence{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px;background:#f6f9fa;border-top:1px solid #dde8ec}.evidence article{display:flex;align-items:center;gap:7px;padding:7px;background:#fff;border:1px solid #dce7eb;border-radius:4px}.evidence i{width:24px;height:24px;display:grid;place-items:center;color:#fff;background:#128da8;border-radius:4px;font-style:normal;font-size:7px}.evidence b,.evidence small{display:block}.evidence b{font-size:8px}.evidence small{margin-top:3px;color:#82949d;font-size:7px}.form dl{margin:0;padding:6px 11px}.form dl div{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #edf2f4;font-size:8px}.form dt{color:#7b909a}.form dd{max-width:150px;margin:0;overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap}.form dd.risk{color:#c15748}.form label{display:grid;gap:5px;margin:9px 11px;color:#6f8691;font-size:8px}.form select,.form textarea{padding:7px;color:#3f5f6d;background:#fbfdfe;border:1px solid #d5e2e7;border-radius:4px;font-size:8px}.form textarea{height:54px;resize:none}.attachment{margin:10px 11px;padding:9px;background:#f4f8f9;border:1px dashed #c8d9df;border-radius:4px}.attachment b,.attachment span{display:block;font-size:8px}.attachment span{margin:5px 0;color:#80949d;font-size:7px}.attachment button{padding:4px 7px;color:#0a839a;background:#e5f5f7;border:1px solid #b7dde2;border-radius:3px;font-size:7px}.action-bar{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 13px;margin-top:8px;background:#fff;border:1px solid #d7e4e9;border-radius:6px}.action-bar>span{color:#7b919a;font-size:8px}.action-bar button{padding:7px 12px;margin-left:6px;color:#55717d;background:#fff;border:1px solid #d2e0e5;border-radius:4px;font-size:8px}.action-bar button.primary{color:#fff;background:#0a91aa;border-color:#0a91aa}@media(max-width:1300px){.node-work{grid-template-columns:230px 1fr 250px}}
 </style>

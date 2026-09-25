@@ -11,16 +11,16 @@ const preview = ref(false)
 const feedback = ref('')
 const form = reactive({
   area: props.task?.area || '任务巡查区域',
-  unit: '九龙镇自然资源所',
-  receiver: '王强',
-  deadline: '2026-09-18',
-  contact: '张明',
+  unit: '属地镇街核查组（示例）',
+  receiver: '核查人员 A（示例）',
+  deadline: '2026-09-25',
+  contact: '任务经办人（示例）',
   phone: '138****6812',
   priority: '高',
-  requirement: '请现场核实业务对象范围与现状，拍摄全景及细节照片并在期限内反馈。',
+  requirement: '请现场核实图斑范围与现状、比对审批材料，拍摄定位、全景及细节照片并在期限内反馈。',
 })
 const selectedSpots = computed(() => problemSpots.filter((item) => selected.value.includes(item.id)))
-function action(text: string) { feedback.value = `${text}成功：已选择 ${selected.value.length} 个${objectLabel.value}` }
+function action(text: string) { feedback.value = `${text}演示：已选择 ${selected.value.length} 个${objectLabel.value}，未写入实际业务系统。` }
 </script>
 
 <template>
@@ -39,8 +39,8 @@ function action(text: string) { feedback.value = `${text}成功：已选择 ${se
       <div class="panel-title">核查任务编制 <small>{{ task?.name }}</small></div>
       <div class="form-grid">
         <label class="wide">核查区域<input v-model="form.area" /></label>
-        <label>接收单位<select v-model="form.unit"><option>九龙镇自然资源所</option><option>城西街道综合执法队</option><option>苏陈镇林业站</option></select></label>
-        <label>接收人员<select v-model="form.receiver"><option>王强</option><option>李宁</option><option>赵峰</option></select></label>
+        <label>接收单位<select v-model="form.unit"><option>属地镇街核查组（示例）</option><option>区级核查专班（示例）</option><option>业务科室核查组（示例）</option></select></label>
+        <label>接收人员<select v-model="form.receiver"><option>核查人员 A（示例）</option><option>核查人员 B（示例）</option><option>核查人员 C（示例）</option></select></label>
         <label>核查期限<input v-model="form.deadline" type="date" /></label>
         <label>优先级<select v-model="form.priority"><option>高</option><option>中</option><option>低</option></select></label>
         <label>联系人<input v-model="form.contact" /></label>

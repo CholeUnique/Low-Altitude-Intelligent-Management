@@ -4,10 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import type { WorkspaceNodeConfig } from '@/types'
 import {
   getWorkflowNodeStatus,
-  isWorkspaceNodeAccessible,
   resolveWorkspaceNodeKey,
 } from '@/workspace/config/workflow'
-import { getSharedWorkspaceConfig, resolveWorkspaceSceneId } from '@/workspace/config/registry'
+import { getSharedWorkspaceConfig, getWorkspaceConfig, resolveWorkspaceSceneId } from '@/workspace/config/registry'
 import { getScene, getTask } from '@/mocks/portal'
 import { useUserStore } from '@/stores/user'
 import { isMockMode } from '@/api/client'
@@ -19,6 +18,10 @@ import ReviewArchivePanel from '@/workspace-components/review-archive/ReviewArch
 import SceneNodePlaceholder from '@/workspace-components/shared/SceneNodePlaceholder.vue'
 import RouteFlightPlanPanel from '@/workspace-components/route-flight-plan/RouteFlightPlanPanel.vue'
 import RealtimeCruisePanel from '@/workspace-components/realtime-cruise/RealtimeCruisePanel.vue'
+import WorkspaceTaskDetailPanel from '@/workspace-components/task-detail/WorkspaceTaskDetailPanel.vue'
+import RectificationTrackingPanel from '@/workspace-components/rectification/RectificationTrackingPanel.vue'
+import ForestryApprovalPanel from '@/workspace-components/approval/ForestryApprovalPanel.vue'
+import FieldVerificationPanel from '@/workspace-components/field-verification/FieldVerificationPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -29,8 +32,8 @@ const task = ref<PortalTask>()
 const taskLoading = ref(false)
 const taskError = ref('')
 const workspaceSceneId = computed(() => resolveWorkspaceSceneId(sceneId.value, task.value?.sceneId))
-// 不同场景使用各自任务数据，但统一复用林业执法监管的完整工作台流程与页面。
-const workspaceConfig = computed(() => getSharedWorkspaceConfig())
+// 任务带有可识别场景时加载该场景的专属节点；未配置场景仍回退到完整公共流程。
+const workspaceConfig = computed(() => getWorkspaceConfig(workspaceSceneId.value) || getSharedWorkspaceConfig())
 const currentScene = computed(() => getScene(user.organization, workspaceSceneId.value))
 
 async function loadTaskContext() {
@@ -60,17 +63,14 @@ const governanceNodes = computed(() =>
   workspaceConfig.value?.nodes.filter((node) => node.module === 'governance') ?? [],
 )
 
-const discoveryNodes = computed(() =>
-  workspaceConfig.value?.nodes.filter((node) => node.module === 'discovery') ?? [],
-)
-
-/** 真实任务只有粗粒度 taskStatus 时，映射为工作台五节点中的当前节点。 */
+/** 工作台从智能识别结果之后开始，仅显示处置业务节点。 */
 const defaultNodeKey = computed(() => {
   const status = task.value?.status || ''
   if (status.includes('完成')) return governanceNodes.value[governanceNodes.value.length - 1]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
-  if (status.includes('核查') || status.includes('复核')) return governanceNodes.value[0]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
-  if (status.includes('执行') || status.includes('进行')) return discoveryNodes.value.find((node) => node.key === 'realtime-cruise')?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
-  return discoveryNodes.value.find((node) => node.key === 'route-flight-plan')?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
+  if (status.includes('复核')) return governanceNodes.value.find((node) => node.key === 'review-archive')?.key || governanceNodes.value[0]?.key || ''
+  if (status.includes('核查')) return governanceNodes.value.find((node) => node.key === 'field-verification')?.key || governanceNodes.value[0]?.key || ''
+  if (status.includes('整改')) return governanceNodes.value.find((node) => node.key === 'rectification-tracking')?.key || governanceNodes.value[0]?.key || ''
+  return governanceNodes.value[0]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
 })
 
 const activeKey = computed(() => {
@@ -96,6 +96,10 @@ const panelComponents = {
   ReviewArchive: ReviewArchivePanel,
   RouteFlightPlan: RouteFlightPlanPanel,
   RealtimeCruise: RealtimeCruisePanel,
+  TaskDetail: WorkspaceTaskDetailPanel,
+  RectificationTracking: RectificationTrackingPanel,
+  ForestryApproval: ForestryApprovalPanel,
+  FieldVerification: FieldVerificationPanel,
   ScenePlaceholder: SceneNodePlaceholder,
 } as const
 
@@ -108,10 +112,7 @@ const ActivePanel = computed(() => {
  * 治理模块是工作台的常驻能力，不再因任务尚未写入节点级 workflow 而被锁定。
  * 巡查节点仍遵循既有的任务阶段控制；治理节点无真实数据时由各面板显示空状态。
  */
-function isNodeAvailable(node: WorkspaceNodeConfig) {
-  return node.module === 'governance'
-    || isWorkspaceNodeAccessible(task.value?.workflow, node.key, nodeKeys.value)
-}
+function isNodeAvailable(_node: WorkspaceNodeConfig) { return true }
 
 function nodeState(key: string) {
   const status = getWorkflowNodeStatus(task.value?.workflow, key)
@@ -194,37 +195,13 @@ onMounted(() => void loadTaskContext())
         </div>
       </div>
 
-      <div class="flow-nav">
-        <div class="flow-module">
-          <span class="module-label">低空巡查发现模块</span>
-          <div class="module-nodes">
-            <button
-              v-for="node in discoveryNodes"
-              :key="node.key"
-              :class="nodeState(node.key)"
-              :disabled="!nodeState(node.key).accessible"
-              @click="selectNode(node)"
-            >
-              <i>{{ nodeState(node.key).done ? '✓' : node.order }}</i>
-              <span>{{ node.shortName }}</span>
-            </button>
-          </div>
-        </div>
-        <div class="flow-divider"></div>
-        <div class="flow-module">
-          <span class="module-label">治理模块</span>
-          <div class="module-nodes">
-            <button
-              v-for="node in governanceNodes"
-              :key="node.key"
-              :class="nodeState(node.key)"
-              :disabled="!nodeState(node.key).accessible"
-              @click="selectNode(node)"
-            >
-              <i>{{ nodeState(node.key).done ? '✓' : node.order }}</i>
-              <span>{{ node.shortName }}</span>
-            </button>
-          </div>
+      <div class="flow-nav flow-nav--business">
+        <div class="module-nodes">
+          <button v-for="node in workspaceConfig.nodes" :key="node.key" :class="nodeState(node.key)" :title="node.description" @click="selectNode(node)">
+            <i>{{ nodeState(node.key).done ? '✓' : node.order }}</i>
+            <span>{{ node.shortName }}</span>
+            <small>{{ node.description }}</small>
+          </button>
         </div>
       </div>
 
@@ -247,8 +224,8 @@ onMounted(() => void loadTaskContext())
       />
       <div v-else class="empty-body">
         <div class="empty-card">
-          <h2>请从公共巡查模块开始</h2>
-          <p>当前任务仍处于航线规划 / 实时巡航阶段，请点击上方节点进入公共巡查页面。</p>
+          <h2>请选择任务处置节点</h2>
+          <p>工作台从智能识别结果开始，依次进入任务详情、审核、任务派发、实地核查、整改跟踪与复核归档。</p>
         </div>
       </div>
     </main>
@@ -388,6 +365,12 @@ onMounted(() => void loadTaskContext())
   font-size: 11px;
   white-space: nowrap;
 }
+.module-nodes small { display: none; }
+.flow-nav--business .module-nodes { width: min(770px, 100%); justify-content: center; }
+.flow-nav--business .module-nodes button { min-width: 105px; }
+.flow-nav--business .module-nodes button:not(:last-child)::after { width: calc(100% - 34px); left: calc(50% + 17px); }
+.flow-nav--business .module-nodes i { width: 25px; height: 25px; }
+.flow-nav--business .module-nodes span { margin-top: 1px; font-size: 10px; font-weight: 600; }
 .module-nodes button.active { color: white; }
 .module-nodes button.active i {
   border-color: #3dd2e0;
@@ -452,5 +435,6 @@ onMounted(() => void loadTaskContext())
   .workspace-header { grid-template-columns: 220px 1fr 180px; }
   .workspace-brand--moved { left: 120px; }
   .module-nodes button { min-width: 76px; }
+  .flow-nav--business .module-nodes button { min-width: 100px; }
 }
 </style>
