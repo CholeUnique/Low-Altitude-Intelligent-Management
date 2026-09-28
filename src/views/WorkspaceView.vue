@@ -19,6 +19,8 @@ import ReviewArchivePanel from '@/workspace-components/review-archive/ReviewArch
 import SceneNodePlaceholder from '@/workspace-components/shared/SceneNodePlaceholder.vue'
 import RouteFlightPlanPanel from '@/workspace-components/route-flight-plan/RouteFlightPlanPanel.vue'
 import RealtimeCruisePanel from '@/workspace-components/realtime-cruise/RealtimeCruisePanel.vue'
+import NonGrainWorkspace from '@/workspace-components/non-grain/NonGrainWorkspace.vue'
+import { NON_GRAIN_MOCK_TASK_ID } from '@/mocks/non-grain-workspace'
 
 const route = useRoute()
 const router = useRouter()
@@ -29,6 +31,7 @@ const task = ref<PortalTask>()
 const taskLoading = ref(false)
 const taskError = ref('')
 const workspaceSceneId = computed(() => resolveWorkspaceSceneId(sceneId.value, task.value?.sceneId))
+const isNonGrainWorkspace = computed(() => workspaceSceneId.value === 'non-grain-monitoring')
 // 不同场景使用各自任务数据，但统一复用林业执法监管的完整工作台流程与页面。
 const workspaceConfig = computed(() => getSharedWorkspaceConfig())
 const currentScene = computed(() => getScene(user.organization, workspaceSceneId.value))
@@ -38,6 +41,13 @@ async function loadTaskContext() {
   task.value = undefined
   taskError.value = ''
   if (!taskId) return
+  // “我的待办”中的非粮任务是纯前端演示数据，不存在于后端任务表。
+  // 直接交给专属工作台读取固定上下文，避免真实详情接口超时阻塞页面。
+  if (resolveWorkspaceSceneId(sceneId.value) === 'non-grain-monitoring'
+    && taskId === NON_GRAIN_MOCK_TASK_ID) {
+    taskLoading.value = false
+    return
+  }
   if (isMockMode()) {
     task.value = getTask(taskId)
     return
@@ -134,6 +144,8 @@ function selectNode(node: WorkspaceNodeConfig) {
 watch(
   [() => workspaceConfig.value?.sceneId, defaultNodeKey, () => route.query.node, () => task.value?.id],
   () => {
+    // 非粮化工作台由其自身七节点路由守卫维护，不能复用共享工作台的节点改写逻辑。
+    if (isNonGrainWorkspace.value) return
     if (!workspaceConfig.value) return
     const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
     const queryNode = workspaceConfig.value.nodes.find((item) => item.key === queryKey)
@@ -156,6 +168,15 @@ onMounted(() => void loadTaskContext())
     <header class="workspace-header"><div class="workspace-brand"><span class="brand-mark">翼</span><div><b>场景作业工作台</b><small>正在加载真实任务</small></div></div></header>
     <main class="empty-body"><div class="empty-card"><h2>正在加载任务工作台…</h2></div></main>
   </div>
+
+  <NonGrainWorkspace
+    v-else-if="workspaceSceneId === 'non-grain-monitoring'"
+    :key="task?.id || String(route.params.taskId || '')"
+    :task-id="task?.id || String(route.params.taskId || '')"
+    :task-name="task?.name"
+    :task-no="task?.id"
+    :task-status="task?.status"
+  />
 
   <div v-else-if="!workspaceConfig" class="workspace workspace-empty">
     <header class="workspace-header">

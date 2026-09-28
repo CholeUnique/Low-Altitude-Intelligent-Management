@@ -132,6 +132,43 @@ export interface TaskWorkflowNode {
   time?: string
 }
 
+export type NonGrainWorkflowNodeKey =
+  | 'task-acceptance'
+  | 'section-preliminary-review'
+  | 'department-confirmation'
+  | 'on-site-verification'
+  | 'rectification-disposal'
+  | 'drone-review'
+  | 'case-archive'
+
+export type NonGrainWorkflowNodeStatus =
+  | 'completed'
+  | 'active'
+  | 'pending'
+  | 'skipped'
+  | 'returned'
+
+/** 非粮化七节点流程使用的独立状态模型，不改变旧工作台的 TaskWorkflowNode。 */
+export interface NonGrainWorkflowNode {
+  key: NonGrainWorkflowNodeKey
+  name: string
+  order: number
+  status: NonGrainWorkflowNodeStatus
+  ownerRole: string
+  ownerUserId?: string
+  ownerName?: string
+  startedAt?: string
+  completedAt?: string
+  updatedAt?: string
+  returnReason?: string
+}
+
+/** 节点权限判定只依赖用户 ID 和角色，可直接由当前登录态组装。 */
+export interface NonGrainWorkflowActor {
+  userId: string
+  roles: string[]
+}
+
 export interface PortalTask {
   id: string
   organizationId: OrganizationId

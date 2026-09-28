@@ -17,7 +17,7 @@ const entries = [
   { label: '单位总览', path: '/dashboard', match: ['dashboard', 'dashboard-scene'] },
   { label: '飞行作业', path: '/uav-tasks', match: ['uav-tasks', 'patrol-route-plan', 'patrol-live'] },
   { label: '智能研判', path: '/recognition', match: ['recognition', 'algorithms', 'data-results'] },
-  { label: '任务中心', path: '/tasks', match: ['tasks', 'task-detail', 'workspace'] },
+  { label: '任务中心', path: '/tasks', match: ['tasks', 'task-overview', 'task-list', 'task-todo', 'task-detail', 'workspace'] },
 ]
 </script>
 
