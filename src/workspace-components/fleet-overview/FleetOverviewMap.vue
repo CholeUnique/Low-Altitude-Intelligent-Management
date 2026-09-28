@@ -13,6 +13,7 @@ let map: L.Map | undefined
 let markerGroup: L.LayerGroup | undefined
 let resizeObserver: ResizeObserver | undefined
 let resizeFrame: number | undefined
+let hasFittedDevices = false
 
 function tileUrl(layer: 'img' | 'cia') {
   return `https://t{s}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}&tk=${token}`
@@ -22,19 +23,32 @@ function renderDevices() {
   if (!map || !markerGroup) return
   const activeMarkerGroup = markerGroup
   activeMarkerGroup.clearLayers()
+  const bounds = L.latLngBounds([])
   props.devices.forEach((device) => {
     if (device.longitude === undefined || device.latitude === undefined) return
     const state = device.online ? '在线' : '离线'
-    const color = device.online ? '#14b89c' : '#8295a1'
-    L.marker([device.latitude, device.longitude], {
+    const point: L.LatLngTuple = [device.latitude, device.longitude]
+    bounds.extend(point)
+    const tooltip = document.createElement('div')
+    const name = document.createElement('strong')
+    const status = document.createElement('span')
+    name.textContent = device.label
+    status.textContent = state
+    tooltip.append(name, status)
+    L.marker(point, {
       icon: L.divIcon({
-        className: 'fleet-device-marker',
-        html: `<span style="--device-color:${color}">✦</span>`,
-        iconSize: [30, 30],
-        iconAnchor: [15, 15],
+        className: `fleet-device-marker ${device.online ? 'is-online' : 'is-offline'}`,
+        html: '<span><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M11 13h10l3 4-3 2H11l-3-2 3-4Z"/><path d="M9 15 5 10m18 5 4-5M9 19l-4 4m18-4 4 4"/><circle cx="4.5" cy="9.5" r="3"/><circle cx="27.5" cy="9.5" r="3"/><circle cx="4.5" cy="23.5" r="3"/><circle cx="27.5" cy="23.5" r="3"/></svg></span>',
+        iconSize: [38, 38],
+        iconAnchor: [19, 19],
       }),
-    }).bindPopup(`<strong>${device.label}</strong><br/><small>${device.sn || '设备编号未返回'} · ${state}</small>`).addTo(activeMarkerGroup)
+    }).bindTooltip(tooltip, { direction: 'top', offset: [0, -18], className: 'fleet-device-tooltip' }).addTo(activeMarkerGroup)
   })
+  if (!hasFittedDevices && bounds.isValid()) {
+    if (props.devices.length === 1) map.setView(bounds.getCenter(), 15, { animate: false })
+    else map.fitBounds(bounds, { padding: [55, 55], maxZoom: 15, animate: false })
+    hasFittedDevices = true
+  }
 }
 
 onMounted(async () => {
@@ -68,5 +82,14 @@ onBeforeUnmount(() => {
 
 <template><div ref="container" class="fleet-map" /></template>
 
-<style scoped>.fleet-map { width:100%; height:100%; min-height:280px; background:#dbe8dc; }</style>
-<style>.fleet-device-marker { background:transparent; border:0; }.fleet-device-marker span { display:grid; width:28px; height:28px; place-items:center; color:#fff; background:var(--device-color); border:2px solid #fff; border-radius:50%; box-shadow:0 2px 10px #17374655; font-size:15px; }</style>
+<style scoped>.fleet-map { width:100%; height:100%; min-height:0; background:#dbe8dc; }</style>
+<style>
+.fleet-device-marker { background:transparent; border:0; }
+.fleet-device-marker span { display:grid;width:36px;height:36px;place-items:center;border:2px solid #fff;border-radius:50%;background:#8295a1;color:#fff;box-sizing:border-box; }
+.fleet-device-marker svg { width:25px;height:25px;fill:currentColor;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round; }
+.fleet-device-marker.is-online span { background:#079b91;color:#eaffff;border-color:#d8ffff;box-shadow:0 0 7px #38f6dc,0 0 18px #14d9c5,0 2px 8px #17374677;animation:fleet-drone-glow 1.8s ease-in-out infinite alternate; }
+.fleet-device-marker.is-offline span { background:#7d8a91;color:#d9dfe2;border-color:#c5cdd1;box-shadow:0 2px 7px #17374655;filter:grayscale(1); }
+.fleet-device-tooltip strong,.fleet-device-tooltip span { display:block;text-align:center; }
+.fleet-device-tooltip span { margin-top:3px;color:#5b7888;font-size:11px; }
+@keyframes fleet-drone-glow { from { box-shadow:0 0 5px #38f6dc,0 0 11px #14d9c5,0 2px 8px #17374677; } to { box-shadow:0 0 10px #7ffff0,0 0 24px #14d9c5,0 2px 8px #17374677; } }
+</style>

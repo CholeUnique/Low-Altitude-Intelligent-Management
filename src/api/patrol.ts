@@ -32,6 +32,48 @@ export interface UavDeviceOption {
   latitude?: number
 }
 
+export interface UavDeviceState {
+  deviceSn: string
+  longitude?: number
+  latitude?: number
+  height?: number
+  elevation?: number
+  horizontalSpeed?: number
+  verticalSpeed?: number
+  batteryPercent?: number
+  modeCode?: string
+  receiveTime?: string
+}
+
+export interface UavDeviceAlarm {
+  id: string
+  sn: string
+  level?: number
+  module?: number
+  code?: string
+  message?: string
+  imminent?: boolean
+  inTheSky?: boolean
+  createTime?: string
+  recoverTime?: string
+}
+
+export interface UavFlightSummary {
+  flightCount?: number
+  flightDistance?: number
+  flightTime?: number
+  completedTaskCount?: number
+  notStartedTaskCount?: number
+}
+
+export interface UavDeviceSummary {
+  totalCount?: number
+  onlineCount?: number
+  offlineCount?: number
+  hmsCount?: number
+  activeHmsCount?: number
+}
+
 export type { PatrolProjectOption }
 export type { UavFlightTaskOption }
 
@@ -113,6 +155,82 @@ export async function getUavDeviceOptions(): Promise<UavDeviceOption[]> {
       latitude: Number.isFinite(latitude) && Math.abs(latitude) <= 90 ? latitude : undefined,
     }
   })
+}
+
+function optionalNumber(value: unknown) {
+  if (value === undefined || value === null || value === '') return undefined
+  const number = Number(value)
+  return Number.isFinite(number) ? number : undefined
+}
+
+/** 设备最新物模型；位置、电量和速度均来自后端真实状态接口。 */
+export async function getUavDeviceState(sn: string): Promise<UavDeviceState> {
+  if (isMockMode()) return { deviceSn: sn }
+  const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/device/state', { sn })
+  const item = data || {}
+  const longitude = optionalNumber(item.longitude ?? item.lng ?? item.lon)
+  const latitude = optionalNumber(item.latitude ?? item.lat)
+  return {
+    deviceSn: String(item.deviceSn ?? item.sn ?? sn),
+    longitude: longitude !== undefined && Math.abs(longitude) <= 180 ? longitude : undefined,
+    latitude: latitude !== undefined && Math.abs(latitude) <= 90 ? latitude : undefined,
+    height: optionalNumber(item.height),
+    elevation: optionalNumber(item.elevation),
+    horizontalSpeed: optionalNumber(item.horizontalSpeed),
+    verticalSpeed: optionalNumber(item.verticalSpeed),
+    batteryPercent: optionalNumber(item.batteryPercent),
+    modeCode: item.modeCode == null ? undefined : String(item.modeCode),
+    receiveTime: item.receiveTime == null ? undefined : String(item.receiveTime),
+  }
+}
+
+/** 设备 HMS 告警；维保字段后端未提供，页面保持 --。 */
+export async function getUavDeviceAlarms(sn: string): Promise<{ list: UavDeviceAlarm[]; total: number }> {
+  if (isMockMode()) return { list: [], total: 0 }
+  const data = await apiClient.post<never, { records?: Array<Record<string, unknown>>; total?: number | string }>('/v1/uav/device/hms/page', {
+    sn,
+    pageNum: 1,
+    pageSize: 200,
+  })
+  const list = (data.records || []).map((item, index) => ({
+    id: String(item.id ?? `${sn}-${index}`),
+    sn: String(item.sn ?? sn),
+    level: optionalNumber(item.level),
+    module: optionalNumber(item.module),
+    code: item.hmsKey == null ? undefined : String(item.hmsKey),
+    message: item.messageZh == null ? (item.messageEn == null ? undefined : String(item.messageEn)) : String(item.messageZh),
+    imminent: optionalNumber(item.imminent) === 1,
+    inTheSky: optionalNumber(item.inTheSky) === 1,
+    createTime: item.createTime == null ? undefined : String(item.createTime),
+    recoverTime: item.recoverTime == null ? undefined : String(item.recoverTime),
+  }))
+  return { list, total: optionalNumber(data.total) ?? list.length }
+}
+
+export async function getUavFlightSummary(): Promise<UavFlightSummary> {
+  if (isMockMode()) return {}
+  const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/statistics/flight-summary', {})
+  const item = data || {}
+  return {
+    flightCount: optionalNumber(item.flightCount),
+    flightDistance: optionalNumber(item.flightDistance),
+    flightTime: optionalNumber(item.flightTime),
+    completedTaskCount: optionalNumber(item.completedTaskCount),
+    notStartedTaskCount: optionalNumber(item.notStartedTaskCount),
+  }
+}
+
+export async function getUavDeviceSummary(): Promise<UavDeviceSummary> {
+  if (isMockMode()) return {}
+  const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/statistics/device-summary', {})
+  const item = data || {}
+  return {
+    totalCount: optionalNumber(item.totalCount),
+    onlineCount: optionalNumber(item.onlineCount),
+    offlineCount: optionalNumber(item.offlineCount),
+    hmsCount: optionalNumber(item.hmsCount),
+    activeHmsCount: optionalNumber(item.activeHmsCount),
+  }
 }
 
 export async function getRouteDetail(id: string) {
