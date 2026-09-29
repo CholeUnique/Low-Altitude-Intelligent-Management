@@ -9,9 +9,12 @@ import { cancelGovernanceTask, executeGovernanceTask, finishGovernanceTask, getG
 import { getGovernanceResultDetail, getGovernanceResultPage, getTaskEvidenceImages } from '@/api/governance-result'
 import type { GovernanceTaskDetail, TaskAbnormal, TaskGeometryFeatureCollection } from '@/api/governance-task'
 import type { GovernanceResult, TaskEvidenceImage } from '@/api/governance-result'
+import { createNonGrainDemoTasks, isNonGrainDemoTaskId } from '@/mocks/non-grain-workspace'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
+const user = useUserStore()
 const detail = ref<GovernanceTaskDetail>()
 const geometry = ref<TaskGeometryFeatureCollection>({ type: 'FeatureCollection', features: [] })
 const loading = ref(false)
@@ -118,6 +121,27 @@ async function loadTask() {
   taskMapView.value = undefined
   loading.value = true
   error.value = ''
+  if (isNonGrainDemoTaskId(taskId)) {
+    const viewerId = String(user.currentUser?.id || user.currentUser?.username || 'non-grain-demo-user')
+    const demoTask = createNonGrainDemoTasks(viewerId, user.activeDeptId, '海陵区农业农村局')
+      .find((item) => item.id === taskId)
+    detail.value = demoTask ? {
+      task: demoTask,
+      refSummary: '非粮化动态监测演示任务',
+      abnormalCount: 3,
+      abnormalArea: (demoTask.areaSize || 0) * 666.67,
+      results: [],
+      process: { remark: '演示任务数据，仅用于查看任务详情与流程进度。', logs: [] },
+    } : undefined
+    geometry.value = { type: 'FeatureCollection', features: [] }
+    resultRecords.value = []
+    resultTotal.value = 0
+    evidenceImages.value = []
+    abnormalRecords.value = []
+    abnormalTotal.value = 0
+    loading.value = false
+    return
+  }
   try {
     // 任务范围属于辅助地图数据，不能因其响应变慢而使整个任务详情页不可用。
     const [detailResult, geometryResult] = await Promise.allSettled([
@@ -297,7 +321,7 @@ onMounted(() => void loadTask())
             <article><i>△</i><span>异常面积<b>{{ detail?.abnormalArea ?? 0 }}<small>㎡</small></b></span></article>
             <article><i>⌖</i><span>范围要素<b>{{ geometry.features.length }}<small>个</small></b></span></article>
           </section>
-          <div class="task-action-toolbar"><button class="enter-workspace" @click="router.push('/tasks/list')">返回任务列表</button><template v-if="!isMockMode()"><button v-if="task.taskStatus !== 4 && task.taskStatus !== 5" class="task-action-edit" @click="editVisible = true">编辑任务</button><button v-if="task.taskStatus === 0" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('execute')">执行任务</button><button v-if="task.taskStatus === 0 || task.taskStatus === 1" class="task-action-danger" :disabled="actionLoading" @click="requestTaskAction('cancel')">取消任务</button><button v-if="task.taskStatus === 2" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('finish')">核查完成</button></template></div>
+          <div class="task-action-toolbar"><button class="enter-workspace" @click="router.push('/tasks/list')">返回任务列表</button><template v-if="!isMockMode() && !isNonGrainDemoTaskId(task.id)"><button v-if="task.taskStatus !== 4 && task.taskStatus !== 5" class="task-action-edit" @click="editVisible = true">编辑任务</button><button v-if="task.taskStatus === 0" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('execute')">执行任务</button><button v-if="task.taskStatus === 0 || task.taskStatus === 1" class="task-action-danger" :disabled="actionLoading" @click="requestTaskAction('cancel')">取消任务</button><button v-if="task.taskStatus === 2" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('finish')">核查完成</button></template></div>
         </div>
         <section class="map-info-grid">
           <article class="detail-panel task-map-panel"><div class="task-map-compare"><section class="task-map-compare__pane"><header>任务范围与异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :fit-abnormal-points="true" :auto-fit="false" :fit-request="taskMapFitRequest" :view="taskMapView" @view-change="syncTaskMapView" /></section><section class="task-map-compare__pane"><header>异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :show-task-range="false" :abnormal-fill-opacity="0" :show-dom-imagery="true" :auto-fit="false" :view="taskMapView" @view-change="syncTaskMapView" /></section></div></article>

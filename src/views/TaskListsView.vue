@@ -14,6 +14,7 @@ import { useUserStore } from '@/stores/user'
 import type { GovernanceTask, GovernanceTaskStatus, TaskGeometryFeatureCollection } from '@/api/governance-task'
 import type { SceneDictionaryItem } from '@/api/scene'
 import { findOrganizationScene, isTaskVisibleForOrganization } from '@/utils/scene-visibility'
+import { createNonGrainDemoTasks, isNonGrainDemoTaskId } from '@/mocks/non-grain-workspace'
 
 const router = useRouter()
 const route = useRoute()
@@ -61,6 +62,7 @@ const rootDepartments = computed(() => {
 const childDepartments = computed(() =>
   departments.value.filter((item) => item.parentId === parentDeptId.value))
 const selectedDeptId = computed(() => childDeptId.value || parentDeptId.value || user.activeDeptId)
+const currentUserId = computed(() => String(user.currentUser?.id || user.currentUser?.username || 'non-grain-demo-user'))
 const requestPageSize = computed(() => Math.min(Math.max(maximumRows.value, 5), 50))
 const pageCount = computed(() => Math.max(1, Math.ceil(taskTotal.value / requestPageSize.value)))
 const paginationItems = computed<(number | 'ellipsis')[]>(() => {
@@ -71,9 +73,12 @@ const paginationItems = computed<(number | 'ellipsis')[]>(() => {
   return pages.flatMap((page, index) => index && page - pages[index - 1]! > 1 ? ['ellipsis', page] : [page]) as (number | 'ellipsis')[]
 })
 const allSelected = computed({
-  get: () => Boolean(taskRows.value.length) && taskRows.value.every((task) => selectedIds.value.includes(task.id)),
+  get: () => {
+    const selectableTasks = taskRows.value.filter((task) => !isNonGrainDemoTaskId(task.id))
+    return Boolean(selectableTasks.length) && selectableTasks.every((task) => selectedIds.value.includes(task.id))
+  },
   set: (value: boolean) => {
-    const pageIds = taskRows.value.map((task) => task.id)
+    const pageIds = taskRows.value.filter((task) => !isNonGrainDemoTaskId(task.id)).map((task) => task.id)
     selectedIds.value = value ? [...new Set([...selectedIds.value, ...pageIds])] : selectedIds.value.filter((id) => !pageIds.includes(id))
   },
 })
@@ -107,6 +112,7 @@ function hasTaskRangeGeometry(geometry: TaskGeometryFeatureCollection) {
 }
 
 async function loadTaskRangePreviews(tasks: GovernanceTask[], taskRequestId: number) {
+  tasks = tasks.filter((task) => !isNonGrainDemoTaskId(task.id))
   const previewRequestId = ++latestRangePreviewRequest
   taskRangePreviewLoading.value = Boolean(tasks.length)
   taskRangeGeometries.value = {}
@@ -123,6 +129,29 @@ async function loadTaskRangePreviews(tasks: GovernanceTask[], taskRequestId: num
   })
   taskRangeGeometries.value = geometries
   taskRangePreviewLoading.value = false
+}
+
+function filteredTaskRecords(apiRecords: GovernanceTask[]) {
+  const demoTasks = createNonGrainDemoTasks(currentUserId.value, user.activeDeptId, '海陵区农业农村局')
+  const normalizedKeyword = keyword.value.trim().toLocaleLowerCase()
+  const selectedPriority = priority.value === '' ? undefined : Number(priority.value)
+  return [...demoTasks, ...apiRecords.filter((task) => !isNonGrainDemoTaskId(task.id))].filter((task) =>
+    (isNonGrainDemoTaskId(task.id) || isTaskVisibleForOrganization(user.organization, task, selectedDeptId.value))
+    && (selectedPriority === undefined || task.priority === selectedPriority)
+    && (status.value === '' || task.taskStatus === status.value)
+    && (!normalizedKeyword || `${task.name} ${task.taskNo} ${task.sceneName} ${task.deptName}`.toLocaleLowerCase().includes(normalizedKeyword))
+    && (!selectedOrganizationSceneId.value
+      || findOrganizationScene(user.organization, task.sceneCode, task.sceneName)?.id === selectedOrganizationSceneId.value))
+}
+
+function applyTaskRecords(records: GovernanceTask[], requestId: number) {
+  const visibleRecords = filteredTaskRecords(records)
+  taskTotal.value = visibleRecords.length
+  const start = (currentPage.value - 1) * requestPageSize.value
+  taskRows.value = visibleRecords.slice(start, start + requestPageSize.value)
+  selectedIds.value = []
+  void loadTaskRangePreviews(taskRows.value, requestId)
+  if (currentPage.value > Math.max(1, Math.ceil(visibleRecords.length / requestPageSize.value))) setPage(1)
 }
 
 async function loadTasks() {
@@ -144,25 +173,11 @@ async function loadTasks() {
     })
     if (requestId !== latestRequest) return
     // 后端切换部门后仍可能返回历史跨单位任务；前端按当前单位场景再做一层隔离。
-    const visibleRecords = page.records.filter((task) =>
-      isTaskVisibleForOrganization(user.organization, task, selectedDeptId.value)
-      // 后端个别版本会忽略 priority 参数；保留前端兜底，确保筛选结果准确。
-      && (selectedPriority === undefined || task.priority === selectedPriority)
-      && (!selectedOrganizationSceneId.value
-        || findOrganizationScene(user.organization, task.sceneCode, task.sceneName)?.id === selectedOrganizationSceneId.value))
-    taskTotal.value = visibleRecords.length
-    const start = (currentPage.value - 1) * requestPageSize.value
-    taskRows.value = visibleRecords.slice(start, start + requestPageSize.value)
-    selectedIds.value = []
-    void loadTaskRangePreviews(taskRows.value, requestId)
-    if (currentPage.value > Math.max(1, Math.ceil(visibleRecords.length / requestPageSize.value))) setPage(1)
+    applyTaskRecords(page.records, requestId)
   } catch (error) {
     if (requestId !== latestRequest) return
-    taskRows.value = []
-    taskTotal.value = 0
-    taskRangeGeometries.value = {}
-    taskRangePreviewLoading.value = false
-    taskError.value = error instanceof Error ? error.message : '任务列表加载失败，请稍后重试。'
+    applyTaskRecords([], requestId)
+    taskError.value = error instanceof Error ? `${error.message}（演示任务仍可使用）` : '真实任务加载失败，演示任务仍可使用。'
   } finally {
     if (requestId === latestRequest) taskLoading.value = false
   }
@@ -233,6 +248,10 @@ function updateMaximumRows() {
 }
 
 function handleCreated(task: { id: string }) {
+  router.push(`/tasks/${task.id}`)
+}
+
+function openTask(task: GovernanceTask) {
   router.push(`/tasks/${task.id}`)
 }
 
@@ -344,7 +363,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
         <span><input v-model="allSelected" type="checkbox" /></span><span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
       </div>
       <div v-for="task in taskRows" :key="task.id" class="task-table-row">
-        <span><input v-model="selectedIds" type="checkbox" :value="task.id" /></span>
+        <span><input v-model="selectedIds" type="checkbox" :value="task.id" :disabled="isNonGrainDemoTaskId(task.id)" :title="isNonGrainDemoTaskId(task.id) ? '演示任务不可删除' : ''" /></span>
         <span class="task-name"><b>{{ task.name }}</b><small>{{ task.taskNo }}</small></span>
         <span><em class="scene-tag">{{ task.sceneName }}</em></span>
         <span><em class="status-tag" :class="taskStatusClass(task)">{{ task.taskStatusDesc }}</em></span>
@@ -355,11 +374,11 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
           <i v-else class="range-thumb range-thumb--empty" :title="taskRangePreviewLoading ? '正在读取真实任务范围' : '暂无任务范围'">{{ taskRangePreviewLoading ? '…' : '—' }}</i>
         </span>
         <span><TaskWorkflowProgress :task="task" compact /></span>
-        <span class="task-actions"><button @click="router.push(`/tasks/${task.id}`)">查看</button></span>
+        <span class="task-actions"><button @click="openTask(task)">查看</button></span>
       </div>
       <div v-if="taskLoading" class="empty-tasks">正在加载真实任务数据…</div>
-      <div v-else-if="taskError" class="empty-tasks task-load-error">任务列表加载失败：{{ taskError }}</div>
-      <div v-else-if="!taskRows.length" class="empty-tasks">当前筛选条件下暂无真实任务</div>
+      <div v-if="taskError" class="empty-tasks task-load-error">{{ taskError }}</div>
+      <div v-else-if="!taskRows.length" class="empty-tasks">当前筛选条件下暂无任务</div>
     </section>
     <footer class="task-pagination"><span>共 <b>{{ taskTotal }}</b> 条记录　每页显示 <b>{{ requestPageSize }}</b> 条</span><div class="page-controls"><button :disabled="currentPage === 1" @click="setPage(currentPage - 1)">‹</button><template v-for="(item, index) in paginationItems" :key="`${item}-${index}`"><span v-if="item === 'ellipsis'">…</span><button v-else :class="{ active: currentPage === item }" @click="setPage(item)">{{ item }}</button></template><button :disabled="currentPage === pageCount" @click="setPage(currentPage + 1)">›</button><label>前往 <input v-model="gotoPage" inputmode="numeric" @keyup.enter="applyGoToPage" @blur="applyGoToPage" /> 页</label></div></footer>
     <NewTaskDialog v-model="newTaskVisible" :scene-id="sceneFilter || undefined" :scenes="sceneOptions" @created="handleCreated" />
@@ -424,6 +443,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
 .task-filters { height: auto; grid-template-columns: 1.35fr repeat(4, minmax(150px, 1fr)); gap: 12px; padding: 14px 16px; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; box-shadow: 0 2px 10px #2449690a; }
 .task-filters label { color: #65788b; font-size: 12px; }
 .task-filters select, .task-filters input, .search-box { height: 34px; color: #32485e; background: #fff; border-color: #d8e0e7; border-radius: 4px; font-size: 12px; }
+.task-filters select { color-scheme: light; }
+.task-filters select option { color: #32485e; background: #fff; }
+.task-filters select:not(:disabled):hover { color: #32485e !important; background-color: #fff !important; }
 .search-box { color: #7e91a4; }
 .department-filter { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .department-filter select { min-width: 0; width: 100%; }
@@ -434,7 +456,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
 .task-name b, .task-owner b { color: #32485e; font-size: 13px; }
 .task-name small, .task-owner small, .task-table-row > span > small { color: #99a6b2; font-size: 11px; }
 .scene-tag { color: #397cae; background: #edf6fc; border-color: #c6e1f3; }
-.status-tag { color: #367eb5; background: #edf6fc; border-color: #c6e1f3; }
+.status-tag { max-width: none; display: inline-flex; align-items: center; color: #367eb5; background: #edf6fc; border-color: #c6e1f3; line-height: 1.25; white-space: nowrap; }
+.task-table-row > span:nth-child(4) { min-width: 92px; overflow: visible; white-space: nowrap; }
 .status-tag.done { color: #258965; background: #eaf7f1; border-color: #bfe7d7; }
 .status-tag.pending { color: #b4772d; background: #fff6e8; border-color: #f0d6ad; }
 .task-actions button { color: #277ebd; background: #fff; border-color: #bcd8eb; border-radius: 4px; }
