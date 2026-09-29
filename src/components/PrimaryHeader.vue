@@ -32,7 +32,7 @@ const entries = [
     </nav>
     <div class="primary-user">
       <time>{{ dateText }}　{{ timeText }}</time>
-      <button class="notice" type="button" aria-label="消息通知"><DashboardSymbol name="notification" /><b>3</b></button>
+      <button class="notice" type="button" aria-label="我的待办" title="前往我的待办" @click="router.push('/tasks/todo')"><DashboardSymbol name="notification" /><b>3</b></button>
       <OrganizationSwitcher />
       <UserAccountMenu icon-only />
     </div>

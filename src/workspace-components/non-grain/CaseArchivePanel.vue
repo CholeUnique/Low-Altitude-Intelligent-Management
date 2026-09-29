@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { NonGrainWorkspaceContext } from '@/mocks/non-grain-workspace'
+import NonGrainTaskSummary from './NonGrainTaskSummary.vue'
+import NonGrainUploadTile from './NonGrainUploadTile.vue'
 import './workspace.scss'
 
 defineProps<{ context: NonGrainWorkspaceContext; readonly: boolean; disabledReason: string }>()
@@ -14,15 +16,16 @@ const form = ref({
 </script>
 
 <template>
-  <div class="ng-page">
+  <div class="ng-page ng-page-stage">
     <div v-if="readonly" class="ng-readonly">{{ disabledReason || '已结案，仅供查看' }}</div>
     <div class="ng-grid">
-      <section class="ng-card span-5">
-        <h3>结案依据</h3>
+      <NonGrainTaskSummary class="span-12" :context="context" node="case-archive" />
+      <section class="ng-card span-5 ng-stage-card">
+        <h3><i>据</i>结案依据概览</h3>
         <ul class="ng-list">
-          <li><span>现场核查依据</span><span class="ng-tag ok">材料齐全</span></li>
-          <li><span>整改处置依据</span><span class="ng-tag ok">材料齐全</span></li>
-          <li><span>无人机复核依据</span><span class="ng-tag ok">复核通过</span></li>
+          <li><span>现场核查<small>图斑1：现场核查确认存在非粮化问题</small></span><span class="ng-tag ok">已完成</span></li>
+          <li><span>整改处置<small>已清除苗木并翻耕整地</small></span><span class="ng-tag ok">已完成</span></li>
+          <li><span>无人机复核<small>复核确认已恢复粮食生产条件</small></span><span class="ng-tag ok">已完成</span></li>
         </ul>
 
         <h4>三图斑可结案状态</h4>
@@ -32,8 +35,9 @@ const form = ref({
         </article>
       </section>
 
-      <section class="ng-card span-7">
-        <h3>结案归档</h3>
+      <section class="ng-card span-7 ng-stage-card">
+        <h3><i>填</i>结案信息填报</h3>
+        <div class="ng-record-bar"><span>任务编号<b>{{ context.task.taskNo }}</b></span><span>当前图斑<b>图斑1</b></span><span>结案人<b>农业农村局管理员01</b></span><span>结案日期<b>2026-10-21</b></span></div>
         <div class="ng-decision">
           <label v-for="item in ['整改完成结案', '核查无问题结案', '其他情形结案']" :key="item">
             <input v-model="type" type="radio" :value="item" :disabled="readonly"> {{ item }}
@@ -47,15 +51,16 @@ const form = ref({
         </div>
 
         <h4>归档材料</h4>
-        <div class="ng-photo-grid">
-          <div class="ng-photo">核查卷宗</div>
-          <div class="ng-photo">闭环报告</div>
-          <div class="ng-photo upload">+ 上传归档材料</div>
+        <div class="ng-photo-grid four">
+          <div class="ng-photo img-road"><span>现场核查照片</span></div>
+          <div class="ng-photo img-field-cleared"><span>整改结果照片</span></div>
+          <div class="ng-photo img-restored"><span>无人机复核影像</span></div>
+          <NonGrainUploadTile label="上传归档材料" accept="image/*,.pdf,.doc,.docx,.zip" :readonly="readonly" />
         </div>
 
         <div class="ng-actions">
-          <button :disabled="readonly" :title="readonly ? disabledReason : ''" @click="emit('draft')">保存</button>
-          <button class="primary" :disabled="readonly" :title="readonly ? disabledReason : ''" @click="emit('close')">确认结案</button>
+          <button :aria-disabled="readonly" :data-permission-tip="readonly ? '无权限操作' : ''" @click="!readonly && emit('draft')">保存</button>
+          <button class="primary" :aria-disabled="readonly" :data-permission-tip="readonly ? '无权限操作' : ''" @click="!readonly && emit('close')">确认结案</button>
         </div>
       </section>
     </div>

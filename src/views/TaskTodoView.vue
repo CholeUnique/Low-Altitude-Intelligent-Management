@@ -2,13 +2,13 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
-import TaskWorkflowProgress, { getTaskWorkspaceNodeKey } from '@/components/task-center/TaskWorkflowProgress.vue'
+import TaskWorkflowProgress, { getTaskWorkflowSteps, isNonGrainTask } from '@/components/task-center/TaskWorkflowProgress.vue'
 import { getGovernanceTaskPage, type GovernanceTask, type GovernanceTaskStatus } from '@/api/governance-task'
 import { useUserStore } from '@/stores/user'
 import { isTaskVisibleForOrganization } from '@/utils/scene-visibility'
-import { createNonGrainTodoTask } from '@/mocks/non-grain-workspace'
+import { createNonGrainDemoTasks, isNonGrainDemoTaskId, NON_GRAIN_VIEWER_NODE_KEY } from '@/mocks/non-grain-workspace'
 
-type TodoCategory = 'all' | 'due-soon' | 'created'
+type TodoCategory = 'all' | 'pending' | 'handled'
 type DeadlineSort = 'asc' | 'desc'
 
 const user = useUserStore()
@@ -24,16 +24,26 @@ let requestVersion = 0
 
 const currentUserId = computed(() =>
   String(user.currentUser?.id || user.currentUser?.username || 'non-grain-demo-user'))
-const demoTask = computed(() =>
-  createNonGrainTodoTask(currentUserId.value, user.activeDeptId, '海陵区农业农村局'))
+const demoTasks = computed(() =>
+  createNonGrainDemoTasks(currentUserId.value, user.activeDeptId, '海陵区农业农村局'))
 const displayTasks = computed(() => [
-  demoTask.value,
-  ...tasks.value.filter((task) => task.id !== demoTask.value.id),
+  ...demoTasks.value,
+  ...tasks.value.filter((task) => !isNonGrainDemoTaskId(task.id)),
 ])
-const hasAssignedData = computed(() => displayTasks.value.some((task) => Boolean(task.assigneeId)))
-const assignedTasks = computed(() => displayTasks.value.filter((task) =>
-  task.assigneeId === currentUserId.value
-  && ![3, 4, 5].includes(task.taskStatus)))
+type MyWorkState = 'pending' | 'handled'
+
+function myWorkState(task: GovernanceTask): MyWorkState | undefined {
+  if (isNonGrainTask(task)) {
+    const myNode = getTaskWorkflowSteps(task).find((node) => node.key === NON_GRAIN_VIEWER_NODE_KEY)
+    if (myNode?.status === 'active') return 'pending'
+    if (myNode?.status === 'done') return 'handled'
+    return undefined
+  }
+  if (task.assigneeId !== currentUserId.value) return undefined
+  return [3, 4, 5].includes(task.taskStatus) ? 'handled' : 'pending'
+}
+
+const myWorkTasks = computed(() => displayTasks.value.filter((task) => Boolean(myWorkState(task))))
 
 function deadlineTime(task: GovernanceTask) {
   if (!task.planEndTime) return Number.POSITIVE_INFINITY
@@ -52,17 +62,16 @@ function isOverdue(task: GovernanceTask) {
 }
 
 const categoryCounts = computed(() => ({
-  all: assignedTasks.value.length,
-  'due-soon': assignedTasks.value.filter(isDueSoon).length,
-  created: assignedTasks.value.filter((task) => task.createBy === currentUserId.value).length,
+  all: myWorkTasks.value.length,
+  pending: myWorkTasks.value.filter((task) => myWorkState(task) === 'pending').length,
+  handled: myWorkTasks.value.filter((task) => myWorkState(task) === 'handled').length,
 }))
 
 const visibleTasks = computed(() => {
   const normalizedKeyword = keyword.value.trim().toLocaleLowerCase()
-  return assignedTasks.value
+  return myWorkTasks.value
     .filter((task) => {
-      if (category.value === 'due-soon' && !isDueSoon(task)) return false
-      if (category.value === 'created' && task.createBy !== currentUserId.value) return false
+      if (category.value !== 'all' && myWorkState(task) !== category.value) return false
       if (processType.value !== '' && task.taskStatus !== processType.value) return false
       return !normalizedKeyword
         || `${task.name} ${task.taskNo} ${task.sceneName} ${task.deptName}`.toLocaleLowerCase().includes(normalizedKeyword)
@@ -78,11 +87,10 @@ const visibleTasks = computed(() => {
 })
 
 const workload = computed(() => ({
-  pending: assignedTasks.value.filter((task) => task.taskStatus === 0).length,
-  executing: assignedTasks.value.filter((task) => task.taskStatus === 1).length,
-  verifying: assignedTasks.value.filter((task) => task.taskStatus === 2).length,
-  dueSoon: assignedTasks.value.filter(isDueSoon).length,
-  overdue: assignedTasks.value.filter(isOverdue).length,
+  pending: myWorkTasks.value.filter((task) => myWorkState(task) === 'pending').length,
+  handled: myWorkTasks.value.filter((task) => myWorkState(task) === 'handled').length,
+  dueSoon: myWorkTasks.value.filter((task) => myWorkState(task) === 'pending' && isDueSoon(task)).length,
+  overdue: myWorkTasks.value.filter((task) => myWorkState(task) === 'pending' && isOverdue(task)).length,
 }))
 
 function formatTime(value?: string) {
@@ -101,7 +109,7 @@ function openWorkspace(task: GovernanceTask) {
   router.push({
     name: 'workspace',
     params: { sceneId: task.sceneCode, taskId: task.id },
-    query: { node: getTaskWorkspaceNodeKey(task) },
+    query: { node: isNonGrainTask(task) ? NON_GRAIN_VIEWER_NODE_KEY : undefined },
   })
 }
 
@@ -133,15 +141,15 @@ onMounted(() => void loadTasks())
 </script>
 
 <template>
-  <TaskCenterLayout title="我的待办" :subtitle="`${user.organization.name} · 仅展示当前用户负责且未结束的任务`">
+  <TaskCenterLayout title="我的待办" :subtitle="`${user.organization.name} · 展示待我处理及我已处理的任务`">
     <template #actions>
       <button class="refresh-button" :disabled="loading" @click="loadTasks">{{ loading ? '加载中…' : '刷新待办' }}</button>
     </template>
 
     <section class="todo-tabs" aria-label="待办分类">
-      <button :class="{ active: category === 'all' }" @click="category = 'all'">全部待办 <b>{{ categoryCounts.all }}</b></button>
-      <button :class="{ active: category === 'due-soon' }" @click="category = 'due-soon'">即将到期 <b>{{ categoryCounts['due-soon'] }}</b></button>
-      <button :class="{ active: category === 'created' }" @click="category = 'created'">我发起的 <b>{{ categoryCounts.created }}</b></button>
+      <button :class="{ active: category === 'all' }" @click="category = 'all'">全部相关 <b>{{ categoryCounts.all }}</b></button>
+      <button :class="{ active: category === 'pending' }" @click="category = 'pending'">待我处理 <b>{{ categoryCounts.pending }}</b></button>
+      <button :class="{ active: category === 'handled' }" @click="category = 'handled'">我已处理 <b>{{ categoryCounts.handled }}</b></button>
     </section>
 
     <div class="todo-layout">
@@ -158,7 +166,7 @@ onMounted(() => void loadTasks())
             <div class="task-meta">
               <div class="task-title">
                 <span class="priority" :class="`priority-${task.priority}`">{{ priorityLabel(task.priority) }}</span>
-                <div><h2>{{ task.name }}</h2><p>{{ task.taskNo }} · {{ task.sceneName }}</p></div>
+                <div><h2>{{ task.name }} <em class="work-state" :class="myWorkState(task)">{{ myWorkState(task) === 'handled' ? '我已处理' : '待我处理' }}</em></h2><p>{{ task.taskNo }} · {{ task.sceneName }}</p></div>
               </div>
               <div class="deadline" :class="{ overdue: isOverdue(task), soon: isDueSoon(task) }">
                 <span>{{ isOverdue(task) ? '已逾期' : isDueSoon(task) ? '即将到期' : '截止时间' }}</span>
@@ -168,24 +176,22 @@ onMounted(() => void loadTasks())
             <div class="task-body">
               <dl><div><dt>所属部门</dt><dd>{{ task.deptName || '-' }}</dd></div><div><dt>当前状态</dt><dd>{{ task.taskStatusDesc }}</dd></div><div><dt>创建时间</dt><dd>{{ formatTime(task.createTime) }}</dd></div></dl>
               <TaskWorkflowProgress :task="task" />
-              <button class="workspace-button" @click="openWorkspace(task)">进入工作台</button>
+              <button class="workspace-button" @click="openWorkspace(task)">{{ myWorkState(task) === 'handled' ? '查看我的办理' : '进入工作台' }}</button>
             </div>
           </article>
 
           <div v-if="loading && !visibleTasks.length" class="todo-empty">正在加载真实待办任务…</div>
-          <div v-else-if="!hasAssignedData" class="todo-empty"><b>暂无可分派的待办数据</b><p>当前部门返回的任务均未设置负责人（assigneeId），请先在任务中指定负责人。</p></div>
-          <div v-else-if="!assignedTasks.length" class="todo-empty"><b>暂无分配给我的待办</b><p>任务已有负责人信息，但没有未完成任务分配给当前用户 #{{ currentUserId }}。</p></div>
+          <div v-else-if="!myWorkTasks.length" class="todo-empty"><b>暂无与我相关的任务</b><p>任务尚未到达我的办理节点，或当前用户没有相关办理记录。</p></div>
           <div v-else-if="!visibleTasks.length" class="todo-empty"><b>当前分类暂无任务</b><p>可调整分类、关键词或处理类型后查看。</p></div>
         </section>
       </main>
 
       <aside class="workload-panel">
         <header><h2>我的工作负载</h2><p>当前用户 #{{ currentUserId || '-' }}</p></header>
-        <div class="workload-total"><strong>{{ assignedTasks.length }}</strong><span>进行中的任务</span></div>
+        <div class="workload-total"><strong>{{ myWorkTasks.length }}</strong><span>与我相关的任务</span></div>
         <ul>
-          <li><span><i class="blue"></i>待执行</span><b>{{ workload.pending }}</b></li>
-          <li><span><i class="cyan"></i>执行中</span><b>{{ workload.executing }}</b></li>
-          <li><span><i class="purple"></i>待核查</span><b>{{ workload.verifying }}</b></li>
+          <li><span><i class="blue"></i>待我处理</span><b>{{ workload.pending }}</b></li>
+          <li><span><i class="cyan"></i>我已处理</span><b>{{ workload.handled }}</b></li>
           <li><span><i class="orange"></i>即将到期</span><b>{{ workload.dueSoon }}</b></li>
           <li><span><i class="red"></i>已逾期</span><b>{{ workload.overdue }}</b></li>
         </ul>
@@ -219,6 +225,8 @@ onMounted(() => void loadTasks())
 .task-title { min-width: 0; display: flex; align-items: center; gap: 11px; }
 .task-title h2, .task-title p { margin: 0; }
 .task-title h2 { overflow: hidden; color: #30465c; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.work-state { margin-left: 6px; padding: 2px 6px; color: #277fbf; background: #eaf5fd; border-radius: 9px; font-size: 9px; font-style: normal; font-weight: 500; vertical-align: 2px; }
+.work-state.handled { color: #248263; background: #e7f7f0; }
 .task-title p { margin-top: 5px; color: #97a4b1; font-size: 10px; }
 .priority { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; color: #738396; background: #edf1f4; border-radius: 50%; font-size: 10px; }
 .priority-2 { color: #c95353; background: #fff0ef; }.priority-1 { color: #bd7a2b; background: #fff5e7; }

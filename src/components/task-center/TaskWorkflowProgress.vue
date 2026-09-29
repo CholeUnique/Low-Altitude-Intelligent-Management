@@ -26,7 +26,7 @@ function nonGrainStatusIndex(status: GovernanceTaskStatus, total: number) {
 }
 
 export function getTaskWorkflowSteps(task: GovernanceTask): TaskWorkflowNode[] {
-  if (!isNonGrainTask(task) && task.workflow?.length) return task.workflow
+  if (task.workflow?.length) return task.workflow
   const source = isNonGrainTask(task)
     ? NON_GRAIN_WORKFLOW
     : getSharedWorkspaceConfig().nodes.map((node) => ({ key: node.key, name: node.shortName }))
@@ -50,6 +50,9 @@ export function getTaskWorkflowSteps(task: GovernanceTask): TaskWorkflowNode[] {
  */
 export function getTaskWorkspaceNodeKey(task: GovernanceTask) {
   if (isNonGrainTask(task)) {
+    const activeNode = task.workflow?.find((node) => node.status === 'active')
+      ?? [...(task.workflow ?? [])].reverse().find((node) => node.status === 'done')
+    if (activeNode?.key) return activeNode.key
     if (task.taskStatus === 1) return 'on-site-verification'
     if (task.taskStatus === 2) return 'drone-review'
     if (task.taskStatus === 5) return 'case-archive'
