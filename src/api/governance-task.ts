@@ -23,6 +23,7 @@ export interface GovernanceTask {
   actualStartTime?: string
   actualEndTime?: string
   assigneeId?: string
+  createBy?: string
   createTime?: string
   updateTime?: string
   /** Mock 展示层保留字段；真实接口未提供时不会伪造。 */
@@ -201,6 +202,7 @@ interface BizTaskDto {
   actualStartTime?: string
   actualEndTime?: string
   assigneeId?: string | number
+  createBy?: string | number
   createTime?: string
   updateTime?: string
 }
@@ -296,6 +298,7 @@ function toGovernanceTask(item: BizTaskDto): GovernanceTask {
     actualStartTime: item.actualStartTime,
     actualEndTime: item.actualEndTime,
     assigneeId: optionalValue(item.assigneeId),
+    createBy: optionalValue(item.createBy),
     createTime: item.createTime,
     updateTime: item.updateTime,
   }

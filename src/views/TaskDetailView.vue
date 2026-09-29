@@ -109,17 +109,6 @@ function handleTaskUpdated() {
   void loadTask()
 }
 
-function enterWorkspace() {
-  if (!task.value) return
-  router.push({
-    name: 'workspace',
-    params: {
-      sceneId: task.value.sceneCode,
-      taskId: task.value.id,
-    },
-  })
-}
-
 async function loadTask() {
   const taskId = String(route.params.taskId || '')
   if (!taskId) return
@@ -273,9 +262,9 @@ onMounted(() => void loadTask())
 </script>
 
 <template>
-  <CockpitPageLayout title="低空治理任务详情" back-to="/tasks">
+  <CockpitPageLayout title="低空治理任务详情" back-to="/tasks/list">
     <div v-if="loading" class="task-not-found"><h2>正在加载真实任务详情…</h2></div>
-    <div v-else-if="error || !task" class="task-not-found"><h2>{{ error || '未找到任务' }}</h2><button @click="router.push('/tasks')">返回任务总览</button></div>
+    <div v-else-if="error || !task" class="task-not-found"><h2>{{ error || '未找到任务' }}</h2><button @click="router.push('/tasks/list')">返回任务列表</button></div>
     <div v-else class="detail-layout">
       <aside class="detail-left">
         <section class="detail-panel basic-info">
@@ -308,7 +297,7 @@ onMounted(() => void loadTask())
             <article><i>△</i><span>异常面积<b>{{ detail?.abnormalArea ?? 0 }}<small>㎡</small></b></span></article>
             <article><i>⌖</i><span>范围要素<b>{{ geometry.features.length }}<small>个</small></b></span></article>
           </section>
-          <div class="task-action-toolbar"><button class="enter-workspace" @click="router.push('/tasks')">返回任务总览</button><button class="enter-patrol" @click="enterWorkspace">进入工作台</button><template v-if="!isMockMode()"><button v-if="task.taskStatus !== 4 && task.taskStatus !== 5" class="task-action-edit" @click="editVisible = true">编辑任务</button><button v-if="task.taskStatus === 0" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('execute')">执行任务</button><button v-if="task.taskStatus === 0 || task.taskStatus === 1" class="task-action-danger" :disabled="actionLoading" @click="requestTaskAction('cancel')">取消任务</button><button v-if="task.taskStatus === 2" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('finish')">核查完成</button></template></div>
+          <div class="task-action-toolbar"><button class="enter-workspace" @click="router.push('/tasks/list')">返回任务列表</button><template v-if="!isMockMode()"><button v-if="task.taskStatus !== 4 && task.taskStatus !== 5" class="task-action-edit" @click="editVisible = true">编辑任务</button><button v-if="task.taskStatus === 0" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('execute')">执行任务</button><button v-if="task.taskStatus === 0 || task.taskStatus === 1" class="task-action-danger" :disabled="actionLoading" @click="requestTaskAction('cancel')">取消任务</button><button v-if="task.taskStatus === 2" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('finish')">核查完成</button></template></div>
         </div>
         <section class="map-info-grid">
           <article class="detail-panel task-map-panel"><div class="task-map-compare"><section class="task-map-compare__pane"><header>任务范围与异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :fit-abnormal-points="true" :auto-fit="false" :fit-request="taskMapFitRequest" :view="taskMapView" @view-change="syncTaskMapView" /></section><section class="task-map-compare__pane"><header>异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :show-task-range="false" :abnormal-fill-opacity="0" :show-dom-imagery="true" :auto-fit="false" :view="taskMapView" @view-change="syncTaskMapView" /></section></div></article>

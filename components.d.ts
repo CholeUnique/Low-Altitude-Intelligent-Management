@@ -17,7 +17,6 @@ declare module 'vue' {
     DomainProgressChart: typeof import('./src/components/DomainProgressChart.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
-    ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElPopover: typeof import('element-plus/es')['ElPopover']
     MetadataManagementPanel: typeof import('./src/components/MetadataManagementPanel.vue')['default']
@@ -30,6 +29,7 @@ declare module 'vue' {
     TaskRangeMap: typeof import('./src/components/TaskRangeMap.vue')['default']
     TaskRangeThumbnail: typeof import('./src/components/TaskRangeThumbnail.vue')['default']
     TaskSchedulePicker: typeof import('./src/components/TaskSchedulePicker.vue')['default']
+    TaskWorkflowProgress: typeof import('./src/components/task-center/TaskWorkflowProgress.vue')['default']
     UserAccountMenu: typeof import('./src/components/UserAccountMenu.vue')['default']
   }
 }
