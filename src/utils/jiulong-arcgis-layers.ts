@@ -2,7 +2,7 @@ import L from 'leaflet'
 
 type ArcGisLayerKind = 'cached' | 'export'
 
-interface ArcGisLayerDefinition {
+export interface ArcGisLayerDefinition {
   id: string
   name: string
   kind: ArcGisLayerKind
@@ -20,10 +20,12 @@ export interface JiulongLayerControlOptions {
   position?: L.ControlPosition
   /** 指定首次进入地图时自动显示的专题层；默认全部关闭，避免同时请求多期大影像。 */
   visibleLayerIds?: string[]
+  /** 是否创建 Leaflet 自带的独立图层面板；业务地图可关闭后接入自己的统一面板。 */
+  showControl?: boolean
 }
 
 export interface JiulongLayerControlHandle {
-  control: L.Control.Layers
+  control?: L.Control.Layers
   layers: Map<string, L.Layer>
   destroy: () => void
 }
@@ -271,12 +273,14 @@ export function installJiulongArcGisLayers(
     if (visibleIds.has(definition.id)) layer.addTo(map)
   })
 
-  const control = L.control.layers(undefined, overlays, {
-    collapsed: options.collapsed ?? false,
-    position: options.position || 'bottomleft',
-    sortLayers: false,
-  }).addTo(map)
-  const controlElement = control.getContainer()
+  const control = options.showControl === false
+    ? undefined
+    : L.control.layers(undefined, overlays, {
+        collapsed: options.collapsed ?? false,
+        position: options.position || 'bottomleft',
+        sortLayers: false,
+      }).addTo(map)
+  const controlElement = control?.getContainer()
   controlElement?.classList.add('jiulong-arcgis-control')
   controlElement?.setAttribute('aria-label', '九龙镇专题图层')
   controlElement?.setAttribute('title', '九龙镇专题图层')
@@ -356,7 +360,7 @@ export function installJiulongArcGisLayers(
       map.off('mousemove', queryHoveredFeatures)
       map.off('mouseout overlayremove', closeHoverTooltip)
       closeHoverTooltip()
-      control.remove()
+      control?.remove()
       layers.forEach((layer) => layer.remove())
       layers.clear()
       focusBoundsByLayer.clear()
