@@ -665,8 +665,10 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
 .cockpit-body--map-only .cockpit-primary,
 .map-overview { height: 100%; min-height: 0; }
 .overview-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: clamp(238px, 15.2vw, 292px) minmax(0, 1fr) clamp(238px, 15.2vw, 292px); gap: 7px; }
-.map-overview { position: relative; }
-.overview-side { min-width: 0; min-height: 0; display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.map-overview { position: relative; grid-template-rows: minmax(0, 1fr); }
+.map-overview > .cockpit-panel__title { width: min(500px, 52%); background: linear-gradient(90deg, #08273cf2 0%, #08273cdb 72%, transparent 100%); }
+.map-overview > .cockpit-panel__title h2 { overflow: hidden; color: #eac100; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 6px #001722; }
+.overview-side { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 7px; }
 .overview-float-panel { min-height: 0; overflow: hidden; padding: 14px; color: #c9f4ff; border: 1px solid #1789b8; border-radius: 5px; background: linear-gradient(145deg, #062b48, #031a32); box-shadow: 0 0 16px #00b9ee1f, inset 0 0 20px #0d6f9d1c; }
 .overview-float-panel > header { display: flex; align-items: center; justify-content: space-between; min-height: 36px; margin: -14px -14px 13px; padding: 0 13px; border-bottom: 1px solid #1676a0; background: linear-gradient(90deg, #07537fc7, #04243cc7); }
 .overview-float-panel h2 { margin: 0; color: #e9fbff; font-size: clamp(14px, .9vw, 18px); }

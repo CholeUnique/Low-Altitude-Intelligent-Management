@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Aim, Compass, Delete, EditPen, InfoFilled, Location, MapLocation, Picture, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
 import L from 'leaflet'
 import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
@@ -114,6 +115,7 @@ const mapMode = ref<'vector' | 'image'>('image')
 const mapServices = ref<MapServiceItem[]>([])
 const mapServicesLoading = ref(false)
 const mapServicesError = ref('')
+const layerPanelCollapsed = ref(false)
 const visibleMapServiceIds = ref<string[]>([])
 interface VectorFilterPanel {
   serviceId: string
@@ -187,7 +189,7 @@ function dismissToolMessage() {
   toolMessage.value = ''
 }
 
-function showToolMessage(message: string, duration = 3200) {
+function showToolMessage(message: string, duration = 4000) {
   if (toolMessageTimer) window.clearTimeout(toolMessageTimer)
   toolMessage.value = message
   toolMessageTimer = window.setTimeout(() => {
@@ -595,18 +597,18 @@ function renderAdministrativeBoundaries() {
   L.geoJSON(taizhouDistrictBoundariesWgs84 as GeoJsonObject, {
     pane: 'administrative-boundaries',
     style: {
-      color: '#2bd8ff',
-      weight: 2.5,
+      color: '#9AEEFE',
+      weight: 3.5,
       opacity: 1,
-      fillColor: '#66c7ff',
-      fillOpacity: .25,
+      fillColor: '#66B9DA',
+      fillOpacity: .26,
     },
   }).addTo(administrativeBoundaryGroup)
   L.geoJSON(taizhouCityBoundaryWgs84 as GeoJsonObject, {
     pane: 'administrative-boundaries',
     style: {
-      color: '#2bd8ff',
-      weight: 2.5,
+      color: '#9AEEFE',
+      weight: 3.5,
       opacity: 1,
       fillOpacity: 0,
       className: 'taizhou-city-boundary',
@@ -620,15 +622,29 @@ function renderHailingBoundary() {
   hailingBoundaryGroup = undefined
   if (!map || props.focusLayerId || !HAILING_DISTRICT) return
   hailingBoundaryGroup = L.layerGroup()
+  // Leaflet uses Canvas here, so a second stroke provides a reliable 50% dark-blue halo.
   L.geoJSON(HAILING_DISTRICT as GeoJsonObject, {
     pane: 'administrative-boundaries',
     interactive: false,
     style: {
-      color: '#63d6ff',
-      weight: 3.5,
-      opacity: 1,
+      color: '#135888',
+      weight: 10,
+      opacity: .5,
       fill: false,
-      fillOpacity: 0,
+      lineCap: 'round',
+      lineJoin: 'round',
+    },
+  }).addTo(hailingBoundaryGroup)
+  L.geoJSON(HAILING_DISTRICT as GeoJsonObject, {
+    pane: 'administrative-boundaries',
+    interactive: false,
+    style: {
+      color: '#9AEEFE',
+      weight: 4,
+      opacity: 1,
+      fill: true,
+      fillColor: '#66B9DA',
+      fillOpacity: .26,
       lineCap: 'round',
       lineJoin: 'round',
       className: 'hailing-boundary-glow',
@@ -771,8 +787,16 @@ onBeforeUnmount(() => {
     <div v-if="mapError" class="dashboard-map__empty"><span>{{ mapError }}</span><button @click="retryMap">重新加载</button></div>
     <div v-else-if="!mapReady" class="dashboard-map__loading">正在加载江苏泰州天地图…</div>
 
-    <div class="layer-panel-stack">
-      <aside class="layer-manager">
+    <div class="layer-panel-stack" :class="{ 'is-collapsed': layerPanelCollapsed }">
+      <button
+        class="layer-panel-handle"
+        type="button"
+        :aria-label="layerPanelCollapsed ? '展开图层管理' : '收起图层管理'"
+        :aria-expanded="!layerPanelCollapsed"
+        title="点击收起或展开图层管理"
+        @click="layerPanelCollapsed = !layerPanelCollapsed"
+      >{{ layerPanelCollapsed ? '▶' : '◀' }}</button>
+      <aside class="layer-manager" :inert="layerPanelCollapsed" :aria-hidden="layerPanelCollapsed">
         <div class="tool-title"><b>图层管理</b><span class="tool-title-state">显示</span></div>
         <div class="layer-manager-list">
           <div v-if="mapServicesLoading" class="layer-panel-message">正在读取地图服务…</div>
@@ -786,7 +810,7 @@ onBeforeUnmount(() => {
         </div>
       </aside>
 
-      <aside v-if="vectorFilterPanels.length" class="parcel-type-panel">
+      <aside v-if="vectorFilterPanels.length" class="parcel-type-panel" :inert="layerPanelCollapsed" :aria-hidden="layerPanelCollapsed">
         <div class="tool-title"><b>地块类型</b></div>
         <section v-for="panel in vectorFilterPanels" :key="panel.serviceId" class="parcel-filter-group">
           <div class="parcel-filter-heading"><b>{{ panel.serviceName }}</b><small>{{ panel.fieldLabel }}</small></div>
@@ -829,25 +853,36 @@ onBeforeUnmount(() => {
 
     <aside class="map-tools">
       <div class="map-mode-switch" aria-label="底图选择">
-        <button :class="{ active: mapMode === 'image' }" title="切换卫星影像" @click="switchMode('image')"><i class="mode-indicator"></i><span>卫星地图</span></button>
-        <button :class="{ active: mapMode === 'vector' }" title="切换电子地图" @click="switchMode('vector')"><i class="mode-indicator"></i><span>电子地图</span></button>
+        <button :class="{ active: mapMode === 'image' }" title="切换卫星影像" @click="switchMode('image')"><i class="map-tool-icon"><Picture /></i><span>卫星地图</span></button>
+        <button :class="{ active: mapMode === 'vector' }" title="切换电子地图" @click="switchMode('vector')"><i class="map-tool-icon"><MapLocation /></i><span>电子地图</span></button>
       </div>
-      <button title="当前位置" @click="locateUser"><i>⌖</i><span>定位</span></button>
-      <button title="回到泰州并保持正北" @click="resetNorth"><i class="compass">N</i><span>指南针</span></button>
-      <button :class="{ active: measureOpen }" title="测量工具" @click="measureOpen = !measureOpen"><i>╱</i><span>测量</span></button>
+      <button title="当前位置" @click="locateUser"><i class="map-tool-icon"><Aim /></i><span>定位</span></button>
+      <button title="回到泰州并保持正北" @click="resetNorth"><i class="map-tool-icon"><Compass /></i><span>指南针</span></button>
+      <button :class="{ active: measureOpen }" title="测量工具" @click="measureOpen = !measureOpen"><i class="map-tool-icon"><EditPen /></i><span>测量</span></button>
       <div v-if="measureOpen" class="tool-submenu right-submenu">
         <button :class="{ active: activeTool === 'distance' }" @click="startTool('distance')">距离测量</button>
         <button :class="{ active: activeTool === 'area' }" @click="startTool('area')">面积测量</button>
         <button @click="clearMeasurements">清除测量</button>
       </div>
-      <button :class="{ active: activeTool === 'marker' }" title="添加标注" @click="startTool('marker')"><i>⚑</i><span>标注</span></button>
-      <button title="清除标注" @click="clearAnnotations"><i>×</i><span>清除</span></button>
-      <button @click="map?.zoomIn()"><i>＋</i><span>放大</span></button>
-      <button @click="map?.zoomOut()"><i>－</i><span>缩小</span></button>
+      <button :class="{ active: activeTool === 'marker' }" title="添加标注" @click="startTool('marker')"><i class="map-tool-icon"><Location /></i><span>标注</span></button>
+      <button title="清除标注" @click="clearAnnotations"><i class="map-tool-icon"><Delete /></i><span>清除</span></button>
+      <button title="放大地图" @click="map?.zoomIn()"><i class="map-tool-icon"><ZoomIn /></i><span>放大</span></button>
+      <button title="缩小地图" @click="map?.zoomOut()"><i class="map-tool-icon"><ZoomOut /></i><span>缩小</span></button>
     </aside>
 
-    <div v-if="measureResult" class="measure-result">{{ measureResult }}</div>
-    <Transition name="tool-message"><div v-if="toolMessage" class="tool-message" @click="dismissToolMessage">{{ toolMessage }}　×</div></Transition>
+    <div v-if="measureResult" class="measure-result" role="status">
+      <span class="measure-result__icon" aria-hidden="true"><EditPen /></span>
+      <span>{{ measureResult }}</span>
+    </div>
+    <Teleport to="body">
+      <Transition name="tool-message">
+        <div v-if="toolMessage" class="tool-message" role="status" aria-live="polite">
+          <span class="tool-message__icon" aria-hidden="true"><InfoFilled /></span>
+          <span class="tool-message__text">{{ toolMessage }}</span>
+          <button type="button" class="tool-message__close" aria-label="关闭提示" @click="dismissToolMessage">×</button>
+        </div>
+      </Transition>
+    </Teleport>
     <div class="map-scale" :style="{ width: `${scaleWidth}px` }" :aria-label="`比例尺 ${scaleLabel}`"><b>{{ scaleLabel }}</b><i></i></div>
   </div>
 </template>
@@ -862,16 +897,6 @@ onBeforeUnmount(() => {
 .map-tools { position: absolute; z-index: 600; right: 10px; top: 10px; width: 50px; display: grid; gap: 4px; }.map-tools>button { min-height: 40px; display: grid; place-items: center; gap: 2px; padding: 4px; color: #84b2c3; background: #031a30ed; border: 1px solid #155a7c; cursor: pointer; }.map-tools>button:hover,.map-tools>button.active { color: #fff; border-color: #24cbe3; background: #075477; }.map-tools i { font-size: 16px; font-style: normal; }.map-tools span { font-size: 11px; }.compass { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #31d9e9; border-radius: 50%; color: #ff7180; font-size: 14px!important; }.tool-submenu { position: absolute; top: 88px; right: 55px; width: 82px; padding: 4px; background: #031a31f5; border: 1px solid #157298; }.tool-submenu button { width: 100%; padding: 7px; color: #88b7c7; background: transparent; border: 0; text-align: left; font-size: 12px; cursor: pointer; }.tool-submenu button:hover,.tool-submenu button.active { color: #fff; background: #08698e; }.base-submenu { top: 220px; }
 .measure-result,.tool-message { position: absolute; z-index: 550; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; color: #c8f8ff; background: #03223aef; border: 1px solid #18a2c1; font-size: 14px; box-shadow: 0 0 10px #12bbd544; }.tool-message { bottom: 46px; cursor: pointer; }.tool-message-enter-active,.tool-message-leave-active { transition: opacity .2s ease, transform .2s ease; }.tool-message-enter-from,.tool-message-leave-to { opacity: 0; transform: translate(-50%, 6px); }.map-scale { position: absolute; z-index: 500; right: 68px; bottom: 7px; padding: 4px 8px; color: #77a9b9; background: #021728cc; font-size: 12px; }
 :deep(.business-task-marker),:deep(.business-drone-marker),:deep(.custom-annotation) { background: transparent; border: 0; }:deep(.business-task-marker span) { width: 23px; height: 23px; display: grid; place-items: center; color: white; background: color-mix(in srgb, var(--marker-color), #062239 35%); border: 2px solid var(--marker-color); border-radius: 50% 50% 50% 5px; transform: rotate(-45deg); box-shadow: 0 0 10px var(--marker-color); font-size: 14px; }:deep(.business-drone-marker) { display: flex; align-items: center; gap: 4px; color: #79eff9; }:deep(.business-drone-marker span) { width: 24px; height: 24px; display: grid; place-items: center; background: #087b9e; border: 1px solid #4defff; border-radius: 50%; box-shadow: 0 0 10px #22e5f4; }:deep(.business-drone-marker b) { padding: 2px 4px; background: #03233ddd; font-size: 12px; white-space: nowrap; }:deep(.business-task-label),:deep(.measure-index) { color: #c9f7ff; background: #03223ddd; border: 1px solid #17698e; box-shadow: none; border-radius: 2px; font: 11px "Microsoft YaHei"; }:deep(.leaflet-popup-content-wrapper),:deep(.leaflet-popup-tip) { color: #d9f8ff; background: #061d34; border: 1px solid #1685ad; border-radius: 2px; }:deep(.business-popup strong),:deep(.business-popup span),:deep(.business-popup small) { display: block; }:deep(.business-popup span) { margin-top: 5px; color: #8db5c3; font-size: 14px; }:deep(.business-popup small) { margin-top: 6px; color: #5d899b; }:deep(.custom-annotation span) { width: 25px; height: 25px; display: grid; place-items: center; color: #fff; background: #e86835; border: 2px solid #ffd7a8; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 0 8px #ff8a45; }
-
-/* Compact, grouped controls keep the map surface visually open. */
-.layer-manager { width: 126px; max-height: calc(100% - 52px); overflow: visible; border: 0; background: transparent; box-shadow: none; }
-.tool-title,.layer-section-title { min-height: 26px; padding: 0 8px; color: #bff3ff; background: linear-gradient(90deg, #056ea7, #073f6d); border: 1px solid #1688bf; font-size: 12px; }
-.tool-title { justify-content: space-between; }.tool-title button { padding: 1px 2px; color: #91e6ff; font-size: 10px; }
-.layer-row { min-height: 27px; grid-template-columns: 7px 1fr auto; gap: 5px; padding: 4px 7px; border: 1px solid #0d5278; border-top: 0; background: #031c37e8; }.layer-row b { font-size: 12px; }.layer-row em { font-size: 10px; }.layer-row>i { width: 6px; height: 6px; }.layer-section-title { margin-top: 7px; }
-.quick-tools { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #0d5278; border-top: 0; background: #031c37e8; }.quick-tools button { min-height: 33px; display: grid; grid-template-columns: 16px 1fr; align-items: center; gap: 3px; padding: 4px 6px; color: #9bcfe4; background: transparent; border: 0; border-right: 1px solid #0d5278; border-bottom: 1px solid #0d5278; font-size: 11px; cursor: pointer; }.quick-tools button:nth-child(2n) { border-right: 0; }.quick-tools button:last-child { grid-column: 1 / 3; }.quick-tools button:hover,.quick-tools button.active { color: white; background: #08698e; }.quick-tools i { color: #5ae1f4; font-size: 14px; font-style: normal; }
-.layer-submenu { top: auto; right: auto; left: 132px; bottom: 0; width: 96px; }.tool-submenu { z-index: 650; }
-.map-search { top: 10px; right: 10px; width: 260px; min-height: 34px; }.map-search input { height: 32px; font-size: 12px; }
-.map-tools { top: 52px; right: 10px; width: 72px; gap: 4px; }.map-tools>button { min-height: 36px; grid-template-columns: 20px 1fr; justify-content: start; padding: 4px 6px; }.map-tools i { font-size: 14px; }.map-tools span { font-size: 11px; }.compass { width: 18px; height: 18px; font-size: 12px!important; }
 
 /* The layer panel is the only left-side control; operational tools form one right-side rail. */
 .layer-manager { width: 100%; height: auto; max-height: min(350px,48vh); display: flex; flex: 0 0 auto; flex-direction: column; transform: none; overflow: hidden; border: 1px solid #1688bf; border-radius: 14px; background: #031c37b8; box-shadow: 0 0 18px #00a7d534; }.layer-manager-list{min-height:0;overflow-x:hidden;overflow-y:auto;scrollbar-color:#1688bf #031c37;scrollbar-width:thin}.tool-title { min-height: 46px; flex:0 0 46px; padding: 0 15px; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg, #056ea7c9, #073f6dc9); font-size: 18px; }.tool-title button { font-size: 14px; }.layer-row { box-sizing: border-box; min-height: 43px; flex: 0 0 43px; grid-template-columns: 18px 1fr auto; gap: 10px; padding: 9px 16px; border: 0; border-bottom: 1px solid #0d5278; background: #031c37b8; }.layer-row:last-child { border-bottom: 0; }.layer-row b { font-size: 17px; }.layer-row em { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; font-size: 0; transform: translateX(-8px); }.layer-row.active em { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }.layer-row>i { width: 16px; height: 16px; border-radius: 1px; box-shadow: none; }.layer-row.disabled { cursor: not-allowed; opacity: .55; }.dom-imagery-symbol { width: 16px!important; height: 2px!important; border: 0!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#20b9ff 0 4px,transparent 4px 7px)!important; }
@@ -901,3 +926,4 @@ onBeforeUnmount(() => {
 :deep(.leaflet-administrative-boundaries-pane path) { filter: drop-shadow(0 0 4px #168fe2cc); }
 :deep(.leaflet-administrative-boundaries-pane .hailing-boundary-glow) { filter: drop-shadow(0 0 2px #b8f1ff) drop-shadow(0 0 6px #27bfff) drop-shadow(0 0 12px #078de0cc); }
 </style>
+<style scoped src="./DashboardMapTheme.scss" lang="scss"></style>
