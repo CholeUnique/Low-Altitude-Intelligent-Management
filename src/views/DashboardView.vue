@@ -8,8 +8,19 @@ import { getGovernanceTaskGeometry, getGovernanceTaskPage, getTaskAbnormalPage, 
 import { getScene } from '@/mocks/portal'
 import { getBusinessDashboardStatistics, type BusinessDashboardStatistics } from '@/api/business-statistics'
 import { getDepartmentOptions, getMyDepartments, switchDepartment } from '@/api/auth'
-import { getLiveStreams, getUavDeviceSummary, type UavDeviceSummary } from '@/api/patrol'
+import {
+  getLiveStreams,
+  getFlightTaskMedia,
+  getUavDeviceSummary,
+  getUavFlightTaskOptions,
+  getUavFlightSummary,
+  getUavMediaSummary,
+  type UavDeviceSummary,
+  type UavFlightSummary,
+  type UavMediaSummary,
+} from '@/api/patrol'
 import type { LiveStream } from '@/adapters/dasFly'
+import type { LiveMediaItem } from '@/mocks/patrol-live'
 import { findOrganizationScene, isTaskVisibleForOrganization } from '@/utils/scene-visibility'
 import type { DashboardMapLayer } from '@/types'
 
@@ -30,10 +41,16 @@ const livePreviewLoading = ref(true)
 const livePreviewLoaded = ref(false)
 const onlineUavCount = ref<number>()
 const uavDeviceSummary = ref<UavDeviceSummary>()
+const uavFlightSummary = ref<UavFlightSummary>()
+const uavMediaSummary = ref<UavMediaSummary>()
+const classifiedMediaCounts = ref<{ totalCount: number; photoCount: number; videoCount: number }>()
 let statisticsRequestVersion = 0
 let geometryRequestVersion = 0
 let abnormalCountRequestVersion = 0
 let livePreviewRequestVersion = 0
+let mediaCountRequestVersion = 0
+let mediaCountsLoadedKey = ''
+let mediaCountsLoadingKey = ''
 const sceneId = computed(() => typeof route.params.sceneId === 'string' ? route.params.sceneId : '')
 const organization = computed(() => user.organization)
 const activeScene = computed(() => getScene(organization.value, sceneId.value))
@@ -160,8 +177,59 @@ function openSceneTaskList(sceneId: string) {
   router.push({ name: 'tasks', query: { sceneId } })
 }
 
+function openFleetOverview() {
+  router.push({ name: 'uav-tasks', params: { tab: 'fleet' } })
+}
+
+function openLiveOperations() {
+  router.push({ name: 'uav-tasks', params: { tab: 'live' } })
+}
+
+function openTaskOverview() {
+  router.push({ name: 'task-overview' })
+}
+
+function openDataManagement() {
+  router.push({ name: 'recognition', params: { tab: 'data' } })
+}
+
+function openRecognition() {
+  router.push({ name: 'recognition', params: { tab: 'spots' } })
+}
+
+function openTaskList() {
+  router.push({ name: 'task-list' })
+}
+
 function formatNumber(value: number | undefined) {
   return typeof value === 'number' ? value.toLocaleString('zh-CN', { maximumFractionDigits: 1 }) : '—'
+}
+
+function formatCount(value: number | undefined) {
+  return typeof value === 'number' ? value.toLocaleString('zh-CN') : '—'
+}
+
+function formatFlightTime(seconds: number | undefined) {
+  if (typeof seconds !== 'number') return '—'
+  const hours = seconds / 3600
+  return `${hours.toLocaleString('zh-CN', { maximumFractionDigits: hours < 10 ? 1 : 0 })} 小时`
+}
+
+function formatDistance(meters: number | undefined) {
+  if (typeof meters !== 'number') return '—'
+  if (Math.abs(meters) >= 1000) {
+    return `${(meters / 1000).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} km`
+  }
+  return `${meters.toLocaleString('zh-CN', { maximumFractionDigits: 0 })} m`
+}
+
+function formatFileSize(bytes: number | undefined) {
+  if (typeof bytes !== 'number') return '—'
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const unitIndex = Math.min(Math.floor(Math.log(Math.abs(bytes)) / Math.log(1024)), units.length - 1)
+  const amount = bytes / 1024 ** Math.max(unitIndex, 0)
+  return `${amount.toLocaleString('zh-CN', { maximumFractionDigits: 1 })} ${units[Math.max(unitIndex, 0)]}`
 }
 
 function geometryPolygons(collection?: TaskGeometryFeatureCollection): [number, number][][] {
@@ -360,14 +428,71 @@ async function loadBusinessStatistics(resetExisting = false) {
   }
 }
 
+function mediaExtension(fileName: string) {
+  const cleanName = fileName.split(/[?#]/)[0]?.trim() || ''
+  const match = cleanName.match(/\.([^.]+)$/)
+  return match?.[1]?.toUpperCase() || ''
+}
+
+async function loadAllTaskMedia(taskId: string) {
+  const records: LiveMediaItem[] = []
+  let pageNum = 1
+  let total = Number.POSITIVE_INFINITY
+  while (records.length < total) {
+    const result = await getFlightTaskMedia({ taskId, pageNum, pageSize: 200 })
+    records.push(...result.list)
+    total = result.total
+    if (!result.list.length || records.length >= total) break
+    pageNum += 1
+  }
+  return records
+}
+
+async function loadClassifiedMediaCounts() {
+  const contextKey = `${user.organizationId}:${user.activeDeptId ?? ''}:${user.token}`
+  if (mediaCountsLoadedKey === contextKey || mediaCountsLoadingKey === contextKey) return
+  mediaCountsLoadingKey = contextKey
+  classifiedMediaCounts.value = undefined
+  const requestVersion = ++mediaCountRequestVersion
+  try {
+    const taskResult = await getUavFlightTaskOptions({ pageNum: 1, pageSize: 200 })
+    let totalCount = 0
+    let photoCount = 0
+    let videoCount = 0
+    const imageTypes = new Set(['JPG', 'JPEG', 'PNG', 'TIF', 'TIFF', 'DNG', 'WEBP', 'BMP'])
+    const videoTypes = new Set(['MP4', 'MOV', 'M4V', 'AVI', 'MKV', 'WEBM'])
+    const excludedTypes = new Set(['OBS', 'NAV', 'MRK', 'RTK'])
+    for (let index = 0; index < taskResult.list.length; index += 5) {
+      const groups = await Promise.all(taskResult.list.slice(index, index + 5).map((task) => loadAllTaskMedia(task.id)))
+      groups.flat().forEach((media) => {
+        const extension = mediaExtension(media.name)
+        const declaredType = String(media.mediaType || '').toUpperCase()
+        if (excludedTypes.has(extension) || excludedTypes.has(declaredType)) return
+        totalCount += 1
+        if (imageTypes.has(extension)) photoCount += 1
+        else if (videoTypes.has(extension)) videoCount += 1
+      })
+    }
+    if (requestVersion !== mediaCountRequestVersion) return
+    classifiedMediaCounts.value = { totalCount, photoCount, videoCount }
+    mediaCountsLoadedKey = contextKey
+  } catch {
+    if (requestVersion === mediaCountRequestVersion) classifiedMediaCounts.value = undefined
+  } finally {
+    if (mediaCountsLoadingKey === contextKey) mediaCountsLoadingKey = ''
+  }
+}
+
 async function loadLivePreview() {
   const requestVersion = ++livePreviewRequestVersion
   const initialLoad = !livePreviewLoaded.value
   if (initialLoad) livePreviewLoading.value = true
   try {
-    const [streamsResult, deviceSummaryResult] = await Promise.allSettled([
+    const [streamsResult, deviceSummaryResult, flightSummaryResult, mediaSummaryResult] = await Promise.allSettled([
       getLiveStreams(),
       getUavDeviceSummary(),
+      getUavFlightSummary(),
+      getUavMediaSummary(),
     ])
     if (requestVersion !== livePreviewRequestVersion) return
     if (deviceSummaryResult.status === 'fulfilled') {
@@ -376,6 +501,17 @@ async function loadLivePreview() {
     } else if (initialLoad) {
       uavDeviceSummary.value = undefined
     }
+    if (flightSummaryResult.status === 'fulfilled') {
+      uavFlightSummary.value = flightSummaryResult.value
+    } else if (initialLoad) {
+      uavFlightSummary.value = undefined
+    }
+    if (mediaSummaryResult.status === 'fulfilled') {
+      uavMediaSummary.value = mediaSummaryResult.value
+    } else if (initialLoad) {
+      uavMediaSummary.value = undefined
+    }
+    void loadClassifiedMediaCounts()
 
     if (streamsResult.status === 'fulfilled') {
       const result = streamsResult.value
@@ -427,7 +563,10 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
         <div class="overview-layout">
           <aside class="overview-side overview-side--left">
             <section class="overview-float-panel resource-panel">
-              <header><h2>无人机机组资源</h2><span>{{ onlineUavCount ?? '—' }} 架在线</span></header>
+              <header>
+                <h2>无人机机组资源</h2>
+                <button v-if="user.hasPermission('live-monitoring')" class="overview-header-link" type="button" aria-label="进入实时作业" @click="openLiveOperations">实时作业 <span aria-hidden="true">›</span></button>
+              </header>
               <div class="resource-summary">
                 <div
                   class="metric-ring"
@@ -440,10 +579,39 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
               <div class="resource-states"><span><i class="online"></i>直播中 <b>{{ livePreviews.filter((item) => item.status === 'ONLINE').length }}</b></span><span><i class="starting"></i>连接中 <b>{{ livePreviews.filter((item) => item.status === 'STARTING').length }}</b></span></div>
             </section>
 
-            <section class="overview-float-panel governance-panel">
-              <header><h2>治理闭环成效</h2><span>任务办理进展</span></header>
-              <div class="governance-summary"><div class="metric-ring" :class="{ 'is-empty': governanceCompletionRate === undefined }" :style="ringStyle(governanceCompletionRate)" :title="governanceCompletionRate === undefined ? '暂无任务总数，无法计算完成率' : `任务完成率 ${governanceCompletionRate}%`"><b>{{ governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%` }}</b><span>完成率</span></div><dl><div><dt>任务总数</dt><dd>{{ unitTaskSummary?.total ?? '—' }}</dd></div><div><dt>已完成</dt><dd>{{ unitTaskSummary?.finished ?? '—' }}</dd></div><div><dt>执行中</dt><dd>{{ unitTaskSummary?.executing ?? '—' }}</dd></div><div><dt>待核查</dt><dd>{{ unitTaskSummary?.pendingVerify ?? '—' }}</dd></div></dl></div>
-              <p class="governance-flow-copy">发现 → 核查 → 整改 → 复核 → 归档</p>
+            <section class="overview-float-panel operation-panel">
+              <header>
+                <h2>飞行作业统计</h2>
+                <button v-if="user.hasPermission('fleet-overview')" class="overview-header-link" type="button" aria-label="进入机队总览" @click="openFleetOverview">机队总览 <span aria-hidden="true">›</span></button>
+              </header>
+              <div class="summary-highlight">
+                <i>航</i>
+                <div><span>累计飞行时长</span><b>{{ formatFlightTime(uavFlightSummary?.flightTime) }}</b></div>
+              </div>
+              <div class="summary-metrics">
+                <div><span>飞行架次</span><b>{{ formatCount(uavFlightSummary?.flightCount) }}</b></div>
+                <div><span>飞行里程</span><b>{{ formatDistance(uavFlightSummary?.flightDistance) }}</b></div>
+                <div><span>已完成任务</span><b>{{ formatCount(uavFlightSummary?.completedTaskCount) }}</b></div>
+                <div><span>未执行任务</span><b>{{ formatCount(uavFlightSummary?.notStartedTaskCount) }}</b></div>
+              </div>
+            </section>
+
+            <section class="overview-float-panel media-panel">
+              <header>
+                <h2>航拍素材成果</h2>
+                <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入采集数据" @click="openDataManagement">采集数据 <span aria-hidden="true">›</span></button>
+              </header>
+              <div class="summary-highlight">
+                <i>影</i>
+                <div><span>素材总数</span><b>{{ formatCount(classifiedMediaCounts?.totalCount) }}<small v-if="typeof classifiedMediaCounts?.totalCount === 'number'"> 项</small></b></div>
+              </div>
+              <div class="summary-metrics">
+                <div><span>照片</span><b>{{ formatCount(classifiedMediaCounts?.photoCount) }}</b></div>
+                <div><span>视频</span><b>{{ formatCount(classifiedMediaCounts?.videoCount) }}</b></div>
+                <div><span>已下载</span><b>{{ formatCount(uavMediaSummary?.downloadedCount) }}</b></div>
+                <div><span>素材容量</span><b>{{ formatFileSize(uavMediaSummary?.totalFileSize) }}</b></div>
+              </div>
+              <p class="summary-foot"><span>下载失败 {{ formatCount(uavMediaSummary?.downloadFailedCount) }}</span><span>已清理 {{ formatCount(uavMediaSummary?.cleanedCount) }}</span></p>
             </section>
           </aside>
 
@@ -454,13 +622,28 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
 
           <aside class="overview-side overview-side--right">
             <section class="overview-float-panel scene-count-panel">
-              <header><h2>各场景任务数</h2><span>{{ sceneBusinessStats.length }} 个场景</span></header>
+              <header>
+                <h2>各场景任务数</h2>
+                <button v-if="user.hasPermission('task-overview')" class="overview-header-link" type="button" aria-label="进入任务总览" @click="openTaskOverview">任务总览 <span aria-hidden="true">›</span></button>
+              </header>
               <button v-for="item in sceneBusinessStats" :key="item.id" type="button" @click="openSceneTaskList(item.id)"><i>{{ item.icon }}</i><span><b>{{ item.name }}</b><em><u :style="{ width: `${item.taskCount / maxSceneTaskCount * 100}%` }"></u></em></span><strong>{{ item.taskCount }}</strong></button>
               <div v-if="!sceneBusinessStats.length" class="float-empty">暂无场景任务数据</div>
             </section>
 
+            <section class="overview-float-panel governance-panel">
+              <header>
+                <h2>治理闭环成效</h2>
+                <button v-if="user.hasPermission('task-list')" class="overview-header-link" type="button" aria-label="进入任务列表" @click="openTaskList">任务列表 <span aria-hidden="true">›</span></button>
+              </header>
+              <div class="governance-summary"><div class="metric-ring" :class="{ 'is-empty': governanceCompletionRate === undefined }" :style="ringStyle(governanceCompletionRate)" :title="governanceCompletionRate === undefined ? '暂无任务总数，无法计算完成率' : `任务完成率 ${governanceCompletionRate}%`"><b>{{ governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%` }}</b><span>完成率</span></div><dl><div><dt>任务总数</dt><dd>{{ unitTaskSummary?.total ?? '—' }}</dd></div><div><dt>已完成</dt><dd>{{ unitTaskSummary?.finished ?? '—' }}</dd></div><div><dt>执行中</dt><dd>{{ unitTaskSummary?.executing ?? '—' }}</dd></div><div><dt>待核查</dt><dd>{{ unitTaskSummary?.pendingVerify ?? '—' }}</dd></div></dl></div>
+              <p class="governance-flow-copy">发现 → 核查 → 整改 → 复核 → 归档</p>
+            </section>
+
             <section class="overview-float-panel recognition-panel">
-              <header><h2>智能识别成果</h2><span>疑似图斑</span></header>
+              <header>
+                <h2>智能识别成果</h2>
+                <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true">›</span></button>
+              </header>
               <div class="recognition-summary"><div class="metric-ring" :class="{ 'is-empty': recognitionHandledRate === undefined }" :style="ringStyle(recognitionHandledRate)" :title="recognitionHandledRate === undefined ? '暂无图斑总数，无法计算处置率' : `图斑处置率 ${recognitionHandledRate}%`"><b>{{ statistics?.abnormalSummary.total ?? '—' }}</b><span>识别图斑</span></div><dl><div><dt>待核查图斑</dt><dd>{{ statistics?.overview.abnormalPendingCount ?? '—' }}</dd></div><div><dt>涉及面积</dt><dd>{{ formatNumber(statistics?.abnormalSummary.areaTotal) }}㎡</dd></div><div><dt>成果批次</dt><dd>{{ statistics?.overview.resultCount ?? '—' }}</dd></div></dl></div>
               <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%` }"></u></i><b>{{ item.count }}</b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
             </section>
@@ -483,11 +666,16 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
 .map-overview { height: 100%; min-height: 0; }
 .overview-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: clamp(238px, 15.2vw, 292px) minmax(0, 1fr) clamp(238px, 15.2vw, 292px); gap: 7px; }
 .map-overview { position: relative; }
-.overview-side { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 7px; }
+.overview-side { min-width: 0; min-height: 0; display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .overview-float-panel { min-height: 0; overflow: hidden; padding: 14px; color: #c9f4ff; border: 1px solid #1789b8; border-radius: 5px; background: linear-gradient(145deg, #062b48, #031a32); box-shadow: 0 0 16px #00b9ee1f, inset 0 0 20px #0d6f9d1c; }
 .overview-float-panel > header { display: flex; align-items: center; justify-content: space-between; min-height: 36px; margin: -14px -14px 13px; padding: 0 13px; border-bottom: 1px solid #1676a0; background: linear-gradient(90deg, #07537fc7, #04243cc7); }
 .overview-float-panel h2 { margin: 0; color: #e9fbff; font-size: clamp(14px, .9vw, 18px); }
 .overview-float-panel header span { color: #75bfd2; font-size: 11px; }
+.overview-header-link { display: inline-flex; align-items: center; gap: 5px; padding: 3px 1px; border: 0; color: #57dcea; background: transparent; text-shadow: 0 0 8px #32d9ec73; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .4px; cursor: pointer; }
+.overview-header-link span { color: inherit !important; font-size: 16px !important; line-height: 1; transition: transform .18s ease; }
+.overview-header-link:hover { color: #e8fdff; text-shadow: 0 0 10px #5cecff; }
+.overview-header-link:hover span { transform: translateX(2px); }
+.overview-header-link:focus-visible { outline: 1px solid #54e8f4; outline-offset: 3px; border-radius: 2px; }
 .resource-summary,.governance-summary,.recognition-summary { display: flex; align-items: center; gap: 13px; }
 .metric-ring { position: relative; isolation: isolate; width: 94px; height: 94px; flex: 0 0 94px; display: grid; place-content: center; border-radius: 50%; text-align: center; background: conic-gradient(from -90deg, #42e6da var(--ring-progress), #175478 0); box-shadow: 0 0 10px #20d8e620; }
 .metric-ring::before { content: ''; position: absolute; z-index: -1; inset: 7px; border-radius: 50%; background: #05233c; box-shadow: inset 0 0 15px #20d8e628; }
@@ -524,6 +712,21 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
 .recognition-types i { height: 5px; overflow: hidden; border-radius: 3px; background: #15425c; }
 .recognition-types u { display: block; height: 100%; background: linear-gradient(90deg, #7d7bff, #42dae5); }
 .recognition-types b { color: #e8fbff; text-align: right; }
+.summary-highlight { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 11px; padding: 10px; border: 1px solid #155b78; background: linear-gradient(120deg, #0a3c59c7, #062842a8); }
+.summary-highlight > i { width: 44px; height: 44px; display: grid; place-items: center; color: #5ff2e5; border: 1px solid #1da4bb; border-radius: 50%; background: #0a4963; box-shadow: inset 0 0 13px #32e0e428; font-size: 16px; font-style: normal; font-weight: 700; }
+.media-panel .summary-highlight > i { color: #b6aaff; border-color: #756fe0; background: #2b356b; box-shadow: inset 0 0 13px #8d82ff35; }
+.summary-highlight span,.summary-highlight b { display: block; min-width: 0; }
+.summary-highlight span { color: #83b8c7; font-size: 11px; }
+.summary-highlight b { margin-top: 3px; overflow: hidden; color: #58eee2; text-overflow: ellipsis; white-space: nowrap; font-size: 19px; }
+.media-panel .summary-highlight b { color: #aeb4ff; }
+.summary-highlight small { font-size: 11px; font-weight: 500; }
+.summary-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 9px; }
+.summary-metrics > div { min-width: 0; padding: 7px 8px; border: 1px solid #124b67; background: #062943a8; }
+.summary-metrics span,.summary-metrics b { display: block; min-width: 0; }
+.summary-metrics span { color: #78adbd; font-size: 10px; }
+.summary-metrics b { margin-top: 3px; overflow: hidden; color: #e6faff; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.summary-warning { margin: 7px 0 0; padding: 5px 7px; color: #ffd582; border: 1px solid #7d622d; background: #4c391f73; font-size: 10px; text-align: center; }
+.summary-foot { display: flex; justify-content: space-between; gap: 8px; margin: 8px 0 0; color: #769faf; font-size: 10px; }
 .float-empty { flex: 1; display: grid; place-content: center; color: #6f9aab; text-align: center; font-size: 12px; }
 @media (max-width: 1280px) {
   .overview-layout { grid-template-columns: 220px minmax(0,1fr) 220px; }
@@ -531,5 +734,8 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
   .overview-float-panel > header { margin: -10px -10px 10px; }
   .metric-ring { width: 74px; height: 74px; flex-basis: 74px; }
   .metric-ring b { font-size: 21px; }
+  .summary-highlight { grid-template-columns: 40px minmax(0, 1fr); padding: 7px; }
+  .summary-highlight > i { width: 36px; height: 36px; }
+  .summary-highlight b { font-size: 16px; }
 }
 </style>

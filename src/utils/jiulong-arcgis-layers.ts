@@ -31,7 +31,7 @@ export interface JiulongLayerControlHandle {
 }
 
 const configuredBaseUrl = import.meta.env.VITE_JIULONG_ARCGIS_BASE_URL?.trim()
-const ARCGIS_BASE_URL = (configuredBaseUrl || 'http://58.213.29.198:9624/arcgis198/arcgis/rest/services/taizhou_temp').replace(/\/$/, '')
+export const JIULONG_ARCGIS_BASE_URL = (configuredBaseUrl || 'http://58.213.29.198:9624/arcgis198/arcgis/rest/services/taizhou_temp').replace(/\/$/, '')
 
 const CACHED_SERVICE_BOUNDS = L.latLngBounds(
   L.CRS.EPSG3857.unproject(L.point(13336534.537771638, 3823800.363812975)),
@@ -41,6 +41,17 @@ const CHANGE_AREA_FOCUS_BOUNDS = L.latLngBounds(
   [32.48788419329846, 119.84145094324899],
   [32.49647556923956, 119.85678119750757],
 )
+
+export interface JiulongImageryServiceCandidate {
+  service: {
+    id: string
+    name: string
+    serviceUrl: string
+    type: string
+    status: number
+  }
+  bounds: [number, number, number, number]
+}
 
 export const JIULONG_ARCGIS_LAYERS: ArcGisLayerDefinition[] = [
   {
@@ -93,6 +104,29 @@ export const JIULONG_ARCGIS_LAYERS: ArcGisLayerDefinition[] = [
     hoverLabel: '变化类型',
   },
 ]
+
+/**
+ * 九龙镇内置影像也应参与异常图斑的多期影像匹配。
+ * 它们并不一定存在于后端地图服务列表，因此在这里提供带已知覆盖范围的候选项。
+ */
+export function getJiulongImageryServiceCandidates(): JiulongImageryServiceCandidate[] {
+  return JIULONG_ARCGIS_LAYERS
+    .filter((definition) => definition.kind === 'cached')
+    .map((definition) => {
+      const southWest = definition.focusBounds.getSouthWest()
+      const northEast = definition.focusBounds.getNorthEast()
+      return {
+        service: {
+          id: `builtin-${definition.id}`,
+          name: definition.name,
+          serviceUrl: `${JIULONG_ARCGIS_BASE_URL}/${definition.servicePath}`,
+          type: 'ARCGIS_MAPSERVER',
+          status: 1,
+        },
+        bounds: [southWest.lng, southWest.lat, northEast.lng, northEast.lat],
+      }
+    })
+}
 
 const RED_BOUNDARY_RENDERER = JSON.stringify([{
   id: 0,
@@ -178,7 +212,7 @@ function ensurePanes(map: L.Map) {
 }
 
 function createLayer(definition: ArcGisLayerDefinition) {
-  const serviceUrl = `${ARCGIS_BASE_URL}/${definition.servicePath}`
+  const serviceUrl = `${JIULONG_ARCGIS_BASE_URL}/${definition.servicePath}`
   if (definition.kind === 'cached') {
     return L.tileLayer(`${serviceUrl}/tile/{z}/{y}/{x}`, {
       bounds: CACHED_SERVICE_BOUNDS,
@@ -246,7 +280,7 @@ function queryHoverField(definition: ArcGisLayerDefinition, latlng: L.LatLng) {
     }
     script.onerror = () => finish(null)
     timeoutId = window.setTimeout(() => finish(null), 6000)
-    script.src = `${ARCGIS_BASE_URL}/${definition.servicePath}/0/query?${parameters.toString()}`
+    script.src = `${JIULONG_ARCGIS_BASE_URL}/${definition.servicePath}/0/query?${parameters.toString()}`
     document.head.appendChild(script)
   })
 }

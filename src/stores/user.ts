@@ -2,6 +2,8 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { getOrganization, getRole, portalData } from '@/mocks/portal'
 import type { CurrentUser, OrganizationId, RoleId } from '@/types'
+import { getUserDepartmentPermissions, type PermissionMenuItem } from '@/api/permission-management'
+import { normalizePermissionToken, permissionAliases, type AppPermissionKey } from '@/utils/access-control'
 
 export const useUserStore = defineStore('user', () => {
   // 用户不再可选择 Mock 身份。升级前遗留的 Mock 会话一律清理，避免它绕过真实登录。
@@ -21,6 +23,10 @@ export const useUserStore = defineStore('user', () => {
   const currentUser = ref<CurrentUser | null>(restoredUser)
   const activeDeptId = ref<string | undefined>(localStorage.getItem('active_dept_id') || undefined)
   const expiresAt = ref(Number(localStorage.getItem('token_expires_at') || 0))
+  const menuPermissions = ref<PermissionMenuItem[]>([])
+  const permissionsLoaded = ref(false)
+  const permissionsError = ref('')
+  let permissionsRequest: Promise<void> | undefined
   const authMode = ref<'real'>('real')
   const organizationId = ref<OrganizationId>((localStorage.getItem('organization_id') as OrganizationId) || 'natural-resources')
   const roleId = ref<RoleId>((localStorage.getItem('role_id') as RoleId) || 'admin')
@@ -60,6 +66,7 @@ export const useUserStore = defineStore('user', () => {
     activeDeptId.value = deptId
     expiresAt.value = Date.now() + expiresIn * 1000
     authMode.value = 'real'
+    clearMenuPermissions()
     roleId.value = userInfo.role === 'ADMIN' ? 'admin' : 'staff'
     const initialOrganization = organizationFromDepartmentName(
       userInfo.deptName || userInfo.deptList?.find((department) => department.deptId === deptId)?.deptName,
@@ -81,6 +88,7 @@ export const useUserStore = defineStore('user', () => {
     activeDeptId.value = deptId
     expiresAt.value = Date.now() + expiresIn * 1000
     authMode.value = 'real'
+    clearMenuPermissions()
     localStorage.setItem('access_token', accessToken)
     localStorage.setItem('token_expires_at', String(expiresAt.value))
     localStorage.setItem('auth_mode', 'real')
@@ -106,16 +114,56 @@ export const useUserStore = defineStore('user', () => {
     currentUser.value = null
     activeDeptId.value = undefined
     expiresAt.value = 0
+    clearMenuPermissions()
     localStorage.removeItem('access_token')
     localStorage.removeItem('current_user')
     localStorage.removeItem('active_dept_id')
     localStorage.removeItem('token_expires_at')
   }
 
-  function hasPermission(code: string) {
-    // 管理员不受普通用户的部门菜单授权限制，始终拥有系统全部功能权限。
+  function clearMenuPermissions() {
+    menuPermissions.value = []
+    permissionsLoaded.value = currentUser.value?.role === 'ADMIN'
+    permissionsError.value = ''
+    permissionsRequest = undefined
+  }
+
+  async function ensureMenuPermissions(force = false) {
+    if (currentUser.value?.role === 'ADMIN') {
+      permissionsLoaded.value = true
+      permissionsError.value = ''
+      return
+    }
+    if (!force && permissionsLoaded.value) return
+    if (!force && permissionsRequest) return permissionsRequest
+    const userId = String(currentUser.value?.id || '')
+    const deptId = activeDeptId.value
+    permissionsRequest = (async () => {
+      try {
+        if (!userId || !deptId) throw new Error('当前账号缺少用户或部门信息，无法读取功能权限。')
+        const result = await getUserDepartmentPermissions(userId, deptId)
+        const current = result.find((item) => item.deptId === String(deptId))
+        menuPermissions.value = current?.menus || []
+        permissionsError.value = ''
+      } catch (error) {
+        menuPermissions.value = []
+        permissionsError.value = error instanceof Error ? error.message : '功能权限读取失败。'
+      } finally {
+        permissionsLoaded.value = true
+        permissionsRequest = undefined
+      }
+    })()
+    return permissionsRequest
+  }
+
+  function hasPermission(key: AppPermissionKey) {
     if (currentUser.value?.role === 'ADMIN') return true
-    return permissions.value.includes(code)
+    const aliases = new Set(permissionAliases[key].map(normalizePermissionToken))
+    return menuPermissions.value.some((menu) => aliases.has(normalizePermissionToken(menu.code)) || aliases.has(normalizePermissionToken(menu.name)))
+  }
+
+  function hasAnyPermission(keys: AppPermissionKey[]) {
+    return keys.some(hasPermission)
   }
 
   return {
@@ -132,6 +180,9 @@ export const useUserStore = defineStore('user', () => {
     role,
     name,
     permissions,
+    menuPermissions,
+    permissionsLoaded,
+    permissionsError,
     isLoggedIn,
     setRealSession,
     setDepartmentSession,
@@ -139,5 +190,8 @@ export const useUserStore = defineStore('user', () => {
     switchOrganization,
     logout,
     hasPermission,
+    hasAnyPermission,
+    ensureMenuPermissions,
+    clearMenuPermissions,
   }
 })

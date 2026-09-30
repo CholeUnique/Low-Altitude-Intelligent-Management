@@ -15,6 +15,8 @@ export interface LiveMediaItem {
   name: string
   capturedAt: string
   thumbnail: string
+  originalUrl?: string
+  mediaType?: string
 }
 
 export interface LiveEventItem {
