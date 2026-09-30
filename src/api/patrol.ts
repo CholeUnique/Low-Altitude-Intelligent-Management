@@ -16,20 +16,41 @@ import type { PatrolProjectOption, UavFlightTaskOption } from '@/adapters/dasFly
 export interface PageQuery {
   pageNum?: number
   pageSize?: number
+  deptId?: string
   keyword?: string
   projectId?: string
   taskId?: string
   flightTaskId?: string
+  status?: number
+  waylineId?: string
+  sn?: string
+  startTime?: string
+  endTime?: string
 }
 
 export interface UavDeviceOption {
   id: string
   label: string
   sn?: string
+  callsign?: string
   online?: boolean
   model?: string
+  cameraList?: string
+  cameraSummary?: string
   longitude?: number
   latitude?: number
+}
+
+export interface UavDeviceFlightStatistic {
+  id?: string
+  sn: string
+  taskType?: string
+  waylineType?: string
+  flightCount?: number
+  flightDistance?: number
+  flightTime?: number
+  statStartDate?: string
+  statEndDate?: string
 }
 
 export interface UavDeviceState {
@@ -64,6 +85,16 @@ export interface UavFlightSummary {
   flightTime?: number
   completedTaskCount?: number
   notStartedTaskCount?: number
+}
+
+export interface UavMediaSummary {
+  totalCount?: number
+  photoCount?: number
+  videoCount?: number
+  downloadedCount?: number
+  downloadFailedCount?: number
+  cleanedCount?: number
+  totalFileSize?: number
 }
 
 export interface UavDeviceSummary {
@@ -130,6 +161,50 @@ export async function getRoutes(params: PageQuery = {}) {
 }
 
 /** 航线规划弹窗使用的真实飞行器选项。 */
+function cameraDisplayName(value: string) {
+  const normalized = value.trim().toUpperCase()
+  const knownNames: Record<string, string> = {
+    DOCK_CAMERA: '机场相机',
+    CAMERA: '可见光相机',
+    ZOOM_CAMERA: '变焦相机',
+    WIDE_CAMERA: '广角相机',
+    THERMAL_CAMERA: '热成像相机',
+    INFRARED_CAMERA: '红外相机',
+  }
+  return knownNames[normalized] || value.trim().replace(/_/g, ' ')
+}
+
+function summarizeDeviceCameras(value: unknown) {
+  if (value == null || value === '') return undefined
+  let entries: unknown[] = []
+  let rawText = ''
+  if (Array.isArray(value)) entries = value
+  else if (typeof value === 'object') entries = [value]
+  else {
+    rawText = String(value)
+    try {
+      const parsed = JSON.parse(rawText) as unknown
+      entries = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' ? [parsed] : []
+    } catch {
+      entries = []
+    }
+  }
+  const names = entries.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return []
+    const item = entry as Record<string, unknown>
+    const name = item.name ?? item.deviceName ?? item.payloadName ?? item.typeName ?? item.type
+    return name == null ? [] : [String(name)]
+  })
+  if (!names.length && rawText) {
+    const matches = [...rawText.matchAll(/(?:name|deviceName|payloadName|typeName)\s*[:=]\s*['"]([^'"]+)['"]/gi)]
+    names.push(...matches.map((match) => match[1] || '').filter(Boolean))
+  }
+  const displayNames = [...new Set(names.map(cameraDisplayName).filter(Boolean))]
+  const count = entries.length || Math.max(names.length, (rawText.match(/\bindex\s*[:=]/gi) || []).length)
+  if (!displayNames.length) return count ? `共 ${count} 个负载` : undefined
+  return `${displayNames.slice(0, 2).join('、')}${displayNames.length > 2 ? '等' : ''}（${count || displayNames.length}个）`
+}
+
 export async function getUavDeviceOptions(): Promise<UavDeviceOption[]> {
   if (isMockMode()) return []
   const data = await apiClient.post<never, { records?: Array<Record<string, unknown>> }>('/v1/uav/device/page', {
@@ -139,7 +214,7 @@ export async function getUavDeviceOptions(): Promise<UavDeviceOption[]> {
   return (data.records || []).map((item, index) => {
     const id = String(item.id ?? item.deviceId ?? item.sn ?? index + 1)
     const sn = item.sn ? String(item.sn) : undefined
-    const name = String(item.nickname ?? item.deviceName ?? item.name ?? item.deviceModelName ?? sn ?? `飞行器 ${index + 1}`)
+    const name = String(item.callsign ?? item.nickname ?? item.deviceName ?? item.name ?? item.deviceModelName ?? sn ?? `飞行器 ${index + 1}`)
     const model = item.deviceModelName && item.deviceModelName !== item.nickname && item.deviceModelName !== item.deviceName
       ? ` · ${String(item.deviceModelName)}`
       : ''
@@ -149,12 +224,32 @@ export async function getUavDeviceOptions(): Promise<UavDeviceOption[]> {
       id,
       label: `${name}${model}`,
       sn,
+      callsign: item.callsign == null ? undefined : String(item.callsign),
       online: Number(item.deviceOnlineStatus ?? item.onlineStatus ?? item.online ?? 0) === 1,
       model: item.deviceModelName ? String(item.deviceModelName) : undefined,
+      cameraList: item.cameraList == null ? undefined : String(item.cameraList),
+      cameraSummary: summarizeDeviceCameras(item.cameraList),
       longitude: Number.isFinite(longitude) && Math.abs(longitude) <= 180 ? longitude : undefined,
       latitude: Number.isFinite(latitude) && Math.abs(latitude) <= 90 ? latitude : undefined,
     }
   })
+}
+
+/** 单架设备的真实飞行统计，距离和时长沿用后端的米、秒单位。 */
+export async function getUavDeviceFlightStatistics(sn: string): Promise<UavDeviceFlightStatistic[]> {
+  if (isMockMode()) return []
+  const data = await apiClient.post<never, Array<Record<string, unknown>> | null>('/v1/uav/device/statistics', { sn })
+  return (Array.isArray(data) ? data : []).map((item) => ({
+    id: item.id == null ? undefined : String(item.id),
+    sn: String(item.sn ?? sn),
+    taskType: item.taskType == null ? undefined : String(item.taskType),
+    waylineType: item.waylineType == null ? undefined : String(item.waylineType),
+    flightCount: optionalNumber(item.flightCount),
+    flightDistance: optionalNumber(item.flightDistance),
+    flightTime: optionalNumber(item.flightTime),
+    statStartDate: item.statStartDate == null ? undefined : String(item.statStartDate),
+    statEndDate: item.statEndDate == null ? undefined : String(item.statEndDate),
+  }))
 }
 
 function optionalNumber(value: unknown) {
@@ -217,6 +312,21 @@ export async function getUavFlightSummary(): Promise<UavFlightSummary> {
     flightTime: optionalNumber(item.flightTime),
     completedTaskCount: optionalNumber(item.completedTaskCount),
     notStartedTaskCount: optionalNumber(item.notStartedTaskCount),
+  }
+}
+
+export async function getUavMediaSummary(): Promise<UavMediaSummary> {
+  if (isMockMode()) return {}
+  const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/statistics/media-summary', {})
+  const item = data || {}
+  return {
+    totalCount: optionalNumber(item.totalCount),
+    photoCount: optionalNumber(item.photoCount),
+    videoCount: optionalNumber(item.videoCount),
+    downloadedCount: optionalNumber(item.downloadedCount),
+    downloadFailedCount: optionalNumber(item.downloadFailedCount),
+    cleanedCount: optionalNumber(item.cleanedCount),
+    totalFileSize: optionalNumber(item.totalFileSize),
   }
 }
 

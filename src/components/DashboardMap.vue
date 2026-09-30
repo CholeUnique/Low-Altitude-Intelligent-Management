@@ -21,9 +21,87 @@ const props = defineProps<{
   focusLayerId?: string
 }>()
 
+type BoundaryFeature = {
+  geometry?: { coordinates?: unknown }
+  properties?: { name?: string }
+}
+
+const GCJ_A = 6378245
+const GCJ_EE = 0.006693421622965943
+
+function outsideChina(longitude: number, latitude: number) {
+  return longitude < 72.004 || longitude > 137.8347 || latitude < 0.8293 || latitude > 55.8271
+}
+
+function transformLatitude(longitude: number, latitude: number) {
+  let result = -100 + 2 * longitude + 3 * latitude + .2 * latitude * latitude + .1 * longitude * latitude + .2 * Math.sqrt(Math.abs(longitude))
+  result += (20 * Math.sin(6 * longitude * Math.PI) + 20 * Math.sin(2 * longitude * Math.PI)) * 2 / 3
+  result += (20 * Math.sin(latitude * Math.PI) + 40 * Math.sin(latitude / 3 * Math.PI)) * 2 / 3
+  result += (160 * Math.sin(latitude / 12 * Math.PI) + 320 * Math.sin(latitude * Math.PI / 30)) * 2 / 3
+  return result
+}
+
+function transformLongitude(longitude: number, latitude: number) {
+  let result = 300 + longitude + 2 * latitude + .1 * longitude * longitude + .1 * longitude * latitude + .1 * Math.sqrt(Math.abs(longitude))
+  result += (20 * Math.sin(6 * longitude * Math.PI) + 20 * Math.sin(2 * longitude * Math.PI)) * 2 / 3
+  result += (20 * Math.sin(longitude * Math.PI) + 40 * Math.sin(longitude / 3 * Math.PI)) * 2 / 3
+  result += (150 * Math.sin(longitude / 12 * Math.PI) + 300 * Math.sin(longitude / 30 * Math.PI)) * 2 / 3
+  return result
+}
+
+function wgs84ToGcj02(longitude: number, latitude: number): [number, number] {
+  if (outsideChina(longitude, latitude)) return [longitude, latitude]
+  let deltaLatitude = transformLatitude(longitude - 105, latitude - 35)
+  let deltaLongitude = transformLongitude(longitude - 105, latitude - 35)
+  const radianLatitude = latitude / 180 * Math.PI
+  let magic = Math.sin(radianLatitude)
+  magic = 1 - GCJ_EE * magic * magic
+  const sqrtMagic = Math.sqrt(magic)
+  deltaLatitude = deltaLatitude * 180 / ((GCJ_A * (1 - GCJ_EE)) / (magic * sqrtMagic) * Math.PI)
+  deltaLongitude = deltaLongitude * 180 / (GCJ_A / sqrtMagic * Math.cos(radianLatitude) * Math.PI)
+  return [longitude + deltaLongitude, latitude + deltaLatitude]
+}
+
+/** DataV GeoAtlas 使用 GCJ-02；天地图底图按 CGCS2000/WGS84 坐标显示。 */
+function gcj02ToWgs84(longitude: number, latitude: number): [number, number] {
+  if (outsideChina(longitude, latitude)) return [longitude, latitude]
+  let wgsLongitude = longitude
+  let wgsLatitude = latitude
+  // 迭代反算比一次近似扣除更稳定，行政区边界可达到亚米级对齐精度。
+  for (let index = 0; index < 6; index += 1) {
+    const [gcjLongitude, gcjLatitude] = wgs84ToGcj02(wgsLongitude, wgsLatitude)
+    wgsLongitude -= gcjLongitude - longitude
+    wgsLatitude -= gcjLatitude - latitude
+  }
+  return [wgsLongitude, wgsLatitude]
+}
+
+function convertBoundaryCoordinates(value: unknown): unknown {
+  if (!Array.isArray(value)) return value
+  if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+    const [longitude, latitude] = gcj02ToWgs84(value[0], value[1])
+    return [longitude, latitude, ...value.slice(2)]
+  }
+  return value.map(convertBoundaryCoordinates)
+}
+
+function convertAdministrativeBoundary<T extends { features?: BoundaryFeature[] }>(source: T): T {
+  return {
+    ...source,
+    features: source.features?.map((feature) => ({
+      ...feature,
+      geometry: feature.geometry
+        ? { ...feature.geometry, coordinates: convertBoundaryCoordinates(feature.geometry.coordinates) }
+        : feature.geometry,
+    })),
+  } as T
+}
+
 const TAIZHOU_CENTER: L.LatLngTuple = [32.4555, 119.9255]
 const TAIZHOU_ZOOM = 10
-const HAILING_DISTRICT = (taizhouDistrictBoundaries as {
+const taizhouCityBoundaryWgs84 = convertAdministrativeBoundary(taizhouCityBoundary)
+const taizhouDistrictBoundariesWgs84 = convertAdministrativeBoundary(taizhouDistrictBoundaries)
+const HAILING_DISTRICT = (taizhouDistrictBoundariesWgs84 as {
   features?: Array<{ properties?: { name?: string } }>
 }).features?.find((feature) => feature.properties?.name === '海陵区')
 const token = import.meta.env.VITE_TIANDITU_TOKEN
@@ -514,7 +592,7 @@ function renderAdministrativeBoundaries() {
   if (!map) return
   administrativeBoundaryGroup?.remove()
   administrativeBoundaryGroup = L.layerGroup()
-  L.geoJSON(taizhouDistrictBoundaries as GeoJsonObject, {
+  L.geoJSON(taizhouDistrictBoundariesWgs84 as GeoJsonObject, {
     pane: 'administrative-boundaries',
     style: {
       color: '#2bd8ff',
@@ -524,7 +602,7 @@ function renderAdministrativeBoundaries() {
       fillOpacity: .25,
     },
   }).addTo(administrativeBoundaryGroup)
-  L.geoJSON(taizhouCityBoundary as GeoJsonObject, {
+  L.geoJSON(taizhouCityBoundaryWgs84 as GeoJsonObject, {
     pane: 'administrative-boundaries',
     style: {
       color: '#2bd8ff',

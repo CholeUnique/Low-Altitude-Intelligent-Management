@@ -1,29 +1,97 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import OrganizationSwitcher from '@/components/OrganizationSwitcher.vue'
 import UserAccountMenu from '@/components/UserAccountMenu.vue'
+import { getGovernanceTaskPage } from '@/api/governance-task'
+import { useUserStore } from '@/stores/user'
+import { isTaskVisibleForOrganization } from '@/utils/scene-visibility'
+import { recognitionPermissionOrder, taskPermissionOrder, uavPermissionOrder, type AppPermissionKey } from '@/utils/access-control'
 
 const router = useRouter()
 const route = useRoute()
+const user = useUserStore()
 const now = ref(new Date())
+const todoCount = ref<number>()
+let todoRequestVersion = 0
 const clock = window.setInterval(() => { now.value = new Date() }, 1000)
+const todoRefreshClock = window.setInterval(() => void loadTodoCount(), 60_000)
 const dateText = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' }).format(now.value))
 const timeText = computed(() => now.value.toLocaleTimeString('zh-CN', { hour12: false }))
-onBeforeUnmount(() => window.clearInterval(clock))
+onBeforeUnmount(() => {
+  window.clearInterval(clock)
+  window.clearInterval(todoRefreshClock)
+})
 
-const entries = [
-  { label: '单位总览', path: '/dashboard', match: ['dashboard', 'dashboard-scene'] },
-  { label: '飞行作业', path: '/uav-tasks', match: ['uav-tasks', 'patrol-route-plan', 'patrol-live'] },
-  { label: '智能研判', path: '/recognition', match: ['recognition', 'algorithms', 'data-results'] },
-  { label: '任务中心', path: '/tasks', match: ['tasks', 'task-overview', 'task-list', 'task-todo', 'task-detail', 'workspace'] },
-]
+interface HeaderEntry { label: string; path: string; match: string[] }
+
+function firstAllowed(items: Array<{ key: AppPermissionKey; path: string }>) {
+  return items.find((item) => user.hasPermission(item.key))?.path
+}
+const entries = computed<HeaderEntry[]>(() => {
+  const result: HeaderEntry[] = []
+  const uavPath = firstAllowed(uavPermissionOrder)
+  const recognitionPath = firstAllowed(recognitionPermissionOrder)
+  const taskPath = firstAllowed(taskPermissionOrder)
+  if (user.hasPermission('unit-overview')) result.push({ label: '单位总览', path: '/dashboard', match: ['dashboard', 'dashboard-scene'] })
+  if (uavPath) result.push({ label: '飞行作业', path: uavPath, match: ['uav-tasks', 'patrol-route-plan', 'patrol-live'] })
+  if (recognitionPath) result.push({ label: '智能研判', path: recognitionPath, match: ['recognition', 'algorithms', 'data-results'] })
+  if (taskPath) result.push({ label: '任务中心', path: taskPath, match: ['tasks', 'task-overview', 'task-list', 'task-todo', 'task-detail', 'workspace'] })
+  return result
+})
+const homePath = computed(() => user.hasPermission('unit-overview') ? '/dashboard' : entries.value[0]?.path || '/forbidden')
+
+async function loadTodoCount() {
+  if (!user.hasPermission('task-todo')) {
+    todoCount.value = undefined
+    return
+  }
+  const version = ++todoRequestVersion
+  const currentUserId = String(user.currentUser?.id || user.currentUser?.username || '')
+  if (!currentUserId) {
+    todoCount.value = undefined
+    return
+  }
+  try {
+    const records = []
+    let pageNum = 1
+    let total = Number.POSITIVE_INFINITY
+    while (records.length < total) {
+      const page = await getGovernanceTaskPage({
+        pageNum,
+        pageSize: 200,
+        deptId: user.activeDeptId,
+        organizationId: user.organizationId,
+      })
+      if (version !== todoRequestVersion) return
+      records.push(...page.records)
+      total = page.total
+      if (!page.records.length) break
+      pageNum += 1
+    }
+    if (version !== todoRequestVersion) return
+    todoCount.value = records.filter((task) =>
+      isTaskVisibleForOrganization(user.organization, task, user.activeDeptId)
+      && task.assigneeId === currentUserId
+      && ![3, 4, 5].includes(task.taskStatus)).length
+  } catch {
+    if (version === todoRequestVersion) todoCount.value = undefined
+  }
+}
+
+function openTodo() {
+  if (!user.hasPermission('task-todo')) return
+  void router.push({ name: 'task-todo' })
+}
+
+watch([() => user.organizationId, () => user.activeDeptId, () => user.currentUser?.id, () => user.currentUser?.username], () => void loadTodoCount())
+onMounted(() => void loadTodoCount())
 </script>
 
 <template>
   <header class="primary-header">
-    <button class="primary-brand" type="button" @click="router.push('/dashboard')">
+    <button class="primary-brand" type="button" @click="router.push(homePath)">
       <span class="primary-logo"><DashboardSymbol name="brand" /></span>
       <h1>海陵区自然资源综合监管平台</h1>
     </button>
@@ -32,7 +100,7 @@ const entries = [
     </nav>
     <div class="primary-user">
       <time>{{ dateText }}　{{ timeText }}</time>
-      <button class="notice" type="button" aria-label="消息通知"><DashboardSymbol name="notification" /><b>3</b></button>
+      <button v-if="user.hasPermission('task-todo')" class="notice" type="button" :aria-label="todoCount === undefined ? '进入我的待办' : `进入我的待办，当前 ${todoCount} 项`" title="我的待办" @click="openTodo"><DashboardSymbol name="notification" /><b v-if="todoCount !== undefined">{{ todoCount > 99 ? '99+' : todoCount }}</b></button>
       <OrganizationSwitcher />
       <UserAccountMenu icon-only />
     </div>
