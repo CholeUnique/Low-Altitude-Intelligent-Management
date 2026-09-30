@@ -84,6 +84,35 @@ export interface NonGrainWorkspaceContext {
 
 export const NON_GRAIN_MOCK_TASK_ID = 'NFNL-20260923-001'
 
+interface NonGrainDemoTaskSpec {
+  id: string
+  name: string
+  area: string
+  totalArea: number
+  nodeKey: NonGrainWorkflowNodeKey
+  taskStatus: GovernanceTask['taskStatus']
+  taskStatusDesc: string
+  priority: number
+  createdAt: string
+  deadline: string
+}
+
+/** 当前登录演示用户在非粮场景中的固定岗位，不随任务进度改变。 */
+export const NON_GRAIN_VIEWER_NODE_KEY: NonGrainWorkflowNodeKey = 'on-site-verification'
+
+const NON_GRAIN_DEMO_TASK_SPECS: NonGrainDemoTaskSpec[] = [
+  { id: NON_GRAIN_MOCK_TASK_ID, name: '九龙镇耕地种植用途变化核查任务', area: '九龙镇界沟村、姚家村', totalArea: 13.66, nodeKey: 'on-site-verification', taskStatus: 1, taskStatusDesc: '现场核查中', priority: 2, createdAt: '2026-09-23T09:20:00', deadline: '2026-10-15T18:00:00' },
+  { id: 'NFNL-20260928-002', name: '苏陈镇永久基本农田疑似果园核查任务', area: '苏陈镇双虹村', totalArea: 7.84, nodeKey: 'task-acceptance', taskStatus: 0, taskStatusDesc: '待受理', priority: 2, createdAt: '2026-09-28T08:35:00', deadline: '2026-10-12T18:00:00' },
+  { id: 'NFNL-20260918-003', name: '罡杨镇养殖坑塘整改处置任务', area: '罡杨镇西冯村', totalArea: 18.31, nodeKey: 'rectification-disposal', taskStatus: 1, taskStatusDesc: '整改处置中', priority: 1, createdAt: '2026-09-18T14:10:00', deadline: '2026-10-08T18:00:00' },
+  { id: 'NFNL-20260911-004', name: '华港镇非粮化地块无人机复核任务', area: '华港镇桑湾村、溪西村', totalArea: 26.52, nodeKey: 'drone-review', taskStatus: 2, taskStatusDesc: '无人机复核中', priority: 1, createdAt: '2026-09-11T10:00:00', deadline: '2026-10-05T18:00:00' },
+]
+
+export const NON_GRAIN_DEMO_TASK_IDS = NON_GRAIN_DEMO_TASK_SPECS.map((task) => task.id)
+
+export function isNonGrainDemoTaskId(taskId?: string) {
+  return Boolean(taskId && NON_GRAIN_DEMO_TASK_IDS.includes(taskId))
+}
+
 export const nonGrainWorkspaceMock: NonGrainWorkspaceContext = {
   task: {
     id: NON_GRAIN_MOCK_TASK_ID,
@@ -280,7 +309,27 @@ export function createNonGrainWorkspaceContext(
   taskId = NON_GRAIN_MOCK_TASK_ID,
 ): NonGrainWorkspaceContext {
   const context = cloneContext(nonGrainWorkspaceMock)
+  const spec = NON_GRAIN_DEMO_TASK_SPECS.find((task) => task.id === taskId)
   context.task.id = taskId
+  context.task.taskNo = taskId
+  if (spec) {
+    context.task.name = spec.name
+    context.task.area = spec.area
+    context.task.totalArea = spec.totalArea
+    context.task.createdAt = spec.createdAt.replace('T', ' ')
+    context.task.deadline = spec.deadline.replace('T', ' ')
+    const activeOrder = context.workflow.find((node) => node.key === spec.nodeKey)?.order ?? 1
+    context.workflow = context.workflow.map((node) => ({
+      ...node,
+      status: node.order < activeOrder ? 'completed' : node.order === activeOrder ? 'active' : 'pending',
+    }))
+    const activeNode = context.workflow.find((node) => node.key === spec.nodeKey)!
+    context.currentNodeKey = spec.nodeKey
+    // 任务当前办理人只决定任务走到哪一步，不能反向改变当前登录用户的身份。
+    context.currentActor = cloneContext(nonGrainWorkspaceMock).currentActor
+    context.summary.completedNodeCount = Math.max(0, activeOrder - 1)
+    context.summary.currentNodeName = activeNode.name
+  }
   return context
 }
 
@@ -292,27 +341,45 @@ export function createNonGrainTodoTask(
   deptId?: string,
   deptName = '海陵区农业农村局',
 ): GovernanceTask {
-  return {
-    id: NON_GRAIN_MOCK_TASK_ID,
-    taskNo: NON_GRAIN_MOCK_TASK_ID,
+  return createNonGrainDemoTasks(assigneeId, deptId, deptName)[0]!
+}
+
+/** 任务中心演示数据：四条任务进度不同，仅流转到固定岗位节点的任务分配给“我”。 */
+export function createNonGrainDemoTasks(
+  viewerId: string,
+  deptId?: string,
+  deptName = '海陵区农业农村局',
+): GovernanceTask[] {
+  return NON_GRAIN_DEMO_TASK_SPECS.map((spec) => {
+    const context = createNonGrainWorkspaceContext(spec.id)
+    const activeNode = context.workflow.find((node) => node.key === spec.nodeKey)!
+    return {
+    id: spec.id,
+    taskNo: spec.id,
     sceneCode: 'NON_GRAIN_MONITORING',
     sceneName: '耕地种植用途管控与“非粮化”动态监测',
-    name: nonGrainWorkspaceMock.task.name,
+    name: spec.name,
     deptId: deptId || 'agriculture-rural-demo',
     deptName,
     refType: 'NONE',
     executeMode: 'MANUAL',
-    taskStatus: 1,
-    taskStatusDesc: '现场核查中',
-    priority: 2,
-    planStartTime: '2026-09-23T09:20:00',
-    planEndTime: '2026-10-15T18:00:00',
-    actualStartTime: '2026-09-24T09:05:00',
-    assigneeId,
-    createBy: assigneeId,
-    createTime: '2026-09-23T09:20:00',
-    updateTime: '2026-09-25T16:40:00',
-    area: nonGrainWorkspaceMock.task.area,
-    areaSize: nonGrainWorkspaceMock.task.totalArea,
-  }
+    taskStatus: spec.taskStatus,
+    taskStatusDesc: spec.taskStatusDesc,
+    priority: spec.priority,
+    planStartTime: spec.createdAt,
+    planEndTime: spec.deadline,
+    actualStartTime: spec.taskStatus === 0 ? undefined : spec.createdAt,
+    assigneeId: spec.nodeKey === NON_GRAIN_VIEWER_NODE_KEY ? viewerId : activeNode.ownerUserId,
+    createBy: viewerId,
+    createTime: spec.createdAt,
+    updateTime: spec.createdAt,
+    area: spec.area,
+    areaSize: spec.totalArea,
+    workflow: context.workflow.map((node) => ({
+      key: node.key,
+      name: node.name,
+      status: node.status === 'completed' ? 'done' : node.status === 'active' || node.status === 'returned' ? 'active' : 'pending',
+    })),
+    }
+  })
 }

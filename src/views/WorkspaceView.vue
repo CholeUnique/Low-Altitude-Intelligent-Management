@@ -20,7 +20,7 @@ import SceneNodePlaceholder from '@/workspace-components/shared/SceneNodePlaceho
 import RouteFlightPlanPanel from '@/workspace-components/route-flight-plan/RouteFlightPlanPanel.vue'
 import RealtimeCruisePanel from '@/workspace-components/realtime-cruise/RealtimeCruisePanel.vue'
 import NonGrainWorkspace from '@/workspace-components/non-grain/NonGrainWorkspace.vue'
-import { NON_GRAIN_MOCK_TASK_ID } from '@/mocks/non-grain-workspace'
+import { isNonGrainDemoTaskId } from '@/mocks/non-grain-workspace'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,7 +44,7 @@ async function loadTaskContext() {
   // “我的待办”中的非粮任务是纯前端演示数据，不存在于后端任务表。
   // 直接交给专属工作台读取固定上下文，避免真实详情接口超时阻塞页面。
   if (resolveWorkspaceSceneId(sceneId.value) === 'non-grain-monitoring'
-    && taskId === NON_GRAIN_MOCK_TASK_ID) {
+    && isNonGrainDemoTaskId(taskId)) {
     taskLoading.value = false
     return
   }

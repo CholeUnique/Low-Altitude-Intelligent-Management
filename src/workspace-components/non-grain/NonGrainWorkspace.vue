@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, markRaw, reactive, watch } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import type { Component } from 'vue'
-import type { NonGrainWorkflowNode, NonGrainWorkflowNodeKey } from '@/types'
-import { createNonGrainWorkspaceContext } from '@/mocks/non-grain-workspace'
+import type { NonGrainWorkflowActor, NonGrainWorkflowNode, NonGrainWorkflowNodeKey } from '@/types'
+import { createNonGrainDemoTasks, createNonGrainWorkspaceContext, isNonGrainDemoTaskId, NON_GRAIN_VIEWER_NODE_KEY } from '@/mocks/non-grain-workspace'
+import { getGovernanceTaskPage, type GovernanceTask } from '@/api/governance-task'
+import { useUserStore } from '@/stores/user'
+import { isTaskVisibleForOrganization } from '@/utils/scene-visibility'
+import { getTaskWorkflowSteps, getTaskWorkspaceNodeKey, isNonGrainTask } from '@/components/task-center/TaskWorkflowProgress.vue'
 import {
   canOperateNonGrainWorkflowNode,
   canViewNonGrainWorkflowNode,
@@ -25,7 +28,9 @@ import CaseArchivePanel from './CaseArchivePanel.vue'
 const props = defineProps<{ taskId?: string; taskName?: string; taskNo?: string; taskStatus?: string }>()
 const route = useRoute()
 const router = useRouter()
+const user = useUserStore()
 const context = reactive(createNonGrainWorkspaceContext(props.taskId))
+const apiTasks = ref<GovernanceTask[]>([])
 if (props.taskName) context.task.name = props.taskName
 if (props.taskNo) context.task.taskNo = props.taskNo
 
@@ -53,14 +58,26 @@ function initializeWorkflowFromTaskStatus() {
   const current = context.workflow.find((node) => node.status === 'active')
   if (current) {
     context.currentNodeKey = current.key
-    context.currentActor = {
-      userId: current.ownerUserId ?? `role-${current.ownerRole}`,
-      roles: [current.ownerRole],
-    }
   }
 }
 
 initializeWorkflowFromTaskStatus()
+const viewerActor: NonGrainWorkflowActor = {
+  userId: context.currentActor.userId,
+  roles: [...context.currentActor.roles],
+}
+const toast = ref<{ message: string; type: 'success' | 'warning' }>()
+let toastTimer: ReturnType<typeof setTimeout> | undefined
+
+function showToast(message: string, type: 'success' | 'warning' = 'success') {
+  if (toastTimer) clearTimeout(toastTimer)
+  toast.value = { message, type }
+  toastTimer = setTimeout(() => { toast.value = undefined }, 2400)
+}
+
+onBeforeUnmount(() => {
+  if (toastTimer) clearTimeout(toastTimer)
+})
 
 const panels: Record<NonGrainWorkflowNodeKey, Component> = {
   'task-acceptance': markRaw(TaskAcceptancePanel),
@@ -90,13 +107,63 @@ function requestedNode() {
 
 const selectedNode = computed(requestedNode)
 const activePanel = computed(() => (selectedNode.value ? panels[selectedNode.value.key] : undefined))
-const canOperate = computed(() => Boolean(selectedNode.value && canOperateNonGrainWorkflowNode(selectedNode.value, context.currentActor)))
+const canOperate = computed(() => Boolean(selectedNode.value && canOperateNonGrainWorkflowNode(selectedNode.value, viewerActor)))
 const disabledReason = computed(() => {
   if (!selectedNode.value) return '还未进行'
   if (selectedNode.value.status === 'completed') return ''
-  return getNonGrainWorkflowNodeHint(selectedNode.value, context.currentActor)
+  return getNonGrainWorkflowNodeHint(selectedNode.value, viewerActor)
 })
-const actorNode = computed(() => currentWorkflowNode.value)
+function isMyNode(node: NonGrainWorkflowNode) {
+  return node.ownerUserId
+    ? node.ownerUserId === viewerActor.userId
+    : viewerActor.roles.includes(node.ownerRole)
+}
+const actorNode = computed(() => context.workflow.find(isMyNode))
+const currentUserId = computed(() => String(user.currentUser?.id || user.currentUser?.username || 'non-grain-demo-user'))
+
+function myWorkState(task: GovernanceTask) {
+  if (isNonGrainTask(task)) {
+    const myNode = getTaskWorkflowSteps(task).find((node) => node.key === NON_GRAIN_VIEWER_NODE_KEY)
+    if (myNode?.status === 'active') return '待我处理'
+    if (myNode?.status === 'done') return '我已处理'
+    return ''
+  }
+  if (task.assigneeId !== currentUserId.value) return ''
+  return [3, 4, 5].includes(task.taskStatus) ? '我已处理' : '待我处理'
+}
+
+const noticeTasks = computed(() => {
+  const demoTasks = createNonGrainDemoTasks(currentUserId.value, user.activeDeptId, '海陵区农业农村局')
+  const merged = [...demoTasks, ...apiTasks.value.filter((task) => !isNonGrainDemoTaskId(task.id))]
+  return merged
+    .filter((task) => task.id !== context.task.id && Boolean(myWorkState(task)))
+    .sort((left, right) => String(left.planEndTime || '').localeCompare(String(right.planEndTime || '')))
+})
+
+async function loadNoticeTasks() {
+  try {
+    const page = await getGovernanceTaskPage({
+      pageNum: 1,
+      pageSize: 200,
+      deptId: user.activeDeptId,
+      organizationId: user.organizationId,
+    })
+    apiTasks.value = page.records.filter((task) =>
+      isTaskVisibleForOrganization(user.organization, task, user.activeDeptId))
+  } catch {
+    apiTasks.value = []
+  }
+}
+
+function openNoticeTask(task: GovernanceTask) {
+  void router.push({
+    name: 'workspace',
+    params: { sceneId: task.sceneCode, taskId: task.id },
+    query: { node: isNonGrainTask(task) ? NON_GRAIN_VIEWER_NODE_KEY : getTaskWorkspaceNodeKey(task) },
+  })
+}
+
+onMounted(() => void loadNoticeTasks())
 
 function replaceNode(key: NonGrainWorkflowNodeKey) {
   void router.replace({ query: { ...route.query, node: key } })
@@ -109,10 +176,6 @@ function selectNode(node: NonGrainWorkflowNode) {
 
 function setActorTo(node: NonGrainWorkflowNode | undefined) {
   if (!node) return
-  context.currentActor = {
-    userId: node.ownerUserId ?? `role-${node.ownerRole}`,
-    roles: [node.ownerRole],
-  }
   context.currentNodeKey = node.key
 }
 
@@ -137,13 +200,13 @@ function submitVerification(hasProblem: boolean) {
     setActorTo(target)
     replaceNode('case-archive')
   }
-  ElMessage.success(hasProblem ? '已提交，进入整改处置' : '核查无问题，已直接进入结案归档')
+  showToast(hasProblem ? '已提交，进入整改处置' : '核查无问题，已直接进入结案归档')
 }
 
 function submitRectification() {
   if (!canOperate.value) return
   activateNext('rectification-disposal', 'drone-review')
-  ElMessage.success('整改处置已提交')
+  showToast('整改处置已提交')
 }
 
 function advanceCurrentNode() {
@@ -156,7 +219,7 @@ function advanceCurrentNode() {
   const target = nextNode[selectedNode.value.key]
   if (!target) return
   activateNext(selectedNode.value.key, target)
-  ElMessage.success(`已完成${selectedNode.value.name}，流程已进入下一节点`)
+  showToast(`已完成${selectedNode.value.name}，流程已进入下一节点`)
 }
 
 function handleSubmit(payload?: boolean) {
@@ -167,7 +230,7 @@ function handleSubmit(payload?: boolean) {
 function passReview() {
   if (!canOperate.value) return
   activateNext('drone-review', 'case-archive')
-  ElMessage.success('复核通过，进入结案归档')
+  showToast('复核通过，进入结案归档')
 }
 
 function rejectReview() {
@@ -176,7 +239,7 @@ function rejectReview() {
   const target = context.workflow.find((node) => node.key === 'rectification-disposal')
   setActorTo(target)
   replaceNode('rectification-disposal')
-  ElMessage.warning('已退回整改处置')
+  showToast('已退回整改处置', 'warning')
 }
 
 function closeCase() {
@@ -186,12 +249,12 @@ function closeCase() {
     node.key === 'case-archive' ? { ...node, status: 'completed', completedAt: now, updatedAt: now } : node,
   )
   replaceNode('case-archive')
-  ElMessage.success('任务已确认结案并归档')
+  showToast('任务已确认结案并归档')
 }
 
 function saveDraft() {
   if (!canOperate.value) return
-  ElMessage.success('草稿已保存，流程未推进')
+  showToast('草稿已保存，流程未推进')
 }
 
 watch(
@@ -223,33 +286,43 @@ watch(
         <button
           v-for="node in context.workflow"
           :key="node.key"
-          :class="[node.status, { selected: node.key === selectedNode?.key }]"
+          :class="[node.status, { selected: node.key === selectedNode?.key, mine: isMyNode(node) }]"
           :disabled="!canViewNonGrainWorkflowNode(node)"
-          :title="getNonGrainWorkflowNodeHint(node, context.currentActor)"
+          :title="getNonGrainWorkflowNodeHint(node, viewerActor)"
           @click="selectNode(node)"
         >
           <i>{{ node.status === 'completed' ? '✓' : node.order }}</i>
-          <span>{{ node.name }}</span>
+          <span>{{ node.name }}<em v-if="isMyNode(node)">我</em></span>
         </button>
       </nav>
 
       <div class="ng-header-right">
-        <button class="ng-notice" type="button" aria-label="我的待办通知">
-          <DashboardSymbol name="notification" />
-          <b>3</b>
+        <div class="ng-notice-shell">
+          <button class="ng-notice" type="button" aria-label="我的待办通知" title="前往我的待办" @click="router.push('/tasks/todo')">
+            <DashboardSymbol name="notification" />
+            <b>{{ noticeTasks.length }}</b>
+          </button>
           <div class="ng-notices">
-            <strong>待办提醒</strong>
-            <p><span>现场核查材料待补充</span><time>今天</time></p>
-            <p><span>整改截止期临近</span><time>2 天后</time></p>
-            <p><span>季度台账待更新</span><time>本周</time></p>
+            <header><strong>其他相关任务</strong><button type="button" @click="router.push('/tasks/todo')">查看全部</button></header>
+            <button v-for="task in noticeTasks" :key="task.id" type="button" class="ng-notice-task" @click="openNoticeTask(task)">
+              <span><b>{{ task.name }}</b><small>{{ task.taskNo }} · {{ myWorkState(task) }}</small></span>
+              <time>{{ task.taskStatusDesc }}</time>
+            </button>
+            <p v-if="!noticeTasks.length" class="ng-notice-empty">暂无其他相关任务</p>
           </div>
-        </button>
+        </div>
         <div class="ng-actor">
           <small>我的身份</small>
           <b>{{ actorNode?.ownerRole || '已办结' }} · {{ actorNode?.ownerName || '—' }}</b>
         </div>
       </div>
     </header>
+
+    <Transition name="ng-toast">
+      <div v-if="toast" class="ng-workspace-toast" :class="toast.type" role="status">
+        <i>{{ toast.type === 'success' ? '✓' : '!' }}</i>{{ toast.message }}
+      </div>
+    </Transition>
 
     <main class="ng-workspace-body">
       <component
@@ -271,6 +344,8 @@ watch(
 
 <style scoped>
 .non-grain-workspace {
+  position: relative;
+  isolation: isolate;
   height: 100dvh;
   min-width: 0;
   display: flex;
@@ -279,6 +354,8 @@ watch(
 }
 
 .ng-header {
+  position: relative;
+  z-index: 100;
   flex: 0 0 92px;
   display: grid;
   grid-template-columns: minmax(280px, 1fr) minmax(560px, 2.6fr) minmax(240px, .9fr);
@@ -387,8 +464,41 @@ watch(
 }
 
 .ng-steps span {
+  position: relative;
   font-size: 11px;
   white-space: nowrap;
+}
+
+.ng-steps span em {
+  position: absolute;
+  top: -21px;
+  right: -13px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  color: #063353;
+  background: #6fe0c3;
+  border-radius: 8px;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 0 7px #28d6b777;
+}
+
+.ng-steps button.selected span {
+  color: #fff;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: #65d9ff;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 5px;
+}
+
+.ng-steps button.selected i {
+  transform: scale(1.12);
+  outline: 2px solid #ffffffb8;
+  outline-offset: 2px;
 }
 
 .ng-steps .completed span {
@@ -451,6 +561,12 @@ watch(
   gap: 12px;
 }
 
+.ng-notice-shell {
+  position: relative;
+  width: 30px;
+  height: 30px;
+}
+
 .ng-notice {
   position: relative;
   width: 30px;
@@ -488,7 +604,7 @@ watch(
 
 .ng-notices {
   position: absolute;
-  z-index: 20;
+  z-index: 240;
   top: 40px;
   right: 0;
   width: 262px;
@@ -501,10 +617,25 @@ watch(
   box-shadow: 0 10px 28px #2a4a5f2a;
 }
 
-.ng-notice:hover .ng-notices,
-.ng-notice:focus .ng-notices,
-.ng-notice:focus-within .ng-notices {
+.ng-notice-shell:hover .ng-notices,
+.ng-notice-shell:focus-within .ng-notices {
   display: block;
+}
+
+.ng-notices header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ng-notices header > button {
+  padding: 0;
+  color: #2583c3;
+  background: transparent;
+  border: 0;
+  font-size: 11px;
+  cursor: pointer;
 }
 
 .ng-notices strong {
@@ -512,13 +643,32 @@ watch(
   font-size: 13px;
 }
 
-.ng-notices p {
+.ng-notice-task {
+  width: 100%;
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 10px;
   margin: 9px 0 0;
   padding-top: 8px;
+  color: #4a6678;
+  background: transparent;
+  border: 0;
   border-top: 1px solid #edf2f5;
   font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ng-notice-task:hover { color: #167ab8; background: #f5faff; }
+.ng-notice-task span { min-width: 0; }
+.ng-notice-task b,.ng-notice-task small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ng-notice-task b { max-width: 165px; color: #2f5268; font-size: 12px; }
+.ng-notice-task small { max-width: 175px; margin-top: 3px; color: #899aa7; font-size: 10px; }
+.ng-notice-empty { margin: 12px 0 0; color: #8a9ba8; font-size: 11px; text-align: center; }
+
+.ng-notice-task time {
+  flex: 0 0 auto;
 }
 
 .ng-notices time {
@@ -542,10 +692,39 @@ watch(
 }
 
 .ng-workspace-body {
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
+
+.ng-workspace-toast {
+  position: absolute;
+  z-index: 180;
+  top: 102px;
+  left: 50%;
+  min-width: 240px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: #1d6e52;
+  background: #f0fff9f5;
+  border: 1px solid #83d9ba;
+  border-radius: 6px;
+  box-shadow: 0 8px 22px #183c5030;
+  font-size: 13px;
+  transform: translateX(-50%);
+}
+
+.ng-workspace-toast.warning { color: #8c6218; background: #fff9eaf5; border-color: #efcf83; }
+.ng-workspace-toast i { width: 18px; height: 18px; display: grid; place-items: center; color: #fff; background: #28aa7b; border-radius: 50%; font-style: normal; }
+.ng-workspace-toast.warning i { background: #e5a52e; }
+.ng-toast-enter-active,.ng-toast-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.ng-toast-enter-from,.ng-toast-leave-to { opacity: 0; transform: translate(-50%, -8px); }
 
 @media (max-width: 1200px) {
   .ng-header {

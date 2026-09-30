@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { NonGrainWorkspaceContext } from '@/mocks/non-grain-workspace'
+import NonGrainTaskSummary from './NonGrainTaskSummary.vue'
+import NonGrainUploadTile from './NonGrainUploadTile.vue'
 import './workspace.scss'
 
 defineProps<{ context: NonGrainWorkspaceContext; readonly: boolean; disabledReason: string }>()
@@ -13,32 +15,32 @@ const note = ref('现场边界与疑似图斑基本一致，地块内种植景�
 </script>
 
 <template>
-  <div class="ng-page">
+  <div class="ng-page ng-page-stage ng-page-onsite">
     <div v-if="readonly" class="ng-readonly">{{ disabledReason || '当前页面只读' }}</div>
     <div class="ng-grid">
-      <section class="ng-card span-4">
-        <h3>图斑列表</h3>
-        <article
-          v-for="(plot, index) in context.plots"
-          :key="plot.id"
-          class="ng-plot clickable"
-          :class="{ active: index === selected }"
-          @click="selected = index"
-        >
-          <b>{{ plot.id }}<em>{{ plot.area }} 亩</em></b>
-          <small>{{ plot.location }}</small>
-          <small>{{ plot.confirmation }}</small>
-        </article>
+      <NonGrainTaskSummary class="span-12" :context="context" node="on-site-verification" />
+      <section class="ng-card span-3 ng-stage-card">
+        <h3><i>斑</i>待核查图斑（{{ context.plots.length }}个）</h3>
+        <div class="ng-plot-list ng-plot-list--side">
+          <article
+            v-for="(plot, index) in context.plots"
+            :key="plot.id"
+            class="ng-plot clickable"
+            :class="{ active: index === selected }"
+            @click="selected = index"
+          >
+            <div class="ng-thumb" :class="['img-paddy', 'img-orchard', 'img-pond'][index]" />
+            <span><b>图斑{{ index + 1 }}</b><small>{{ plot.landType === '养殖坑塘' ? plot.landType : `${plot.landType}种植` }}</small><small>面积：{{ plot.area }} 亩</small></span>
+          </article>
+        </div>
 
-        <h4>现场联络</h4>
-        <ul class="ng-list">
-          <li><span>定位坐标</span><b>119.9214, 32.4698</b></li>
-          <li><span>责任人电话</span><b>138****6042</b></li>
-        </ul>
+        <div class="ng-info-box"><h4>填写说明</h4><p>选择核查结论并补充说明；上传现场照片与定位信息；提交后进入整改环节。</p></div>
       </section>
 
-      <section class="ng-card span-8">
-        <h3>现场核查记录 · {{ context.plots[selected]?.id }}</h3>
+      <section class="ng-card span-9 ng-stage-card">
+        <h3><i>填</i>现场核查填报</h3>
+        <div class="ng-record-bar"><span>任务编号<b>{{ context.task.taskNo }}</b></span><span>当前图斑<b>图斑{{ selected + 1 }}</b></span><span>核查人<b>区县核查员01</b></span><span>核查日期<b>2026-07-28</b></span></div>
+        <h4>核查结论</h4>
         <div class="ng-radio cols-2">
           <label><input v-model="result" type="radio" value="problem" :disabled="readonly"> 发现问题</label>
           <label><input v-model="result" type="radio" value="clear" :disabled="readonly"> 无问题</label>
@@ -72,14 +74,17 @@ const note = ref('现场边界与疑似图斑基本一致，地块内种植景�
 
         <h4>现场照片</h4>
         <div class="ng-photo-grid">
-          <div class="ng-photo">地块全景<br>已定位</div>
-          <div class="ng-photo">现状近景<br>2026-09-25</div>
-          <div class="ng-photo upload">+ 上传照片</div>
+          <div class="ng-photo img-field-cleared"><span>拍摄点位1<br>已记录定位</span></div>
+          <div class="ng-photo img-road"><span>拍摄点位2<br>2026-07-28</span></div>
+          <NonGrainUploadTile label="上传现场照片" :readonly="readonly" />
         </div>
 
+        <h4>现场定位与附加信息</h4>
+        <div class="ng-form ng-form--three"><label class="ng-field"><span>经纬度 *</span><input value="32.4861, 119.9234" disabled></label><label class="ng-field"><span>所属村组 *</span><input value="姚家村" disabled></label><label class="ng-field"><span>联系电话 *</span><input value="138****5621" disabled></label></div>
+
         <div class="ng-actions">
-          <button :disabled="readonly" :title="readonly ? disabledReason : ''" @click="emit('draft')">保存草稿</button>
-          <button class="primary" :disabled="readonly" :title="readonly ? disabledReason : ''" @click="emit('submit', result === 'problem')">提交核查</button>
+          <button :aria-disabled="readonly" :data-permission-tip="readonly ? '无权限操作' : ''" @click="!readonly && emit('draft')">保存草稿</button>
+          <button class="primary" :aria-disabled="readonly" :data-permission-tip="readonly ? '无权限操作' : ''" @click="!readonly && emit('submit', result === 'problem')">提交核查</button>
         </div>
       </section>
     </div>
