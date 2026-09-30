@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PrimaryHeader from '@/components/PrimaryHeader.vue'
+import { useUserStore } from '@/stores/user'
 
 defineProps<{
   title: string
@@ -10,12 +11,13 @@ defineProps<{
 
 const route = useRoute()
 const router = useRouter()
-const entries = [
-  { label: '任务总览', icon: '▦', name: 'task-overview' },
-  { label: '任务列表', icon: '☷', name: 'task-list' },
-  { label: '我的待办', icon: '✓', name: 'task-todo' },
-]
-const activeEntry = computed(() => entries.find((entry) => entry.name === route.name)?.name)
+const user = useUserStore()
+const entries = computed(() => [
+  { label: '任务总览', icon: '▦', name: 'task-overview', permission: 'task-overview' as const },
+  { label: '任务列表', icon: '☷', name: 'task-list', permission: 'task-list' as const },
+  { label: '我的待办', icon: '✓', name: 'task-todo', permission: 'task-todo' as const },
+].filter((entry) => user.hasPermission(entry.permission)))
+const activeEntry = computed(() => entries.value.find((entry) => entry.name === route.name)?.name)
 </script>
 
 <template>
@@ -23,10 +25,6 @@ const activeEntry = computed(() => entries.find((entry) => entry.name === route.
     <PrimaryHeader />
     <div class="task-center-shell">
       <aside class="task-center-sidebar">
-        <div class="sidebar-heading">
-          <i>任</i>
-          <div><strong>任务中心</strong><small>TASK CENTER</small></div>
-        </div>
         <nav aria-label="任务中心导航">
           <button
             v-for="entry in entries"
@@ -67,61 +65,69 @@ const activeEntry = computed(() => entries.find((entry) => entry.name === route.
 }
 .task-center-shell { flex: 1; min-height: 0; display: flex; }
 .task-center-sidebar {
-  width: 218px;
-  flex: 0 0 218px;
-  color: #d7e9f5;
-  background: linear-gradient(180deg, #123f66, #0b3154 62%, #092c4b);
-  box-shadow: 3px 0 14px #193a5530;
+  width: 220px;
+  flex: 0 0 220px;
+  min-height: 0;
+  overflow: auto;
+  padding: 15px 12px;
+  box-sizing: border-box;
+  color: #d8edf4;
+  background: linear-gradient(180deg, #06243e 0%, #031c33 100%);
+  border-right: 1px solid #0b4969;
+  box-shadow: inset -1px 0 #021426;
 }
-.sidebar-heading {
-  height: 88px;
-  display: flex;
+.task-center-sidebar nav { display: grid; gap: 9px; }
+.task-center-sidebar button {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 12px;
   align-items: center;
-  gap: 12px;
-  padding: 0 22px;
-  border-bottom: 1px solid #ffffff17;
+  gap: 10px;
+  padding: 8px 9px;
+  color: #abc6d3;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 17px;
+  text-align: left;
+  transition: border-color .18s, background .18s, color .18s;
 }
-.sidebar-heading > i {
-  width: 38px;
-  height: 38px;
+.task-center-sidebar button::after {
+  position: absolute;
+  right: 10px;
+  bottom: -5px;
+  left: 10px;
+  border-bottom: 1px solid #0d3d59;
+  content: '';
+}
+.task-center-sidebar button i {
+  width: 34px;
+  height: 34px;
   display: grid;
   place-items: center;
-  color: #fff;
-  background: linear-gradient(135deg, #35a7e8, #1778c5);
-  border-radius: 8px;
-  box-shadow: 0 5px 12px #001b3155;
-  font-style: normal;
-  font-weight: 700;
-}
-.sidebar-heading strong, .sidebar-heading small { display: block; }
-.sidebar-heading strong { color: #fff; font-size: 18px; letter-spacing: 2px; }
-.sidebar-heading small { margin-top: 4px; color: #769bb9; font-size: 9px; letter-spacing: 1.5px; }
-.task-center-sidebar nav { padding: 18px 12px; }
-.task-center-sidebar button {
-  width: 100%;
-  height: 48px;
-  display: grid;
-  grid-template-columns: 28px 1fr auto;
-  align-items: center;
-  gap: 8px;
-  padding: 0 15px;
-  color: #a9c4d8;
-  background: transparent;
-  border: 0;
+  color: #61bfd6;
+  background: #093b57;
+  border: 1px solid #0c5776;
   border-radius: 5px;
-  cursor: pointer;
-  font-size: 15px;
-  text-align: left;
+  font-size: 19px;
+  font-style: normal;
+  text-align: center;
 }
-.task-center-sidebar button i { color: #82b2d1; font-size: 17px; font-style: normal; text-align: center; }
-.task-center-sidebar button b { color: #6f94af; font-size: 20px; font-weight: 400; }
-.task-center-sidebar button:hover { color: #fff; background: #ffffff0d; }
+.task-center-sidebar button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.task-center-sidebar button b { color: #668fa1; font-size: 22px; font-weight: 400; }
+.task-center-sidebar button:hover { color: #eafaff; background: #0a2d48; }
 .task-center-sidebar button.active {
   color: #fff;
-  background: linear-gradient(90deg, #168bda, #187cc2);
-  box-shadow: 0 5px 12px #001b3140;
+  background: #082f4c;
+  border-color: #1686a8;
+  box-shadow: none;
 }
-.task-center-sidebar button.active i, .task-center-sidebar button.active b { color: #fff; }
+.task-center-sidebar button.active i { color: #e8fdff; background: #075a78; border-color: #1686a8; }
+.task-center-sidebar button.active b { color: #48d9eb; }
 .task-center-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; background: #f3f6fa; }
 .content-heading {
   min-height: 78px;
@@ -137,7 +143,8 @@ const activeEntry = computed(() => entries.find((entry) => entry.name === route.
 .content-heading p { margin: 7px 0 0; color: #8a99a9; font-size: 13px; }
 .content-body { padding: 20px 24px 26px; }
 @media (max-width: 1200px) {
-  .task-center-sidebar { width: 190px; flex-basis: 190px; }
+  .task-center-sidebar { width: 190px; flex-basis: 190px; padding: 12px 8px; }
+  .task-center-sidebar button { grid-template-columns: 34px minmax(0, 1fr) 9px; gap: 7px; }
   .content-body { padding-inline: 18px; }
 }
 </style>

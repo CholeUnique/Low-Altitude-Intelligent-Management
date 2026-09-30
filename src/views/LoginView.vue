@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { getDepartmentOptions, getMyDepartments, loginWithPassword, switchDepartment } from '@/api/auth'
 import { ApiBusinessError } from '@/api/client'
+import { firstAccessiblePath } from '@/utils/access-control'
 
 const router = useRouter()
 const route = useRoute()
@@ -69,7 +70,10 @@ async function submitReal() {
       const message = error instanceof Error ? error.message : '部门切换接口请求失败'
       throw new Error(`部门身份初始化失败：${message}`)
     }
-    const target = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
+    await user.ensureMenuPermissions()
+    const target = typeof route.query.redirect === 'string'
+      ? route.query.redirect
+      : firstAccessiblePath(user.hasPermission)
     await router.replace(target)
   } catch (error) {
     user.logout()

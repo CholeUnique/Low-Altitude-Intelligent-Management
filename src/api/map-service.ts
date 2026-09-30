@@ -9,6 +9,52 @@ export interface MapServiceItem {
   status: number
   preset?: number
   remark?: string
+  createTime?: string
+  updateTime?: string
+}
+
+export interface MapServiceListQuery {
+  keyword?: string
+  status?: 0 | 1
+}
+
+export interface MapServiceCreateInput {
+  name: string
+  serviceUrl: string
+  type?: string
+  sort?: number
+  remark?: string
+}
+
+export interface MapServiceUpdateInput extends Partial<MapServiceCreateInput> {
+  id: string | number
+}
+
+export async function listMapServices(query: MapServiceListQuery = {}) {
+  if (isMockMode()) return []
+  const services = await apiClient.post<never, MapServiceItem[]>('/v1/map/service/list', query)
+  return (Array.isArray(services) ? services : [])
+    .sort((left, right) => (Number(left.sort) || 0) - (Number(right.sort) || 0))
+}
+
+export async function getMapServiceDetail(id: string | number) {
+  return apiClient.post<never, MapServiceItem>('/v1/map/service/detail', { id })
+}
+
+export async function addMapService(input: MapServiceCreateInput) {
+  return apiClient.post<never, MapServiceItem>('/v1/map/service/add', input)
+}
+
+export async function updateMapService(input: MapServiceUpdateInput) {
+  await apiClient.post('/v1/map/service/update', input)
+}
+
+export async function deleteMapService(id: string | number) {
+  await apiClient.post('/v1/map/service/delete', { id })
+}
+
+export async function updateMapServiceStatus(id: string | number, status: 0 | 1) {
+  await apiClient.post('/v1/map/service/status', { id, status })
 }
 
 /**
