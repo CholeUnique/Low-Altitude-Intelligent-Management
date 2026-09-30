@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { getDepartmentOptions, getMyDepartments, switchDepartment, type DepartmentOption } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
 import type { OrganizationId } from '@/types'
+import { firstAccessiblePath } from '@/utils/access-control'
 
 const user = useUserStore()
 const router = useRouter()
@@ -87,11 +88,12 @@ async function selectOrganization(organizationId: OrganizationId) {
       // 后端以 targetDeptId 确认当前部门数据视角，并返回必须替换的新 token。
       const result = await switchDepartment(department.deptId)
       user.setDepartmentSession(result.accessToken, result.expiresIn, result.activeDeptId || department.deptId)
+      await user.ensureMenuPermissions()
     }
 
     user.switchOrganization(organizationId)
     open.value = false
-    await router.push('/dashboard')
+    await router.push(firstAccessiblePath(user.hasPermission))
   } catch (error) {
     switchError.value = error instanceof Error ? error.message : '单位切换失败，请稍后重试。'
   } finally {

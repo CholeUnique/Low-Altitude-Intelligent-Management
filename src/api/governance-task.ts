@@ -1,6 +1,7 @@
 import { apiClient, isMockMode } from './client'
 import { getOrganization, getScene, getTask, getTasks } from '@/mocks/portal'
 import type { OrganizationId, PortalTask, TaskWorkflowNode } from '@/types'
+import type { MapServiceItem } from '@/api/map-service'
 
 export type GovernanceTaskStatus = 0 | 1 | 2 | 3 | 4 | 5
 
@@ -26,10 +27,20 @@ export interface GovernanceTask {
   createBy?: string
   createTime?: string
   updateTime?: string
+  /** 任务分页接口直接返回的对比影像；智能研判以此为准，不再自行推断任务影像。 */
+  comparisonImages?: GovernanceTaskComparisonImage[]
   /** Mock 展示层保留字段；真实接口未提供时不会伪造。 */
   area?: string
   areaSize?: number
   workflow?: TaskWorkflowNode[]
+}
+
+export interface GovernanceTaskComparisonImage {
+  id: string
+  label: string
+  imageUrl?: string
+  captureTime?: string
+  mapService?: MapServiceItem
 }
 
 export interface GovernanceTaskPageQuery {
@@ -86,6 +97,17 @@ export interface GovernanceTaskMediaBindInput {
   mediaIds: string[]
 }
 
+export interface AbnormalTaskCreateInput {
+  deptId?: string
+  abnormalIds: string[]
+  merge?: boolean
+  priority?: number
+  startFlow?: boolean
+  flowAssigneeId?: string
+  flowDeptId?: string
+  deadline?: string
+}
+
 /** 与当前 Swagger 的 /biz/task/update 请求体保持一致。 */
 export interface GovernanceTaskUpdateInput {
   id: string
@@ -135,6 +157,9 @@ export interface GovernanceTaskDetail {
 
 export interface TaskAbnormal {
   id: string
+  /** 识别图斑接口返回的业务编号；任务异常接口可能没有该字段。 */
+  spotNo?: string
+  spotSource?: string
   bizTaskId: string
   sceneCode: string
   abnormalType: string
@@ -205,6 +230,10 @@ interface BizTaskDto {
   createBy?: string | number
   createTime?: string
   updateTime?: string
+  /** 后端任务分页响应中的参考影像服务列表（biz_task_map_service）。 */
+  mapServices?: MapServiceItem[]
+  /** 后端字段仍在联调，保留扩展字段以兼容对比影像单对象和数组响应。 */
+  [key: string]: unknown
 }
 
 interface BizTaskDetailDto {
@@ -221,6 +250,8 @@ interface BizTaskDetailDto {
 
 interface BizAbnormalDto {
   id: string | number
+  spotNo?: string
+  spotSource?: string
   bizTaskId?: string | number
   sceneCode?: string
   abnormalType?: string
@@ -275,6 +306,104 @@ function optionalValue(value: unknown): string | undefined {
   return normalized && normalized.toLowerCase() !== 'null' ? normalized : undefined
 }
 
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function firstString(item: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = optionalValue(item[key])
+    if (value) return value
+  }
+}
+
+function inferMapServiceType(url: string, value?: string) {
+  if (value) return value
+  if (/\/ImageServer(?:\?|$)/i.test(url)) return 'ARCGIS_IMAGESERVER'
+  if (/\/MapServer(?:\?|$)/i.test(url)) return 'ARCGIS_MAPSERVER'
+  if (/\bWMTS\b/i.test(url)) return 'WMTS'
+  if (/\bWMS\b/i.test(url)) return 'WMS'
+  return 'ARCGIS_MAPSERVER'
+}
+
+function normalizeComparisonImage(value: unknown, index: number): GovernanceTaskComparisonImage | undefined {
+  if (typeof value === 'string') {
+    const url = optionalValue(value)
+    return url ? { id: `comparison-image-${index}`, label: `对比影像 ${index + 1}`, imageUrl: url } : undefined
+  }
+  const raw = recordValue(value)
+  if (!raw) return undefined
+  const nestedService = recordValue(raw.mapService)
+    || recordValue(raw.mapServiceObject)
+    || recordValue(raw.imageryService)
+    || recordValue(raw.imageService)
+    || recordValue(raw.service)
+  const service = nestedService || raw
+  const serviceUrl = firstString(service, ['serviceUrl', 'mapServiceUrl', 'imageServiceUrl', 'layerUrl', 'serviceAddress', 'url'])
+  const explicitServiceUrl = firstString(service, ['serviceUrl', 'mapServiceUrl', 'imageServiceUrl', 'layerUrl', 'serviceAddress'])
+  const looksLikeMapService = Boolean(explicitServiceUrl || (serviceUrl && /\/(?:MapServer|ImageServer)(?:\?|$)|\bWMS\b|\bWMTS\b/i.test(serviceUrl)))
+  const id = firstString(raw, ['id', 'mediaId', 'fileId', 'serviceId', 'mapServiceId'])
+    || firstString(service, ['id', 'serviceId', 'mapServiceId'])
+    || `comparison-image-${index}`
+  const label = firstString(raw, ['label', 'name', 'imageName', 'fileName', 'title', 'serviceName'])
+    || firstString(service, ['name', 'serviceName', 'mapServiceName', 'label'])
+    || `对比影像 ${index + 1}`
+  const captureTime = firstString(raw, ['shootTime', 'captureTime', 'collectTime', 'imageTime', 'createTime'])
+  if (looksLikeMapService && serviceUrl) {
+    return {
+      id,
+      label,
+      captureTime,
+      mapService: {
+        id: firstString(service, ['id', 'serviceId', 'mapServiceId']) || id,
+        name: firstString(service, ['name', 'serviceName', 'mapServiceName', 'label']) || label,
+        serviceUrl,
+        type: inferMapServiceType(serviceUrl, firstString(service, ['type', 'serviceType', 'mapServiceType'])),
+        status: Number(service.status ?? 1),
+        sort: Number(service.sort ?? index),
+        preset: service.preset === undefined ? undefined : Number(service.preset),
+        remark: firstString(service, ['remark']),
+      },
+    }
+  }
+  const imageUrl = firstString(raw, ['imageUrl', 'originalUrl', 'previewUrl', 'thumbnailUrl', 'url'])
+  return imageUrl ? { id, label, imageUrl, captureTime } : undefined
+}
+
+function comparisonImageSources(item: BizTaskDto) {
+  const explicitKeys = [
+    'mapServices',
+    'comparisonImage', 'comparisonImages', 'compareImage', 'compareImages',
+    'contrastImage', 'contrastImages', 'comparisonImagery', 'compareImagery',
+    'comparisonImageObject', 'compareImageObject', 'comparisonService',
+    'compareService', 'comparisonMapService', 'compareMapService',
+  ]
+  const values: unknown[] = explicitKeys.flatMap((key) => item[key] === undefined ? [] : [item[key]])
+  for (const [key, value] of Object.entries(item)) {
+    if (explicitKeys.includes(key)) continue
+    if (/(?:comparison|compare|contrast).*(?:image|imagery|service)|(?:image|imagery|service).*(?:comparison|compare|contrast)/i.test(key)) values.push(value)
+  }
+  return values.flatMap((value) => {
+    if (Array.isArray(value)) return value
+    const wrapper = recordValue(value)
+    const list = wrapper && (wrapper.records || wrapper.list || wrapper.items)
+    return Array.isArray(list) ? list : [value]
+  })
+}
+
+function normalizeComparisonImages(item: BizTaskDto) {
+  const seen = new Set<string>()
+  return comparisonImageSources(item)
+    .map(normalizeComparisonImage)
+    .filter((image): image is GovernanceTaskComparisonImage => {
+      if (!image) return false
+      const identity = image.mapService?.serviceUrl || image.imageUrl || image.id
+      if (seen.has(identity)) return false
+      seen.add(identity)
+      return true
+    })
+}
+
 function toGovernanceTask(item: BizTaskDto): GovernanceTask {
   const status = Number.isInteger(item.taskStatus) && item.taskStatus! >= 0 && item.taskStatus! <= 5
     ? item.taskStatus as GovernanceTaskStatus
@@ -301,6 +430,7 @@ function toGovernanceTask(item: BizTaskDto): GovernanceTask {
     createBy: optionalValue(item.createBy),
     createTime: item.createTime,
     updateTime: item.updateTime,
+    comparisonImages: normalizeComparisonImages(item),
   }
 }
 
@@ -327,6 +457,7 @@ function toMockGovernanceTask(task: PortalTask): GovernanceTask {
     area: task.area,
     areaSize: task.areaSize,
     workflow: task.workflow,
+    comparisonImages: [],
   }
 }
 
@@ -411,6 +542,8 @@ function toTaskAbnormal(item: BizAbnormalDto): TaskAbnormal {
   }
   return {
     id: String(item.id),
+    spotNo: item.spotNo,
+    spotSource: item.spotSource,
     bizTaskId: item.bizTaskId === undefined ? '' : String(item.bizTaskId),
     sceneCode: item.sceneCode || '',
     abnormalType: item.abnormalType || 'OTHER',
@@ -449,6 +582,12 @@ export async function createGovernanceTask(input: GovernanceTaskCreateInput): Pr
   if (isMockMode()) throw new Error('Mock 模式不调用真实任务创建接口。')
   const data = await apiClient.post<never, BizTaskDto>('/v1/biz/task/create', input)
   return toGovernanceTask(data)
+}
+
+/** 将同场景、同部门的疑似异常图斑批量派生为核查任务。 */
+export async function createTasksFromAbnormals(input: AbnormalTaskCreateInput): Promise<GovernanceTask[]> {
+  const data = await apiClient.post<never, BizTaskDto[]>('/v1/biz/task/abnormal/create', input)
+  return (Array.isArray(data) ? data : []).map(toGovernanceTask)
 }
 
 /** 保存任务范围；后端要求传入 WGS84 的 GeoJSON FeatureCollection。 */

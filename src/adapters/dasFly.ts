@@ -146,16 +146,50 @@ export function toRouteList(payload: unknown): { list: FlightRoute[]; total: num
 
 export function toFlightPlanList(payload: unknown): { list: FlightPlanItem[]; total: number } {
   const records = asRecords(payload)
-  const list = records.map((item, index) => ({
-    id: String(item.id ?? item.flightPlanId ?? `FP-${index + 1}`),
-    projectId: item.projectId === undefined ? undefined : String(item.projectId),
-    date: String(item.executeDate ?? item.planDate ?? item.createTime ?? '').slice(0, 10),
-    start: String(item.executeTime ?? item.startTime ?? '08:00').slice(0, 5),
-    end: String(item.endTime ?? item.finishTime ?? '09:00').slice(0, 5),
-    title: String(item.name ?? item.planName ?? `飞行计划 ${index + 1}`),
-    area: String(item.waylineName ?? item.areaName ?? item.regionName ?? '-'),
-    routeId: String(item.routeId ?? item.waylineId ?? ''),
-  }))
+  const temporalValue = (item: Record<string, unknown>) => {
+    const scheduler = parseJson(item.schedulerParamJson)
+    const source = scheduler && typeof scheduler === 'object' && !Array.isArray(scheduler)
+      ? scheduler as Record<string, unknown>
+      : {}
+    const keys = ['executeDate', 'planDate', 'scheduledAt', 'executeTime', 'startTime', 'scheduleTime', 'taskStartTime', 'planStartTime', 'execute_time', 'start_time']
+    for (const key of keys) {
+      const value = item[key] ?? source[key]
+      if (value !== undefined && value !== null && value !== '') return value
+    }
+    return undefined
+  }
+  const normalizeDateTime = (value: unknown) => {
+    if (typeof value === 'number' || /^\d{10,13}$/.test(String(value || ''))) {
+      const number = Number(value)
+      const date = new Date(number < 1e12 ? number * 1000 : number)
+      if (!Number.isNaN(date.getTime())) {
+        const pad = (part: number) => String(part).padStart(2, '0')
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+      }
+    }
+    return value == null ? '' : String(value).replace('T', ' ')
+  }
+  const list = records.map((item, index) => {
+    const scheduledAt = normalizeDateTime(temporalValue(item))
+    const endAt = normalizeDateTime(item.endTime ?? item.finishTime)
+    return {
+      id: String(item.id ?? item.flightPlanId ?? `FP-${index + 1}`),
+      projectId: item.projectId === undefined ? undefined : String(item.projectId),
+      date: scheduledAt.slice(0, 10),
+      start: scheduledAt.slice(11, 16) || '--:--',
+      end: endAt.slice(11, 16) || '',
+      title: String(item.name ?? item.planName ?? `飞行计划 ${index + 1}`),
+      area: String(item.waylineName ?? item.areaName ?? item.regionName ?? '-'),
+      routeId: String(item.routeId ?? item.waylineId ?? ''),
+      status: item.status === undefined || item.status === null ? undefined : Number(item.status),
+      sn: item.sn == null ? undefined : String(item.sn),
+      deviceType: item.deviceType == null ? undefined : String(item.deviceType),
+      planType: item.type == null ? undefined : String(item.type),
+      waylineType: item.waylineType == null ? undefined : String(item.waylineType),
+      scheduledAt: scheduledAt || undefined,
+      createTime: item.createTime == null ? undefined : String(item.createTime),
+    }
+  })
   return { list, total: totalOf(payload, list.length) }
 }
 
@@ -208,8 +242,10 @@ export function toMediaList(payload: unknown): { list: LiveMediaItem[]; total: n
   const list = records.map((item, index) => ({
     id: String(item.id ?? item.mediaId ?? `MEDIA-${index + 1}`),
     name: String(item.fileName ?? item.name ?? `IMG_${index + 1}.JPG`),
-    capturedAt: String(item.capturedAt ?? item.createTime ?? '').slice(11, 19) || '--:--:--',
-    thumbnail: String(item.thumbnailUrl ?? item.previewUrl ?? 'forest'),
+    capturedAt: String(item.shootTime ?? item.capturedAt ?? item.createTime ?? '').replace('T', ' ').slice(0, 19) || '--',
+    thumbnail: String(item.thumbnailUrl ?? item.previewUrl ?? ''),
+    originalUrl: item.originalUrl ? String(item.originalUrl) : undefined,
+    mediaType: item.type ? String(item.type) : undefined,
   }))
   return { list, total: totalOf(payload, list.length) }
 }

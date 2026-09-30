@@ -1,100 +1,179 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { TaskAbnormal } from '@/api/governance-task'
+import type { MapServiceItem } from '@/api/map-service'
+import {
+  createMapServiceLayer,
+  MAP_SERVICE_IMAGERY_PANE,
+  MAP_SERVICE_VECTOR_PANE,
+  type MapServiceLayerHandle,
+} from '@/utils/map-service-layer'
+
+export type SpotDrawingMode = 'off' | 'available' | 'active' | 'preview' | 'blocked'
 
 export interface ComparisonPeriod {
   number: number
   label: string
-  kind: 'dom' | 'image' | 'empty'
+  kind: 'image' | 'map-service' | 'empty'
   imageUrl?: string
+  mapService?: MapServiceItem
 }
 
-const props = defineProps<{
-  /** 仅第 1 期 DOM 基准窗口使用当前图斑的空间范围。 */
+export interface SynchronizedMapView {
+  center: [number, number]
+  zoom: number
+  source: symbol
+}
+
+const props = withDefaults(defineProps<{
+  /** 地理影像窗口使用当前图斑的空间范围。 */
   spot?: TaskAbnormal
   period: ComparisonPeriod
   /** 用于期次栏缩略图时隐藏说明和期次浮标。 */
   thumbnail?: boolean
-}>()
+  /** 仅地理影像窗口使用；普通图片查看器不参与视图联动。 */
+  synchronizedView?: SynchronizedMapView
+  /** 新增图斑时复用当前地理影像窗口进行圈画。 */
+  drawingMode?: SpotDrawingMode
+  draftCoordinates?: Array<[number, number]>
+}>(), { drawingMode: 'off', draftCoordinates: () => [] })
 
-const emit = defineEmits<{ select: [id: string] }>()
+const emit = defineEmits<{
+  select: [id: string]
+  'view-change': [view: SynchronizedMapView]
+  'draw-point': [period: number, coordinate: [number, number], mapServiceId?: string | number]
+}>()
 const container = ref<HTMLElement>()
 const imageError = ref(false)
-const token = import.meta.env.VITE_TIANDITU_TOKEN
-const domXyzTileUrl = import.meta.env.VITE_DOM_XYZ_TILE_URL?.trim()
-const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
-const domBounds = L.latLngBounds(
-  [32.48574015140688, 119.8412888155381],
-  [32.49689672806349, 119.85940753661878],
-)
+const referenceImageryError = ref('')
 let map: L.Map | undefined
 let resizeObserver: ResizeObserver | undefined
 let resizeFrame: number | undefined
+let synchronizationFrame: number | undefined
+let referenceImagery: MapServiceLayerHandle | undefined
+let spotBoundaryLayer: L.Layer | undefined
+let draftShapeLayer: L.Layer | undefined
+let draftVertexLayer: L.LayerGroup | undefined
+let draftHoverLayer: L.Layer | undefined
+let applyingSynchronizedView = false
+const synchronizationSource = Symbol('spot-map')
+const drawingCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M18.8 2.7l6.5 6.5-12.8 12.8-7.4 1.7 1.7-7.4z' fill='%23ffffff' stroke='%23073550' stroke-width='1.7' stroke-linejoin='round'/%3E%3Cpath d='M6.8 16.3l6.5 6.5-8.2 1.9z' fill='%2319a5c7' stroke='%23073550' stroke-width='1.7' stroke-linejoin='round'/%3E%3Cpath d='M17.1 4.4l6.5 6.5' stroke='%2319a5c7' stroke-width='2'/%3E%3C/svg%3E") 4 24, crosshair`
 
-function tileUrl(layer: 'img' | 'cia') {
-  return `https://t{s}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}&tk=${token}`
+function isSynchronizedImagery() {
+  return !props.thumbnail && props.period.kind === 'map-service'
+}
+
+function sameView(view: SynchronizedMapView) {
+  if (!map) return true
+  const center = map.getCenter()
+  return map.getZoom() === view.zoom
+    && Math.abs(center.lat - view.center[0]) < 1e-9
+    && Math.abs(center.lng - view.center[1]) < 1e-9
+}
+
+function applySynchronizedView(view?: SynchronizedMapView) {
+  if (!map || !view || view.source === synchronizationSource || !isSynchronizedImagery() || sameView(view)) return
+  applyingSynchronizedView = true
+  map.setView(view.center, view.zoom, { animate: false })
+  applyingSynchronizedView = false
+}
+
+function publishMapView() {
+  synchronizationFrame = undefined
+  if (!map || applyingSynchronizedView || !isSynchronizedImagery()) return
+  const center = map.getCenter()
+  emit('view-change', { center: [center.lat, center.lng], zoom: map.getZoom(), source: synchronizationSource })
+}
+
+function scheduleMapViewPublish() {
+  if (applyingSynchronizedView || synchronizationFrame !== undefined) return
+  synchronizationFrame = window.requestAnimationFrame(publishMapView)
+}
+
+function enableViewSynchronization() {
+  if (!map || !isSynchronizedImagery()) return
+  // 已有基准视图时直接采用；否则由当前（通常为第 1 期）窗口发布初始视图。
+  if (props.synchronizedView) applySynchronizedView(props.synchronizedView)
+  map.on('move', scheduleMapViewPublish)
+  if (!props.synchronizedView) publishMapView()
 }
 
 function isArea(bounds: L.LatLngBounds) {
   return bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())
 }
 
-/** 第 1 期：DOM 基准图及其异常图斑范围。 */
-function createReferenceMap() {
-  if (!container.value) return
-  map = L.map(container.value, { maxZoom: 22, zoomControl: false, attributionControl: false }).setView([32.4555, 119.9255], 11)
-  if (token) {
-    const labelsPane = map.createPane('labels')
-    labelsPane.style.zIndex = '450'
-    labelsPane.style.pointerEvents = 'none'
-    L.tileLayer(tileUrl('img'), { subdomains, maxNativeZoom: 18, maxZoom: 22 }).addTo(map)
-    L.tileLayer(tileUrl('cia'), { subdomains, maxNativeZoom: 18, maxZoom: 22, pane: 'labels' }).addTo(map)
-  }
-  if (domXyzTileUrl) {
-    L.tileLayer(domXyzTileUrl, {
-      bounds: domBounds,
-      minNativeZoom: 16,
-      maxNativeZoom: 22,
-      maxZoom: 22,
-      tms: true,
-      opacity: .94,
-      noWrap: true,
-    }).addTo(map)
-  }
+function isDrawingOnThisMap() {
+  return !props.thumbnail && props.period.kind === 'map-service'
+    && (props.drawingMode === 'available' || props.drawingMode === 'active')
+}
 
-  const spot = props.spot
-  if (!spot) return
-  let boundaryBounds: L.LatLngBounds | undefined
-  if (spot.boundaryGeoJson?.features.length) {
-    try {
-      const boundary = L.geoJSON(spot.boundaryGeoJson as GeoJSON.FeatureCollection, {
-        style: { color: '#f3475b', weight: 3, opacity: 1, fillColor: '#f3475b', fillOpacity: .22, dashArray: '5 4' },
-        pointToLayer: (_feature, latlng) => L.circleMarker(latlng, {
-          radius: 8, color: '#fff', weight: 2, fillColor: '#f3475b', fillOpacity: 1,
-        }),
-      })
-      const bounds = boundary.getBounds()
-      if (isArea(bounds)) {
-        boundary.addTo(map)
-        boundaryBounds = bounds
-      }
-    } catch {
-      // 不规范的历史边界改用中心点显示，不能影响基准图使用。
-    }
+function renderDraftBoundary() {
+  draftShapeLayer?.remove()
+  draftVertexLayer?.remove()
+  draftShapeLayer = undefined
+  draftVertexLayer = undefined
+  if (!map || (props.drawingMode !== 'active' && props.drawingMode !== 'preview') || !props.draftCoordinates.length) return
+  const latLngs = props.draftCoordinates.map(([longitude, latitude]) => L.latLng(latitude, longitude))
+  draftVertexLayer = L.layerGroup().addTo(map)
+  latLngs.forEach((latLng, index) => {
+    L.circleMarker(latLng, {
+      pane: 'spot-drawing', radius: 5, color: '#fff', weight: 2,
+      fillColor: index === 0 ? '#ffd75a' : '#ff3d55', fillOpacity: 1,
+    }).addTo(draftVertexLayer!)
+  })
+  draftShapeLayer = latLngs.length >= 3
+    ? L.polygon(latLngs, { pane: 'spot-drawing', color: '#ff334f', weight: 3, fillColor: '#ff4054', fillOpacity: .2 })
+    : L.polyline(latLngs, { pane: 'spot-drawing', color: '#ff334f', weight: 3, dashArray: '7 5' })
+  draftShapeLayer?.addTo(map)
+}
+
+function clearDraftHover() {
+  draftHoverLayer?.remove()
+  draftHoverLayer = undefined
+}
+
+function renderDraftHover(latlng: L.LatLng) {
+  clearDraftHover()
+  if (!map || !isDrawingOnThisMap() || !props.draftCoordinates.length) return
+  const previewPoints = [
+    ...props.draftCoordinates.map(([longitude, latitude]) => L.latLng(latitude, longitude)),
+    latlng,
+  ]
+  const pathOptions: L.PathOptions = {
+    pane: 'spot-drawing', color: '#ffcf3d', weight: 3, opacity: .95,
+    dashArray: '7 5', fillColor: '#ff4054', fillOpacity: .22,
   }
-  if (!boundaryBounds && spot.latitude !== undefined && spot.longitude !== undefined) {
-    L.circleMarker([spot.latitude, spot.longitude], {
-      radius: 9, color: '#fff', weight: 2.5, fillColor: '#f3475b', fillOpacity: 1,
-    }).bindTooltip(`${spot.title}（仅中心点）`, { direction: 'top' }).on('click', () => emit('select', spot.id)).addTo(map)
-    map.setView([spot.latitude, spot.longitude], 18, { animate: false })
-    return
+  draftHoverLayer = previewPoints.length >= 3
+    ? L.polygon(previewPoints, pathOptions)
+    : L.polyline(previewPoints, pathOptions)
+  draftHoverLayer.addTo(map)
+}
+
+function updateDrawingMode() {
+  const drawing = props.drawingMode !== 'off'
+  const canvas = container.value
+  if (canvas) canvas.style.cursor = isDrawingOnThisMap() ? drawingCursor : ''
+  if (!isDrawingOnThisMap()) clearDraftHover()
+  if (spotBoundaryLayer) {
+    if (drawing && map?.hasLayer(spotBoundaryLayer)) spotBoundaryLayer.remove()
+    else if (!drawing && map && !map.hasLayer(spotBoundaryLayer)) spotBoundaryLayer.addTo(map)
   }
-  if (boundaryBounds) {
-    const padding: L.PointExpression = props.thumbnail ? [0, 0] : [24, 24]
-    map.fitBounds(boundaryBounds.pad(.7), { padding, animate: false })
-  }
+  renderDraftBoundary()
+}
+
+function handleMapClick(event: L.LeafletMouseEvent) {
+  if (!isDrawingOnThisMap()) return
+  emit('draw-point', props.period.number, [Number(event.latlng.lng.toFixed(8)), Number(event.latlng.lat.toFixed(8))], props.period.mapService?.id)
+}
+
+function handleMapMouseMove(event: L.LeafletMouseEvent) {
+  renderDraftHover(event.latlng)
+}
+
+function handleMapMouseOut() {
+  clearDraftHover()
 }
 
 /**
@@ -123,12 +202,83 @@ function createImageViewer(imageUrl: string) {
   source.src = imageUrl
 }
 
+/** 地图服务影像保留地理坐标，可与当前图斑边界在同一视图中展示。 */
+async function createMapServiceViewer(service: MapServiceItem) {
+  if (!container.value) return
+  referenceImageryError.value = ''
+  map = L.map(container.value, {
+    maxZoom: 22,
+    zoomControl: !props.thumbnail,
+    attributionControl: false,
+    dragging: !props.thumbnail,
+    scrollWheelZoom: !props.thumbnail,
+    doubleClickZoom: !props.thumbnail,
+    boxZoom: !props.thumbnail,
+    keyboard: !props.thumbnail,
+  }).setView([32.4555, 119.9255], 11)
+  const imageryPane = map.createPane(MAP_SERVICE_IMAGERY_PANE)
+  imageryPane.style.zIndex = '225'
+  imageryPane.style.pointerEvents = 'none'
+  const vectorPane = map.createPane(MAP_SERVICE_VECTOR_PANE)
+  vectorPane.style.zIndex = '335'
+  vectorPane.style.pointerEvents = 'none'
+  const drawingPane = map.createPane('spot-drawing')
+  drawingPane.style.zIndex = '620'
+
+  try {
+    const handle = await createMapServiceLayer(service)
+    if (!map) {
+      handle.layer.remove()
+      return
+    }
+    referenceImagery = handle
+    handle.layer.addTo(map)
+
+    let spotBounds: L.LatLngBounds | undefined
+    if (props.spot?.boundaryGeoJson?.features.length) {
+      try {
+        const boundary = L.geoJSON(props.spot.boundaryGeoJson as GeoJSON.FeatureCollection, {
+          style: { color: '#f3475b', weight: 3, opacity: 1, fillColor: '#f3475b', fillOpacity: .16, dashArray: '5 4' },
+          pointToLayer: (_feature, latlng) => L.circleMarker(latlng, {
+            radius: 7, color: '#fff', weight: 2, fillColor: '#f3475b', fillOpacity: 1,
+          }),
+        })
+        const bounds = boundary.getBounds()
+        if (bounds.isValid()) {
+          boundary.addTo(map)
+          spotBoundaryLayer = boundary
+          spotBounds = bounds
+        }
+      } catch {
+        // 历史图斑边界不规范时继续使用中心点或服务范围定位。
+      }
+    }
+    if (spotBounds && isArea(spotBounds)) {
+      map.fitBounds(spotBounds.pad(.7), { padding: props.thumbnail ? [0, 0] : [24, 24], maxZoom: 20, animate: false })
+    } else if (props.spot?.latitude !== undefined && props.spot.longitude !== undefined) {
+      spotBoundaryLayer = L.circleMarker([props.spot.latitude, props.spot.longitude], {
+        radius: 8, color: '#fff', weight: 2, fillColor: '#f3475b', fillOpacity: 1,
+      }).addTo(map)
+      map.setView([props.spot.latitude, props.spot.longitude], 18, { animate: false })
+    } else if (handle.bounds?.isValid()) {
+      map.fitBounds(handle.bounds, { padding: [12, 12], maxZoom: 18, animate: false })
+    }
+  } catch (reason) {
+    referenceImageryError.value = reason instanceof Error ? reason.message : '地图服务影像加载失败'
+  }
+}
+
 onMounted(async () => {
   await nextTick()
   if (!container.value || props.period.kind === 'empty') return
-  if (props.period.kind === 'dom') createReferenceMap()
+  if (props.period.kind === 'map-service' && props.period.mapService) await createMapServiceViewer(props.period.mapService)
   else if (props.period.imageUrl) createImageViewer(props.period.imageUrl)
   if (!map) return
+  map.on('click', handleMapClick)
+  map.on('mousemove', handleMapMouseMove)
+  map.on('mouseout', handleMapMouseOut)
+  updateDrawingMode()
+  enableViewSynchronization()
   resizeObserver = new ResizeObserver(() => {
     if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
     resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: false }))
@@ -136,19 +286,41 @@ onMounted(async () => {
   resizeObserver.observe(container.value)
 })
 
+watch(() => props.synchronizedView, (view) => applySynchronizedView(view))
+watch(() => props.drawingMode, updateDrawingMode)
+watch(() => props.draftCoordinates, renderDraftBoundary, { deep: true })
+
 onBeforeUnmount(() => {
   if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
+  if (synchronizationFrame !== undefined) window.cancelAnimationFrame(synchronizationFrame)
   resizeObserver?.disconnect()
+  referenceImagery?.layer.remove()
+  referenceImagery = undefined
+  spotBoundaryLayer?.remove()
+  spotBoundaryLayer = undefined
+  draftShapeLayer?.remove()
+  draftVertexLayer?.remove()
+  clearDraftHover()
+  map?.off('move', scheduleMapViewPublish)
+  map?.off('click', handleMapClick)
+  map?.off('mousemove', handleMapMouseMove)
+  map?.off('mouseout', handleMapMouseOut)
   map?.remove()
+  map = undefined
 })
 </script>
 
 <template>
-  <div class="spot-map" :class="{ 'spot-map--empty': period.kind === 'empty', 'spot-map--thumbnail': thumbnail }">
+  <div class="spot-map" :class="{ 'spot-map--empty': period.kind === 'empty', 'spot-map--thumbnail': thumbnail, 'spot-map--drawing': drawingMode === 'available' || drawingMode === 'active', 'spot-map--drawing-active': drawingMode === 'active', 'spot-map--drawing-preview': drawingMode === 'preview' }">
     <div v-if="period.kind !== 'empty'" ref="container" class="spot-map__canvas"></div>
     <span v-if="!thumbnail" class="period-badge">第 {{ period.number }} 期 · {{ period.label }}</span>
+    <div v-if="!thumbnail && period.kind === 'map-service' && referenceImageryError" class="imagery-layer-error">{{ referenceImageryError }}</div>
     <div v-if="!thumbnail && period.kind === 'empty'" class="empty-imagery">暂无多期影像</div>
     <div v-else-if="!thumbnail && period.kind === 'image' && imageError" class="empty-imagery empty-imagery--error">关联影像加载失败</div>
+    <div v-if="!thumbnail && drawingMode === 'available'" class="drawing-prompt">在此窗口点选第一个边界点</div>
+    <div v-else-if="!thumbnail && drawingMode === 'active'" class="drawing-prompt drawing-prompt--active">当前绘制窗口 · {{ draftCoordinates.length }} 个点</div>
+    <div v-else-if="!thumbnail && drawingMode === 'preview'" class="drawing-prompt drawing-prompt--preview">新增图斑边界预览</div>
+    <div v-else-if="!thumbnail && drawingMode === 'blocked'" class="drawing-blocked">请在已选中的影像窗口继续绘制</div>
   </div>
 </template>
 
@@ -159,4 +331,6 @@ onBeforeUnmount(() => {
 .period-badge { position: absolute; z-index: 500; top: 9px; right: 9px; padding: 5px 8px; color: #effbff; background: #08364ad9; border: 1px solid #54d6e099; border-radius: 4px; font-size: 12px; font-weight: 600; pointer-events: none; }
 .empty-imagery { position: absolute; z-index: 500; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 10px 15px; color: #526773; background: #edf1f3dd; border: 1px solid #afbdc5; border-radius: 4px; font-size: 14px; font-weight: 600; white-space: nowrap; pointer-events: none; }
 .empty-imagery--error { color: #a64a4a; }
+.imagery-layer-error { position: absolute; z-index: 500; right: 9px; bottom: 9px; max-width: calc(100% - 18px); padding: 5px 8px; color: #fff0f0; border: 1px solid #d98787; border-radius: 4px; background: #661f25d9; font-size: 11px; pointer-events: none; }
+.spot-map--drawing { box-shadow: inset 0 0 0 3px #14a9cf; }.spot-map--drawing-active { box-shadow: inset 0 0 0 3px #ff4055; }.spot-map--drawing-preview { box-shadow:inset 0 0 0 3px #21a47a; }.drawing-prompt { position:absolute; z-index:700; left:50%; bottom:14px; transform:translateX(-50%); padding:7px 12px; color:#fff; background:#087da5e8; border:1px solid #6ae5f4; border-radius:16px; box-shadow:0 3px 10px #00263e66; font-size:12px; font-weight:700; white-space:nowrap; pointer-events:none; }.drawing-prompt--active { background:#bd3043e8; border-color:#ffc1c8; }.drawing-prompt--preview { background:#147b60e8; border-color:#9ff0d4; }.drawing-blocked { position:absolute; z-index:690; inset:0; display:grid; place-items:center; color:#536e7c; background:#e9f0f3a8; font-size:13px; font-weight:700; pointer-events:none; }
 </style>

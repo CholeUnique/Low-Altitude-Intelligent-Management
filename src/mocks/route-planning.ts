@@ -33,6 +33,13 @@ export interface FlightPlanItem {
   title: string
   area: string
   routeId: string
+  status?: number
+  sn?: string
+  deviceType?: string
+  planType?: string
+  waylineType?: string
+  scheduledAt?: string
+  createTime?: string
 }
 
 export const routeTypeOptions = [

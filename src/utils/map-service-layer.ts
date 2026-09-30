@@ -55,6 +55,13 @@ export interface MapServiceLayerHandle {
   categoryFilter?: MapServiceCategoryFilter
 }
 
+export interface MapServiceInspection {
+  /** 只有能够确认是影像且可取得覆盖范围的服务才参与图斑自动匹配。 */
+  isImagery: boolean
+  /** WGS84：[west, south, east, north]。 */
+  bounds?: [number, number, number, number]
+}
+
 interface ServiceRemarkConfig {
   bounds?: L.LatLngBounds
   minZoom?: number
@@ -69,6 +76,18 @@ function serviceRoot(serviceUrl: string) {
 
 function normalizedType(type: string) {
   return String(type || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+}
+
+function isExplicitVectorService(service: MapServiceItem) {
+  const description = `${normalizedType(service.type)} ${service.name || ''}`
+  return /VECTOR|FEATURE|矢量|图斑|边界|地类|变化区/i.test(description)
+}
+
+function serializableBounds(bounds?: L.LatLngBounds): MapServiceInspection['bounds'] {
+  if (!bounds?.isValid()) return
+  const southWest = bounds.getSouthWest()
+  const northEast = bounds.getNorthEast()
+  return [southWest.lng, southWest.lat, northEast.lng, northEast.lat]
 }
 
 function hasTileTemplate(url: string) {
@@ -586,4 +605,41 @@ export async function createMapServiceLayer(service: MapServiceItem): Promise<Ma
     return createArcGisLayer(url, false, config)
   }
   throw new Error(`暂不支持地图服务类型：${service.type || '未知'}`)
+}
+
+/**
+ * 读取地图服务的空间覆盖范围并排除矢量服务，供异常图斑自动匹配多期影像。
+ * 无覆盖范围的服务不能可靠判断空间关系，因此不会被猜测为命中。
+ */
+export async function inspectMapService(service: MapServiceItem): Promise<MapServiceInspection> {
+  if (isExplicitVectorService(service)) return { isImagery: false }
+  const url = serviceRoot(service.serviceUrl)
+  const type = normalizedType(service.type)
+  const config = parseServiceRemark(service.remark)
+
+  if (type.includes('ARCGIS_IMAGESERVER') || /\/ImageServer(?:\?|$)/i.test(url)) {
+    const metadata = await loadArcGisMetadata(url)
+    return { isImagery: true, bounds: serializableBounds(config.bounds || extentBounds(metadata.fullExtent || metadata.initialExtent)) }
+  }
+
+  if (type.includes('ARCGIS_MAPSERVER') || type === 'ARCGIS' || /\/MapServer(?:\?|$)/i.test(url)) {
+    const metadata = await loadArcGisMetadata(url)
+    // 缓存切片 MapServer 在子图层元数据中也可能带 geometryType，但前端实际
+    // 获取的是已经渲染好的影像瓦片，不能因此把它误判为矢量服务。
+    if (metadata.singleFusedMapCache) {
+      return { isImagery: true, bounds: serializableBounds(config.bounds || extentBounds(metadata.fullExtent || metadata.initialExtent)) }
+    }
+    for (const definition of (metadata.layers || []).slice(0, 12)) {
+      if (!Number.isFinite(Number(definition.id))) continue
+      const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${Number(definition.id)}`)
+      if (layerMetadata.geometryType) return { isImagery: false }
+    }
+    return { isImagery: true, bounds: serializableBounds(config.bounds || extentBounds(metadata.fullExtent || metadata.initialExtent)) }
+  }
+
+  if (type.includes('TMS') || type.includes('XYZ') || type.includes('WMTS') || type.includes('WMS')) {
+    return { isImagery: true, bounds: serializableBounds(config.bounds) }
+  }
+
+  return { isImagery: false }
 }
