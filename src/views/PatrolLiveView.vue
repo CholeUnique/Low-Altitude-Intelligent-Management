@@ -7,6 +7,7 @@ import GlobalLiveCruisePanel from '@/workspace-components/realtime-cruise/Global
 const route = useRoute()
 const router = useRouter()
 const fullscreen = computed(() => route.query.fullscreen === 'first')
+const fullscreenDeviceId = computed(() => typeof route.query.deviceId === 'string' ? route.query.deviceId : '')
 
 function exitFullscreen() {
   const returnTo = typeof route.query.returnTo === 'string' ? route.query.returnTo : ''
@@ -18,7 +19,7 @@ function exitFullscreen() {
 </script>
 
 <template>
-  <GlobalLiveCruisePanel v-if="fullscreen" fullscreen @exit-fullscreen="exitFullscreen" />
+  <GlobalLiveCruisePanel v-if="fullscreen" fullscreen :initial-device-id="fullscreenDeviceId" @exit-fullscreen="exitFullscreen" />
   <PatrolLayout
     v-else
     active-node="live"

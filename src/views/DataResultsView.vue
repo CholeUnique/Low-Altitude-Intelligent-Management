@@ -22,7 +22,7 @@ const mediaSummaryTotal = ref<number>()
 const expandedTaskIds = ref<string[]>([])
 const mediaByTask = ref<Record<string, TaskMediaState>>({})
 const currentPage = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(20)
 const notice = ref('')
 const previewMedia = ref<LiveMediaItem>()
 const previewItems = ref<LiveMediaItem[]>([])
@@ -45,15 +45,25 @@ const taskMediaRequests = new Map<string, Promise<ClassifiedTaskMedia>>()
 
 const deviceOptions = computed(() => [...new Set(tasks.value.map((item) => item.deviceName).filter(Boolean))])
 const taskOptions = computed(() => [...new Map(tasks.value.map((item) => [item.id, item.name])).entries()])
-const filteredTasks = computed(() => tasks.value.filter((task) => {
-  const query = keyword.value.trim().toLowerCase()
-  const mediaNames = (mediaByTask.value[task.id]?.list || []).map((item) => item.name).join('')
-  const matchesKeyword = !query || `${task.name}${task.waylineName}${task.deviceName}${task.id}${mediaNames}`.toLowerCase().includes(query)
-  if (!matchesKeyword || (taskFilter.value && task.id !== taskFilter.value) || (deviceFilter.value && task.deviceName !== deviceFilter.value)) return false
-  if (!timeFilter.value) return true
-  const timestamp = Date.parse(task.createTime.replace(' ', 'T'))
-  return Number.isFinite(timestamp) && Date.now() - timestamp <= Number(timeFilter.value) * 86400000
-}))
+const filteredTasks = computed(() => tasks.value
+  .filter((task) => {
+    const query = keyword.value.trim().toLowerCase()
+    const mediaNames = (mediaByTask.value[task.id]?.list || []).map((item) => item.name).join('')
+    const matchesKeyword = !query || `${task.name}${task.waylineName}${task.deviceName}${task.id}${mediaNames}`.toLowerCase().includes(query)
+    if (!matchesKeyword || (taskFilter.value && task.id !== taskFilter.value) || (deviceFilter.value && task.deviceName !== deviceFilter.value)) return false
+    if (!timeFilter.value) return true
+    const timestamp = Date.parse(task.createTime.replace(' ', 'T'))
+    return Number.isFinite(timestamp) && Date.now() - timestamp <= Number(timeFilter.value) * 86400000
+  })
+  .map((task, originalIndex) => ({ task, originalIndex }))
+  .sort((left, right) => {
+    const leftState = mediaByTask.value[left.task.id]
+    const rightState = mediaByTask.value[right.task.id]
+    const leftEmpty = Boolean(leftState && !leftState.loading && !leftState.error && leftState.total === 0)
+    const rightEmpty = Boolean(rightState && !rightState.loading && !rightState.error && rightState.total === 0)
+    return Number(leftEmpty) - Number(rightEmpty) || left.originalIndex - right.originalIndex
+  })
+  .map(({ task }) => task))
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredTasks.value.length / pageSize.value)))
 const pageTasks = computed(() => filteredTasks.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
 const visibleMediaTotal = computed(() => Object.values(mediaByTask.value).reduce((sum, item) => sum + item.total, 0))
@@ -120,11 +130,19 @@ async function refreshEligibleMediaTotal(taskList: UavFlightTaskOption[], backen
   try {
     let excludedCount = 0
     let eligibleCount = 0
+    const loadedStates: Record<string, TaskMediaState> = {}
     for (let index = 0; index < taskList.length; index += 5) {
-      const group = await Promise.all(taskList.slice(index, index + 5).map((task) => fetchClassifiedTaskMedia(task.id)))
+      const groupTasks = taskList.slice(index, index + 5)
+      const group = await Promise.all(groupTasks.map((task) => fetchClassifiedTaskMedia(task.id)))
       excludedCount += group.reduce((sum, item) => sum + item.excludedCount, 0)
       eligibleCount += group.reduce((sum, item) => sum + item.eligible.length, 0)
+      group.forEach((result, groupIndex) => {
+        const task = groupTasks[groupIndex]
+        if (!task) return
+        loadedStates[task.id] = { list: result.eligible, all: result.eligible, total: result.eligible.length, loading: false, error: '' }
+      })
     }
+    mediaByTask.value = { ...mediaByTask.value, ...loadedStates }
     mediaSummaryTotal.value = backendTotal === undefined ? eligibleCount : Math.max(0, backendTotal - excludedCount)
   } catch {
     mediaSummaryTotal.value = undefined

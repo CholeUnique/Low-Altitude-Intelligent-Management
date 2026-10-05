@@ -644,7 +644,7 @@ function renderHailingBoundary() {
       opacity: 1,
       fill: true,
       fillColor: '#66B9DA',
-      fillOpacity: .26,
+      fillOpacity: .1,
       lineCap: 'round',
       lineJoin: 'round',
       className: 'hailing-boundary-glow',

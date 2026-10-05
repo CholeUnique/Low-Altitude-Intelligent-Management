@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   createTasksFromAbnormals,
   getGovernanceTaskPage,
@@ -34,10 +34,19 @@ interface ReviewSpot extends RecognitionSpotItem {
 
 const loading = ref(false)
 const loadError = ref('')
+const mapFullscreen = ref(false)
 const records = ref<ReviewSpot[]>([])
 const keyword = ref('')
 const typeFilter = ref('')
 const statusFilter = ref<number | ''>('')
+
+function toggleMapFullscreen() {
+  mapFullscreen.value = !mapFullscreen.value
+}
+
+function handleMapFullscreenKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && mapFullscreen.value) mapFullscreen.value = false
+}
 const activeId = ref('')
 const selectedIds = ref<string[]>([])
 const creatingTasks = ref(false)
@@ -159,6 +168,7 @@ function selectSpot(id: string) {
   synchronizedMapView.value = undefined
 }
 function selectPeriods(count: number) {
+  if (count > displayableImagery.value.length) return
   periods.value = count
   activeImageIndex.value = Math.min(activeImageIndex.value, Math.max(0, displayableImagery.value.length - 1))
 }
@@ -462,12 +472,18 @@ watch(filtered, (items) => {
   if (!items.some((item) => item.id === activeId.value)) activeId.value = items[0]?.id || ''
 })
 watch(activeId, () => { activeImageIndex.value = 0 })
+watch(() => displayableImagery.value.length, (count) => {
+  periods.value = Math.min(periods.value, Math.max(1, count))
+  activeImageIndex.value = Math.min(activeImageIndex.value, Math.max(0, count - 1))
+}, { immediate: true })
 onMounted(() => {
+  window.addEventListener('keydown', handleMapFullscreenKeydown)
   void loadSpots()
   void loadImageryMapServices().catch((error) => {
     operationError.value = error instanceof Error ? error.message : '参考影像地图服务加载失败。'
   })
 })
+onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenKeydown))
 </script>
 
 <template>
@@ -477,7 +493,7 @@ onMounted(() => {
       <article><span>待核查</span><b>{{ statusCounts[0]?.count || 0 }}</b><small>等待派生核查任务</small></article>
       <article><span>核查中</span><b>{{ statusCounts[1]?.count || 0 }}</b><small>已进入核查流程</small></article>
       <article><span>已完成处置</span><b>{{ (statusCounts[2]?.count || 0) + (statusCounts[3]?.count || 0) }}</b><small>已处置及已销号</small></article>
-      <div class="heading-actions"><button class="secondary" @click="prepareUpload">上传疑似图斑</button><button :disabled="!selectedIds.length || creatingTasks" @click="openTaskCreateDialog">{{ `选中图斑创建任务（${selectedIds.length}）` }}</button></div>
+      <div class="heading-actions"><button :disabled="!selectedIds.length || creatingTasks" @click="openTaskCreateDialog">{{ `选中图斑创建任务（${selectedIds.length}）` }}</button><button class="secondary" @click="prepareUpload">上传疑似图斑</button></div>
     </section>
 
     <div v-if="operationMessage" class="operation-message success">{{ operationMessage }}</div>
@@ -498,17 +514,17 @@ onMounted(() => {
       </aside>
 
       <div class="center-column">
-        <main class="comparison panel">
-          <header><b>问题图斑分布</b><span v-if="active">当前：{{ active.title }}</span></header>
+        <main class="comparison panel" :class="{ 'map-panel--fullscreen': mapFullscreen }">
+          <header><b>问题图斑分布</b><div class="map-header-actions"><span v-if="active">当前：{{ active.title }}</span><button type="button" :aria-label="mapFullscreen ? '退出问题图斑分布全屏' : '全屏展示问题图斑分布'" @click="toggleMapFullscreen">{{ mapFullscreen ? '退出全屏' : '全屏展示' }}</button></div></header>
           <div class="map-grid" :class="`compare-${periods}`">
             <SpotDistributionMap v-for="period in comparisonPeriods" :key="`${active?.id}-${periods}-${period.number}-${period.mapService?.id || 'empty'}`" :spot="activeAsTaskAbnormal" :period="period" :synchronized-view="synchronizedMapView" :drawing-mode="drawingMode(period)" :draft-coordinates="draftCoordinates" @view-change="synchronizedMapView = $event" @draw-point="addSpotDrawingPoint" />
           </div>
         </main>
 
         <section class="analysis panel">
-          <header><b>多期影像 / 变化分析</b><span>点选影像可切换当前显示的起始期次</span></header>
+          <header><b>多期影像 / 变化分析 <small class="analysis-title-hint">（点选下方影像可切换当前显示的起始期次）</small></b></header>
           <div class="period-bar">
-            <div><button v-for="count in [1, 2, 3, 4]" :key="count" :class="{ active: periods === count }" @click="selectPeriods(count)">{{ count }} 期影像</button></div>
+            <div><button v-for="count in [1, 2, 3, 4]" :key="count" :class="{ active: periods === count }" :disabled="count > displayableImagery.length" :title="count > displayableImagery.length ? `当前图斑仅有 ${displayableImagery.length} 期影像` : `显示 ${count} 期影像`" @click="selectPeriods(count)">{{ count }} 期影像</button></div>
             <span>当前对比：{{ active?.title || '未选择图斑' }}</span>
           </div>
           <div class="imagery-list">
@@ -522,11 +538,6 @@ onMounted(() => {
       </div>
 
       <aside class="right-column">
-        <section class="spot-detail panel">
-          <header><b>异常图斑详细信息</b></header>
-          <template v-if="active"><dl><div><dt>图斑编号</dt><dd>{{ active.spotNo }}</dd></div><div><dt>异常类型</dt><dd>{{ active.abnormalTypeDesc }}</dd></div><div><dt>处置状态</dt><dd>{{ statusLabel(active.handleStatus) }}</dd></div><div><dt>所属场景</dt><dd>{{ activeSceneName }}</dd></div><div><dt>面积</dt><dd>{{ active.area === undefined ? '-' : `${active.area} ㎡` }}</dd></div><div><dt>发现时间</dt><dd>{{ formatTime(active.foundTime) }}</dd></div><div><dt>关联影像</dt><dd>{{ active.mapServices.length }} 期</dd></div><div><dt>来源任务</dt><dd>{{ active.sourceTaskName || '通用识别图斑' }}</dd></div></dl><p>{{ active.description || '暂无异常图斑描述。' }}</p></template>
-          <div v-else class="empty">请选择问题图斑</div>
-        </section>
         <ManualSpotCreatePanel
           :scene-code="active?.sceneCode"
           :scenes="scenes"
@@ -544,6 +555,11 @@ onMounted(() => {
           @clear-drawing="clearSpotDrawing"
           @created="handleSpotCreated"
         />
+        <section class="spot-detail panel">
+          <header><b>异常图斑详细信息</b></header>
+          <template v-if="active"><dl><div><dt>图斑编号</dt><dd>{{ active.spotNo }}</dd></div><div><dt>异常类型</dt><dd>{{ active.abnormalTypeDesc }}</dd></div><div><dt>处置状态</dt><dd>{{ statusLabel(active.handleStatus) }}</dd></div><div><dt>所属场景</dt><dd>{{ activeSceneName }}</dd></div><div><dt>面积</dt><dd>{{ active.area === undefined ? '-' : `${active.area} ㎡` }}</dd></div><div><dt>发现时间</dt><dd>{{ formatTime(active.foundTime) }}</dd></div><div><dt>关联影像</dt><dd>{{ active.mapServices.length }} 期</dd></div><div><dt>来源任务</dt><dd>{{ active.sourceTaskName || '通用识别图斑' }}</dd></div></dl><p>{{ active.description || '暂无异常图斑描述。' }}</p></template>
+          <div v-else class="empty">请选择问题图斑</div>
+        </section>
       </aside>
     </section>
 
@@ -660,8 +676,13 @@ onMounted(() => {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(390px, .95fr) minmax(340px, 1.05fr);
+  grid-template-rows: minmax(0, 1.07fr) minmax(0, .93fr);
   gap: 12px;
+  overflow: hidden;
+}
+
+.right-column > .panel {
+  min-height: 0;
 }
 
 .right-column .spot-detail {
@@ -672,6 +693,76 @@ onMounted(() => {
 .comparison {
   min-height: 0;
   grid-template-rows: 48px minmax(0, 1fr);
+}
+
+.map-header-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.map-header-actions > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-header-actions > button {
+  flex: none;
+  height: 30px;
+  padding: 0 11px;
+  color: #167895;
+  background: #f3fafc;
+  border: 1px solid #8fc8d8;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.map-header-actions > button:hover,
+.map-header-actions > button:focus-visible {
+  color: #fff;
+  background: #137f9e;
+  border-color: #137f9e;
+  outline: none;
+}
+
+.comparison.map-panel--fullscreen {
+  position: fixed;
+  z-index: 4000;
+  inset: 0;
+  grid-template-rows: 54px minmax(0, 1fr);
+  border: 0;
+  border-radius: 0;
+  background: #dbe5ea;
+  box-shadow: none;
+}
+
+.comparison.map-panel--fullscreen > header {
+  height: 54px;
+  padding-inline: 18px;
+  color: #eafaff;
+  background: #07344f;
+  border-color: #1e6684;
+}
+
+.comparison.map-panel--fullscreen > header b {
+  color: #fff;
+  font-size: 18px;
+}
+
+.comparison.map-panel--fullscreen .map-header-actions > span {
+  color: #b4d7e5;
+  font-size: 13px;
+}
+
+.comparison.map-panel--fullscreen .map-header-actions > button {
+  color: #fff;
+  background: #126f91;
+  border-color: #6ed8eb;
 }
 
 .map-grid.compare-1 {
@@ -719,6 +810,7 @@ onMounted(() => {
 
 .period-bar > div {
   display: flex;
+  align-items: center;
   gap: 6px;
 }
 
@@ -737,6 +829,23 @@ onMounted(() => {
   color: #fff;
   background: #168dab;
   border-color: #168dab;
+}
+
+.period-bar button:disabled {
+  color: #9eacb3;
+  background: #eef2f4;
+  border-color: #dce4e8;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: .72;
+}
+
+.analysis-title-hint {
+  margin-left: 4px;
+  color: #718997;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .period-bar > span {
@@ -841,6 +950,26 @@ onMounted(() => {
     flex-basis: 154px;
   }
 }
+
+@media (max-height: 900px) {
+  .general-review {
+    padding-block: 8px;
+  }
+
+  .right-column {
+    grid-template-rows: minmax(0, 1.1fr) minmax(240px, .9fr);
+    gap: 8px;
+  }
+
+  .right-column .spot-detail dl div {
+    padding-block: 8px;
+  }
+
+  .right-column .spot-detail > p {
+    margin-block: 8px;
+  }
+}
 .filters select:hover,.filters select:focus{color:#fff;background:#075273;border-color:#1599c1}.filters select option{color:#365768;background:#fff}
+.upload-form select:hover,.upload-form select:focus{color:#fff;background-color:#075273;border-color:#1599c1}.upload-form select option{color:#365768;background:#fff}
 .upload-file-field{min-width:0;display:flex;flex-direction:column;gap:6px}.upload-file-field>span{color:#536f7d;font-size:12px;font-weight:700}.file-picker{height:46px;box-sizing:border-box;display:grid;grid-template-columns:30px auto minmax(0,1fr);align-items:center;gap:9px;padding:0 12px;border:1px dashed #9ec7d7;border-radius:6px;background:#f5fbfd;cursor:pointer;transition:border-color .18s,background .18s,box-shadow .18s}.file-picker:hover,.file-picker:focus-within{border-color:#168ead;background:#eaf7fb;box-shadow:0 0 0 2px #168ead16}.file-picker.selected{border-style:solid;border-color:#74b9cb;background:#eff9f7}.file-picker__input{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0!important}.file-picker i{width:28px;height:28px;display:grid;place-items:center;color:#fff;background:#168fac;border-radius:50%;font-size:17px;font-style:normal;font-weight:800}.file-picker b{color:#176f89;font-size:13px;white-space:nowrap}.file-picker em{min-width:0;overflow:hidden;color:#78909c;font-size:12px;font-style:normal;text-align:right;text-overflow:ellipsis;white-space:nowrap}.file-picker.selected em{color:#24725f}.upload-form .file-picker__names{overflow:hidden;padding:5px 8px;color:#3f7485;background:#f2f7f9;border-radius:4px;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
 </style>
