@@ -70,3 +70,11 @@ assert.equal(looped.workflow.length, 3, '循环节点保留不同实例，只去
 assert.equal(listState.projectTaskListWorkflow({ ...waitingTask, taskStatus: 4, taskStatusDesc: '已取消' }, reviewFlow).taskStatus, 4)
 assert.equal(listState.projectTaskListWorkflow(waitingTask, { ...reviewFlow, status: 'FINISHED', timeline: [{ ...realReview, status: 'COMPLETED' }], currentNode: undefined }).taskStatus, 5)
 console.log('PASS: list status, workflow history, next node, loops, filtering status and source immutability')
+
+const ownerReview = { ...realReview, nodeKey: 'REVIEW_OWNER', nodeName: '场景负责人审核', bizTaskId: '900' }
+assert.equal(state.nonGrainNodeKey(ownerReview), 'section-preliminary-review', '任务900最新后端首节点映射为科室初核')
+assert.equal(state.canOperateWorkflowNode(ownerReview, '692'), true)
+assert.equal(state.workflowNodeDisplayName(ownerReview, 'CULTIVATED_LAND_USE_CONTROL'), '科室初核')
+assert.equal(state.nonGrainWorkflow({ ...reviewFlow, currentNode: ownerReview, timeline: [ownerReview] }, true)[1].status, 'active')
+assert.equal(listState.projectTaskListWorkflow(waitingTask, { ...reviewFlow, currentNode: ownerReview, timeline: [ownerReview] }).taskStatusDesc, '科室初核处理中')
+console.log('PASS: REVIEW_OWNER real non-grain first node and assignee permissions')

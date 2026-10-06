@@ -17,7 +17,7 @@ export function nonGrainNodeKey(node: WorkflowNode) {
   const normalized = node.nodeKey.toLowerCase().replace(/_/g, '-')
   // 非粮化 NON_GRAIN_MONITOR 的真实首审标识（任务 1314 联调确认）。
   // 工作台按业务称为科室初核，提交仍使用后端的节点实例 ID，不改写流程数据。
-  if (normalized === 'review-city' && node.nodeType === 'REVIEW') return 'section-preliminary-review'
+  if (['review-city', 'review-owner'].includes(normalized) && node.nodeType === 'REVIEW') return 'section-preliminary-review'
   return NON_GRAIN_WORKFLOW.find(step => step.key === normalized || step.name === node.nodeName)?.key
 }
 export function workflowNodeDisplayName(node: WorkflowNode, sceneCode: string) {

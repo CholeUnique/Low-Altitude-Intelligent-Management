@@ -127,3 +127,10 @@ nyncKZ 浏览器实测任务 1314/111：当前状态为科室初核处理中，�
 下发表单新增必填办理期限日期时间选择器，供当前办理人选择下一节点截止时间。提交传 WfSubmitReq 顶层 deadline，按现有接口使用的本地 ISO 日期时间 YYYY-MM-DDTHH:mm:ss，保留用户所选日期/时间，不额外转 UTC，避免产生八小时偏移。未选择或时间格式无效不提交；失败保留选择；切换节点重置，不把当前节点期限冒充下一节点期限。只读页面无编辑控件。
 
 result 路由错误与 deadline 无关。targetDeptId/targetAssigneeId 是接收方；接口没有显式下一节点字段，当前后端根据 result 匹配流程配置，匹配失败无法创建下一节点。仍待后端确认当前首审节点的合法 result 值，不能声称填了期限就已经打通下发。
+
+
+### 2026-10-07 启动 NYNCJ-20260915-001 并分派给 nyncKZ
+
+用户明确要求的任务为 bizTaskId=900（棚房测试任务）。真实调用 /workflow/start，传 bizTaskId=900、deptId=1、assigneeId=692。后端生成 flowInstanceId=3、首节点实例 id=2，状态 RUNNING/PROCESSING，办理人为农田建设科 nyncKZ。启动时间 2026-10-07T02:41:44，默认期限 2026-11-06T02:41:44（后端返回）。
+
+本次启动的后端首节点标识为 REVIEW_OWNER，名称为场景负责人审核，与之前任务1314的 REVIEW_CITY 不同。补充真实首审节点到前端科室初核的业务名称映射；未改写后端节点Key。实际读取 /workflow/todo/page 确认该账号能看到任务900的当前实例；验证JSON为 docs/backend-task-snapshot/nync-20260915-start-verification.json，不含Token/密码。

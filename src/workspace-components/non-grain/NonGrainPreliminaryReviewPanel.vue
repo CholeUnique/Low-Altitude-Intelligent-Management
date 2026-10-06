@@ -120,14 +120,15 @@ function recordText(value: unknown) { return value && typeof value === 'object' 
     <div class="review-columns">
       <main class="review-left">
         <section class="ng-card review-plots"><h3><i>斑</i>初核图斑概览 <small>共 {{ abnormals.length }} 个</small></h3>
+          <div class="review-scroll" tabindex="0" role="region" aria-label="初核图斑概览列表">
           <button v-for="(spot, index) in abnormals" :key="spot.id" class="review-plot" :class="{ selected: activeSpotId === spot.id }" @click="activeSpotId = spot.id">
             <div class="plot-thumbnail"><SpotDistributionMap :key="`${spot.id}-${spotPeriod(spot).imageUrl || spotPeriod(spot).mapService?.id || 'empty'}`" :spot="spot" :period="spotPeriod(spot)" thumbnail /></div>
             <span class="plot-content"><b><i>{{ index + 1 }}</i>{{ spot.title }}</b><span>面积：<strong>{{ spot.area == null ? '暂无数据' : `${spot.area} ㎡` }}</strong></span><small>{{ spot.abnormalTypeDesc }} · {{ handleLabel(spot.handleStatus) }}</small><small>{{ spot.description || '暂无图斑说明' }}</small></span>
           </button>
           <p v-if="!abnormals.length" class="review-empty">当前任务暂无异常图斑，任务范围及影像请在任务受理页查看。</p>
-
+          </div>
         </section>
-        <section class="ng-card review-history"><h3><i>痕</i>任务操作历史 <small>{{ logs.length }} 条</small></h3><div class="review-actions"><button :disabled="loading" @click="load">刷新任务操作历史</button></div><article v-for="log in logs" :key="log.id" class="review-log"><b>{{ log.operateTypeDesc }}</b><small>{{ text(log.createTime) }} · {{ log.operatorName || '暂无操作人' }}</small><p>{{ log.operateDesc }}</p></article><p v-if="!logs.length" class="review-empty">暂无任务操作历史</p></section>
+        <section class="ng-card review-history"><h3><i>痕</i>任务操作历史 <small>{{ logs.length }} 条</small></h3><div class="review-actions"><button :disabled="loading" @click="load">刷新任务操作历史</button></div><div class="review-scroll" tabindex="0" role="region" aria-label="任务操作历史列表"><article v-for="log in logs" :key="log.id" class="review-log"><b>{{ log.operateTypeDesc }}</b><small>{{ text(log.createTime) }} · {{ log.operatorName || '暂无操作人' }}</small><p>{{ log.operateDesc }}</p></article><p v-if="!logs.length" class="review-empty">暂无任务操作历史</p></div></section>
       </main>
       <aside class="review-right">
         <section class="ng-card review-record"><h3 class="dispatch-heading"><i></i>{{ task?.taskNo }} 下发</h3>
@@ -186,4 +187,30 @@ function recordText(value: unknown) { return value && typeof value === 'object' 
 
 <style scoped>
 .dispatch-deadline{position:relative}.required-hint{position:absolute;right:0;top:0;color:#e26c58;font-size:11px}.dispatch-deadline small{color:#8195a6;font-size:11px}.dispatch-deadline input{font-family:inherit;color-scheme:light}
+</style>
+
+<style scoped>
+.preliminary-review{display:flex;flex-direction:column;overflow:hidden}
+.review-summary,.review-status{flex-shrink:0}
+.review-columns{flex:1;min-height:0;align-items:stretch}
+.review-left{min-height:0;grid-template-rows:minmax(0,3fr) minmax(0,2fr)}
+.review-plots,.review-history{min-height:0;box-sizing:border-box;padding:16px}
+.review-plots>h3,.review-history>h3,.review-history>.review-actions{flex-shrink:0}
+.review-plots>h3{margin-bottom:12px}
+.review-history{position:relative}
+.review-history>h3{padding-right:145px}
+.review-history>.review-actions{position:absolute;top:12px;right:16px;margin:0}
+.review-history>.review-actions button{padding:6px 10px;font-size:12px}
+.review-scroll{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-gutter:stable;overscroll-behavior:contain}
+.review-scroll:focus-visible{outline:2px solid #1687ef;outline-offset:2px}
+.review-right{min-height:0;grid-template-rows:minmax(0,1fr);overflow:hidden}
+.review-right>.review-record{min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-gutter:stable;overscroll-behavior:contain}
+.review-record>h3,.review-record>form,.review-record>.review-fields,.review-record>.review-unsubmitted{flex-shrink:0}
+@media(max-width:800px){
+  .preliminary-review{overflow:auto}
+  .review-columns{flex:none}
+  .review-left{height:clamp(360px,70dvh,650px)}
+  .review-right{grid-template-rows:auto;overflow:visible}
+  .review-right>.review-record{overflow:visible}
+}
 </style>
