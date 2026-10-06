@@ -70,9 +70,6 @@ const spotDrawing = ref(false)
 const drawingPeriod = ref<number>()
 const drawingMapServiceId = ref<string | number>()
 const draftCoordinates = ref<Array<[number, number]>>([])
-const drawingBackup = ref<Array<[number, number]>>([])
-const drawingBackupPeriod = ref<number>()
-const drawingBackupMapServiceId = ref<string | number>()
 
 const abnormalTypes: Array<{ value: RecognitionAbnormalType; label: string }> = [
   { value: 'ILLEGAL_OCCUPY', label: '违法占用' },
@@ -189,18 +186,13 @@ function drawingMode(period: ComparisonPeriod): SpotDrawingMode {
   return drawingPeriod.value === period.number ? 'active' : 'blocked'
 }
 function startSpotDrawing() {
-  drawingBackup.value = draftCoordinates.value.map((point) => [...point] as [number, number])
-  drawingBackupPeriod.value = drawingPeriod.value
-  drawingBackupMapServiceId.value = drawingMapServiceId.value
   draftCoordinates.value = []
   drawingPeriod.value = undefined
   drawingMapServiceId.value = undefined
   spotDrawing.value = true
 }
 function cancelSpotDrawing() {
-  draftCoordinates.value = drawingBackup.value.map((point) => [...point] as [number, number])
-  drawingPeriod.value = drawingBackupPeriod.value
-  drawingMapServiceId.value = drawingBackupMapServiceId.value
+  clearSpotDrawing()
   spotDrawing.value = false
 }
 function finishSpotDrawing() {
@@ -234,9 +226,6 @@ async function handleSpotCreated(result: RecognitionSpotCreateResult) {
   statusFilter.value = ''
   await loadSpots(preferredSpotNo)
   clearSpotDrawing()
-  drawingBackup.value = []
-  drawingBackupPeriod.value = undefined
-  drawingBackupMapServiceId.value = undefined
 }
 function canSelect(item: ReviewSpot) {
   if (item.derivedTaskId || item.handleStatus !== 0) return false
@@ -471,9 +460,12 @@ async function submitUpload() {
 watch(filtered, (items) => {
   if (!items.some((item) => item.id === activeId.value)) activeId.value = items[0]?.id || ''
 })
-watch(activeId, () => { activeImageIndex.value = 0 })
+watch(activeId, () => {
+  activeImageIndex.value = 0
+  periods.value = displayableImagery.value.length >= 2 ? 2 : 1
+})
 watch(() => displayableImagery.value.length, (count) => {
-  periods.value = Math.min(periods.value, Math.max(1, count))
+  periods.value = count >= 2 ? 2 : 1
   activeImageIndex.value = Math.min(activeImageIndex.value, Math.max(0, count - 1))
 }, { immediate: true })
 onMounted(() => {
@@ -517,7 +509,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
         <main class="comparison panel" :class="{ 'map-panel--fullscreen': mapFullscreen }">
           <header><b>问题图斑分布</b><div class="map-header-actions"><span v-if="active">当前：{{ active.title }}</span><button type="button" :aria-label="mapFullscreen ? '退出问题图斑分布全屏' : '全屏展示问题图斑分布'" @click="toggleMapFullscreen">{{ mapFullscreen ? '退出全屏' : '全屏展示' }}</button></div></header>
           <div class="map-grid" :class="`compare-${periods}`">
-            <SpotDistributionMap v-for="period in comparisonPeriods" :key="`${active?.id}-${periods}-${period.number}-${period.mapService?.id || 'empty'}`" :spot="activeAsTaskAbnormal" :period="period" :synchronized-view="synchronizedMapView" :drawing-mode="drawingMode(period)" :draft-coordinates="draftCoordinates" @view-change="synchronizedMapView = $event" @draw-point="addSpotDrawingPoint" />
+            <SpotDistributionMap v-for="period in comparisonPeriods" :key="`${active?.id}-${periods}-${period.number}-${period.mapService?.id || 'empty'}`" :spot="activeAsTaskAbnormal" :period="period" :synchronized-view="synchronizedMapView" :drawing-mode="drawingMode(period)" :draft-coordinates="draftCoordinates" @view-change="synchronizedMapView = $event" @draw-point="addSpotDrawingPoint" @finish-drawing="finishSpotDrawing" />
           </div>
         </main>
 
