@@ -454,7 +454,12 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
 .task-filters select, .task-filters input, .search-box { height: 34px; color: #32485e; background: #fff; border-color: #d8e0e7; border-radius: 4px; font-size: 12px; }
 .task-filters select { color-scheme: light; }
 .task-filters select option { color: #32485e; background: #fff; }
-.task-filters select:not(:disabled):hover { color: #32485e !important; background-color: #fff !important; }
+.task-filters select:not(:disabled):hover,
+.task-filters select:not(:disabled):focus-visible {
+  color: #fff !important;
+  background-color: #176f9f !important;
+  border-color: #2aa9df !important;
+}
 .search-box { color: #7e91a4; }
 .department-filter { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .department-filter select { min-width: 0; width: 100%; }

@@ -226,7 +226,7 @@ onBeforeUnmount(() => {
               <div v-if="deviceStatisticsLoading" class="panel-empty panel-empty--small">…<small>正在读取设备飞行统计</small></div>
               <div v-else-if="deviceFlightStatistics.length" class="performance-body">
                 <section class="performance-metrics">
-                  <article><span>累计飞行架次</span><b>{{ selectedDeviceMetrics.flightCount }}</b><small>架次</small></article>
+                  <article><span>累计飞行架次</span><b>{{ selectedDeviceMetrics.flightCount }} 架次</b></article>
                   <article><span>累计飞行距离</span><b>{{ formatDistance(selectedDeviceMetrics.flightDistance) }}</b></article>
                   <article><span>累计飞行时长</span><b>{{ formatDuration(selectedDeviceMetrics.flightTime) }}</b></article>
                 </section>
@@ -751,7 +751,7 @@ onBeforeUnmount(() => {
   padding: 14px;
   border-color: #28a8c8;
   background: linear-gradient(145deg, #e9f8fb 0%, #f9fdfe 58%, #eef8fa 100%);
-  box-shadow: inset 4px 0 #13a6ca, 0 4px 16px #187f9c14;
+  box-shadow: none;
   cursor: default;
 }
 

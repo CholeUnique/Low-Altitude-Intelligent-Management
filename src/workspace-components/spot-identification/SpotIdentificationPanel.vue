@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { getTaskAbnormalPage } from '@/api/governance-task'
 import type { GovernanceTask, TaskAbnormal } from '@/api/governance-task'
-import type { MapServiceItem } from '@/api/map-service'
+import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { inspectMapService } from '@/utils/map-service-layer'
 import SpotDistributionMap from './SpotDistributionMap.vue'
 import type { ComparisonPeriod, SynchronizedMapView } from './SpotDistributionMap.vue'
 
@@ -26,13 +27,18 @@ const activeId = ref('')
 const periods = ref(1)
 const periodsManuallySelected = ref(false)
 const synchronizedMapView = ref<SynchronizedMapView>()
+const mapFullscreen = ref(false)
 const loading = ref(false)
 const loadError = ref('')
 const records = ref<TaskAbnormal[]>([])
 const activeImageIndex = ref(0)
-const uploadInput = ref<HTMLInputElement>()
 const hiddenImageIdsBySpot = ref<Record<string, string[]>>({})
 const pendingDeleteImage = ref<RelatedImagery>()
+const servicePickerVisible = ref(false)
+const servicePickerLoading = ref(false)
+const servicePickerError = ref('')
+const imageryMapServices = ref<MapServiceItem[]>([])
+const selectedMapServiceIds = ref<string[]>([])
 let requestVersion = 0
 
 const taskStatusOptions = [
@@ -137,41 +143,70 @@ function isImageDisplayed(index: number) {
     && index < activeImageIndex.value + periods.value
 }
 function selectPeriods(value: number) {
+  if (value > displayableImagery.value.length) return
   periods.value = value
   periodsManuallySelected.value = true
 }
 function synchronizeMapView(view: SynchronizedMapView) {
   synchronizedMapView.value = view
 }
-function openImageUpload() {
-  uploadInput.value?.click()
+function toggleMapFullscreen() {
+  mapFullscreen.value = !mapFullscreen.value
+}
+function handleMapFullscreenKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  if (servicePickerVisible.value) servicePickerVisible.value = false
+  else if (mapFullscreen.value) mapFullscreen.value = false
+}
+async function loadImageryMapServices() {
+  const services = await listEnabledMapServices()
+  const inspections = await Promise.allSettled(services.map((service) => inspectMapService(service)))
+  imageryMapServices.value = services.filter((service, index) => {
+    const inspection = inspections[index]
+    if (inspection?.status === 'fulfilled') return inspection.value.isImagery
+    const type = String(service.type || '').toUpperCase()
+    return /IMAGE_SERVER|IMAGESERVER|WMTS|WMS|XYZ|TMS/.test(type)
+  })
 }
 function clearManualImagery() {
-  Object.values(manualImageryBySpot.value).flat().forEach((image) => {
-    if (image.local && image.url) URL.revokeObjectURL(image.url)
-  })
   manualImageryBySpot.value = {}
 }
-function addLocalImagery(event: Event) {
-  const input = event.target as HTMLInputElement
-  const files = Array.from(input.files || []).filter((file) => file.type.startsWith('image/'))
-  const spotId = currentSpotId.value
-  if (!files.length || !spotId) {
-    input.value = ''
-    return
+function isMapServiceAdded(service: MapServiceItem) {
+  return displayableImagery.value.some((image) => String(image.mapService?.id) === String(service.id))
+}
+async function openImageServicePicker() {
+  if (!active.value) return
+  servicePickerVisible.value = true
+  servicePickerError.value = ''
+  selectedMapServiceIds.value = []
+  if (imageryMapServices.value.length) return
+  servicePickerLoading.value = true
+  try {
+    await loadImageryMapServices()
+  } catch (error) {
+    servicePickerError.value = error instanceof Error ? error.message : '参考影像地图服务加载失败。'
+  } finally {
+    servicePickerLoading.value = false
   }
-  const additions: RelatedImagery[] = files.map((file) => ({
-    id: `local-${crypto.randomUUID()}`,
-    label: `本地上传 · ${file.name}`,
-    url: URL.createObjectURL(file),
-    date: new Date().toISOString(),
-    local: true,
-  }))
+}
+function addSelectedMapServices() {
+  const spotId = currentSpotId.value
+  if (!spotId || !selectedMapServiceIds.value.length) return
+  const selectedIds = new Set(selectedMapServiceIds.value)
+  const existingServiceIds = new Set(displayableImagery.value.flatMap((image) => image.mapService ? [String(image.mapService.id)] : []))
+  const additions: RelatedImagery[] = imageryMapServices.value
+    .filter((service) => selectedIds.has(String(service.id)) && !existingServiceIds.has(String(service.id)))
+    .map((service) => ({
+      id: `selected-service-${spotId}-${service.id}`,
+      label: service.name,
+      mapService: service,
+    }))
   manualImageryBySpot.value = {
     ...manualImageryBySpot.value,
     [spotId]: [...currentManualImagery.value, ...additions],
   }
-  input.value = ''
+  servicePickerVisible.value = false
+  selectedMapServiceIds.value = []
 }
 function requestImageDelete(image: RelatedImagery) {
   pendingDeleteImage.value = image
@@ -180,8 +215,7 @@ function confirmImageDelete() {
   const image = pendingDeleteImage.value
   const spotId = currentSpotId.value
   if (!image || !spotId) return
-  if (image.local) {
-    if (image.url) URL.revokeObjectURL(image.url)
+  if (currentManualImagery.value.some((item) => item.id === image.id)) {
     manualImageryBySpot.value = {
       ...manualImageryBySpot.value,
       [spotId]: currentManualImagery.value.filter((item) => item.id !== image.id),
@@ -253,9 +287,16 @@ watch(periods, () => {
   synchronizedMapView.value = undefined
 }, { flush: 'sync' })
 watch(() => displayableImagery.value.length, (imageCount) => {
-  if (!periodsManuallySelected.value) periods.value = imageCount >= 2 ? 2 : 1
+  const availablePeriods = Math.max(1, imageCount)
+  periods.value = periodsManuallySelected.value
+    ? Math.min(periods.value, availablePeriods)
+    : Math.min(2, availablePeriods)
+  activeImageIndex.value = Math.min(activeImageIndex.value, Math.max(0, imageCount - 1))
 })
-onBeforeUnmount(clearManualImagery)
+onMounted(() => window.addEventListener('keydown', handleMapFullscreenKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleMapFullscreenKeydown)
+})
 </script>
 
 <template>
@@ -298,8 +339,8 @@ onBeforeUnmount(clearManualImagery)
     </aside>
 
     <section class="center-column">
-      <div class="panel map-panel">
-        <div class="panel-title"><span>问题图斑分布</span></div>
+      <div class="panel map-panel" :class="{ 'map-panel--fullscreen': mapFullscreen }">
+        <div class="panel-title"><span>问题图斑分布</span><div class="map-header-actions"><small v-if="active">当前：{{ active.title }}</small><button type="button" :aria-label="mapFullscreen ? '退出问题图斑分布全屏' : '全屏展示问题图斑分布'" @click="toggleMapFullscreen">{{ mapFullscreen ? '退出全屏' : '全屏展示' }}</button></div></div>
         <div v-if="active" class="map-compare" :class="`compare-${periods}`">
           <SpotDistributionMap
             v-for="period in comparisonPeriods"
@@ -315,22 +356,20 @@ onBeforeUnmount(clearManualImagery)
       </div>
 
       <div class="panel analysis">
-        <div class="panel-title"><span>多期影像 / 变化分析</span></div>
+        <div class="panel-title"><span>多期影像 / 变化分析 <small class="analysis-title-hint">（点选下方影像可切换当前显示的起始期次）</small></span></div>
         <div class="periods">
-          <button v-for="n in [1, 2, 3, 4]" :key="n" :class="{ active: periods === n }" @click="selectPeriods(n)">{{ n }} 期影像</button>
-          <small class="analysis-hint">点选下方影像可切换当前显示的起始期次</small>
+          <button v-for="n in [1, 2, 3, 4]" :key="n" :class="{ active: periods === n }" :disabled="n > displayableImagery.length" :title="n > displayableImagery.length ? `当前图斑仅有 ${displayableImagery.length} 期影像` : `显示 ${n} 期影像`" @click="selectPeriods(n)">{{ n }} 期影像</button>
           <span>当前对比：{{ active?.title || '未选择图斑' }}</span>
         </div>
         <div class="imagery">
-          <input ref="uploadInput" class="imagery-upload-input" type="file" accept="image/*" multiple @change="addLocalImagery" />
           <button v-for="(image, index) in displayableImagery" :key="image.id" class="image-card" :class="{ active: activeImageIndex === index, displayed: isImageDisplayed(index) }" @click="selectImage(index)">
             <SpotDistributionMap v-if="image.mapService && active" class="image-card__map-thumbnail" :spot="active" :period="imageryThumbnailPeriod(image, index)" thumbnail />
             <img v-else-if="image.url" :src="image.url" :alt="image.label" />
             <b>第 {{ index + 1 }} 期影像</b><small>{{ image.label }}{{ image.date ? ` · ${formatTime(image.date)}` : '' }}</small>
             <span class="image-card__delete" role="button" tabindex="0" aria-label="从当前图斑移除影像" title="从当前图斑移除" @click.stop="requestImageDelete(image)" @keydown.enter.stop="requestImageDelete(image)">×</span>
           </button>
-          <div v-if="!displayableImagery.length" class="imagery-empty">当前任务接口未返回可用的参考影像，可从本地添加</div>
-          <button class="image-card image-card--add" type="button" :disabled="!active" @click="openImageUpload"><i>＋</i><b>添加影像</b><small>从本地选择当前图斑的不同时期影像</small></button>
+          <div v-if="!displayableImagery.length" class="imagery-empty">当前任务暂未关联可用的参考影像，可从地图服务中添加</div>
+          <button class="image-card image-card--add" type="button" :disabled="!active" @click="openImageServicePicker"><i>＋</i><b>添加影像</b><small>从后端影像地图服务中选择</small></button>
         </div>
       </div>
     </section>
@@ -360,6 +399,28 @@ onBeforeUnmount(clearManualImagery)
         <footer><button @click="pendingDeleteImage = undefined">取消</button><button class="danger" @click="confirmImageDelete">确认移除</button></footer>
       </section>
     </div>
+    <div v-if="servicePickerVisible" class="service-picker-mask" @click.self="servicePickerVisible = false">
+      <section class="service-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="service-picker-title">
+        <header>
+          <div><h3 id="service-picker-title">添加参考影像</h3><p>从后端已启用的非矢量地图服务中选择影像</p></div>
+          <button type="button" aria-label="关闭" @click="servicePickerVisible = false">×</button>
+        </header>
+        <div class="service-picker-body">
+          <div v-if="servicePickerLoading" class="service-picker-state">正在读取参考影像地图服务…</div>
+          <div v-else-if="servicePickerError" class="service-picker-state service-picker-state--error">{{ servicePickerError }}</div>
+          <div v-else-if="!imageryMapServices.length" class="service-picker-state">暂无已启用的非矢量影像地图服务</div>
+          <fieldset v-else>
+            <legend>参考影像地图服务 <em>*</em></legend>
+            <label v-for="service in imageryMapServices" :key="service.id" :class="{ added: isMapServiceAdded(service) }">
+              <input v-model="selectedMapServiceIds" type="checkbox" :value="String(service.id)" :disabled="isMapServiceAdded(service)" />
+              <span><b>{{ service.name }}</b><small>{{ isMapServiceAdded(service) ? '已关联到当前图斑' : service.type }}</small></span>
+            </label>
+          </fieldset>
+          <p class="service-picker-tip">只展示已启用且通过影像类型检查的地图服务，矢量、图斑和边界服务不会出现在此列表中。</p>
+        </div>
+        <footer><button type="button" class="cancel" @click="servicePickerVisible = false">取消</button><button type="button" class="primary" :disabled="servicePickerLoading || !selectedMapServiceIds.length" @click="addSelectedMapServices">确认添加（{{ selectedMapServiceIds.length }}）</button></footer>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -367,18 +428,76 @@ onBeforeUnmount(clearManualImagery)
 .governance-page { height: 100%; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr) 330px; grid-template-rows:minmax(360px,1fr) 250px; gap: 10px; padding: 10px; background: #e8eef3; color: #29475a; }
 .panel { min-height: 0; overflow: hidden; background: #fff; border: 1px solid #cbdbe5; border-radius: 7px; box-shadow: 0 2px 9px #1c3b5214; }
 .panel-title { height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 13px; border-bottom: 1px solid #e1ebf1; color: #173c54; font-size: 15px; font-weight: 700; }.panel-title small { color: #6c8595; font-size: 12px; font-weight: 500; }
-.analysis-hint { color:#587789; font-size:12px; font-weight:700; white-space:nowrap; }
+.analysis-title-hint { margin-left:4px; color:#6c8595; font-size:12px; font-weight:500; white-space:nowrap; }
 .left-column { min-height: 0; grid-column:1; grid-row:1 / 3; display: grid; grid-template-rows: 290px minmax(0, 1fr); gap: 10px; }
 .task-selector { display: flex; flex-direction: column; }.task-filters { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 7px; padding: 9px; border-bottom: 1px solid #e8eff3; }.task-filters select { min-width: 0; height: 33px; padding: 0 7px; color: #38586a; background: #fbfdfe; border: 1px solid #c9dce7; border-radius: 4px; font-size: 11px; outline: none; }.task-filters select:hover,.task-filters select:focus { color:#fff; background:#075273; border-color:#1599c1; }.task-filters select option { color:#38586a; background:#fff; }.task-scroll { min-height:0; flex:1; overflow-y:auto; }.recognition-task-item { width:100%; display:block; padding:8px 10px; color:#29475a; border:0; border-bottom:1px solid #e8eef2; background:#fff; text-align:left; cursor:pointer; }.recognition-task-item:hover { background:#f2f9fc; }.recognition-task-item.active { padding-left:6px; border-left:4px solid #129bc3; background:#e5f5fb; }.recognition-task-item span,.recognition-task-item b,.recognition-task-item small { display:block; min-width:0; }.recognition-task-item b,.recognition-task-item small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.recognition-task-item b { color:#1d435b; font-size:12px; }.recognition-task-item small { margin-top:3px; color:#708897; font-size:10px; }.task-empty { display:grid; min-height:70px; place-items:center; padding:12px; color:#6f8796; font-size:12px; text-align:center; }
 .spot-list { display: flex; flex-direction: column; }.filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-bottom: 1px solid #e8eff3; }.filters input { grid-column: 1 / -1; }.filters input,.filters select { min-width: 0; height: 34px; padding: 0 9px; color: #38586a; background: #fbfdfe; border: 1px solid #c9dce7; border-radius: 4px; font-size: 12px; outline: none; }.filters input:focus,.filters select:focus { border-color: #1a9ac0; box-shadow: 0 0 0 2px #1a9ac01c; }
 .filters select:hover,.filters select:focus { color:#fff; background:#075273; border-color:#1599c1; }.filters select option { color:#38586a; background:#fff; }
 .spot-scroll { min-height: 0; overflow: auto; }.spot-item { width: 100%; display: grid; grid-template-columns: 31px minmax(0,1fr) auto; gap: 9px; align-items: center; padding: 11px 10px; border: 0; border-bottom: 1px solid #e8eef2; background: #fff; color: #29475a; text-align: left; cursor: pointer; transition: background .15s; }.spot-item:hover { background: #f2f9fc; }.spot-item.active { background: #e5f5fb; border-left: 4px solid #129bc3; padding-left: 6px; }.spot-item>i { display: grid; width: 28px; height: 28px; place-items: center; color: #ffffff; background: #3e91b1; border-radius: 50%; font-style: normal; font-size: 13px; font-weight: 700; }.spot-item>i.level-2 { background: #d79228; }.spot-item>i.level-3 { background: #d55762; }.spot-item b,.spot-item small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.spot-item b { color:#1d435b; font-size:14px; }.spot-item small { margin-top:4px;color:#6f8796;font-size:11px; }.spot-item em { padding:4px 6px;border-radius:3px;font-style:normal;font-size:11px;white-space:nowrap; }.status-0 { color:#9a680f;background:#fff3d9; }.status-1 { color:#1b79a2;background:#e2f3fa; }.status-2 { color:#21875e;background:#e3f6ed; }.status-3 { color:#667986;background:#ecf0f2; }.list-empty { display:grid; min-height:150px; place-items:center; padding:16px; color:#6f8796; font-size:13px; text-align:center; }.list-empty--error { color:#c7535e; }
-.center-column { display:contents; }.map-panel { grid-column:2; grid-row:1; display:flex; flex-direction:column; }.map-compare { flex:1; min-height:0; display:grid; gap:4px; padding:4px; background:#c9d8df; }.map-compare.compare-2,.map-compare.compare-3 { grid-template-columns:repeat(var(--period-count),minmax(0,1fr)); }.map-compare.compare-2 { --period-count:2; }.map-compare.compare-3 { --period-count:3; }.map-compare.compare-4 { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }.map-compare :deep(.spot-map) { min-width:0; min-height:0; border:1px solid #adc6d2; }.map-empty { display:grid; flex:1; place-items:center; color:#6b8493; background:#eef3f5; font-size:14px; }
-.analysis { grid-column:2 / 4; grid-row:2; display:flex; flex-direction:column; }.periods { display:flex; align-items:center; gap:7px; padding:9px 11px 7px; }.periods button { padding:7px 11px; color:#426478; background:#f5f9fb; border:1px solid #cbdde7; border-radius:4px; font-size:12px; cursor:pointer; }.periods button.active { color:#fff; background:#168db5; border-color:#168db5; box-shadow:0 2px 5px #168db544; }.periods span { margin-left:auto; overflow:hidden; color:#6f8796; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.imagery { flex:1; min-height:0; display:flex; gap:8px; padding:0 11px 11px; overflow-x:auto; }.image-card { position:relative; flex:0 0 180px; height:112px; overflow:hidden; padding:9px; color:#f4fcff; background:linear-gradient(135deg,#276c80,#17445b); border:1px solid transparent; border-radius:5px; text-align:left; cursor:pointer; transition:border-color .18s,box-shadow .18s; }.image-card:hover,.image-card.active { border-color:#13a9d3; box-shadow:0 0 0 2px #13a9d325; }.image-card.displayed { border-color:#ff4054; box-shadow:0 0 4px #ff4054b8,inset 0 0 2px #ff8a9699; }.image-card__map-thumbnail { position:absolute; inset:0; display:block; opacity:.82; pointer-events:none; }.image-card>img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.66; }.image-card>span { display:grid; height:100%; place-items:center; color:#d5e1e6; background:#53616a; font-size:12px; }.image-card b,.image-card small { position:relative; z-index:1; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card b { margin-top:48px; font-size:13px; }.image-card small { margin-top:4px; font-size:11px; }.image-card.unavailable { cursor:not-allowed; opacity:.7; }.imagery-empty { display:grid; min-width:260px; place-items:center; padding:0 16px; color:#728796; background:#f3f6f8; border:1px dashed #c4d3db; border-radius:5px; font-size:12px; line-height:1.6; }.imagery-empty--error { color:#b24e58; border-color:#e2aeb4; background:#fff5f6; }
-.imagery-upload-input { display:none; }.image-card--add { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:#377b95; background:#f4fafc; border:1px dashed #69aec4; text-align:center; }.image-card--add:hover:not(:disabled) { color:#0b86ae; background:#e9f7fb; border-color:#159bc4; }.image-card--add:disabled { cursor:not-allowed; opacity:.55; }.image-card--add i { width:30px; height:30px; display:grid; place-items:center; border:1px solid currentColor; border-radius:50%; font-size:22px; font-style:normal; line-height:1; }.image-card--add b { margin:4px 0 0; color:currentColor; text-shadow:none; }.image-card--add small { color:#6d92a2; text-shadow:none; }
+.center-column { display:contents; }.map-panel { grid-column:2; grid-row:1; display:flex; flex-direction:column; }.map-header-actions{min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:10px}.map-header-actions small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.map-header-actions button{flex:none;height:30px;padding:0 11px;color:#167895;background:#f3fafc;border:1px solid #8fc8d8;border-radius:4px;font-size:12px;font-weight:700;cursor:pointer}.map-header-actions button:hover,.map-header-actions button:focus-visible{color:#fff;background:#137f9e;border-color:#137f9e;outline:none}.map-panel.map-panel--fullscreen{position:fixed;z-index:4000;inset:0;grid-column:auto;grid-row:auto;border:0;border-radius:0;background:#c9d8df;box-shadow:none}.map-panel.map-panel--fullscreen>.panel-title{height:54px;flex:0 0 54px;padding-inline:18px;color:#fff;background:#07344f;border-color:#1e6684;font-size:18px}.map-panel.map-panel--fullscreen .map-header-actions small{color:#b4d7e5;font-size:13px}.map-panel.map-panel--fullscreen .map-header-actions button{color:#fff;background:#126f91;border-color:#6ed8eb}.map-compare { flex:1; min-height:0; display:grid; gap:4px; padding:4px; background:#c9d8df; }.map-compare.compare-2,.map-compare.compare-3 { grid-template-columns:repeat(var(--period-count),minmax(0,1fr)); }.map-compare.compare-2 { --period-count:2; }.map-compare.compare-3 { --period-count:3; }.map-compare.compare-4 { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }.map-compare :deep(.spot-map) { min-width:0; min-height:0; border:1px solid #adc6d2; }.map-empty { display:grid; flex:1; place-items:center; color:#6b8493; background:#eef3f5; font-size:14px; }
+.analysis { grid-column:2 / 4; grid-row:2; display:flex; flex-direction:column; }.periods { display:flex; align-items:center; gap:7px; padding:9px 11px 7px; }.periods button { padding:7px 11px; color:#426478; background:#f5f9fb; border:1px solid #cbdde7; border-radius:4px; font-size:12px; cursor:pointer; }.periods button.active { color:#fff; background:#168db5; border-color:#168db5; box-shadow:0 2px 5px #168db544; }.periods button:disabled { color:#9eacb3; background:#eef2f4; border-color:#dce4e8; box-shadow:none; cursor:not-allowed; opacity:.72; }.periods span { margin-left:auto; overflow:hidden; color:#6f8796; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.imagery { flex:1; min-height:0; display:flex; gap:8px; padding:0 11px 11px; overflow-x:auto; }.image-card { position:relative; flex:0 0 180px; height:112px; overflow:hidden; padding:9px; color:#f4fcff; background:linear-gradient(135deg,#276c80,#17445b); border:1px solid transparent; border-radius:5px; text-align:left; cursor:pointer; transition:border-color .18s,box-shadow .18s; }.image-card:hover,.image-card.active { border-color:#13a9d3; box-shadow:0 0 0 2px #13a9d325; }.image-card.displayed { border-color:#ff4054; box-shadow:0 0 4px #ff4054b8,inset 0 0 2px #ff8a9699; }.image-card__map-thumbnail { position:absolute; inset:0; display:block; opacity:.82; pointer-events:none; }.image-card>img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.66; }.image-card>span { display:grid; height:100%; place-items:center; color:#d5e1e6; background:#53616a; font-size:12px; }.image-card b,.image-card small { position:relative; z-index:1; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card b { margin-top:48px; font-size:13px; }.image-card small { margin-top:4px; font-size:11px; }.image-card.unavailable { cursor:not-allowed; opacity:.7; }.imagery-empty { display:grid; min-width:260px; place-items:center; padding:0 16px; color:#728796; background:#f3f6f8; border:1px dashed #c4d3db; border-radius:5px; font-size:12px; line-height:1.6; }.imagery-empty--error { color:#b24e58; border-color:#e2aeb4; background:#fff5f6; }
+.image-card--add { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:#377b95; background:#f4fafc; border:1px dashed #69aec4; text-align:center; }.image-card--add:hover:not(:disabled) { color:#0b86ae; background:#e9f7fb; border-color:#159bc4; }.image-card--add:disabled { cursor:not-allowed; opacity:.55; }.image-card--add i { width:30px; height:30px; display:grid; place-items:center; border:1px solid currentColor; border-radius:50%; font-size:22px; font-style:normal; line-height:1; }.image-card--add b { margin:4px 0 0; color:currentColor; text-shadow:none; }.image-card--add small { color:#6d92a2; text-shadow:none; }
 .image-card > .image-card__delete { position:absolute; z-index:3; top:5px; right:5px; width:14px; height:14px; min-height:14px; padding:0; display:grid; place-items:center; color:#fff; background:#d64755; border:1px solid #fff8; border-radius:50%; box-shadow:0 1px 3px #3e1420aa; font-size:12px; font-weight:400; line-height:1; text-shadow:none; }.image-card > .image-card__delete:hover,.image-card > .image-card__delete:focus-visible { background:#b92739; outline:2px solid #ffd2d7; outline-offset:1px; }
 .image-delete-mask { position:fixed; z-index:3100; inset:0; display:grid; place-items:center; padding:20px; background:#10243180; }.image-delete-dialog { width:min(390px,calc(100vw - 40px)); overflow:hidden; color:#29475a; background:#fff; border:1px solid #b9d1dc; border-radius:7px; box-shadow:0 12px 32px #102a3d66; }.image-delete-dialog h3 { margin:0; padding:15px 18px; color:#203f53; border-bottom:1px solid #e0eaef; font-size:17px; }.image-delete-dialog p { margin:0; padding:18px; color:#5c7481; font-size:14px; line-height:1.7; }.image-delete-dialog footer { display:flex; justify-content:flex-end; gap:8px; padding:11px 18px; background:#f5f8fa; border-top:1px solid #e1ebef; }.image-delete-dialog button { min-width:76px; padding:7px 12px; color:#466877; background:#fff; border:1px solid #bfd4df; border-radius:4px; cursor:pointer; }.image-delete-dialog button.danger { color:#fff; background:#cf4655; border-color:#cf4655; }.image-delete-dialog button.danger:hover { background:#b92e40; }
+.service-picker-mask { position:fixed; z-index:4200; inset:0; display:grid; place-items:center; padding:24px; background:#102431b8; backdrop-filter:blur(3px); }.service-picker-dialog { width:min(720px,calc(100vw - 40px)); max-height:calc(100vh - 48px); display:flex; flex-direction:column; overflow:hidden; color:#29475a; background:#fff; border:1px solid #b9d1dc; border-radius:9px; box-shadow:0 20px 60px #001d2e66; }.service-picker-dialog>header { flex:none; display:flex; align-items:center; justify-content:space-between; padding:17px 20px; border-bottom:1px solid #d7e4ea; }.service-picker-dialog h3,.service-picker-dialog p { margin:0; }.service-picker-dialog h3 { color:#173c54; font-size:20px; }.service-picker-dialog header p { margin-top:4px; color:#7d929d; font-size:12px; }.service-picker-dialog header button { width:34px; height:34px; border:0; color:#627c89; background:transparent; font-size:26px; cursor:pointer; }.service-picker-body { min-height:0; overflow:auto; padding:18px 20px; }.service-picker-body fieldset { margin:0; padding:12px; border:1px solid #cbdde5; border-radius:6px; }.service-picker-body legend { padding:0 5px; color:#536f7d; font-size:13px; font-weight:700; }.service-picker-body legend em { color:#d14b58; font-style:normal; }.service-picker-body label { min-height:50px; display:flex; align-items:center; gap:10px; padding:7px 10px; border-bottom:1px solid #e6eef2; cursor:pointer; }.service-picker-body label:last-child { border-bottom:0; }.service-picker-body label:hover { background:#f2f9fc; }.service-picker-body label.added { color:#94a4ac; background:#f7f9fa; cursor:not-allowed; }.service-picker-body label input { flex:none; width:16px; height:16px; accent-color:#168eae; }.service-picker-body label span,.service-picker-body label b,.service-picker-body label small { display:block; min-width:0; }.service-picker-body label b { overflow:hidden; color:#294d60; font-size:14px; text-overflow:ellipsis; white-space:nowrap; }.service-picker-body label small { margin-top:4px; color:#718b98; font-size:11px; }.service-picker-body label.added b { color:#8d9ca4; }.service-picker-state { min-height:160px; display:grid; place-items:center; color:#718894; border:1px dashed #c8d9e1; border-radius:6px; font-size:14px; }.service-picker-state--error { color:#b84450; background:#fff4f5; }.service-picker-tip { margin:12px 0 0!important; padding:9px 11px; color:#587786; background:#edf7fa; border-left:3px solid #1b9cba; border-radius:4px; font-size:12px; line-height:1.6; }.service-picker-dialog>footer { flex:none; display:flex; justify-content:flex-end; gap:9px; padding:13px 20px; border-top:1px solid #d7e4ea; background:#fff; }.service-picker-dialog footer button { min-width:92px; height:38px; padding:0 15px; border:1px solid #168aa9; border-radius:4px; font-weight:700; cursor:pointer; }.service-picker-dialog footer button.cancel { color:#587786; background:#fff; border-color:#bfd4de; }.service-picker-dialog footer button.primary { color:#fff; background:#168eae; }.service-picker-dialog footer button:disabled { opacity:.45; cursor:not-allowed; }
 .right-column { min-height:0; grid-column:3; grid-row:1; display:flex; flex-direction:column; }.detail { min-height:0; flex:1; display:flex; flex-direction:column; overflow-y:auto; }.detail>.panel-title { flex:0 0 42px; }.detail dl { flex:0 0 auto; display:grid; grid-template-columns:94px 1fr; margin:0; padding:9px 13px; }.detail dt,.detail dd { margin:0; padding:8px 0; border-bottom:1px solid #edf2f5; font-size:12px; }.detail dt { color:#718895; }.detail dd { color:#29485a; font-weight:700; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.text-level-2 { color:#bd7a18!important; }.text-level-3 { color:#c94856!important; }.detail>p { flex:0 0 auto; margin:0 13px 11px; padding:10px; color:#607987; background:#f3f7f9; font-size:12px; line-height:1.7; }.detail-empty { display:grid; min-height:120px; place-items:center; color:#728796; font-size:13px; }
+
+/* 场景任务研判在大屏上仍保持清晰可读，统一放大各面板标题与正文层级。 */
+.panel-title {
+  height: 46px;
+  flex: 0 0 46px;
+  padding-inline: 14px;
+  font-size: 17px;
+}
+.panel-title small { font-size: 13px; }
+.task-filters select,
+.filters input,
+.filters select {
+  height: 38px;
+  font-size: 13px;
+}
+.recognition-task-item { padding-block: 10px; }
+.recognition-task-item b { font-size: 14px; }
+.recognition-task-item small { margin-top: 4px; font-size: 12px; }
+.task-empty,
+.list-empty { font-size: 14px; }
+.spot-item { min-height: 66px; padding-block: 12px; }
+.spot-item.active { padding-left: 6px; }
+.spot-item > i {
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+}
+.spot-item b { font-size: 15px; }
+.spot-item small { font-size: 12px; }
+.spot-item em { padding: 5px 7px; font-size: 12px; }
+.map-header-actions small,
+.map-header-actions button,
+.analysis-title-hint,
+.periods button,
+.periods span { font-size: 13px; }
+.periods button { min-height: 32px; }
+.image-card b { font-size: 14px; }
+.image-card small { font-size: 12px; }
+.image-card--add i { font-size: 23px; }
+.detail > .panel-title { flex-basis: 46px; }
+.detail dl {
+  grid-template-columns: 100px minmax(0, 1fr);
+  padding: 10px 14px;
+}
+.detail dt,
+.detail dd {
+  padding-block: 10px;
+  font-size: 14px;
+}
+.detail > p {
+  margin-inline: 14px;
+  padding: 12px;
+  font-size: 13px;
+}
+.detail-empty { font-size: 14px; }
+.map-compare :deep(.period-badge) { font-size: 13px; }
+.map-compare :deep(.empty-imagery) { font-size: 15px; }
 @media (max-width: 1180px) {
   .governance-page { grid-template-columns: clamp(215px, 23vw, 270px) minmax(400px, 1fr) clamp(235px, 24vw, 280px); gap: 7px; padding: 7px; }
   .governance-page { grid-template-rows:minmax(300px,1fr) 230px; }.left-column { grid-template-rows: 270px minmax(0,1fr); gap:7px; }.filters { padding: 7px; }.task-filters { grid-template-columns:minmax(0,1fr); padding:7px; }

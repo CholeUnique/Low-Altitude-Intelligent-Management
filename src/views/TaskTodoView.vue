@@ -209,6 +209,12 @@ onBeforeUnmount(() => {
 .todo-filters label { display: grid; gap: 6px; color: #65788b; font-size: 12px; }
 .todo-filters input, .todo-filters select, .search-control > div { height: 34px; color: #33495e; background: #fff; border: 1px solid #d8e0e7; border-radius: 4px; outline: 0; }
 .todo-filters select { padding: 0 9px; }
+.todo-filters select:not(:disabled):hover,
+.todo-filters select:not(:disabled):focus-visible {
+  color: #fff !important;
+  background-color: #176f9f !important;
+  border-color: #2aa9df !important;
+}
 .search-control > div { display: flex; align-items: center; gap: 8px; padding: 0 10px; }
 .search-control span { color: #8c9aa8; }
 .search-control input { min-width: 0; flex: 1; height: 30px; padding: 0; border: 0; }
