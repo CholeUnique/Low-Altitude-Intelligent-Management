@@ -1,5 +1,4 @@
-import { apiClient, isMockMode } from './client'
-import { getOrganization, getScene, getTask, getTasks } from '@/mocks/portal'
+import { apiClient } from './client'
 import type { OrganizationId, PortalTask, TaskWorkflowNode } from '@/types'
 import type { MapServiceItem } from '@/api/map-service'
 
@@ -24,12 +23,24 @@ export interface GovernanceTask {
   actualStartTime?: string
   actualEndTime?: string
   assigneeId?: string
+  assigneeName?: string
+  description?: string
+  contactName?: string
+  contactPhone?: string
+  resultRequirements?: string[]
+  rangeName?: string
+  rangeArea?: number
+  rangeAreaUnit?: string
+  geometryAvailable?: boolean
+  coverImageUrl?: string
+  coverImageThumbnailUrl?: string
+  imageCount?: number
   createBy?: string
   createTime?: string
   updateTime?: string
   /** 任务分页接口直接返回的对比影像；智能研判以此为准，不再自行推断任务影像。 */
   comparisonImages?: GovernanceTaskComparisonImage[]
-  /** Mock 展示层保留字段；真实接口未提供时不会伪造。 */
+  /** 任务范围和后端节点信息；缺失时不推断。 */
   area?: string
   areaSize?: number
   workflow?: TaskWorkflowNode[]
@@ -54,7 +65,7 @@ export interface GovernanceTaskPageQuery {
   endTime?: string
   /** 当前业务视角部门；真实接口由后端按此字段隔离数据。 */
   deptId?: string
-  /** 仅 Mock 模式使用，真实请求不会发送。 */
+  /** 前端业务视角参数，不发送给后端。 */
   organizationId?: OrganizationId
 }
 
@@ -78,6 +89,10 @@ export interface GovernanceTaskCreateInput {
   planEndTime?: string
   assigneeId?: string
   remark?: string
+  description?: string
+  resultRequirements?: string[]
+  contactName?: string
+  contactPhone?: string
   /** 创建时可一并关联的无人机素材 ID。 */
   mediaIds?: string[]
 }
@@ -120,6 +135,10 @@ export interface GovernanceTaskUpdateInput {
   planEndTime?: string
   assigneeId?: string
   remark?: string
+  description?: string
+  resultRequirements?: string[]
+  contactName?: string
+  contactPhone?: string
 }
 
 export interface GovernanceTaskResultBrief {
@@ -139,6 +158,7 @@ export interface GovernanceTaskOperateLog {
   operateDesc: string
   operatorId?: string
   operatorName?: string
+  detailJson?: string
   createTime?: string
 }
 
@@ -148,6 +168,14 @@ export interface GovernanceTaskDetail {
   abnormalCount?: number
   /** 当前任务异常图斑总面积，单位 m²。 */
   abnormalArea?: number
+  statistics?: {
+    flightCount?: number
+    flightHours?: number | null
+    patrolArea?: number
+    patrolAreaUnit?: string
+    abnormalCount?: number
+    abnormalArea?: number
+  }
   results: GovernanceTaskResultBrief[]
   process?: {
     remark?: string
@@ -182,6 +210,7 @@ export interface TaskAbnormal {
 }
 
 export interface TaskAbnormalPageQuery {
+  deptId?: string
   bizTaskId: string
   pageNum: number
   pageSize: number
@@ -241,6 +270,7 @@ interface BizTaskDetailDto {
   refSummary?: string
   abnormalCount?: number
   abnormalArea?: number
+  statistics?: GovernanceTaskDetail['statistics']
   results?: Array<Record<string, unknown>>
   process?: {
     remark?: string
@@ -274,24 +304,13 @@ interface BizAbnormalDto {
   updateTime?: string
 }
 
-const mockStatusByName: Record<string, GovernanceTaskStatus> = {
-  '待处理': 0,
-  '进行中': 1,
-  '待复核': 2,
-  '已完成': 5,
-}
-
-const mockStatusText: Record<GovernanceTaskStatus, string> = {
+const taskStatusText: Record<GovernanceTaskStatus, string> = {
   0: '待执行',
   1: '执行中',
   2: '待核查',
   3: '已失败',
   4: '已取消',
   5: '已完成',
-}
-
-function toPriorityValue(priority: PortalTask['priority']) {
-  return priority === '高' ? 2 : priority === '中' ? 1 : 0
 }
 
 function normalizePriority(priority: unknown) {
@@ -348,7 +367,7 @@ function normalizeComparisonImage(value: unknown, index: number): GovernanceTask
   const label = firstString(raw, ['label', 'name', 'imageName', 'fileName', 'title', 'serviceName'])
     || firstString(service, ['name', 'serviceName', 'mapServiceName', 'label'])
     || `对比影像 ${index + 1}`
-  const captureTime = firstString(raw, ['shootTime', 'captureTime', 'collectTime', 'imageTime', 'createTime'])
+  const captureTime = firstString(raw, ['shootTime', 'captureTime', 'collectTime', 'imageTime'])
   if (looksLikeMapService && serviceUrl) {
     return {
       id,
@@ -420,64 +439,31 @@ function toGovernanceTask(item: BizTaskDto): GovernanceTask {
     refId: optionalValue(item.refId),
     executeMode: item.executeMode || 'MANUAL',
     taskStatus: status,
-    taskStatusDesc: item.taskStatusDesc || mockStatusText[status],
+    taskStatusDesc: item.taskStatusDesc || taskStatusText[status],
     priority: normalizePriority(item.priority),
     planStartTime: item.planStartTime,
     planEndTime: item.planEndTime,
     actualStartTime: item.actualStartTime,
     actualEndTime: item.actualEndTime,
     assigneeId: optionalValue(item.assigneeId),
+    assigneeName: optionalValue(item.assigneeName),
+    description: optionalValue(item.description),
+    contactName: optionalValue(item.contactName),
+    contactPhone: optionalValue(item.contactPhone),
+    resultRequirements: Array.isArray(item.resultRequirements) ? item.resultRequirements.filter((value): value is string => typeof value === 'string') : undefined,
+    rangeName: optionalValue(item.rangeName),
+    rangeArea: typeof item.rangeArea === 'number' ? item.rangeArea : undefined,
+    rangeAreaUnit: optionalValue(item.rangeAreaUnit),
+    geometryAvailable: typeof item.geometryAvailable === 'boolean' ? item.geometryAvailable : undefined,
+    coverImageUrl: optionalValue(item.coverImageUrl),
+    coverImageThumbnailUrl: optionalValue(item.coverImageThumbnailUrl),
+    imageCount: typeof item.imageCount === 'number' ? item.imageCount : undefined,
+    area: optionalValue(item.rangeName),
+    areaSize: typeof item.rangeArea === 'number' ? item.rangeArea : undefined,
     createBy: optionalValue(item.createBy),
     createTime: item.createTime,
     updateTime: item.updateTime,
     comparisonImages: normalizeComparisonImages(item),
-  }
-}
-
-function toMockGovernanceTask(task: PortalTask): GovernanceTask {
-  const organization = getOrganization(task.organizationId)
-  const scene = getScene(organization, task.sceneId)
-  const status = mockStatusByName[task.status] ?? 0
-  return {
-    id: task.id,
-    taskNo: task.id,
-    sceneCode: task.sceneId,
-    sceneName: scene?.name || task.sceneId,
-    name: task.name,
-    deptName: organization.shortName,
-    refType: 'NONE',
-    executeMode: 'MANUAL',
-    taskStatus: status,
-    taskStatusDesc: task.status,
-    priority: toPriorityValue(task.priority),
-    planStartTime: task.plannedStart,
-    planEndTime: task.plannedEnd,
-    createTime: task.createdAt,
-    updateTime: task.updatedAt,
-    area: task.area,
-    areaSize: task.areaSize,
-    workflow: task.workflow,
-    comparisonImages: [],
-  }
-}
-
-function priorityMatches(value: number, priority?: number) {
-  return priority === undefined || value === priority
-}
-
-function getMockTaskPage(query: GovernanceTaskPageQuery): GovernanceTaskPage {
-  const records = getTasks(query.organizationId || 'natural-resources').map(toMockGovernanceTask).filter((task) =>
-    (!query.keyword || `${task.name}${task.taskNo}`.includes(query.keyword))
-    && (!query.sceneCode || task.sceneCode === query.sceneCode)
-    && (query.taskStatus === undefined || task.taskStatus === query.taskStatus)
-    && priorityMatches(task.priority, query.priority),
-  )
-  const start = (query.pageNum - 1) * query.pageSize
-  return {
-    records: records.slice(start, start + query.pageSize),
-    total: records.length,
-    pageNum: query.pageNum,
-    pageSize: query.pageSize,
   }
 }
 
@@ -487,8 +473,9 @@ function toOperateLog(item: Record<string, unknown>): GovernanceTaskOperateLog {
     operateType: String(item.operateType || ''),
     operateTypeDesc: String(item.operateTypeDesc || item.operateType || '任务操作'),
     operateDesc: String(item.operateDesc || '-'),
-    operatorId: item.operatorId === undefined ? undefined : String(item.operatorId),
+    operatorId: item.operatorId == null ? undefined : String(item.operatorId),
     operatorName: typeof item.operatorName === 'string' ? item.operatorName : undefined,
+    detailJson: typeof item.detailJson === 'string' ? item.detailJson : undefined,
     createTime: typeof item.createTime === 'string' ? item.createTime : undefined,
   }
 }
@@ -556,7 +543,7 @@ function toTaskAbnormal(item: BizAbnormalDto): TaskAbnormal {
     // 不同版本接口曾使用 lng/lat、longitude/latitude 与 lon/lat，统一兼容。
     longitude: coordinate(item.lng, item.longitude, item.lon),
     latitude: coordinate(item.lat, item.latitude),
-    imageMediaId: item.imageMediaId === undefined ? undefined : String(item.imageMediaId),
+    imageMediaId: optionalValue(item.imageMediaId),
     imageUrl: item.imageUrl,
     handleStatus: item.handleStatus ?? 0,
     foundTime: item.foundTime,
@@ -566,7 +553,6 @@ function toTaskAbnormal(item: BizAbnormalDto): TaskAbnormal {
 }
 
 export async function getGovernanceTaskPage(query: GovernanceTaskPageQuery): Promise<GovernanceTaskPage> {
-  if (isMockMode()) return getMockTaskPage(query)
   const { organizationId: _organizationId, ...request } = query
   const page = await apiClient.post<never, { records?: BizTaskDto[]; total?: number | string; pageNum?: number; pageSize?: number }>('/v1/biz/task/page', request)
   return {
@@ -577,9 +563,20 @@ export async function getGovernanceTaskPage(query: GovernanceTaskPageQuery): Pro
   }
 }
 
-/** 创建真实业务任务；Mock 模式的临时任务仍由 NewTaskDialog 在前端会话内处理。 */
+/** 当前登录人负责的未完结业务任务；由后端决定可见范围。 */
+export async function getMyTodoTaskPage(query: { pageNum: number; pageSize: number; deptId?: string; taskStatus?: 0 | 1 | 2 }): Promise<GovernanceTaskPage> {
+  const page = await apiClient.post<never, { records?: BizTaskDto[]; total?: number | string; pageNum?: number; pageSize?: number }>('/v1/biz/task/my-todo/page', query)
+  return { records: (page.records || []).map(toGovernanceTask), total: Number(page.total || 0), pageNum: page.pageNum || query.pageNum, pageSize: page.pageSize || query.pageSize }
+}
+
+/** 独立查询任务全流程留痕，不依赖详情内嵌日志。 */
+export async function getGovernanceTaskOperateLogs(id: string, deptId?: string): Promise<GovernanceTaskOperateLog[]> {
+  const data = await apiClient.post<never, Array<Record<string, unknown>>>('/v1/biz/task/operate-log', { id, deptId })
+  return (data || []).map(toOperateLog)
+}
+
+/** 创建后端业务任务。 */
 export async function createGovernanceTask(input: GovernanceTaskCreateInput): Promise<GovernanceTask> {
-  if (isMockMode()) throw new Error('Mock 模式不调用真实任务创建接口。')
   const data = await apiClient.post<never, BizTaskDto>('/v1/biz/task/create', input)
   return toGovernanceTask(data)
 }
@@ -592,13 +589,11 @@ export async function createTasksFromAbnormals(input: AbnormalTaskCreateInput): 
 
 /** 保存任务范围；后端要求传入 WGS84 的 GeoJSON FeatureCollection。 */
 export async function upsertGovernanceTaskGeometry(input: GovernanceTaskGeometryUpsertInput): Promise<void> {
-  if (isMockMode()) throw new Error('Mock 模式不调用真实任务范围保存接口。')
   await apiClient.post('/v1/biz/task/geometry/upsert', input)
 }
 
 /** 批量关联已存在的无人机影像素材，重复提交由后端自动去重。 */
 export async function bindGovernanceTaskMedia(input: GovernanceTaskMediaBindInput): Promise<void> {
-  if (isMockMode()) throw new Error('Mock 模式不调用真实任务影像关联接口。')
   await apiClient.post('/v1/biz/task/media/bind', input)
 }
 
@@ -607,54 +602,40 @@ export async function setGovernanceTaskMediaCover(input: {
   bizTaskId: string
   mediaId: string
 }): Promise<void> {
-  if (isMockMode()) throw new Error('Mock 模式不调用真实任务封面设置接口。')
   await apiClient.post('/v1/biz/task/media/set-cover', input)
 }
 
 /** 修改真实业务任务的当前 Swagger 已支持字段。 */
 export async function updateGovernanceTask(input: GovernanceTaskUpdateInput): Promise<void> {
-  if (isMockMode()) throw new Error('Mock 模式不调用真实任务修改接口。')
   await apiClient.post('/v1/biz/task/update', input)
 }
 
 export async function executeGovernanceTask(id: string, remark?: string, deptId?: string): Promise<void> {
-  if (isMockMode()) throw new Error('Mock 模式不调用真实任务执行接口。')
   await apiClient.post('/v1/biz/task/execute', { id, deptId, remark: remark || undefined })
 }
 
 export async function cancelGovernanceTask(id: string, deptId?: string): Promise<void> {
-  if (isMockMode()) throw new Error('Mock 模式不调用真实任务取消接口。')
   await apiClient.post('/v1/biz/task/cancel', { id, deptId })
 }
 
 /** 删除单个业务任务；批量删除由前端按已勾选任务逐项调用该接口。 */
 export async function deleteGovernanceTask(id: string, deptId?: string): Promise<void> {
-  if (isMockMode()) throw new Error('Mock 模式不调用真实任务删除接口。')
   await apiClient.post('/v1/biz/task/delete', { id, deptId })
 }
 
 /** Swagger 中的完成接口路径为 /biz/task/finish。仅允许待核查任务完成。 */
 export async function finishGovernanceTask(id: string, deptId?: string): Promise<void> {
-  if (isMockMode()) throw new Error('Mock 模式不调用真实任务完成接口。')
   await apiClient.post('/v1/biz/task/finish', { id, deptId })
 }
 
 export async function getGovernanceTaskDetail(taskId: string): Promise<GovernanceTaskDetail | undefined> {
-  if (isMockMode()) {
-    const task = getTask(taskId)
-    return task ? {
-      task: toMockGovernanceTask(task),
-      abnormalCount: task.metrics.issues,
-      results: [],
-      process: { logs: [] },
-    } : undefined
-  }
   const detail = await apiClient.post<never, BizTaskDetailDto>('/v1/biz/task/detail', { id: taskId })
   return {
     task: toGovernanceTask(detail.task),
     refSummary: detail.refSummary,
     abnormalCount: detail.abnormalCount,
     abnormalArea: detail.abnormalArea,
+    statistics: detail.statistics,
     results: (detail.results || []).map((item) => ({
       id: item.id === undefined ? undefined : String(item.id),
       resultType: typeof item.resultType === 'string' ? item.resultType : undefined,
@@ -671,21 +652,10 @@ export async function getGovernanceTaskDetail(taskId: string): Promise<Governanc
   }
 }
 
-export async function getGovernanceTaskGeometry(taskId: string, resultId?: string, includeAbnormalPoints = true): Promise<TaskGeometryFeatureCollection> {
-  if (isMockMode()) {
-    const task = getTask(taskId)
-    if (!task?.coordinates.length) return { type: 'FeatureCollection', features: [] }
-    return {
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [[...task.coordinates, task.coordinates[0]]] },
-        properties: { taskId: task.id, name: task.name },
-      }],
-    }
-  }
+export async function getGovernanceTaskGeometry(taskId: string, resultId?: string, includeAbnormalPoints = true, deptId?: string): Promise<TaskGeometryFeatureCollection> {
   const data = await apiClient.post<never, unknown>('/v1/biz/task/geometry/geojson', {
     bizTaskId: taskId,
+    deptId,
     resultId,
     includeAbnormalPoints,
   })
@@ -693,7 +663,6 @@ export async function getGovernanceTaskGeometry(taskId: string, resultId?: strin
 }
 
 export async function getTaskAbnormalPage(query: TaskAbnormalPageQuery): Promise<TaskAbnormalPage> {
-  if (isMockMode()) return { records: [], total: 0, pageNum: query.pageNum, pageSize: query.pageSize }
   const page = await apiClient.post<never, {
     records?: BizAbnormalDto[]
     total?: number | string
@@ -717,20 +686,7 @@ export function taskPriorityLabel(priority: number) {
  * 该映射只用于页面展示和流程导航，不会向后端写入任何 Mock 字段。
  */
 export function toPatrolTask(task: GovernanceTask): PortalTask {
-  const discoveryWorkflow: TaskWorkflowNode[] = [
-    {
-      key: 'route-flight-plan',
-      name: '航线规划',
-      status: task.taskStatus >= 1 && task.taskStatus !== 4 ? 'done' : 'active',
-      time: task.planStartTime || task.createTime,
-    },
-    {
-      key: 'realtime-cruise',
-      name: '实时巡航',
-      status: task.taskStatus >= 2 && task.taskStatus !== 4 ? 'done' : task.taskStatus === 1 ? 'active' : 'pending',
-      time: task.actualStartTime,
-    },
-  ]
+  const discoveryWorkflow = task.workflow || []
   const completedNodes = discoveryWorkflow.filter((node) => node.status === 'done').length
 
   return {
@@ -745,16 +701,16 @@ export function toPatrolTask(task: GovernanceTask): PortalTask {
     area: task.area || '后端暂未关联任务范围',
     areaSize: task.areaSize || 0,
     owner: task.deptName,
-    assignee: task.assigneeId ? `负责人 #${task.assigneeId}` : '未指派负责人',
+    assignee: task.assigneeName || (task.assigneeId ? `负责人 #${task.assigneeId}` : '未指派负责人'),
     createdAt: task.createTime || '',
     updatedAt: task.updateTime || task.createTime || '',
     plannedStart: task.planStartTime || '',
     plannedEnd: task.planEndTime || '',
-    progress: task.taskStatus >= 2 ? 100 : task.taskStatus === 1 ? 50 : 0,
-    description: `真实业务任务：${task.taskNo}`,
-    contact: '',
-    phone: '',
-    resultRequirements: [],
+    progress: discoveryWorkflow.length ? Math.round(completedNodes / discoveryWorkflow.length * 100) : 0,
+    description: task.description || '',
+    contact: task.contactName || '',
+    phone: task.contactPhone || '',
+    resultRequirements: task.resultRequirements || [],
     coordinates: [],
     workflow: discoveryWorkflow,
     metrics: {

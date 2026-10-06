@@ -1,0 +1,393 @@
+{
+  "verifiedAt": "2026-10-06T15:48:14.432Z",
+  "user": {
+    "id": 692,
+    "username": "nyncKZ",
+    "deptList": [
+      {
+        "deptCode": "DEPT_NYNCJ",
+        "deptId": 1,
+        "deptName": "农业农村局",
+        "deptRole": "",
+        "isDefault": true
+      }
+    ]
+  },
+  "todos": {
+    "code": "0",
+    "data": {
+      "pageNum": 1,
+      "pageSize": 200,
+      "records": [
+        {
+          "assigneeId": 692,
+          "assigneeName": "农田建设科",
+          "bizTaskId": 1314,
+          "createTime": "2026-10-06T23:45:29",
+          "deadline": "2026-11-05T23:45:29",
+          "deptId": 1,
+          "deptName": "农业农村局",
+          "flowInstanceId": 2,
+          "id": 1,
+          "nodeKey": "REVIEW_CITY",
+          "nodeName": "市级审核",
+          "nodeType": "REVIEW",
+          "overdue": false,
+          "prevNodeInstId": null,
+          "status": "PROCESSING",
+          "submitTime": null,
+          "taskName": "111",
+          "taskNo": "NYNCJ-20261006-001",
+          "transferFromId": null
+        }
+      ],
+      "total": 1
+    },
+    "msg": "success"
+  },
+  "businessTodos": {
+    "code": "0",
+    "data": {
+      "pageNum": 1,
+      "pageSize": 200,
+      "records": [],
+      "total": 0
+    },
+    "msg": "success"
+  },
+  "visibleTasks": {
+    "code": "0",
+    "data": {
+      "pageNum": 1,
+      "pageSize": 200,
+      "records": [
+        {
+          "actualEndTime": null,
+          "actualStartTime": null,
+          "assigneeId": null,
+          "assigneeName": null,
+          "contactName": null,
+          "contactPhone": null,
+          "coverImageThumbnailUrl": null,
+          "coverImageUrl": null,
+          "createBy": 1,
+          "createTime": "2026-10-06T22:47:22",
+          "deptId": 1,
+          "deptName": "农业农村局",
+          "description": null,
+          "executeMode": "MANUAL",
+          "geometryAvailable": true,
+          "geometryFeatureCount": 1,
+          "geometryUpdatedAt": "2026-10-06T22:47:22",
+          "id": 1314,
+          "imageCount": 0,
+          "mapServices": null,
+          "name": "111",
+          "planEndTime": "2026-10-10T00:00:00",
+          "planStartTime": "2026-10-01T00:00:00",
+          "priority": 1,
+          "rangeArea": 0.0104,
+          "rangeAreaUnit": "km2",
+          "rangeName": null,
+          "refId": null,
+          "refType": "NONE",
+          "resultRequirements": [
+            "照片"
+          ],
+          "sceneCode": "CULTIVATED_LAND_USE_CONTROL",
+          "sceneName": "耕地种植用途管控与\"非粮化\"动态监测",
+          "sourceAbnormalId": null,
+          "taskNo": "NYNCJ-20261006-001",
+          "taskStatus": 0,
+          "taskStatusDesc": "待执行",
+          "updateTime": "2026-10-06T23:45:29"
+        },
+        {
+          "actualEndTime": null,
+          "actualStartTime": null,
+          "assigneeId": 1,
+          "assigneeName": "系统管理员",
+          "contactName": null,
+          "contactPhone": null,
+          "coverImageThumbnailUrl": null,
+          "coverImageUrl": null,
+          "createBy": 451,
+          "createTime": "2026-09-16T06:41:01",
+          "deptId": 1,
+          "deptName": "农业农村局",
+          "description": null,
+          "executeMode": "MANUAL",
+          "geometryAvailable": true,
+          "geometryFeatureCount": 1,
+          "geometryUpdatedAt": "2026-09-16T14:41:01",
+          "id": 901,
+          "imageCount": 0,
+          "mapServices": [
+            {
+              "createTime": "2026-09-24T11:35:44",
+              "id": 1,
+              "name": "202604局部0.02米影像",
+              "preset": 1,
+              "remark": "{\r\n  \"bounds\": {\r\n    \"west\": 119.8412888155381,\r\n    \"south\": 32.48574015140688,\r\n    \"east\": 119.85940753661878,\r\n    \"north\": 32.49689672806349\r\n  },\r\n  \"wkid\": 4326,\r\n  \"minZoom\": 16,\r\n  \"maxZoom\": 22\r\n}",
+              "serviceUrl": "http://58.213.29.198:9624/arcgis198/arcgis/rest/services/taizhou_temp/Jiulong_04_gaofen/MapServer",
+              "sort": 1,
+              "status": 1,
+              "type": "ARCGIS_MAPSERVER",
+              "updateTime": "2026-09-28T16:45:39"
+            },
+            {
+              "createTime": "2026-09-28T15:23:30",
+              "id": 6,
+              "name": "2026年9月12日九龙镇无人机正射影像",
+              "preset": 1,
+              "remark": "{\r\n  \"bounds\": {\r\n    \"west\": 119.8412888155381,\r\n    \"south\": 32.48574015140688,\r\n    \"east\": 119.85940753661878,\r\n    \"north\": 32.49689672806349\r\n  },\r\n  \"wkid\": 4326,\r\n  \"minZoom\": 16,\r\n  \"maxZoom\": 22\r\n}",
+              "serviceUrl": "https://das-fly-online-1301434080.cos.ap-guangzhou.myqcloud.com/assets/2093223140942544896/2098618921722638336/dom-tms/{z}/{x}/{y}.png",
+              "sort": 6,
+              "status": 0,
+              "type": "TMS",
+              "updateTime": "2026-10-05T17:13:38"
+            }
+          ],
+          "name": "测试2",
+          "planEndTime": "2026-09-24T00:00:00",
+          "planStartTime": "2026-09-16T00:00:00",
+          "priority": 1,
+          "rangeArea": 774.0511,
+          "rangeAreaUnit": "km2",
+          "rangeName": null,
+          "refId": null,
+          "refType": "NONE",
+          "resultRequirements": null,
+          "sceneCode": "FOREST_LAW_ENFORCE",
+          "sceneName": "林业执法监管",
+          "sourceAbnormalId": null,
+          "taskNo": "NYNCJ-20260916-001",
+          "taskStatus": 0,
+          "taskStatusDesc": "待执行",
+          "updateTime": "2026-10-06T09:05:43"
+        },
+        {
+          "actualEndTime": null,
+          "actualStartTime": "2026-09-18T13:47:59",
+          "assigneeId": 1,
+          "assigneeName": "系统管理员",
+          "contactName": null,
+          "contactPhone": null,
+          "coverImageThumbnailUrl": null,
+          "coverImageUrl": null,
+          "createBy": 1,
+          "createTime": "2026-09-15T13:41:38",
+          "deptId": 1,
+          "deptName": "农业农村局",
+          "description": null,
+          "executeMode": "MANUAL",
+          "geometryAvailable": true,
+          "geometryFeatureCount": 1,
+          "geometryUpdatedAt": "2026-09-18T10:54:34",
+          "id": 900,
+          "imageCount": 0,
+          "mapServices": [
+            {
+              "createTime": "2026-09-24T11:35:44",
+              "id": 1,
+              "name": "202604局部0.02米影像",
+              "preset": 1,
+              "remark": "{\r\n  \"bounds\": {\r\n    \"west\": 119.8412888155381,\r\n    \"south\": 32.48574015140688,\r\n    \"east\": 119.85940753661878,\r\n    \"north\": 32.49689672806349\r\n  },\r\n  \"wkid\": 4326,\r\n  \"minZoom\": 16,\r\n  \"maxZoom\": 22\r\n}",
+              "serviceUrl": "http://58.213.29.198:9624/arcgis198/arcgis/rest/services/taizhou_temp/Jiulong_04_gaofen/MapServer",
+              "sort": 1,
+              "status": 1,
+              "type": "ARCGIS_MAPSERVER",
+              "updateTime": "2026-09-28T16:45:39"
+            },
+            {
+              "createTime": "2026-09-28T15:23:30",
+              "id": 6,
+              "name": "2026年9月12日九龙镇无人机正射影像",
+              "preset": 1,
+              "remark": "{\r\n  \"bounds\": {\r\n    \"west\": 119.8412888155381,\r\n    \"south\": 32.48574015140688,\r\n    \"east\": 119.85940753661878,\r\n    \"north\": 32.49689672806349\r\n  },\r\n  \"wkid\": 4326,\r\n  \"minZoom\": 16,\r\n  \"maxZoom\": 22\r\n}",
+              "serviceUrl": "https://das-fly-online-1301434080.cos.ap-guangzhou.myqcloud.com/assets/2093223140942544896/2098618921722638336/dom-tms/{z}/{x}/{y}.png",
+              "sort": 6,
+              "status": 0,
+              "type": "TMS",
+              "updateTime": "2026-10-05T17:13:38"
+            }
+          ],
+          "name": "棚房测试任务",
+          "planEndTime": "2026-09-16T00:00:00",
+          "planStartTime": "2026-09-15T00:00:00",
+          "priority": 0,
+          "rangeArea": 1.6167,
+          "rangeAreaUnit": "km2",
+          "rangeName": null,
+          "refId": null,
+          "refType": "NONE",
+          "resultRequirements": null,
+          "sceneCode": "CULTIVATED_LAND_USE_CONTROL",
+          "sceneName": "耕地种植用途管控与\"非粮化\"动态监测",
+          "sourceAbnormalId": null,
+          "taskNo": "NYNCJ-20260915-001",
+          "taskStatus": 2,
+          "taskStatusDesc": "待核查",
+          "updateTime": "2026-10-06T09:05:43"
+        }
+      ],
+      "total": 3
+    },
+    "msg": "success"
+  },
+  "flow": {
+    "code": "0",
+    "data": {
+      "bizTaskId": 1314,
+      "currentNode": {
+        "assigneeId": 692,
+        "assigneeName": "农田建设科",
+        "bizTaskId": 1314,
+        "createTime": "2026-10-06T23:45:29",
+        "deadline": "2026-11-05T23:45:29",
+        "deptId": 1,
+        "deptName": "农业农村局",
+        "flowInstanceId": 2,
+        "id": 1,
+        "nodeKey": "REVIEW_CITY",
+        "nodeName": "市级审核",
+        "nodeType": "REVIEW",
+        "overdue": false,
+        "prevNodeInstId": null,
+        "status": "PROCESSING",
+        "submitTime": null,
+        "taskName": "111",
+        "taskNo": "NYNCJ-20261006-001",
+        "transferFromId": null
+      },
+      "endTime": null,
+      "flowInstanceId": 2,
+      "flowKey": "NON_GRAIN_MONITOR",
+      "flowName": "耕地种植用途管控与\"非粮化\"动态监测流程",
+      "startTime": "2026-10-06T23:45:29",
+      "status": "RUNNING",
+      "timeline": [
+        {
+          "assigneeId": 692,
+          "assigneeName": "农田建设科",
+          "bizTaskId": 1314,
+          "createTime": "2026-10-06T23:45:29",
+          "deadline": "2026-11-05T23:45:29",
+          "deptId": 1,
+          "deptName": "农业农村局",
+          "files": [],
+          "flowInstanceId": 2,
+          "id": 1,
+          "nodeKey": "REVIEW_CITY",
+          "nodeName": "市级审核",
+          "nodeType": "REVIEW",
+          "operateLogs": [],
+          "overdue": false,
+          "prevNodeInstId": null,
+          "resultData": null,
+          "status": "PROCESSING",
+          "submitTime": null,
+          "taskName": "111",
+          "taskNo": "NYNCJ-20261006-001",
+          "transferFromId": null
+        }
+      ]
+    },
+    "msg": "success"
+  },
+  "detail": {
+    "code": "0",
+    "data": {
+      "abnormalArea": 0,
+      "abnormalCount": 0,
+      "images": [],
+      "process": {
+        "logs": [
+          {
+            "createTime": "2026-10-06T23:45:29",
+            "detailJson": null,
+            "id": 2422,
+            "operateDesc": "启动工作流：耕地种植用途管控与\"非粮化\"动态监测流程，指派[市级审核]",
+            "operateType": "WORKFLOW_START",
+            "operateTypeDesc": "启动工作流",
+            "operatorId": 1,
+            "operatorName": "系统管理员"
+          },
+          {
+            "createTime": "2026-10-06T22:47:22",
+            "detailJson": "{\"featureCount\":1,\"area\":0.0104,\"areaUnit\":\"km2\"}",
+            "id": 2420,
+            "operateDesc": "保存任务范围",
+            "operateType": "GEOMETRY_UPSERT",
+            "operateTypeDesc": "保存任务范围",
+            "operatorId": 1,
+            "operatorName": "系统管理员"
+          },
+          {
+            "createTime": "2026-10-06T22:47:22",
+            "detailJson": "{\"sceneCode\":\"CULTIVATED_LAND_USE_CONTROL\",\"refType\":\"NONE\",\"refId\":null}",
+            "id": 2419,
+            "operateDesc": "创建业务任务",
+            "operateType": "TASK_CREATE",
+            "operateTypeDesc": "创建任务",
+            "operatorId": 1,
+            "operatorName": "系统管理员"
+          }
+        ],
+        "remark": null
+      },
+      "refSummary": "未关联无人机飞行数据（纯人工任务）",
+      "results": [],
+      "statistics": {
+        "abnormalArea": 0,
+        "abnormalCount": 0,
+        "flightCount": 0,
+        "flightHours": null,
+        "patrolArea": 0.0104,
+        "patrolAreaUnit": "km2"
+      },
+      "task": {
+        "actualEndTime": null,
+        "actualStartTime": null,
+        "assigneeId": null,
+        "assigneeName": null,
+        "contactName": null,
+        "contactPhone": null,
+        "coverImageThumbnailUrl": null,
+        "coverImageUrl": null,
+        "createBy": 1,
+        "createTime": "2026-10-06T22:47:22",
+        "deptId": 1,
+        "deptName": "农业农村局",
+        "description": null,
+        "executeMode": "MANUAL",
+        "geometryAvailable": true,
+        "geometryFeatureCount": 1,
+        "geometryUpdatedAt": "2026-10-06T22:47:22",
+        "id": 1314,
+        "imageCount": 0,
+        "mapServices": null,
+        "name": "111",
+        "planEndTime": "2026-10-10T00:00:00",
+        "planStartTime": "2026-10-01T00:00:00",
+        "priority": 1,
+        "rangeArea": 0.0104,
+        "rangeAreaUnit": "km2",
+        "rangeName": null,
+        "refId": null,
+        "refType": "NONE",
+        "resultRequirements": [
+          "照片"
+        ],
+        "sceneCode": "CULTIVATED_LAND_USE_CONTROL",
+        "sceneName": "耕地种植用途管控与\"非粮化\"动态监测",
+        "sourceAbnormalId": null,
+        "taskNo": "NYNCJ-20261006-001",
+        "taskStatus": 0,
+        "taskStatusDesc": "待执行",
+        "updateTime": "2026-10-06T23:45:29"
+      }
+    },
+    "msg": "success"
+  }
+}

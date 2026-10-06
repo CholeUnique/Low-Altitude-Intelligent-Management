@@ -32,16 +32,14 @@ interface UnitScopedTask {
 }
 
 /**
- * 后端部门筛选异常时的前端兜底：任务既要属于当前单位的场景，也要属于当前部门。
- * 缺少部门字段的旧记录仅按场景判断，避免误伤历史数据。
+ * 后端部门筛选异常时的前端兜底：按部门隔离。
+ * 不用前端固定场景清单排除后端真实任务。
  */
 export function isTaskVisibleForOrganization(
   organization: Organization,
   task: UnitScopedTask,
   activeDeptId?: string,
 ) {
-  if (!findOrganizationScene(organization, task.sceneCode, task.sceneName)) return false
-
   const deptName = task.deptName?.trim()
   // 任务接口的 deptId 在部分版本中是数字主键或历史 ID，不能优先拿它与
   // 切换接口返回的部门 ID 做严格比较；有名称时以名称作为可靠的展示隔离依据。

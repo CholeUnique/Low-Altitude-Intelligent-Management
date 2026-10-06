@@ -1,48 +1,18 @@
 <script lang="ts">
-import type { GovernanceTask, GovernanceTaskStatus } from '@/api/governance-task'
+import type { GovernanceTask } from '@/api/governance-task'
 import type { TaskWorkflowNode } from '@/types'
-import { getSharedWorkspaceConfig, resolveWorkspaceSceneId } from '@/workspace/config/registry'
+import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
 
-export const NON_GRAIN_WORKFLOW = [
-  { key: 'task-acceptance', name: '任务受理' },
-  { key: 'section-preliminary-review', name: '科室初核' },
-  { key: 'department-confirmation', name: '部门确认' },
-  { key: 'on-site-verification', name: '现场核查' },
-  { key: 'rectification-disposal', name: '整改处置' },
-  { key: 'drone-review', name: '无人机复核' },
-  { key: 'case-archive', name: '结案归档' },
-] as const
+export { NON_GRAIN_WORKFLOW } from '@/workspace/config/non-grain-workflow'
 
 export function isNonGrainTask(task: Pick<GovernanceTask, 'sceneCode' | 'sceneName'>) {
   return resolveWorkspaceSceneId(task.sceneCode, task.sceneName) === 'non-grain-monitoring'
 }
 
-function nonGrainStatusIndex(status: GovernanceTaskStatus, total: number) {
-  if (status === 5) return total
-  if (status === 3 || status === 4) return 0
-  if (status === 2) return Math.max(0, total - 2)
-  if (status === 1) return Math.min(Math.max(1, Math.floor(total / 2)), total - 1)
-  return 0
-}
-
+/** 只有后端返回节点进度时才展示节点；taskStatus 不能推断七节点完成情况。 */
 export function getTaskWorkflowSteps(task: GovernanceTask): TaskWorkflowNode[] {
   if (task.workflow?.length) return task.workflow
-  const source = isNonGrainTask(task)
-    ? NON_GRAIN_WORKFLOW
-    : getSharedWorkspaceConfig().nodes.map((node) => ({ key: node.key, name: node.shortName }))
-  const activeIndex = isNonGrainTask(task)
-    ? nonGrainStatusIndex(task.taskStatus, source.length)
-    : task.taskStatus === 0 ? 0 : task.taskStatus === 1 ? 1 : 2
-
-  return source.map((node, index) => ({
-    key: node.key,
-    name: node.name,
-    status: task.taskStatus === 5 || index < activeIndex
-      ? 'done'
-      : index === activeIndex && task.taskStatus !== 3 && task.taskStatus !== 4
-        ? 'active'
-        : 'pending',
-  }))
+  return [{ key: 'task-status', name: task.taskStatusDesc, status: task.taskStatus === 5 ? 'done' : [3, 4].includes(task.taskStatus) ? 'pending' : 'active' }]
 }
 
 /**
@@ -82,10 +52,10 @@ const steps = computed(() => getTaskWorkflowSteps(props.task))
   <div
     class="workflow-progress"
     :class="{ compact, 'is-non-grain': isNonGrainTask(task) }"
-    :style="{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }"
+    :style="{ gridTemplateColumns: `repeat(${steps.length}, minmax(56px, 1fr))` }"
     :aria-label="`${task.name}流程进度`"
   >
-    <span v-for="node in steps" :key="node.key" class="workflow-step" :class="node.status">
+    <span v-for="(node, index) in steps" :key="`${node.key}-${index}`" class="workflow-step" :class="node.status">
       <i>{{ node.status === 'done' ? '✓' : node.status === 'active' ? '•' : '' }}</i>
       <small :title="node.name">{{ node.name }}</small>
     </span>
@@ -93,7 +63,7 @@ const steps = computed(() => getTaskWorkflowSteps(props.task))
 </template>
 
 <style scoped>
-.workflow-progress { min-width: 0; display: grid; align-items: start; }
+.workflow-progress { min-width: 0; display: grid; align-items: start; overflow-x: auto; padding: 3px 0; scrollbar-width: thin; }
 .workflow-step { position: relative; min-width: 0; display: grid; grid-template-rows: 18px auto; justify-items: center; color: #98a5b3; }
 .workflow-step:not(:first-child)::before { content: ""; position: absolute; top: 7px; right: calc(50% + 7px); width: calc(100% - 14px); height: 2px; background: #d9e0e7; }
 .workflow-step.done::before { background: #43b88b; }

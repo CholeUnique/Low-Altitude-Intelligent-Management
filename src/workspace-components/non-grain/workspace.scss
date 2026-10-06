@@ -54,7 +54,7 @@
 
 .ng-sub-time { margin-left: 3px; color: #56738a !important; font-weight: 500; }
 .ng-map-panel { display: flex; flex-direction: column; }
-.ng-map-figure,.ng-imagery,.ng-thumb,.ng-photo { position: relative; overflow: hidden; background-image: url('../../assets/non-grain-demo-grid.png'); background-repeat: no-repeat; background-size: 400% 300%; }
+.ng-map-figure,.ng-imagery,.ng-thumb,.ng-photo { position: relative; overflow: hidden; background-image: none; background-repeat: no-repeat; background-size: 400% 300%; }
 .img-paddy { background-position: 0 0; }.img-orchard { background-position: 33.333% 0; }.img-nursery { background-position: 66.666% 0; }.img-pond { background-position: 100% 0; }.img-rice { background-position: 0 50%; }.img-young-trees { background-position: 33.333% 50%; }.img-field-cleared { background-position: 66.666% 50%; }.img-restored { background-position: 100% 50%; }.img-road { background-position: 0 100%; }.img-bare-field { background-position: 33.333% 100%; }.img-rice-hills { background-position: 66.666% 100%; }.img-survey { background-position: 100% 100%; }
 .ng-map-figure { min-height: 0; flex: 1; border: 1px solid #b9d0dd; border-radius: 6px; background-color: #7da05d; box-shadow: inset 0 0 0 1px #ffffff55; }
 .ng-map-viewport { position: relative; min-height: 0; flex: 1; overflow: hidden; border-radius: 6px; }
@@ -65,7 +65,7 @@
 .ng-map-tools button { width: 28px; height: 28px; color: #fff; background: #092f49e8; border: 0; border-bottom: 1px solid #ffffff33; font-size: 15px; }
 
 .ng-swipe-compare { position: relative; min-height: 0; flex: 1; overflow: hidden; border: 1px solid #b9d0dd; border-radius: 6px; background: #829b63; }
-.ng-swipe-layer { position: absolute; inset: 0; background-image: url('../../assets/non-grain-demo-grid.png'); background-repeat: no-repeat; background-size: 400% 300%; background-position: 0 0; }
+.ng-swipe-layer { position: absolute; inset: 0; background-image: none; background-repeat: no-repeat; background-size: 400% 300%; background-position: 0 0; }
 .ng-swipe-current { right: auto; z-index: 1; background-position: 66.666% 0; border-right: 2px solid #fff; box-shadow: 4px 0 10px #001d2c66; }
 .ng-swipe-handle { position: absolute; z-index: 3; top: 50%; width: 32px; height: 32px; display: grid; place-items: center; color: #fff; background: #1687ef; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 3px 10px #06263b66; pointer-events: none; transform: translate(-50%, -50%); }
 .ng-swipe-handle i { font-style: normal; font-size: 15px; }

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import TaskRangeMap from '@/components/TaskRangeMap.vue'
-import { isMockMode } from '@/api/client'
 import {
   bindGovernanceTaskMedia,
   createGovernanceTask,
@@ -12,22 +11,22 @@ import {
   upsertGovernanceTaskGeometry,
 } from '@/api/governance-task'
 import { getFlightTaskMedia } from '@/api/patrol'
-import { addSessionTask } from '@/mocks/portal'
+import { assignNonGrainReview, getNonGrainReviewerId, isNonGrainScene } from '@/api/non-grain-assignment'
 import { useUserStore } from '@/stores/user'
 import { getDepartmentOptions, getMyDepartments } from '@/api/auth'
 import TaskSchedulePicker from '@/components/TaskSchedulePicker.vue'
 import type { GovernanceTask, TaskAbnormal } from '@/api/governance-task'
 import type { SceneDictionaryItem } from '@/api/scene'
-import type { PortalTask, TaskPriority, UserDepartment } from '@/types'
-import { getSharedWorkspaceConfig } from '@/workspace/config/registry'
+import type { UserDepartment } from '@/types'
 
 const props = defineProps<{ sceneId?: string; scenes: SceneDictionaryItem[]; task?: GovernanceTask }>()
-const emit = defineEmits<{ created: [task: { id: string }]; updated: [task: { id: string }] }>()
+const emit = defineEmits<{ created: [task: { id: string; sceneCode?: string }]; updated: [task: { id: string }] }>()
 const visible = defineModel<boolean>({ default: false })
 const user = useUserStore()
 const scenes = computed(() => props.scenes)
 const isEditing = computed(() => Boolean(props.task))
 const selectedScene = computed(() => scenes.value.find((scene) => scene.id === form.sceneId))
+const autoAssignReview = computed(() => !isEditing.value && isNonGrainScene(selectedScene.value?.code || ''))
 const submitError = ref('')
 const submitting = ref(false)
 const departments = ref<UserDepartment[]>([])
@@ -40,6 +39,7 @@ const coverMediaId = ref('')
 const mediaLoading = ref(false)
 const mediaError = ref('')
 const createdTaskId = ref('')
+const assignmentFailed = ref(false)
 const rangeLoading = ref(false)
 const rangeError = ref('')
 const rangeDirty = ref(false)
@@ -56,8 +56,8 @@ const form = reactive({
   description: '',
   contact: '',
   phone: '',
-  requirements: ['照片'] as string[],
-  coordinates: [[117.75, 31.97], [118.08, 32.08], [118.35, 31.92], [118.22, 31.60], [117.82, 31.56]] as [number, number][],
+  requirements: [] as string[],
+  coordinates: [] as [number, number][],
   refType: 'NONE' as 'PLAN' | 'TASK' | 'NONE',
   refId: '',
   assigneeId: '',
@@ -71,7 +71,6 @@ const departmentOptions = computed(() => {
   return [{ deptId: form.deptId, deptName: props.task.deptName }, ...departments.value]
 })
 
-const defaultMockCoordinates: [number, number][] = [[117.75, 31.97], [118.08, 32.08], [118.35, 31.92], [118.22, 31.60], [117.82, 31.56]]
 
 function toDateTimeInput(value?: string) {
   if (!value) return ''
@@ -83,10 +82,6 @@ function toApiDateTime(value: string) {
   return value.length === 16 ? `${value}:00` : value
 }
 
-function toMockPriority(value: string): TaskPriority {
-  return value === '2' ? '高' : value === '0' ? '低' : '中'
-}
-
 function resetForm() {
   submitError.value = ''
   form.name = props.task?.name || ''
@@ -96,16 +91,20 @@ function resetForm() {
   form.priority = String(props.task?.priority ?? 1)
   form.deptId = props.task?.deptId || user.activeDeptId || user.currentUser?.deptId || ''
   schedule.value = [
-    toDateTimeInput(props.task?.planStartTime) || (isMockMode() ? '2026-09-10T08:00:00' : ''),
-    toDateTimeInput(props.task?.planEndTime) || (isMockMode() ? '2026-09-12T18:00:00' : ''),
+    toDateTimeInput(props.task?.planStartTime),
+    toDateTimeInput(props.task?.planEndTime),
   ].filter(Boolean)
   form.refType = props.task?.refType === 'PLAN' || props.task?.refType === 'TASK' ? props.task.refType : 'NONE'
   form.refId = props.task?.refId || ''
   form.assigneeId = props.task?.assigneeId || ''
+  form.description = props.task?.description || ''
+  form.requirements = [...(props.task?.resultRequirements || [])]
+  form.contact = props.task?.contactName || ''
+  form.phone = props.task?.contactPhone || ''
   form.remark = ''
   form.area = ''
   form.mediaIds = ''
-  form.coordinates = isMockMode() ? [...defaultMockCoordinates] : []
+  form.coordinates = []
   rangeLoading.value = false
   rangeError.value = ''
   rangeDirty.value = false
@@ -116,6 +115,7 @@ function resetForm() {
   coverMediaId.value = ''
   mediaError.value = ''
   createdTaskId.value = ''
+  assignmentFailed.value = false
 }
 
 function coordinatesFromGeometry(geometry: Awaited<ReturnType<typeof getGovernanceTaskGeometry>>) {
@@ -138,7 +138,7 @@ function coordinatesFromGeometry(geometry: Awaited<ReturnType<typeof getGovernan
 }
 
 async function loadExistingRange() {
-  if (!props.task || isMockMode()) return
+  if (!props.task) return
   const requestVersion = ++rangeLoadVersion
   rangeLoading.value = true
   rangeError.value = ''
@@ -198,7 +198,6 @@ function updateRangeCoordinates(value: [number, number][]) {
 }
 
 async function loadDepartments() {
-  if (isMockMode()) return
   departmentsLoading.value = true
   departmentsError.value = ''
   try {
@@ -231,6 +230,7 @@ watch(visible, (open) => {
 })
 
 function validateRealForm() {
+  if (!isEditing.value && user.currentUser?.role !== 'ADMIN') return '只有管理员可以创建任务。'
   if (!form.name.trim() || !selectedScene.value) return '请填写任务名称并选择所属场景。'
   if (!form.deptId) return '请选择主责部门。管理员在全局视角下创建任务时必须明确指定部门。'
   if (schedule.value.length !== 2) return '请选择计划开始和结束时间。'
@@ -309,6 +309,10 @@ async function saveRealTask() {
     planEndTime: toApiDateTime(schedule.value[1]!),
     assigneeId: form.assigneeId || undefined,
     remark: form.remark.trim() || undefined,
+    description: form.description.trim(),
+    resultRequirements: [...form.requirements],
+    contactName: form.contact.trim(),
+    contactPhone: form.phone.trim(),
   }
   submitting.value = true
   submitError.value = ''
@@ -327,30 +331,22 @@ async function saveRealTask() {
       }
       emit('updated', { id: props.task.id })
     } else {
-      const mediaIds = parseMediaIds()
+      // 先确认管理员存在，查询失败时不创建无负责人任务。
+      const reviewerId = autoAssignReview.value ? await getNonGrainReviewerId(form.deptId) : undefined
       const created = await createGovernanceTask({
         deptId: form.deptId,
         sceneCode: selectedScene.value!.code,
         executeMode: 'MANUAL',
         ...common,
+        ...(reviewerId ? { assigneeId: reviewerId } : {}),
       })
       createdTaskId.value = created.id
-      if (form.coordinates.length >= 3) {
-        await upsertGovernanceTaskGeometry({
-          deptId: form.deptId,
-          bizTaskId: created.id,
-          geometry: toRangeGeometry(),
-          coordinateSystem: 'EPSG:4326',
-          geometryType: 'POLYGON',
-          rangeName: form.area.trim() || undefined,
-        })
+      if (reviewerId) {
+        assignmentFailed.value = true
+        await assignNonGrainReview(created.id, form.deptId, reviewerId)
+        assignmentFailed.value = false
       }
-      if (mediaIds.length) {
-        await bindGovernanceTaskMedia({ deptId: form.deptId, bizTaskId: created.id, mediaIds })
-        if (coverMediaId.value && mediaIds.includes(coverMediaId.value)) {
-          await setGovernanceTaskMediaCover({ deptId: form.deptId, bizTaskId: created.id, mediaId: coverMediaId.value })
-        }
-      }
+      await saveCreatedTaskAssets(created.id)
       emit('created', created)
     }
     visible.value = false
@@ -359,65 +355,46 @@ async function saveRealTask() {
   } catch (error) {
     const message = error instanceof Error ? error.message : '任务保存失败，请稍后重试。'
     submitError.value = createdTaskId.value
-      ? `任务已创建（ID：${createdTaskId.value}），但范围或影像关联失败：${message}。请关闭弹窗后在任务详情补充，不要重复创建。`
+      ? `任务已创建（ID：${createdTaskId.value}），但后续处理未完成：${message}。请勿重复创建。`
       : message
   } finally {
     submitting.value = false
   }
 }
 
-function createMockTask() {
-  if (!form.name || !form.sceneId || !form.area || !form.owner) {
-    submitError.value = '请填写任务名称、所属场景、所属区域和执行单位。'
-    return
-  }
-  const workspaceConfig = getSharedWorkspaceConfig()
-  const now = new Date()
-  const task: PortalTask = {
-    id: `TASK-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(Date.now()).slice(-3)}`,
-    organizationId: user.organizationId,
-    sceneId: form.sceneId,
-    name: form.name,
-    status: '待处理',
-    priority: toMockPriority(form.priority),
-    area: form.area,
-    areaSize: Math.max(form.coordinates.length * 657.3, 1),
-    owner: form.owner,
-    assignee: form.contact || '待指派',
-    createdAt: now.toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-'),
-    updatedAt: now.toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-'),
-    plannedStart: (schedule.value[0] || '').replace('T', ' '),
-    plannedEnd: (schedule.value[1] || '').replace('T', ' '),
-    progress: 0,
-    description: form.description || '暂无任务描述',
-    contact: form.contact || '待指派',
-    phone: form.phone || '-',
-    resultRequirements: [...form.requirements],
-    coordinates: [...form.coordinates],
-    workflow: workspaceConfig.nodes.map((node, index) => ({
-      key: node.key,
-      name: node.name,
-      status: index === 0 ? 'active' as const : 'pending' as const,
-      ...(index === 0 ? { time: '刚刚' } : {}),
-    })),
-    metrics: { flights: 0, flightHours: 0, patrolArea: 0, issues: 0, completedNodes: 0, totalNodes: workspaceConfig.nodes.length },
-  }
-  addSessionTask(task)
-  emit('created', task)
-  visible.value = false
+function saveTask() {
+  if (!submitting.value) void saveRealTask()
 }
 
-function saveTask() {
-  if (submitting.value) return
-  if (!isMockMode()) {
-    void saveRealTask()
-    return
+async function saveCreatedTaskAssets(taskId: string) {
+  if (form.coordinates.length >= 3) {
+    await upsertGovernanceTaskGeometry({ deptId: form.deptId, bizTaskId: taskId, geometry: toRangeGeometry(), coordinateSystem: 'EPSG:4326', geometryType: 'POLYGON', rangeName: form.area.trim() || undefined })
   }
-  if (isEditing.value) {
-    submitError.value = 'Mock 模式暂不支持编辑会话任务。'
-    return
+  const mediaIds = parseMediaIds()
+  if (mediaIds.length) {
+    await bindGovernanceTaskMedia({ deptId: form.deptId, bizTaskId: taskId, mediaIds })
+    if (coverMediaId.value && mediaIds.includes(coverMediaId.value)) {
+      await setGovernanceTaskMediaCover({ deptId: form.deptId, bizTaskId: taskId, mediaId: coverMediaId.value })
+    }
   }
-  createMockTask()
+}
+
+async function retryReviewAssignment() {
+  if (submitting.value || !createdTaskId.value || !assignmentFailed.value) return
+  submitting.value = true
+  try {
+    const reviewerId = await getNonGrainReviewerId(form.deptId)
+    await assignNonGrainReview(createdTaskId.value, form.deptId, reviewerId)
+    assignmentFailed.value = false
+    await saveCreatedTaskAssets(createdTaskId.value)
+    emit('created', { id: createdTaskId.value, sceneCode: selectedScene.value?.code })
+    visible.value = false
+    rangeLoadVersion += 1
+  } catch (error) {
+    submitError.value = `任务已创建（ID：${createdTaskId.value}），分派未完成：${error instanceof Error ? error.message : '请稍后重试'}。请勿重复创建。`
+  } finally {
+    submitting.value = false
+  }
 }
 
 function cancelTaskEdit() {
@@ -436,11 +413,8 @@ function cancelTaskEdit() {
         <label>任务名称 *</label><input v-model="form.name" placeholder="请输入任务名称" />
         <div class="form-columns"><div><label>所属场景 *</label><select v-model="form.sceneId" :disabled="isEditing"><option v-for="scene in scenes" :key="scene.id" :value="scene.id">{{ scene.name }}</option></select></div><div><label>优先级</label><select v-model="form.priority"><option value="2">高</option><option value="1">中</option><option value="0">低</option></select></div></div>
         <p v-if="submitError" class="task-form-error">{{ submitError }}</p>
-        <template v-if="isMockMode()">
-          <label>所属区域 *</label><input v-model="form.area" placeholder="请输入任务区域" />
-          <label>执行单位 *</label><input v-model="form.owner" placeholder="请输入执行单位" />
-        </template>
-        <template v-if="!isMockMode()">
+        <button v-if="assignmentFailed" type="button" :disabled="submitting" @click="retryReviewAssignment">{{ submitting ? '正在分派…' : '重试分派给 admin' }}</button>
+        <template>
           <label>主责部门 *</label>
           <select v-model="form.deptId" :disabled="departmentsLoading || !departmentOptions.length">
             <option value="" disabled>{{ departmentsLoading ? '正在读取主责部门…' : departmentsError ? '主责部门读取失败' : '请选择主责部门' }}</option>
@@ -451,14 +425,11 @@ function cancelTaskEdit() {
         </template>
         <label>计划时间 *</label>
         <TaskSchedulePicker v-model="schedule" />
-        <template v-if="isMockMode()">
-          <label>任务描述</label><textarea v-model="form.description" maxlength="300" placeholder="请输入任务背景、目标和具体说明"></textarea>
-          <label>成果要求</label>
-          <div class="requirement-list"><label v-for="item in ['照片','视频','直播','二维成果','三维成果','全景','事件','巡检报告']" :key="item"><input v-model="form.requirements" type="checkbox" :value="item" />{{ item }}</label></div>
-          <label>联系人</label><div class="form-columns"><input v-model="form.contact" placeholder="联系人姓名" /><input v-model="form.phone" placeholder="联系人手机号" /></div>
-        </template>
-        <template v-else>
-          <div class="form-columns"><div><label>负责人 ID</label><input v-model="form.assigneeId" inputmode="numeric" placeholder="可暂不填写" /></div><div><label>关联类型</label><select v-model="form.refType"><option value="NONE">不关联</option><option value="PLAN">飞行计划</option><option value="TASK">飞行任务</option></select></div></div>
+        <label>任务说明</label><textarea v-model="form.description" maxlength="1000" placeholder="填写业务说明（可选）"></textarea>
+        <label>成果要求</label><div class="requirement-list"><label v-for="item in ['照片','视频','直播','二维成果','三维成果','全景','事件','巡检报告']" :key="item"><input v-model="form.requirements" type="checkbox" :value="item" />{{ item }}</label></div>
+        <label>联系人与联系电话</label><div class="form-columns"><input v-model="form.contact" maxlength="100" placeholder="联系人（可选）" /><input v-model="form.phone" maxlength="32" placeholder="联系电话（可选）" /></div>
+        <template>
+          <div class="form-columns"><div><label>{{ autoAssignReview ? '科室初核负责人' : '负责人 ID' }}</label><input v-if="autoAssignReview" value="admin（创建后自动分派）" readonly /><input v-else v-model="form.assigneeId" inputmode="numeric" placeholder="可暂不填写" /></div><div><label>关联类型</label><select v-model="form.refType"><option value="NONE">不关联</option><option value="PLAN">飞行计划</option><option value="TASK">飞行任务</option></select></div></div>
           <label v-if="form.refType !== 'NONE'">关联对象 ID *</label><input v-if="form.refType !== 'NONE'" v-model="form.refId" inputmode="numeric" placeholder="请输入飞行计划或飞行任务 ID" />
           <label>内部备注</label><textarea v-model="form.remark" maxlength="1000" placeholder="仅管理员可见，可暂不填写"></textarea>
           <template v-if="!isEditing">

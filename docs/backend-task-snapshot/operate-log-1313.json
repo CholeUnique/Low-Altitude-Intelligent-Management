@@ -1,0 +1,16 @@
+{
+  "code": "0",
+  "data": [
+    {
+      "createTime": "2026-09-30T15:56:43",
+      "detailJson": "{\"sourceAbnormalId\":435,\"sourceTaskId\":null}",
+      "id": 2418,
+      "operateDesc": "图斑派生核查任务",
+      "operateType": "TASK_CREATE",
+      "operateTypeDesc": "创建任务",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    }
+  ],
+  "msg": "success"
+}

@@ -4,17 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import CockpitPageLayout from '@/layouts/CockpitPageLayout.vue'
 import TaskRangeMap from '@/components/TaskRangeMap.vue'
 import NewTaskDialog from '@/components/NewTaskDialog.vue'
-import { isMockMode } from '@/api/client'
-import { cancelGovernanceTask, executeGovernanceTask, finishGovernanceTask, getGovernanceTaskDetail, getGovernanceTaskGeometry, getTaskAbnormalPage, taskPriorityLabel } from '@/api/governance-task'
+import { cancelGovernanceTask, executeGovernanceTask, finishGovernanceTask, getGovernanceTaskDetail, getGovernanceTaskOperateLogs, getGovernanceTaskGeometry, getTaskAbnormalPage, taskPriorityLabel } from '@/api/governance-task'
 import { getGovernanceResultDetail, getGovernanceResultPage, getTaskEvidenceImages } from '@/api/governance-result'
-import type { GovernanceTaskDetail, TaskAbnormal, TaskGeometryFeatureCollection } from '@/api/governance-task'
+import type { GovernanceTaskDetail, GovernanceTaskOperateLog, TaskAbnormal, TaskGeometryFeatureCollection } from '@/api/governance-task'
 import type { GovernanceResult, TaskEvidenceImage } from '@/api/governance-result'
-import { createNonGrainDemoTasks, isNonGrainDemoTaskId } from '@/mocks/non-grain-workspace'
-import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
-const user = useUserStore()
 const detail = ref<GovernanceTaskDetail>()
 const geometry = ref<TaskGeometryFeatureCollection>({ type: 'FeatureCollection', features: [] })
 const loading = ref(false)
@@ -50,7 +46,10 @@ const pendingAction = ref<'execute' | 'cancel' | 'finish'>()
 let mapAbnormalRequestVersion = 0
 const task = computed(() => detail.value?.task)
 const abnormalPageCount = computed(() => Math.max(1, Math.ceil(abnormalTotal.value / 10)))
-const logs = computed(() => detail.value?.process?.logs || [])
+const logs = ref<GovernanceTaskOperateLog[]>([])
+const logsLoading = ref(false)
+const logsError = ref('')
+let logsRequestVersion = 0
 const displayedLogs = computed(() => logs.value)
 const editScenes = computed(() => task.value ? [{
   id: task.value.sceneCode,
@@ -115,33 +114,16 @@ function handleTaskUpdated() {
 async function loadTask() {
   const taskId = String(route.params.taskId || '')
   if (!taskId) return
+  const logVersion = ++logsRequestVersion
+  logs.value = []
+  logsError.value = ''
+  logsLoading.value = false
   mapAbnormalRequestVersion += 1
   mapAbnormalRecords.value = []
   // 从任务列表进入、或从工作台返回另一任务时，不能沿用上一任务的地图视野。
   taskMapView.value = undefined
   loading.value = true
   error.value = ''
-  if (isNonGrainDemoTaskId(taskId)) {
-    const viewerId = String(user.currentUser?.id || user.currentUser?.username || 'non-grain-demo-user')
-    const demoTask = createNonGrainDemoTasks(viewerId, user.activeDeptId, '海陵区农业农村局')
-      .find((item) => item.id === taskId)
-    detail.value = demoTask ? {
-      task: demoTask,
-      refSummary: '非粮化动态监测演示任务',
-      abnormalCount: 3,
-      abnormalArea: (demoTask.areaSize || 0) * 666.67,
-      results: [],
-      process: { remark: '演示任务数据，仅用于查看任务详情与流程进度。', logs: [] },
-    } : undefined
-    geometry.value = { type: 'FeatureCollection', features: [] }
-    resultRecords.value = []
-    resultTotal.value = 0
-    evidenceImages.value = []
-    abnormalRecords.value = []
-    abnormalTotal.value = 0
-    loading.value = false
-    return
-  }
   try {
     // 任务范围属于辅助地图数据，不能因其响应变慢而使整个任务详情页不可用。
     const [detailResult, geometryResult] = await Promise.allSettled([
@@ -156,6 +138,7 @@ async function loadTask() {
       : { type: 'FeatureCollection', features: [] }
     if (!nextDetail) error.value = '未找到该任务或当前账号无查看权限。'
     else {
+      if (logVersion === logsRequestVersion) void loadOperateLogs(taskId, nextDetail.task.deptId, logVersion)
       void loadResultsAndEvidence(taskId)
       void loadAbnormals(taskId)
       void loadAllMapAbnormals(taskId)
@@ -166,6 +149,18 @@ async function loadTask() {
     error.value = reason instanceof Error ? reason.message : '任务详情加载失败，请稍后重试。'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadOperateLogs(taskId: string, deptId: string | undefined, version: number) {
+  logsLoading.value = true
+  try {
+    const records = await getGovernanceTaskOperateLogs(taskId, deptId)
+    if (version === logsRequestVersion) logs.value = records
+  } catch (reason) {
+    if (version === logsRequestVersion) logsError.value = reason instanceof Error ? reason.message : '操作留痕加载失败'
+  } finally {
+    if (version === logsRequestVersion) logsLoading.value = false
   }
 }
 
@@ -299,7 +294,7 @@ onMounted(() => void loadTask())
             <dt>业务场景</dt><dd>{{ task.sceneName }}</dd><dt>当前状态</dt><dd>{{ task.taskStatusDesc }}</dd>
             <dt>执行方式</dt><dd>{{ task.executeMode === 'AUTO' ? '自动执行' : '手动执行' }}</dd><dt>关联类型</dt><dd>{{ task.refType }}{{ task.refId ? ` · ${task.refId}` : '' }}</dd>
             <dt>计划时间</dt><dd>{{ formatTime(task.planStartTime) }} 至 {{ formatTime(task.planEndTime) }}</dd><dt>实际时间</dt><dd>{{ formatTime(task.actualStartTime) }} 至 {{ formatTime(task.actualEndTime) }}</dd>
-            <dt>负责人</dt><dd>{{ task.assigneeId ? `用户 #${task.assigneeId}` : '' }}</dd><dt>创建时间</dt><dd>{{ formatTime(task.createTime) }}</dd>
+            <dt>负责人</dt><dd>{{ task.assigneeName || (task.assigneeId ? `用户 #${task.assigneeId}` : '暂无数据') }}</dd><dt>创建时间</dt><dd>{{ formatTime(task.createTime) }}</dd>
           </dl>
         </section>
         <section class="detail-panel area-info side-area-info"><div class="detail-title">范围与任务信息</div><dl><dt>范围要素</dt><dd>{{ geometry.features.length ? `${geometry.features.length} 个 GeoJSON 要素` : '后端暂未提供范围' }}</dd><dt>场景编码</dt><dd>{{ task.sceneCode }}</dd><dt>主责部门</dt><dd>{{ task.deptName }}</dd><dt>执行方式</dt><dd>{{ task.executeMode }}</dd><dt>关联信息</dt><dd>{{ detail?.refSummary || '无' }}</dd><dt>内部备注</dt><dd>{{ detail?.process?.remark || '暂无' }}</dd></dl></section>
@@ -308,6 +303,8 @@ onMounted(() => void loadTask())
           <ol v-if="displayedLogs.length" class="process-list">
             <li v-for="(log, index) in displayedLogs" :key="log.id || index"><i>✓</i><span><b :title="log.operateTypeDesc">{{ log.operateTypeDesc }}</b><small>{{ formatTime(log.createTime) }}</small></span></li>
           </ol>
+          <div v-else-if="logsLoading" class="process-empty">正在加载操作留痕…</div>
+          <div v-else-if="logsError" class="process-empty table-error">{{ logsError }}</div>
           <div v-else class="process-empty">暂无后端操作留痕</div>
         </section>
       </aside>
@@ -321,7 +318,7 @@ onMounted(() => void loadTask())
             <article><i>△</i><span>异常面积<b>{{ detail?.abnormalArea ?? 0 }}<small>㎡</small></b></span></article>
             <article><i>⌖</i><span>范围要素<b>{{ geometry.features.length }}<small>个</small></b></span></article>
           </section>
-          <div class="task-action-toolbar"><button class="enter-workspace" @click="router.push('/tasks/list')">返回任务列表</button><template v-if="!isMockMode() && !isNonGrainDemoTaskId(task.id)"><button v-if="task.taskStatus !== 4 && task.taskStatus !== 5" class="task-action-edit" @click="editVisible = true">编辑任务</button><button v-if="task.taskStatus === 0" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('execute')">执行任务</button><button v-if="task.taskStatus === 0 || task.taskStatus === 1" class="task-action-danger" :disabled="actionLoading" @click="requestTaskAction('cancel')">取消任务</button><button v-if="task.taskStatus === 2" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('finish')">核查完成</button></template></div>
+          <div class="task-action-toolbar"><button class="enter-workspace" @click="router.push('/tasks/list')">返回任务列表</button><template ><button v-if="task.taskStatus !== 4 && task.taskStatus !== 5" class="task-action-edit" @click="editVisible = true">编辑任务</button><button v-if="task.taskStatus === 0" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('execute')">执行任务</button><button v-if="task.taskStatus === 0 || task.taskStatus === 1" class="task-action-danger" :disabled="actionLoading" @click="requestTaskAction('cancel')">取消任务</button><button v-if="task.taskStatus === 2" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('finish')">核查完成</button></template></div>
         </div>
         <section class="map-info-grid">
           <article class="detail-panel task-map-panel"><div class="task-map-compare"><section class="task-map-compare__pane"><header>任务范围与异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :fit-abnormal-points="true" :auto-fit="false" :fit-request="taskMapFitRequest" :view="taskMapView" @view-change="syncTaskMapView" /></section><section class="task-map-compare__pane"><header>异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :show-task-range="false" :abnormal-fill-opacity="0" :show-dom-imagery="true" :auto-fit="false" :view="taskMapView" @view-change="syncTaskMapView" /></section></div></article>

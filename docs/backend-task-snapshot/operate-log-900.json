@@ -1,0 +1,66 @@
+{
+  "code": "0",
+  "data": [
+    {
+      "createTime": "2026-09-18T05:47:58",
+      "detailJson": "{\"from\":0,\"to\":1}",
+      "id": 2415,
+      "operateDesc": "触发任务执行",
+      "operateType": "TASK_EXECUTE",
+      "operateTypeDesc": "触发执行",
+      "operatorId": 451,
+      "operatorName": "系统管理员2"
+    },
+    {
+      "createTime": "2026-09-18T02:54:34",
+      "detailJson": "{\"featureCount\":1,\"area\":1.6167,\"areaUnit\":\"km2\"}",
+      "id": 2408,
+      "operateDesc": "保存任务范围",
+      "operateType": "GEOMETRY_UPSERT",
+      "operateTypeDesc": "保存任务范围",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    },
+    {
+      "createTime": "2026-09-18T02:54:34",
+      "detailJson": null,
+      "id": 2407,
+      "operateDesc": "修改业务任务",
+      "operateType": "TASK_UPDATE",
+      "operateTypeDesc": "修改任务",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    },
+    {
+      "createTime": "2026-09-17T07:07:39",
+      "detailJson": null,
+      "id": 2283,
+      "operateDesc": "修改业务任务",
+      "operateType": "TASK_UPDATE",
+      "operateTypeDesc": "修改任务",
+      "operatorId": 451,
+      "operatorName": "系统管理员2"
+    },
+    {
+      "createTime": "2026-09-15T13:41:38",
+      "detailJson": "{\"featureCount\":1,\"area\":0.0326,\"areaUnit\":\"km2\"}",
+      "id": 1602,
+      "operateDesc": "保存任务范围",
+      "operateType": "GEOMETRY_UPSERT",
+      "operateTypeDesc": "保存任务范围",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    },
+    {
+      "createTime": "2026-09-15T13:41:38",
+      "detailJson": "{\"sceneCode\":\"FOREST_LAW_ENFORCE\",\"refType\":\"NONE\",\"refId\":null}",
+      "id": 1601,
+      "operateDesc": "创建业务任务",
+      "operateType": "TASK_CREATE",
+      "operateTypeDesc": "创建任务",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    }
+  ],
+  "msg": "success"
+}

@@ -35,6 +35,8 @@ const props = withDefaults(defineProps<{
   thumbnail?: boolean
   /** 仅地理影像窗口使用；普通图片查看器不参与视图联动。 */
   synchronizedView?: SynchronizedMapView
+  /** 仅两幅普通图片使用相同归一化坐标时启用联动，不和地理坐标混用。 */
+  synchronizeImages?: boolean
   /** 新增图斑时复用当前地理影像窗口进行圈画。 */
   drawingMode?: SpotDrawingMode
   draftCoordinates?: Array<[number, number]>
@@ -48,6 +50,7 @@ const emit = defineEmits<{
 const container = ref<HTMLElement>()
 const imageError = ref(false)
 const referenceImageryError = ref('')
+const renderedView = ref<{ center: string; zoom: number }>()
 let map: L.Map | undefined
 let resizeObserver: ResizeObserver | undefined
 let resizeFrame: number | undefined
@@ -58,11 +61,12 @@ let draftShapeLayer: L.Layer | undefined
 let draftVertexLayer: L.LayerGroup | undefined
 let draftHoverLayer: L.Layer | undefined
 let applyingSynchronizedView = false
+let imageReady = false
 const synchronizationSource = Symbol('spot-map')
 const drawingCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M18.8 2.7l6.5 6.5-12.8 12.8-7.4 1.7 1.7-7.4z' fill='%23ffffff' stroke='%23073550' stroke-width='1.7' stroke-linejoin='round'/%3E%3Cpath d='M6.8 16.3l6.5 6.5-8.2 1.9z' fill='%2319a5c7' stroke='%23073550' stroke-width='1.7' stroke-linejoin='round'/%3E%3Cpath d='M17.1 4.4l6.5 6.5' stroke='%2319a5c7' stroke-width='2'/%3E%3C/svg%3E") 4 24, crosshair`
 
 function isSynchronizedImagery() {
-  return !props.thumbnail && props.period.kind === 'map-service'
+  return !props.thumbnail && (props.period.kind === 'map-service' || (props.period.kind === 'image' && props.synchronizeImages))
 }
 
 function sameView(view: SynchronizedMapView) {
@@ -74,15 +78,24 @@ function sameView(view: SynchronizedMapView) {
 }
 
 function applySynchronizedView(view?: SynchronizedMapView) {
+  if (props.period.kind === 'image' && !imageReady) return
   if (!map || !view || view.source === synchronizationSource || !isSynchronizedImagery() || sameView(view)) return
   applyingSynchronizedView = true
   map.setView(view.center, view.zoom, { animate: false })
+  updateRenderedView()
   applyingSynchronizedView = false
+}
+
+function updateRenderedView() {
+  if (!map) return
+  const center = map.getCenter()
+  renderedView.value = { center: `${center.lat},${center.lng}`, zoom: map.getZoom() }
 }
 
 function publishMapView() {
   synchronizationFrame = undefined
   if (!map || applyingSynchronizedView || !isSynchronizedImagery()) return
+  updateRenderedView()
   const center = map.getCenter()
   emit('view-change', { center: [center.lat, center.lng], zoom: map.getZoom(), source: synchronizationSource })
 }
@@ -184,8 +197,8 @@ function createImageViewer(imageUrl: string) {
   if (!container.value) return
   map = L.map(container.value, {
     crs: L.CRS.Simple,
-    minZoom: -4,
-    maxZoom: 4,
+    minZoom: props.synchronizeImages ? 0 : -4,
+    maxZoom: props.synchronizeImages ? 16 : 4,
     zoomControl: true,
     attributionControl: false,
     zoomSnap: .25,
@@ -193,10 +206,14 @@ function createImageViewer(imageUrl: string) {
   const source = new Image()
   source.onload = () => {
     if (!map || !source.naturalWidth || !source.naturalHeight) return
-    const bounds = L.latLngBounds([0, 0], [source.naturalHeight, source.naturalWidth])
+    const bounds = props.synchronizeImages ? L.latLngBounds([0, 0], [source.naturalHeight / source.naturalWidth, 1]) : L.latLngBounds([0, 0], [source.naturalHeight, source.naturalWidth])
     L.imageOverlay(imageUrl, bounds, { opacity: 1, interactive: false }).on('error', () => { imageError.value = true }).addTo(map)
     map.setMaxBounds(bounds.pad(.5))
     map.fitBounds(bounds, { padding: [12, 12], animate: false })
+    imageReady = true
+    if (props.synchronizeImages) {
+      enableViewSynchronization()
+    }
   }
   source.onerror = () => { imageError.value = true }
   source.src = imageUrl
@@ -278,7 +295,7 @@ onMounted(async () => {
   map.on('mousemove', handleMapMouseMove)
   map.on('mouseout', handleMapMouseOut)
   updateDrawingMode()
-  enableViewSynchronization()
+  if (props.period.kind !== 'image') enableViewSynchronization()
   resizeObserver = new ResizeObserver(() => {
     if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
     resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: false }))
@@ -311,7 +328,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="spot-map" :class="{ 'spot-map--empty': period.kind === 'empty', 'spot-map--thumbnail': thumbnail, 'spot-map--drawing': drawingMode === 'available' || drawingMode === 'active', 'spot-map--drawing-active': drawingMode === 'active', 'spot-map--drawing-preview': drawingMode === 'preview' }">
+  <div class="spot-map" :data-center="renderedView?.center" :data-zoom="renderedView?.zoom" :class="{ 'spot-map--empty': period.kind === 'empty', 'spot-map--thumbnail': thumbnail, 'spot-map--drawing': drawingMode === 'available' || drawingMode === 'active', 'spot-map--drawing-active': drawingMode === 'active', 'spot-map--drawing-preview': drawingMode === 'preview' }">
     <div v-if="period.kind !== 'empty'" ref="container" class="spot-map__canvas"></div>
     <span v-if="!thumbnail" class="period-badge">第 {{ period.number }} 期 · {{ period.label }}</span>
     <div v-if="!thumbnail && period.kind === 'map-service' && referenceImageryError" class="imagery-layer-error">{{ referenceImageryError }}</div>

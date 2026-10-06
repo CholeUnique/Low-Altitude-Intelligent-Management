@@ -8,9 +8,8 @@ import {
   resolveWorkspaceNodeKey,
 } from '@/workspace/config/workflow'
 import { getSharedWorkspaceConfig, resolveWorkspaceSceneId } from '@/workspace/config/registry'
-import { getScene, getTask } from '@/mocks/portal'
+import { getScene } from '@/mocks/portal'
 import { useUserStore } from '@/stores/user'
-import { isMockMode } from '@/api/client'
 import { getGovernanceTaskDetail, toPatrolTask } from '@/api/governance-task'
 import type { PortalTask } from '@/types'
 import SpotIdentificationPanel from '@/workspace-components/spot-identification/SpotIdentificationPanel.vue'
@@ -20,7 +19,7 @@ import SceneNodePlaceholder from '@/workspace-components/shared/SceneNodePlaceho
 import RouteFlightPlanPanel from '@/workspace-components/route-flight-plan/RouteFlightPlanPanel.vue'
 import RealtimeCruisePanel from '@/workspace-components/realtime-cruise/RealtimeCruisePanel.vue'
 import NonGrainWorkspace from '@/workspace-components/non-grain/NonGrainWorkspace.vue'
-import { isNonGrainDemoTaskId } from '@/mocks/non-grain-workspace'
+import TaskAcceptancePanel from '@/workspace-components/shared/TaskAcceptancePanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,44 +29,44 @@ const sceneId = computed(() => String(route.params.sceneId || ''))
 const task = ref<PortalTask>()
 const taskLoading = ref(false)
 const taskError = ref('')
-const workspaceSceneId = computed(() => resolveWorkspaceSceneId(sceneId.value, task.value?.sceneId))
+const workspaceSceneId = computed(() => resolveWorkspaceSceneId(backendTask.value?.sceneCode || sceneId.value, backendTask.value?.sceneName))
 const isNonGrainWorkspace = computed(() => workspaceSceneId.value === 'non-grain-monitoring')
 // 不同场景使用各自任务数据，但统一复用林业执法监管的完整工作台流程与页面。
-const workspaceConfig = computed(() => getSharedWorkspaceConfig())
+const workspaceConfig = computed(() => {
+  const config = getSharedWorkspaceConfig()
+  return { ...config, nodes: [{ key: 'task-acceptance', name: '任务受理', shortName: '任务受理', order: 0, module: 'governance' as const, component: 'TaskAcceptance' }, ...config.nodes] }
+})
+const backendTask = ref<import('@/api/governance-task').GovernanceTask>()
 const currentScene = computed(() => getScene(user.organization, workspaceSceneId.value))
+let taskRequestVersion = 0
 
 async function loadTaskContext() {
+  const version = ++taskRequestVersion
   const taskId = typeof route.params.taskId === 'string' ? route.params.taskId : ''
   task.value = undefined
+  backendTask.value = undefined
   taskError.value = ''
+  taskLoading.value = false
   if (!taskId) return
-  // “我的待办”中的非粮任务是纯前端演示数据，不存在于后端任务表。
-  // 直接交给专属工作台读取固定上下文，避免真实详情接口超时阻塞页面。
-  if (resolveWorkspaceSceneId(sceneId.value) === 'non-grain-monitoring'
-    && isNonGrainDemoTaskId(taskId)) {
-    taskLoading.value = false
-    return
-  }
-  if (isMockMode()) {
-    task.value = getTask(taskId)
-    return
-  }
   taskLoading.value = true
   try {
     const detail = await getGovernanceTaskDetail(taskId)
+    if (version !== taskRequestVersion) return
+    backendTask.value = detail?.task
     task.value = detail ? toPatrolTask(detail.task) : undefined
     if (!task.value) taskError.value = '未找到该真实业务任务，或当前账号没有查看权限。'
   } catch (error) {
+    if (version !== taskRequestVersion) return
     taskError.value = error instanceof Error ? error.message : '真实任务上下文加载失败。'
   } finally {
-    taskLoading.value = false
+    if (version === taskRequestVersion) taskLoading.value = false
   }
 }
 
 const nodeKeys = computed(() => workspaceConfig.value?.nodes.map((node) => node.key) ?? [])
 
 const governanceNodes = computed(() =>
-  workspaceConfig.value?.nodes.filter((node) => node.key === 'task-dispatch' || node.key === 'review-archive') ?? [],
+  workspaceConfig.value?.nodes.filter((node) => ['task-acceptance', 'task-dispatch', 'review-archive'].includes(node.key)) ?? [],
 )
 
 const discoveryNodes = computed<WorkspaceNodeConfig[]>(() => [])
@@ -76,8 +75,8 @@ const discoveryNodes = computed<WorkspaceNodeConfig[]>(() => [])
 const defaultNodeKey = computed(() => {
   const status = task.value?.status || ''
   if (status.includes('完成')) return governanceNodes.value[governanceNodes.value.length - 1]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
-  if (status.includes('核查') || status.includes('复核')) return governanceNodes.value[0]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
-  return governanceNodes.value[0]?.key || resolveWorkspaceNodeKey(task.value?.workflow, nodeKeys.value)
+  if (status.includes('核查') || status.includes('复核')) return 'task-dispatch'
+  return 'task-dispatch'
 })
 
 const activeKey = computed(() => {
@@ -121,6 +120,7 @@ function isNodeAvailable(node: WorkspaceNodeConfig) {
 }
 
 function nodeState(key: string) {
+  if (key === 'task-acceptance') return { status: 'done', accessible: Boolean(backendTask.value), active: key === activeKey.value, done: true }
   const status = getWorkflowNodeStatus(task.value?.workflow, key)
   const node = workspaceConfig.value?.nodes.find((item) => item.key === key)
   return {
@@ -159,7 +159,7 @@ watch(
   { immediate: true },
 )
 
-watch(() => route.params.taskId, () => void loadTaskContext())
+watch([() => route.params.taskId, () => route.params.sceneId, () => user.activeDeptId], () => void loadTaskContext())
 onMounted(() => void loadTaskContext())
 </script>
 
@@ -170,13 +170,15 @@ onMounted(() => void loadTaskContext())
   </div>
 
   <NonGrainWorkspace
-    v-else-if="workspaceSceneId === 'non-grain-monitoring'"
+    v-else-if="!taskError && task && workspaceSceneId === 'non-grain-monitoring'"
     :key="task?.id || String(route.params.taskId || '')"
     :task-id="task?.id || String(route.params.taskId || '')"
     :task-name="task?.name"
-    :task-no="task?.id"
+    :task-no="backendTask?.taskNo"
     :task-status="task?.status"
   />
+
+  <div v-else-if="taskError" class="workspace workspace-empty"><main class="empty-body"><div class="empty-card"><h2>任务读取失败</h2><p>{{ taskError }}</p><button @click="loadTaskContext">重试</button></div></main></div>
 
   <div v-else-if="!workspaceConfig" class="workspace workspace-empty">
     <header class="workspace-header">
@@ -201,7 +203,7 @@ onMounted(() => void loadTaskContext())
   <div v-else class="workspace">
     <header class="workspace-header">
       <div class="workspace-return">
-        <el-button class="workspace-return-button" @click="$router.push(task ? `/tasks/${task.id}` : '/tasks')">‹ 返回任务</el-button>
+        <el-button class="workspace-return-button" @click="$router.push('/tasks/todo')">‹ 返回任务</el-button>
       </div>
 
       <div class="workspace-brand workspace-brand--moved" @click="$router.push('/dashboard')">
@@ -219,7 +221,7 @@ onMounted(() => void loadTaskContext())
             <button
               v-for="node in discoveryNodes"
               :key="node.key"
-              :class="nodeState(node.key)"
+              :class="[nodeState(node.key), { 'acceptance-complete': node.key === 'task-acceptance' }]"
               :disabled="!nodeState(node.key).accessible"
               @click="selectNode(node)"
             >
@@ -235,7 +237,7 @@ onMounted(() => void loadTaskContext())
             <button
               v-for="node in governanceNodes"
               :key="node.key"
-              :class="nodeState(node.key)"
+              :class="[nodeState(node.key), { 'acceptance-complete': node.key === 'task-acceptance' }]"
               :disabled="!nodeState(node.key).accessible"
               @click="selectNode(node)"
             >
@@ -247,15 +249,15 @@ onMounted(() => void loadTaskContext())
       </div>
 
       <div class="workspace-user">
-        <span>今日任务 <b>{{ user.organizationId === 'agriculture-rural' ? 22 : 18 }}</b></span>
-        <span>待办 <b>12</b></span>
+
         <span>{{ user.name }}</span>
       </div>
     </header>
 
     <main class="workspace-body">
+      <TaskAcceptancePanel v-if="activeKey === 'task-acceptance'" :task-id="backendTask?.id" />
       <component
-        v-if="activeKey && activeNode"
+        v-else-if="activeKey && activeNode"
         :is="ActivePanel"
         :task="task"
         :scene-name="workspaceConfig.name"
@@ -418,6 +420,13 @@ onMounted(() => void loadTaskContext())
   border-color: #58d3b1;
   background: #58d3b1;
 }
+.module-nodes button.acceptance-complete i {
+  color: #fff;
+  background: #0280a2;
+  border: 1px solid #52c4d9;
+  box-shadow: 0 0 5px 4px #0a5270;
+}
+.module-nodes button.acceptance-complete span { color: #7199ac; }
 .module-nodes button:disabled {
   opacity: 0.42;
   cursor: not-allowed;

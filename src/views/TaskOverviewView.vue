@@ -7,6 +7,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
 import { getBusinessDashboardStatistics, type BusinessDashboardStatistics } from '@/api/business-statistics'
 import { getGovernanceTaskPage, type GovernanceTask } from '@/api/governance-task'
+import { collectPages } from '@/api/pagination'
 import { useUserStore } from '@/stores/user'
 import { isTaskVisibleForOrganization } from '@/utils/scene-visibility'
 
@@ -102,7 +103,7 @@ const efficiencyItems = computed(() => [
   {
     label: '当前逾期任务',
     value: String(overdueCount.value),
-    note: `分页接口前 ${tasks.value.length} 条任务`,
+    note: `基于当前部门 ${tasks.value.length} 条任务`,
     tone: overdueCount.value ? 'orange' : 'green',
   },
 ])
@@ -193,7 +194,7 @@ async function loadData() {
   const organizationId = user.organizationId
   const [statisticsResult, tasksResult] = await Promise.allSettled([
     getBusinessDashboardStatistics({ deptId, days: 7 }),
-    getGovernanceTaskPage({ pageNum: 1, pageSize: 100, deptId, organizationId }),
+    collectPages((pageNum, pageSize) => getGovernanceTaskPage({ pageNum, pageSize, deptId, organizationId })),
   ])
   if (version !== requestVersion) return
 
@@ -205,7 +206,7 @@ async function loadData() {
   statisticsLoading.value = false
 
   if (tasksResult.status === 'fulfilled') {
-    tasks.value = tasksResult.value.records.filter((task) =>
+    tasks.value = tasksResult.value.filter((task) =>
       isTaskVisibleForOrganization(user.organization, task, deptId))
   } else {
     tasks.value = []

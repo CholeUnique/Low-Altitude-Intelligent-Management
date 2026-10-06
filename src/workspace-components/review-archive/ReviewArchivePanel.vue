@@ -1,68 +1,23 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
-import { archiveMaterials, operationLogs, reviewCases, reviewWorkflow } from '@/mocks/governance'
-
+import { useBackendTaskData } from '@/workspace-components/shared/use-backend-task'
+import { workflowStatusLabel } from '@/api/task-workflow'
+import TaskRangeMap from '@/components/TaskRangeMap.vue'
+import SpotDistributionMap from '@/workspace-components/spot-identification/SpotDistributionMap.vue'
 const props = defineProps<{ task?: PortalTask; sceneName?: string; node?: WorkspaceNodeConfig }>()
-const isForestry = computed(() => props.node?.key === 'review-archive')
-const finalAction = computed(() => props.node?.name.includes('销号') ? '确认销号' : '确认归档')
-const tab = ref('待复核')
-const activeId = ref(reviewCases[0]!.id)
-const conclusion = ref(isForestry.value
-  ? '经复核，现场整改范围与问题图斑一致，林地植被恢复措施基本到位，建议通过复核。'
-  : '经复核，现场处置范围与任务要求一致，提交成果材料完整，建议通过复核。')
-const result = ref('整改完成')
-const feedback = ref('')
-const compare = ref(52)
-const cases = computed(() => reviewCases.filter((item) => item.status === tab.value))
-const active = computed(() => reviewCases.find((item) => item.id === activeId.value) || cases.value[0] || reviewCases[0]!)
-function act(name: string) { feedback.value = `${active.value.id}：${name}操作已记录` }
+const source = computed(() => props.task?.id)
+const { task: backendTask, flow, geometry, abnormals, results, logs, loading, errors, activeSpotId, selectedSpot, selectedNode, text, imageryPeriod, load } = useBackendTaskData({ get taskId() { return source.value } })
+const selectedImage = ref(0)
+const image = computed(() => backendTask.value?.comparisonImages?.[selectedImage.value])
+const files = computed(() => results.value.flatMap(result => result.files.map(file => ({ ...file, status: result.parseStatusDesc }))))
 </script>
-
 <template>
   <div class="review-page">
-    <aside class="panel case-list">
-      <div class="tabs"><button v-for="name in ['待复核','待归档','已归档']" :key="name" :class="{active:tab===name}" @click="tab=name">{{ name }} <small>{{ reviewCases.filter(i=>i.status===name).length }}</small></button></div>
-      <button v-for="item in cases" :key="item.id" class="case-row" :class="{active:item.id===activeId}" @click="activeId=item.id">
-        <i>案</i><span><b>{{ item.title }}</b><small>{{ item.id }} · {{ item.area }}</small><em>{{ item.assignee }} · {{ item.updatedAt }}</em></span>
-      </button>
-      <div v-if="!cases.length" class="empty">暂无{{ tab }}案件</div>
-    </aside>
-
-    <section class="center-col">
-      <div class="panel compare-panel">
-        <div class="panel-title">{{ isForestry ? '整改前后影像对比' : '处置前后影像对比' }} <small>{{ active.title }}</small></div>
-        <div class="compare-view">
-          <div class="before"><span>{{ isForestry ? '整改前影像' : '处置前影像' }}</span></div>
-          <div class="after" :style="{ width: `${compare}%` }"><span>{{ isForestry ? '整改后影像' : '处置后影像' }}</span></div>
-          <i :style="{ left: `${compare}%` }"></i>
-        </div>
-        <input v-model.number="compare" type="range" min="10" max="90" />
-        <div class="image-strip"><button class="active">{{ isForestry ? '整改前' : '处置前' }}</button><button>{{ isForestry ? '整改后' : '处置后' }}</button><button>无人机复核影像</button><p>{{ isForestry ? '变化说明：裸土区域已完成补植复绿，临时构筑物已拆除。' : '变化说明：现场状态已按任务要求完成处置，影像变化清晰。' }}</p></div>
-      </div>
-      <div class="panel materials">
-        <div class="panel-title">归档材料</div>
-        <table><thead><tr><th>材料名称</th><th>类型</th><th>大小</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in archiveMaterials" :key="item.name"><td>{{ item.name }}</td><td>{{ item.type }}</td><td>{{ item.size }}</td><td><em :class="{pending:item.status!=='完整'}">{{ item.status }}</em></td><td><button>查看</button></td></tr></tbody></table>
-      </div>
-    </section>
-
-    <aside class="right-col">
-      <div class="panel result-panel">
-        <div class="panel-title">复核结论</div>
-        <dl><dt>事项编号</dt><dd>{{ active.id }}</dd><dt>核查人员</dt><dd>{{ active.assignee }}</dd><dt>核查结果</dt><dd>问题属实</dd><dt>{{ isForestry ? '整改结果' : '处置结果' }}</dt><dd><select v-model="result"><option>整改完成</option><option>部分整改</option><option>未整改</option></select></dd></dl>
-        <label>复核意见<textarea v-model="conclusion"></textarea></label>
-      </div>
-      <div class="panel workflow">
-        <div class="panel-title">历史流程</div>
-        <div v-for="item in reviewWorkflow" :key="item.time" class="flow-row"><i></i><div><b>{{ item.name }}</b><small>{{ item.time }} · {{ item.operator }}</small></div></div>
-      </div>
-      <div class="panel logs">
-        <div class="panel-title">操作日志</div>
-        <div v-for="item in operationLogs" :key="item.time" class="log-row"><time>{{ item.time }}</time><span>{{ item.operator }}</span><b>{{ item.action }}</b></div>
-      </div>
-    </aside>
-
-    <footer class="action-bar panel"><span>{{ feedback || `${node?.name || '复核'}通过后可完成闭环并导出完整材料` }}</span><button @click="act('退回补充')">退回补充</button><button @click="act('复核通过')">复核通过</button><button class="primary" @click="act(finalAction)">{{ finalAction }}</button><button @click="act('导出档案')">导出档案</button></footer>
+    <aside class="panel case-list"><div class="panel-title">关联任务图斑 <small>{{ abnormals.length }} 个</small></div><button v-for="spot in abnormals" :key="spot.id" class="case-row" :class="{ active: activeSpotId === spot.id }" @click="activeSpotId = spot.id"><i>斑</i><span><b>{{ spot.title }}</b><small>{{ spot.spotNo || spot.id }} · {{ spot.area ?? '—' }} ㎡</small><em>{{ spot.abnormalTypeDesc }} · {{ text(spot.foundTime) }}</em></span></button><div v-if="!abnormals.length" class="empty">暂无关联图斑</div></aside>
+    <section class="center-col"><div class="panel compare-panel"><div class="panel-title">复核影像与任务范围 <small>{{ backendTask?.name }}</small></div><div class="compare-view"><SpotDistributionMap v-if="image?.mapService" :spot="selectedSpot" :period="imageryPeriod(image)" /><img v-else-if="image?.imageUrl" :src="image.imageUrl" :alt="image.label" /><TaskRangeMap v-else-if="geometry.features.length || abnormals.length" :geo-json="geometry" :abnormal-points="abnormals" :active-abnormal-id="activeSpotId" :fit-abnormal-points="true" /><p v-else class="empty">暂无影像或任务范围</p></div><div class="image-strip"><button v-for="(item, index) in backendTask?.comparisonImages || []" :key="item.id" :class="{ active: selectedImage === index }" @click="selectedImage = index">{{ item.label }}</button></div></div><div class="panel materials"><div class="panel-title">归档材料</div><table><thead><tr><th>材料名称</th><th>类型</th><th>大小</th><th>状态</th></tr></thead><tbody><tr v-for="file in files" :key="file.id"><td>{{ file.fileName }}</td><td>{{ file.fileExt || '—' }}</td><td>{{ file.fileSize ?? '—' }} 字节</td><td>{{ file.status }}</td></tr></tbody></table><p v-if="!files.length" class="empty">暂无成果材料</p></div></section>
+    <aside class="right-col"><div class="panel result-panel"><div class="panel-title">复核结论</div><dl><dt>事项编号</dt><dd>{{ backendTask?.taskNo }}</dd><dt>负责人</dt><dd>{{ backendTask?.assigneeName || '暂无数据' }}</dd><dt>任务状态</dt><dd>{{ backendTask?.taskStatusDesc }}</dd></dl><label>节点办理内容<textarea :value="selectedNode?.resultData == null ? '暂无后端办理内容' : JSON.stringify(selectedNode.resultData, null, 2)" readonly /></label></div><div class="panel workflow"><div class="panel-title">历史流程</div><div v-for="item in flow?.timeline || []" :key="item.id" class="flow-row"><i></i><div><b>{{ item.nodeName }} · {{ workflowStatusLabel(item.status) }}</b><small>{{ text(item.submitTime || item.createTime) }} · {{ item.assigneeName || '暂无处理人' }}</small></div></div><p v-if="!flow" class="empty">暂无工作流节点记录</p></div><div class="panel logs"><div class="panel-title">操作日志 <small>{{ logs.length }} 条</small></div><div v-for="log in logs" :key="log.id" class="log-row"><time>{{ text(log.createTime) }}</time><span>{{ log.operatorName || '暂无操作人' }}</span><b>{{ log.operateDesc }}</b></div></div></aside>
+    <footer class="action-bar panel"><span role="status">{{ errors.join('；') || (loading ? '正在加载真实任务…' : '任务数据来自后端') }}</span><button :disabled="loading" @click="load">刷新任务</button></footer>
   </div>
 </template>
 
@@ -73,4 +28,8 @@ function act(name: string) { feedback.value = `${active.value.id}：${name}操�
 table{width:100%;border-collapse:collapse;font-size:10px}th,td{padding:7px 9px;border-bottom:1px solid #edf2f5;text-align:left}th{color:#668090;background:#f5f8fa}td em{color:#1a9a63;font-style:normal}td em.pending{color:#ca871a}td button{color:#1684b0;border:0;background:transparent;cursor:pointer}
 .right-col{min-height:0;display:grid;grid-template-rows:auto 1fr auto;gap:8px}.result-panel dl{display:grid;grid-template-columns:78px 1fr;margin:0;padding:7px 11px}.result-panel dt,.result-panel dd{margin:0;padding:6px 0;border-bottom:1px solid #edf2f5;font-size:10px}.result-panel dt{color:#7c8e9a}.result-panel dd{text-align:right;font-weight:600}.result-panel select{height:25px;border:1px solid #ccdce6}.result-panel label{display:grid;gap:5px;padding:0 11px 11px;color:#708592;font-size:10px}.result-panel textarea{height:64px;padding:7px;border:1px solid #ccdce6;resize:none}.workflow{overflow:auto}.flow-row{display:grid;grid-template-columns:12px 1fr;gap:7px;margin-left:15px;padding:8px 10px;border-left:1px solid #cddde7}.flow-row i{width:7px;height:7px;margin-left:-14px;border-radius:50%;background:#17a7bd}.flow-row b,.flow-row small{display:block;font-size:10px}.flow-row small{margin-top:3px;color:#8496a3}.log-row{display:grid;grid-template-columns:58px 42px 1fr;gap:6px;padding:7px 10px;border-bottom:1px solid #edf2f5;font-size:9px}.log-row time,.log-row span{color:#80939f}.log-row b{font-weight:500}
 .action-bar{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 12px}.action-bar span{margin-right:auto;color:#66808f;font-size:11px}.action-bar button{height:34px;padding:0 16px;color:#426174;background:#fff;border:1px solid #c8d9e4;border-radius:4px;cursor:pointer}.action-bar button.primary{color:#fff;background:#168bd2;border-color:#168bd2}
+</style>
+
+<style scoped>
+.compare-view{background:#eef3f6}.compare-view>img{height:100%;width:100%;object-fit:contain}.materials,.logs{max-height:220px;overflow:auto}.log-row{grid-template-columns:110px 65px 1fr}.empty{padding:14px 10px}.image-strip{flex-wrap:wrap}
 </style>

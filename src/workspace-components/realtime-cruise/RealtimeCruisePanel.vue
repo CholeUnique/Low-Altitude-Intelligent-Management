@@ -1,122 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import type { PortalTask } from '@/types'
-import { createLiveCruiseSnapshot } from '@/mocks/patrol-live'
-import LiveCruiseMap from './LiveCruiseMap.vue'
-
+import { useBackendTaskData } from '@/workspace-components/shared/use-backend-task'
+import TaskRangeMap from '@/components/TaskRangeMap.vue'
 const props = defineProps<{ task?: PortalTask }>()
-
-const snapshot = ref(createLiveCruiseSnapshot(props.task))
-
-watch(
-  () => props.task?.id,
-  () => {
-    snapshot.value = createLiveCruiseSnapshot(props.task)
-  },
-)
-
-const flownPct = computed(() => Math.round((snapshot.value.flownIndex / Math.max(snapshot.value.routeCoordinates.length - 1, 1)) * 100))
+const source = computed(() => props.task?.id)
+const { task: backendTask, detail, geometry, abnormals, images, logs, errors, loading, text } = useBackendTaskData({ get taskId() { return source.value } })
 </script>
-
 <template>
   <div class="live-cruise">
-    <section class="top-grid">
-      <aside class="panel task-panel">
-        <div class="panel-title">当前飞行任务</div>
-        <dl>
-          <dt>任务</dt><dd>{{ snapshot.taskName }}</dd>
-          <dt>飞行 ID</dt><dd>{{ snapshot.flightId }}</dd>
-          <dt>无人机</dt><dd>{{ snapshot.aircraftName }}</dd>
-          <dt>机号</dt><dd>{{ snapshot.aircraftId }}</dd>
-          <dt>区域</dt><dd>{{ snapshot.area }}</dd>
-          <dt>状态</dt><dd><em class="running">{{ snapshot.status }}</em></dd>
-          <dt>进度</dt><dd>{{ snapshot.progress }}% · 已飞航段 {{ flownPct }}%</dd>
-        </dl>
-        <div class="progress-bar"><i :style="{ width: `${snapshot.progress}%` }"></i></div>
-      </aside>
-
-      <section class="map-panel panel">
-        <div class="panel-title">
-          巡航区域地图
-          <small>绿=已飞 · 灰虚线=未飞</small>
-        </div>
-        <div class="map-wrap">
-          <LiveCruiseMap
-            :route-coordinates="snapshot.routeCoordinates"
-            :flown-index="snapshot.flownIndex"
-            :drone-position="snapshot.dronePosition"
-          />
-        </div>
-      </section>
-
-      <aside class="right-col">
-        <div class="panel">
-          <div class="panel-title">实时遥测</div>
-          <div class="telemetry-grid">
-            <div><b>{{ snapshot.telemetry.altitude }}</b><span>高度 m</span></div>
-            <div><b>{{ snapshot.telemetry.speed }}</b><span>速度 m/s</span></div>
-            <div><b>{{ snapshot.telemetry.heading }}°</b><span>航向</span></div>
-            <div><b>{{ snapshot.telemetry.battery }}%</b><span>电池</span></div>
-            <div class="wide"><b>{{ snapshot.telemetry.gps }}</b><span>GPS</span></div>
-            <div><b>{{ snapshot.telemetry.rcLink }}</b><span>遥控链路</span></div>
-            <div><b>{{ snapshot.telemetry.videoLink }}</b><span>图传链路</span></div>
-          </div>
-        </div>
-        <div class="panel live-panel">
-          <div class="panel-title">直播画面 <em class="online">● {{ snapshot.liveStatus }}</em></div>
-          <div class="live-screen">
-            <span>LIVE · {{ snapshot.aircraftId }}</span>
-            <p>实时图传占位（正式环境由后端返回临时播放地址）</p>
-          </div>
-        </div>
-      </aside>
-    </section>
-
-    <section class="bottom-grid">
-      <div class="panel">
-        <div class="panel-title">采集影像</div>
-        <div class="media-grid">
-          <div v-for="item in snapshot.media" :key="item.id" class="media-card" :class="`thumb-${item.thumbnail}`">
-            <b>{{ item.name }}</b>
-            <small>{{ item.capturedAt }}</small>
-          </div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">飞行事件记录</div>
-        <div class="event-list">
-          <div v-for="item in snapshot.events" :key="item.id" class="event-row">
-            <time>{{ item.time }}</time>
-            <em>{{ item.type }}</em>
-            <span>{{ item.message }}</span>
-          </div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">待执行飞行计划</div>
-        <div v-for="item in snapshot.pendingPlans" :key="item.id" class="plan-row">
-          <b>{{ item.start }} · {{ item.title }}</b>
-          <small>{{ item.area }} · {{ item.status }}</small>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">历史飞行记录</div>
-        <table>
-          <thead>
-            <tr><th>航线</th><th>日期</th><th>时长</th><th>里程</th><th>状态</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in snapshot.history" :key="item.id">
-              <td>{{ item.title }}</td>
-              <td>{{ item.date }}</td>
-              <td>{{ item.durationMin }} min</td>
-              <td>{{ item.distanceKm }} km</td>
-              <td><em class="done">{{ item.status }}</em></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <section class="top-grid"><aside class="panel task-panel"><div class="panel-title">当前巡查任务</div><dl><dt>任务</dt><dd>{{ backendTask?.name }}</dd><dt>任务编号</dt><dd>{{ backendTask?.taskNo }}</dd><dt>无人机</dt><dd>暂无数据</dd><dt>机号</dt><dd>暂无数据</dd><dt>区域</dt><dd>{{ text(backendTask?.rangeName) }}</dd><dt>状态</dt><dd>{{ backendTask?.taskStatusDesc }}</dd><dt>飞行次数</dt><dd>{{ detail?.statistics?.flightCount ?? '暂无数据' }}</dd></dl><p>{{ errors.join('；') || (loading ? '正在加载真实任务…' : '') }}</p></aside><section class="map-panel panel"><div class="panel-title">巡查区域地图</div><div class="map-wrap"><TaskRangeMap v-if="geometry.features.length || abnormals.length" :geo-json="geometry" :abnormal-points="abnormals" :fit-abnormal-points="true" /><p v-else>暂无任务范围</p></div></section><aside class="right-col"><div class="panel"><div class="panel-title">实时遥测</div><div class="telemetry-grid"><div v-for="label in ['高度 m', '速度 m/s', '航向', '电池', 'GPS', '遥控链路', '图传链路']" :key="label"><b>暂无数据</b><span>{{ label }}</span></div></div></div><div class="panel live-panel"><div class="panel-title">直播画面</div><div class="live-screen"><p>暂无任务关联直播地址</p></div></div></aside></section>
+    <section class="bottom-grid"><div class="panel"><div class="panel-title">采集影像</div><div class="media-grid"><div v-for="image in images" :key="image.id" class="media-card" :style="image.thumbnailUrl || image.imageUrl ? { backgroundImage: `url(${image.thumbnailUrl || image.imageUrl})` } : {}"><b>{{ image.fileName }}</b><small>{{ text(image.shootTime) }}</small></div></div><p v-if="!images.length">暂无关联影像</p></div><div class="panel"><div class="panel-title">任务操作留痕</div><div class="event-list"><div v-for="log in logs" :key="log.id" class="event-row"><time>{{ text(log.createTime) }}</time><em>{{ log.operateTypeDesc }}</em><span>{{ log.operateDesc }}</span></div></div></div><div class="panel"><div class="panel-title">计划时间</div><div class="plan-row"><b>{{ text(backendTask?.planStartTime) }}</b><small>计划开始</small></div><div class="plan-row"><b>{{ text(backendTask?.planEndTime) }}</b><small>计划结束</small></div></div><div class="panel"><div class="panel-title">巡查统计</div><table><thead><tr><th>飞行次数</th><th>飞行时长</th><th>异常数量</th></tr></thead><tbody><tr><td>{{ detail?.statistics?.flightCount ?? '暂无数据' }}</td><td>{{ detail?.statistics?.flightHours ?? '暂无数据' }}</td><td>{{ detail?.abnormalCount ?? '暂无数据' }}</td></tr></tbody></table></div></section>
   </div>
 </template>
 

@@ -1,294 +1,88 @@
 <script setup lang="ts">
-import { computed, markRaw, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { Component } from 'vue'
-import type { NonGrainWorkflowActor, NonGrainWorkflowNode, NonGrainWorkflowNodeKey } from '@/types'
-import { createNonGrainDemoTasks, createNonGrainWorkspaceContext, isNonGrainDemoTaskId, NON_GRAIN_VIEWER_NODE_KEY } from '@/mocks/non-grain-workspace'
-import { getGovernanceTaskPage, type GovernanceTask } from '@/api/governance-task'
+import { nonGrainWorkflow, nonGrainNodeKey, isNodeMine, canOperateWorkflowNode } from '@/utils/task-workflow-state'
+import { getMyWorkflowTasks, type MyWorkflowTask } from '@/api/my-workflow-tasks'
+import { getTaskWorkflow, type TaskWorkflow } from '@/api/task-workflow'
 import { useUserStore } from '@/stores/user'
-import { isTaskVisibleForOrganization } from '@/utils/scene-visibility'
-import { getTaskWorkflowSteps, getTaskWorkspaceNodeKey, isNonGrainTask } from '@/components/task-center/TaskWorkflowProgress.vue'
-import {
-  canOperateNonGrainWorkflowNode,
-  canViewNonGrainWorkflowNode,
-  getNonGrainWorkflowNodeHint,
-  returnNonGrainReviewToRectification,
-  skipNonGrainRectificationToArchive,
-} from '@/workspace/config/workflow'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
+import NonGrainNodePanel from './NonGrainNodePanel.vue'
+import TaskAcceptancePanel from '@/workspace-components/shared/TaskAcceptancePanel.vue'
+import NonGrainPreliminaryReviewPanel from './NonGrainPreliminaryReviewPanel.vue'
 import logoUrl from '@/assets/非粮工作台logo.png'
-import TaskAcceptancePanel from './TaskAcceptancePanel.vue'
-import SectionPreliminaryReviewPanel from './SectionPreliminaryReviewPanel.vue'
-import DepartmentConfirmationPanel from './DepartmentConfirmationPanel.vue'
-import OnSiteVerificationPanel from './OnSiteVerificationPanel.vue'
-import RectificationDisposalPanel from './RectificationDisposalPanel.vue'
-import DroneReviewPanel from './DroneReviewPanel.vue'
-import CaseArchivePanel from './CaseArchivePanel.vue'
 
 const props = defineProps<{ taskId?: string; taskName?: string; taskNo?: string; taskStatus?: string }>()
 const route = useRoute()
 const router = useRouter()
 const user = useUserStore()
-const context = reactive(createNonGrainWorkspaceContext(props.taskId))
-const apiTasks = ref<GovernanceTask[]>([])
-if (props.taskName) context.task.name = props.taskName
-if (props.taskNo) context.task.taskNo = props.taskNo
-
-function initializeWorkflowFromTaskStatus() {
-  const status = props.taskStatus || ''
-  const activeKey: NonGrainWorkflowNodeKey = /完成|结案/.test(status)
-    ? 'case-archive'
-    : /核查|复核/.test(status)
-      ? 'drone-review'
-      : /执行|进行/.test(status)
-        ? 'on-site-verification'
-        : /待执行|待处理/.test(status)
-          ? 'task-acceptance'
-          : context.currentNodeKey
-  const activeOrder = context.workflow.find((node) => node.key === activeKey)?.order ?? 4
-  const isFinished = /完成|结案/.test(status)
-  context.workflow = context.workflow.map((node) => ({
-    ...node,
-    status: isFinished || node.order < activeOrder
-      ? 'completed'
-      : node.order === activeOrder
-        ? 'active'
-        : 'pending',
-  }))
-  const current = context.workflow.find((node) => node.status === 'active')
-  if (current) {
-    context.currentNodeKey = current.key
-  }
-}
-
-initializeWorkflowFromTaskStatus()
-const viewerActor: NonGrainWorkflowActor = {
-  userId: context.currentActor.userId,
-  roles: [...context.currentActor.roles],
-}
-const toast = ref<{ message: string; type: 'success' | 'warning' }>()
-let toastTimer: ReturnType<typeof setTimeout> | undefined
-
-function showToast(message: string, type: 'success' | 'warning' = 'success') {
-  if (toastTimer) clearTimeout(toastTimer)
-  toast.value = { message, type }
-  toastTimer = setTimeout(() => { toast.value = undefined }, 2400)
-}
-
-onBeforeUnmount(() => {
-  if (toastTimer) clearTimeout(toastTimer)
+const flow = ref<TaskWorkflow>()
+const todos = ref<MyWorkflowTask[]>([])
+const noticeError = ref('')
+const flowError = ref('')
+let version = 0
+const flowLoading = ref(true)
+const workflow = computed(() => nonGrainWorkflow(flow.value, Boolean(props.taskId)))
+const currentKey = computed(() => {
+  const current = flow.value?.currentNode || flow.value?.timeline.find(node => node.status === 'PROCESSING')
+  const key = current ? nonGrainNodeKey(current) : undefined
+  return workflow.value.find(node => node.key === key && node.viewable)?.key || [...workflow.value].reverse().find(node => node.viewable)?.key
 })
-
-const panels: Record<NonGrainWorkflowNodeKey, Component> = {
-  'task-acceptance': markRaw(TaskAcceptancePanel),
-  'section-preliminary-review': markRaw(SectionPreliminaryReviewPanel),
-  'department-confirmation': markRaw(DepartmentConfirmationPanel),
-  'on-site-verification': markRaw(OnSiteVerificationPanel),
-  'rectification-disposal': markRaw(RectificationDisposalPanel),
-  'drone-review': markRaw(DroneReviewPanel),
-  'case-archive': markRaw(CaseArchivePanel),
-}
-
-const currentWorkflowNode = computed(() =>
-  context.workflow.find((node) => node.status === 'active' || node.status === 'returned')
-  ?? [...context.workflow].reverse().find((node) => node.status === 'completed'),
-)
-
-function requestedNode() {
-  const rawKey = typeof route.query.node === 'string' ? route.query.node : ''
-  const key = rawKey === 'task-dispatch'
-    ? 'on-site-verification'
-    : rawKey === 'review-archive'
-      ? 'case-archive'
-      : rawKey
-  const node = context.workflow.find((item) => item.key === key)
-  return node && canViewNonGrainWorkflowNode(node) ? node : currentWorkflowNode.value
-}
-
-const selectedNode = computed(requestedNode)
-const activePanel = computed(() => (selectedNode.value ? panels[selectedNode.value.key] : undefined))
-const canOperate = computed(() => Boolean(selectedNode.value && canOperateNonGrainWorkflowNode(selectedNode.value, viewerActor)))
-const disabledReason = computed(() => {
-  if (!selectedNode.value) return '还未进行'
-  if (selectedNode.value.status === 'completed') return ''
-  return getNonGrainWorkflowNodeHint(selectedNode.value, viewerActor)
+const selectedKey = computed(() => {
+  const requested = workflow.value.find(node => node.key === route.query.node && node.viewable)
+  return requested?.key || currentKey.value
 })
-function isMyNode(node: NonGrainWorkflowNode) {
-  return node.ownerUserId
-    ? node.ownerUserId === viewerActor.userId
-    : viewerActor.roles.includes(node.ownerRole)
+const selectedNode = computed(() => workflow.value.find(node => node.key === selectedKey.value))
+const canOperate = computed(() => canOperateWorkflowNode(selectedNode.value?.instance, String(user.currentUser?.id || '')))
+const noticeTasks = computed(() => todos.value.filter(task => task.id !== props.taskId))
+function isMyNode(node: typeof workflow.value[number]) { return Boolean(node.instance && isNodeMine(node.instance, String(user.currentUser?.id || ''))) }
+function selectNode(node: typeof workflow.value[number]) {
+  if (!node.viewable) return
+  void router.replace({ query: { ...route.query, node: node.key } })
 }
-const actorNode = computed(() => context.workflow.find(isMyNode))
-const currentUserId = computed(() => String(user.currentUser?.id || user.currentUser?.username || 'non-grain-demo-user'))
-
-function myWorkState(task: GovernanceTask) {
-  if (isNonGrainTask(task)) {
-    const myNode = getTaskWorkflowSteps(task).find((node) => node.key === NON_GRAIN_VIEWER_NODE_KEY)
-    if (myNode?.status === 'active') return '待我处理'
-    if (myNode?.status === 'done') return '我已处理'
-    return ''
-  }
-  if (task.assigneeId !== currentUserId.value) return ''
-  return [3, 4, 5].includes(task.taskStatus) ? '我已处理' : '待我处理'
+function nodeHint(node: typeof workflow.value[number]) {
+  if (!node.viewable) return '还未进行到此流程'
+  if (node.status === 'active' && !isMyNode(node)) return '没有工作权限，当前页面只读'
+  return node.status === 'completed' ? '已处理，当前页面只读' : '本人办理节点'
 }
-
-const noticeTasks = computed(() => {
-  const demoTasks = createNonGrainDemoTasks(currentUserId.value, user.activeDeptId, '海陵区农业农村局')
-  const merged = [...demoTasks, ...apiTasks.value.filter((task) => !isNonGrainDemoTaskId(task.id))]
-  return merged
-    .filter((task) => task.id !== context.task.id && Boolean(myWorkState(task)))
-    .sort((left, right) => String(left.planEndTime || '').localeCompare(String(right.planEndTime || '')))
-})
-
-async function loadNoticeTasks() {
-  try {
-    const page = await getGovernanceTaskPage({
-      pageNum: 1,
-      pageSize: 200,
-      deptId: user.activeDeptId,
-      organizationId: user.organizationId,
-    })
-    apiTasks.value = page.records.filter((task) =>
-      isTaskVisibleForOrganization(user.organization, task, user.activeDeptId))
-  } catch {
-    apiTasks.value = []
-  }
+function openNoticeTask(task: MyWorkflowTask) { void router.push({ name: 'workspace', params: { sceneId: task.sceneCode, taskId: task.id } }) }
+async function loadHeader() {
+  const current = ++version
+  flowLoading.value = true; flow.value = undefined; todos.value = []; noticeError.value = ''; flowError.value = ''
+  const responses = await Promise.allSettled([
+    props.taskId ? getTaskWorkflow(props.taskId) : Promise.resolve(undefined),
+    getMyWorkflowTasks(String(user.currentUser?.id || ''), user.activeDeptId),
+  ])
+  if (current !== version) return
+  if (responses[0].status === 'fulfilled') flow.value = responses[0].value
+  else flowError.value = responses[0].reason instanceof Error ? responses[0].reason.message : '工作流读取失败'
+  if (responses[1].status === 'fulfilled') todos.value = responses[1].value.records
+  if (responses[1].status === 'fulfilled') noticeError.value = responses[1].value.warnings.join('；')
+  else noticeError.value = responses[1].reason instanceof Error ? responses[1].reason.message : '待办读取失败'
+  flowLoading.value = false
 }
-
-function openNoticeTask(task: GovernanceTask) {
-  void router.push({
-    name: 'workspace',
-    params: { sceneId: task.sceneCode, taskId: task.id },
-    query: { node: isNonGrainTask(task) ? NON_GRAIN_VIEWER_NODE_KEY : getTaskWorkspaceNodeKey(task) },
-  })
-}
-
-onMounted(() => void loadNoticeTasks())
-
-function replaceNode(key: NonGrainWorkflowNodeKey) {
-  void router.replace({ query: { ...route.query, node: key } })
-}
-
-function selectNode(node: NonGrainWorkflowNode) {
-  if (!canViewNonGrainWorkflowNode(node)) return
-  replaceNode(node.key)
-}
-
-function setActorTo(node: NonGrainWorkflowNode | undefined) {
-  if (!node) return
-  context.currentNodeKey = node.key
-}
-
-function activateNext(from: NonGrainWorkflowNodeKey, to: NonGrainWorkflowNodeKey) {
-  const now = new Date().toISOString()
-  context.workflow = context.workflow.map((node) => {
-    if (node.key === from) return { ...node, status: 'completed', completedAt: now, updatedAt: now }
-    if (node.key === to) return { ...node, status: 'active', startedAt: now, updatedAt: now }
-    return node
-  })
-  const target = context.workflow.find((node) => node.key === to)
-  setActorTo(target)
-  replaceNode(to)
-}
-
-function submitVerification(hasProblem: boolean) {
-  if (!canOperate.value) return
-  if (hasProblem) activateNext('on-site-verification', 'rectification-disposal')
-  else {
-    context.workflow = skipNonGrainRectificationToArchive(context.workflow, new Date().toISOString())
-    const target = context.workflow.find((node) => node.key === 'case-archive')
-    setActorTo(target)
-    replaceNode('case-archive')
-  }
-  showToast(hasProblem ? '已提交，进入整改处置' : '核查无问题，已直接进入结案归档')
-}
-
-function submitRectification() {
-  if (!canOperate.value) return
-  activateNext('rectification-disposal', 'drone-review')
-  showToast('整改处置已提交')
-}
-
-function advanceCurrentNode() {
-  if (!canOperate.value || !selectedNode.value) return
-  const nextNode: Partial<Record<NonGrainWorkflowNodeKey, NonGrainWorkflowNodeKey>> = {
-    'task-acceptance': 'section-preliminary-review',
-    'section-preliminary-review': 'department-confirmation',
-    'department-confirmation': 'on-site-verification',
-  }
-  const target = nextNode[selectedNode.value.key]
-  if (!target) return
-  activateNext(selectedNode.value.key, target)
-  showToast(`已完成${selectedNode.value.name}，流程已进入下一节点`)
-}
-
-function handleSubmit(payload?: boolean) {
-  if (selectedNode.value?.key === 'on-site-verification') submitVerification(Boolean(payload))
-  else if (selectedNode.value?.key === 'rectification-disposal') submitRectification()
-}
-
-function passReview() {
-  if (!canOperate.value) return
-  activateNext('drone-review', 'case-archive')
-  showToast('复核通过，进入结案归档')
-}
-
-function rejectReview() {
-  if (!canOperate.value) return
-  context.workflow = returnNonGrainReviewToRectification(context.workflow, '无人机复核发现整改不到位', new Date().toISOString())
-  const target = context.workflow.find((node) => node.key === 'rectification-disposal')
-  setActorTo(target)
-  replaceNode('rectification-disposal')
-  showToast('已退回整改处置', 'warning')
-}
-
-function closeCase() {
-  if (!canOperate.value) return
-  const now = new Date().toISOString()
-  context.workflow = context.workflow.map((node) =>
-    node.key === 'case-archive' ? { ...node, status: 'completed', completedAt: now, updatedAt: now } : node,
-  )
-  replaceNode('case-archive')
-  showToast('任务已确认结案并归档')
-}
-
-function saveDraft() {
-  if (!canOperate.value) return
-  showToast('草稿已保存，流程未推进')
-}
-
-watch(
-  [() => route.query.node, () => context.workflow.map((node) => `${node.key}:${node.status}`).join('|')],
-  () => {
-    const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
-    const queryNode = context.workflow.find((node) => node.key === queryKey)
-    if (queryNode && canViewNonGrainWorkflowNode(queryNode)) return
-    const fallback = currentWorkflowNode.value
-    if (fallback && queryKey !== fallback.key) replaceNode(fallback.key)
-  },
-  { immediate: true },
-)
+watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { immediate: true })
 </script>
 
 <template>
   <div class="non-grain-workspace">
     <header class="ng-header">
       <div class="ng-brand-area">
-        <button class="ng-back" @click="$router.push(taskId ? `/tasks/${taskId}` : '/tasks/todo')">‹ 返回任务</button>
+        <button class="ng-back" @click="router.push('/tasks/todo')">‹ 返回任务</button>
         <img :src="logoUrl" alt="耕地用途监管 Logo">
         <div class="ng-brand-text">
           <b>耕地用途监管工作台</b>
-          <small :title="context.task.name">{{ context.task.name }}</small>
+          <small :title="taskName">{{ taskName }}</small>
         </div>
       </div>
 
       <nav class="ng-steps" aria-label="任务办理步骤">
         <button
-          v-for="node in context.workflow"
+          v-for="node in workflow"
           :key="node.key"
-          :class="[node.status, { selected: node.key === selectedNode?.key, mine: isMyNode(node) }]"
-          :disabled="!canViewNonGrainWorkflowNode(node)"
-          :title="getNonGrainWorkflowNodeHint(node, viewerActor)"
+          :class="[node.status, { selected: node.key === selectedKey, mine: isMyNode(node) }]"
+
+          :title="nodeHint(node)"
+          :aria-disabled="!node.viewable"
           @click="selectNode(node)"
         >
           <i>{{ node.status === 'completed' ? '✓' : node.order }}</i>
@@ -305,39 +99,24 @@ watch(
           <div class="ng-notices">
             <header><strong>其他相关任务</strong><button type="button" @click="router.push('/tasks/todo')">查看全部</button></header>
             <button v-for="task in noticeTasks" :key="task.id" type="button" class="ng-notice-task" @click="openNoticeTask(task)">
-              <span><b>{{ task.name }}</b><small>{{ task.taskNo }} · {{ myWorkState(task) }}</small></span>
+              <span><b>{{ task.name }}</b><small>{{ task.taskNo }} · {{ task.myWorkState === 'pending' ? '待我处理' : '我已处理' }}</small></span>
               <time>{{ task.taskStatusDesc }}</time>
             </button>
-            <p v-if="!noticeTasks.length" class="ng-notice-empty">暂无其他相关任务</p>
+            <p v-if="noticeError" class="ng-notice-empty">{{ noticeError }}</p>
+            <p v-else-if="!noticeTasks.length" class="ng-notice-empty">暂无其他相关任务</p>
           </div>
         </div>
         <div class="ng-actor">
-          <small>我的身份</small>
-          <b>{{ actorNode?.ownerRole || '已办结' }} · {{ actorNode?.ownerName || '—' }}</b>
+          <small>当前用户</small>
+          <b>{{ user.name }}</b>
         </div>
       </div>
     </header>
 
-    <Transition name="ng-toast">
-      <div v-if="toast" class="ng-workspace-toast" :class="toast.type" role="status">
-        <i>{{ toast.type === 'success' ? '✓' : '!' }}</i>{{ toast.message }}
-      </div>
-    </Transition>
-
     <main class="ng-workspace-body">
-      <component
-        :is="activePanel"
-        v-if="activePanel && selectedNode"
-        :context="context"
-        :readonly="!canOperate"
-        :disabled-reason="disabledReason"
-        @advance="advanceCurrentNode"
-        @draft="saveDraft"
-        @submit="handleSubmit"
-        @pass="passReview"
-        @reject="rejectReview"
-        @close="closeCase"
-      />
+      <TaskAcceptancePanel v-if="selectedKey === 'task-acceptance'" :task-id="taskId" />
+      <NonGrainPreliminaryReviewPanel v-else-if="selectedKey === 'section-preliminary-review'" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="loadHeader" />
+      <NonGrainNodePanel v-else :task-id="taskId" :node-key="selectedKey" :flow-error="flowError" :flow-loading="flowLoading" :readonly="!canOperate" />
     </main>
   </div>
 </template>
@@ -505,6 +284,8 @@ watch(
   color: #7199ac;
 }
 
+.ng-steps button.completed.selected span { color: #7199ac; }
+
 .ng-steps .completed i {
   color: #fff;
   background: #0280a2;
@@ -539,14 +320,13 @@ watch(
   color: #7199ac;
 }
 
-.ng-steps button:disabled {
+.ng-steps button[aria-disabled="true"] {
   cursor: not-allowed;
-  opacity: .76;
+  opacity: 1;
 }
 
 .ng-steps button:hover i {
   transform: scale(1.06);
-  animation: nodePulse .8s ease-in-out infinite alternate;
 }
 
 @keyframes nodePulse {
@@ -605,7 +385,7 @@ watch(
 .ng-notices {
   position: absolute;
   z-index: 240;
-  top: 40px;
+  top: 30px;
   right: 0;
   width: 262px;
   display: none;
@@ -616,6 +396,8 @@ watch(
   border-radius: 6px;
   box-shadow: 0 10px 28px #2a4a5f2a;
 }
+
+.ng-notices::before { content: ''; position: absolute; top: -10px; left: 0; right: 0; height: 10px; }
 
 .ng-notice-shell:hover .ng-notices,
 .ng-notice-shell:focus-within .ng-notices {

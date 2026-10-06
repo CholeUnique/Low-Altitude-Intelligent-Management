@@ -18,7 +18,7 @@ defineProps<{
         <div><dt>任务</dt><dd>{{ task.name }}</dd></div>
         <div><dt>区域</dt><dd>{{ task.area }}</dd></div>
         <div><dt>负责人</dt><dd>{{ task.assignee || task.owner }}</dd></div>
-        <div><dt>进度</dt><dd>{{ task.progress }}%</dd></div>
+        <div><dt>任务状态</dt><dd>{{ task.status }}</dd></div>
       </dl>
       <div class="hint">该节点能力后续完善，当前仅保证流程切换与布局一致。</div>
     </div>

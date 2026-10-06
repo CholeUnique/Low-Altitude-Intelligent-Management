@@ -1,0 +1,136 @@
+{
+  "verifiedAt": "2026-10-06T15:45:27.816Z",
+  "taskNo": "NYNCJ-20261006-001",
+  "username": "nyncKZ",
+  "user": {
+    "id": 692,
+    "username": "nyncKZ",
+    "realName": "农田建设科",
+    "nickname": null,
+    "role": "ADMIN",
+    "status": 1,
+    "deptList": [
+      {
+        "deptCode": "DEPT_NYNCJ",
+        "deptId": 1,
+        "deptName": "农业农村局",
+        "deptRole": "",
+        "isDefault": true
+      }
+    ]
+  },
+  "task": {
+    "actualEndTime": null,
+    "actualStartTime": null,
+    "assigneeId": null,
+    "assigneeName": null,
+    "contactName": null,
+    "contactPhone": null,
+    "coverImageThumbnailUrl": null,
+    "coverImageUrl": null,
+    "createBy": 1,
+    "createTime": "2026-10-06T22:47:22",
+    "deptId": 1,
+    "deptName": "农业农村局",
+    "description": null,
+    "executeMode": "MANUAL",
+    "geometryAvailable": true,
+    "geometryFeatureCount": 1,
+    "geometryUpdatedAt": "2026-10-06T22:47:22",
+    "id": 1314,
+    "imageCount": 0,
+    "mapServices": null,
+    "name": "111",
+    "planEndTime": "2026-10-10T00:00:00",
+    "planStartTime": "2026-10-01T00:00:00",
+    "priority": 1,
+    "rangeArea": 0.0104,
+    "rangeAreaUnit": "km2",
+    "rangeName": null,
+    "refId": null,
+    "refType": "NONE",
+    "resultRequirements": [
+      "照片"
+    ],
+    "sceneCode": "CULTIVATED_LAND_USE_CONTROL",
+    "sceneName": "耕地种植用途管控与\"非粮化\"动态监测",
+    "sourceAbnormalId": null,
+    "taskNo": "NYNCJ-20261006-001",
+    "taskStatus": 0,
+    "taskStatusDesc": "待执行",
+    "updateTime": "2026-10-06T22:47:22"
+  },
+  "before": {
+    "code": "10501",
+    "msg": "该任务尚未启动工作流"
+  },
+  "startRequest": {
+    "bizTaskId": "1314",
+    "assigneeId": "692",
+    "deptId": "1"
+  },
+  "start": {
+    "code": "0",
+    "msg": "success"
+  },
+  "after": {
+    "code": "0",
+    "data": {
+      "bizTaskId": 1314,
+      "currentNode": {
+        "assigneeId": 692,
+        "assigneeName": "农田建设科",
+        "bizTaskId": 1314,
+        "createTime": "2026-10-06T23:45:29",
+        "deadline": "2026-11-05T23:45:29",
+        "deptId": 1,
+        "deptName": "农业农村局",
+        "flowInstanceId": 2,
+        "id": 1,
+        "nodeKey": "REVIEW_CITY",
+        "nodeName": "市级审核",
+        "nodeType": "REVIEW",
+        "overdue": false,
+        "prevNodeInstId": null,
+        "status": "PROCESSING",
+        "submitTime": null,
+        "taskName": "111",
+        "taskNo": "NYNCJ-20261006-001",
+        "transferFromId": null
+      },
+      "endTime": null,
+      "flowInstanceId": 2,
+      "flowKey": "NON_GRAIN_MONITOR",
+      "flowName": "耕地种植用途管控与\"非粮化\"动态监测流程",
+      "startTime": "2026-10-06T23:45:29",
+      "status": "RUNNING",
+      "timeline": [
+        {
+          "assigneeId": 692,
+          "assigneeName": "农田建设科",
+          "bizTaskId": 1314,
+          "createTime": "2026-10-06T23:45:29",
+          "deadline": "2026-11-05T23:45:29",
+          "deptId": 1,
+          "deptName": "农业农村局",
+          "files": [],
+          "flowInstanceId": 2,
+          "id": 1,
+          "nodeKey": "REVIEW_CITY",
+          "nodeName": "市级审核",
+          "nodeType": "REVIEW",
+          "operateLogs": [],
+          "overdue": false,
+          "prevNodeInstId": null,
+          "resultData": null,
+          "status": "PROCESSING",
+          "submitTime": null,
+          "taskName": "111",
+          "taskNo": "NYNCJ-20261006-001",
+          "transferFromId": null
+        }
+      ]
+    },
+    "msg": "success"
+  }
+}

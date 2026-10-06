@@ -5,16 +5,16 @@ import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
 import NewTaskDialog from '@/components/NewTaskDialog.vue'
 import TaskRangeThumbnail from '@/components/TaskRangeThumbnail.vue'
 import TaskWorkflowProgress from '@/components/task-center/TaskWorkflowProgress.vue'
+import { collectPages } from '@/api/pagination'
+import { getTaskWorkflow } from '@/api/task-workflow'
+import { projectTaskListWorkflow } from '@/utils/task-list-workflow'
 import { deleteGovernanceTask, getGovernanceTaskGeometry, getGovernanceTaskPage } from '@/api/governance-task'
 import { getDepartmentList, type DepartmentInfo } from '@/api/account-management'
-import { getSceneDictionary, toMockSceneDictionaryItem } from '@/api/scene'
-import { isMockMode } from '@/api/client'
-import { removeSessionTasks } from '@/mocks/portal'
+import { getSceneDictionary } from '@/api/scene'
 import { useUserStore } from '@/stores/user'
 import type { GovernanceTask, GovernanceTaskStatus, TaskGeometryFeatureCollection } from '@/api/governance-task'
 import type { SceneDictionaryItem } from '@/api/scene'
 import { findOrganizationScene, isTaskVisibleForOrganization } from '@/utils/scene-visibility'
-import { createNonGrainDemoTasks, isNonGrainDemoTaskId } from '@/mocks/non-grain-workspace'
 
 const router = useRouter()
 const route = useRoute()
@@ -42,6 +42,7 @@ const taskRows = ref<GovernanceTask[]>([])
 const taskTotal = ref(0)
 const taskLoading = ref(false)
 const taskError = ref('')
+const workflowError = ref('')
 const sceneOptions = ref<SceneDictionaryItem[]>([])
 const sceneLoading = ref(true)
 const sceneError = ref('')
@@ -62,7 +63,6 @@ const rootDepartments = computed(() => {
 const childDepartments = computed(() =>
   departments.value.filter((item) => item.parentId === parentDeptId.value))
 const selectedDeptId = computed(() => childDeptId.value || parentDeptId.value || user.activeDeptId)
-const currentUserId = computed(() => String(user.currentUser?.id || user.currentUser?.username || 'non-grain-demo-user'))
 const requestPageSize = computed(() => Math.min(Math.max(maximumRows.value, 5), 50))
 const pageCount = computed(() => Math.max(1, Math.ceil(taskTotal.value / requestPageSize.value)))
 const paginationItems = computed<(number | 'ellipsis')[]>(() => {
@@ -74,11 +74,11 @@ const paginationItems = computed<(number | 'ellipsis')[]>(() => {
 })
 const allSelected = computed({
   get: () => {
-    const selectableTasks = taskRows.value.filter((task) => !isNonGrainDemoTaskId(task.id))
+    const selectableTasks = taskRows.value
     return Boolean(selectableTasks.length) && selectableTasks.every((task) => selectedIds.value.includes(task.id))
   },
   set: (value: boolean) => {
-    const pageIds = taskRows.value.filter((task) => !isNonGrainDemoTaskId(task.id)).map((task) => task.id)
+    const pageIds = taskRows.value.map((task) => task.id)
     selectedIds.value = value ? [...new Set([...selectedIds.value, ...pageIds])] : selectedIds.value.filter((id) => !pageIds.includes(id))
   },
 })
@@ -112,7 +112,6 @@ function hasTaskRangeGeometry(geometry: TaskGeometryFeatureCollection) {
 }
 
 async function loadTaskRangePreviews(tasks: GovernanceTask[], taskRequestId: number) {
-  tasks = tasks.filter((task) => !isNonGrainDemoTaskId(task.id))
   const previewRequestId = ++latestRangePreviewRequest
   taskRangePreviewLoading.value = Boolean(tasks.length)
   taskRangeGeometries.value = {}
@@ -131,17 +130,16 @@ async function loadTaskRangePreviews(tasks: GovernanceTask[], taskRequestId: num
   taskRangePreviewLoading.value = false
 }
 
-function filteredTaskRecords(apiRecords: GovernanceTask[]) {
-  const demoTasks = createNonGrainDemoTasks(currentUserId.value, user.activeDeptId, '海陵区农业农村局')
+function filteredTaskRecords(apiRecords: GovernanceTask[], filterStatus = true) {
   const normalizedKeyword = keyword.value.trim().toLocaleLowerCase()
   const selectedPriority = priority.value === '' ? undefined : Number(priority.value)
-  return [...demoTasks, ...apiRecords.filter((task) => !isNonGrainDemoTaskId(task.id))].filter((task) =>
-    (isNonGrainDemoTaskId(task.id) || isTaskVisibleForOrganization(user.organization, task, selectedDeptId.value))
+  return apiRecords.filter((task) =>
+    isTaskVisibleForOrganization(user.organization, task, selectedDeptId.value)
     && (selectedPriority === undefined || task.priority === selectedPriority)
-    && (status.value === '' || task.taskStatus === status.value)
+    && (!filterStatus || status.value === '' || task.taskStatus === status.value)
     && (!normalizedKeyword || `${task.name} ${task.taskNo} ${task.sceneName} ${task.deptName}`.toLocaleLowerCase().includes(normalizedKeyword))
-    && (!selectedOrganizationSceneId.value
-      || findOrganizationScene(user.organization, task.sceneCode, task.sceneName)?.id === selectedOrganizationSceneId.value))
+    && (!selectedScene.value || task.sceneCode === selectedScene.value.code
+      || (selectedOrganizationSceneId.value && findOrganizationScene(user.organization, task.sceneCode, task.sceneName)?.id === selectedOrganizationSceneId.value)))
 }
 
 function applyTaskRecords(records: GovernanceTask[], requestId: number) {
@@ -158,26 +156,41 @@ async function loadTasks() {
   const requestId = ++latestRequest
   taskLoading.value = true
   taskError.value = ''
+  workflowError.value = ''
   try {
     const selectedPriority = priority.value === '' ? undefined : Number(priority.value)
-    const page = await getGovernanceTaskPage({
+    const records = await collectPages((pageNum, pageSize) => getGovernanceTaskPage({
       // 场景编码在统计接口和任务接口之间不完全一致，先取当前部门任务，
       // 再以统一场景映射在前端筛选，避免点击统计卡片后查不到任务。
-      pageNum: 1,
-      pageSize: 100,
+      pageNum,
+      pageSize,
       keyword: keyword.value || undefined,
-      taskStatus: status.value === '' ? undefined : status.value,
+      // 流程已启动时业务 taskStatus 可能仍为 0，状态筛选须在合并流程后执行。
       priority: selectedPriority,
       deptId: selectedDeptId.value,
       organizationId: user.organizationId,
-    })
+    }))
     if (requestId !== latestRequest) return
     // 后端切换部门后仍可能返回历史跨单位任务；前端按当前单位场景再做一层隔离。
-    applyTaskRecords(page.records, requestId)
+    const candidates = filteredTaskRecords(records, false)
+    const projected = [...candidates]
+    const failures: string[] = []
+    let next = 0
+    await Promise.all(Array.from({ length: Math.min(6, candidates.length) }, async () => {
+      while (next < candidates.length && requestId === latestRequest) {
+        const index = next++
+        const task = candidates[index]!
+        try { projected[index] = projectTaskListWorkflow(task, await getTaskWorkflow(task.id)) }
+        catch (error) { failures.push(`${task.taskNo}：${error instanceof Error ? error.message : '读取失败'}`) }
+      }
+    }))
+    if (requestId !== latestRequest) return
+    if (failures.length) workflowError.value = `部分任务流程读取失败，相关任务暂按业务状态显示：${failures.join('；')}`
+    applyTaskRecords(projected, requestId)
   } catch (error) {
     if (requestId !== latestRequest) return
     applyTaskRecords([], requestId)
-    taskError.value = error instanceof Error ? `${error.message}（演示任务仍可使用）` : '真实任务加载失败，演示任务仍可使用。'
+    taskError.value = error instanceof Error ? error.message : '真实任务加载失败，请重试。'
   } finally {
     if (requestId === latestRequest) taskLoading.value = false
   }
@@ -190,13 +203,7 @@ async function loadSceneDictionary() {
   try {
     const scenes = await getSceneDictionary(user.organization.scenes, user.activeDeptId)
     if (requestId !== latestSceneRequest) return
-    const visibleScenes = scenes.filter((scene) =>
-      Boolean(findOrganizationScene(user.organization, scene.code, scene.name)))
-    // 有些部门尚未在场景字典接口中配置记录；回退到该单位自身的固定场景，
-    // 但绝不采用接口返回的其他单位场景。
-    sceneOptions.value = visibleScenes.length
-      ? visibleScenes
-      : user.organization.scenes.map(toMockSceneDictionaryItem)
+    sceneOptions.value = scenes
     if (!sceneFilter.value && initialSceneCode) {
       sceneFilter.value = sceneOptions.value.find((scene) =>
         scene.code === initialSceneCode
@@ -247,8 +254,12 @@ function updateMaximumRows() {
   maximumRows.value = Math.max(5, Math.floor((window.innerHeight - taskTable.value.getBoundingClientRect().top - headerHeight - paginationHeight - safeGap) / rowHeight))
 }
 
-function handleCreated(task: { id: string }) {
-  router.push(`/tasks/${task.id}`)
+function handleCreated(task: { id: string; sceneCode?: string }) {
+  if (task.sceneCode && ['CULTIVATED_LAND_USE_CONTROL', 'NON_GRAIN', 'NON_GRAIN_MONITORING'].includes(task.sceneCode)) {
+    void router.push({ name: 'workspace', params: { sceneId: task.sceneCode, taskId: task.id } })
+  } else {
+    void router.push(`/tasks/${task.id}`)
+  }
 }
 
 function openTask(task: GovernanceTask) {
@@ -271,9 +282,7 @@ async function confirmBatchDelete() {
   deleteError.value = ''
   const failed: string[] = []
   try {
-    if (isMockMode()) {
-      removeSessionTasks(taskIds)
-    } else {
+
       for (const taskId of taskIds) {
         try {
           await deleteGovernanceTask(taskId, user.activeDeptId)
@@ -281,7 +290,6 @@ async function confirmBatchDelete() {
           failed.push(taskId)
         }
       }
-    }
     selectedIds.value = []
     await loadTasks()
     if (failed.length) {
@@ -333,7 +341,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
         <button class="batch-delete" :disabled="!selectedIds.length || deleteLoading" @click="requestBatchDelete">
           批量删除<span v-if="selectedIds.length">（{{ selectedIds.length }}）</span>
         </button>
-        <button class="primary-action" @click="newTaskVisible = true">＋ 新增任务</button>
+        <button v-if="user.currentUser?.role === 'ADMIN'" class="primary-action" @click="newTaskVisible = true">＋ 新增任务</button>
       </div>
     </template>
     <section class="task-filters">
@@ -357,18 +365,19 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
     <p v-if="sceneError" class="scene-dictionary-error">场景字典加载失败：{{ sceneError }}。请检查登录状态与网络后刷新页面。</p>
     <p v-if="departmentError" class="scene-dictionary-error">部门列表加载失败：{{ departmentError }}。筛选将使用当前登录部门。</p>
     <p v-if="deleteError" class="scene-dictionary-error">{{ deleteError }}</p>
+    <p v-if="workflowError" class="scene-dictionary-error" role="alert">{{ workflowError }}</p>
 
     <section ref="taskTable" class="task-table">
       <div class="task-table-row task-table-head">
         <span><input v-model="allSelected" type="checkbox" /></span><span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
       </div>
       <div v-for="task in taskRows" :key="task.id" class="task-table-row">
-        <span><input v-model="selectedIds" type="checkbox" :value="task.id" :disabled="isNonGrainDemoTaskId(task.id)" :title="isNonGrainDemoTaskId(task.id) ? '演示任务不可删除' : ''" /></span>
+        <span><input v-model="selectedIds" type="checkbox" :value="task.id" /></span>
         <span class="task-name"><b>{{ task.name }}</b><small>{{ task.taskNo }}</small></span>
         <span><em class="scene-tag">{{ task.sceneName }}</em></span>
         <span><em class="status-tag" :class="taskStatusClass(task)">{{ task.taskStatusDesc }}</em></span>
-        <span class="task-owner"><b>{{ task.deptName }}</b><small v-if="task.assigneeId">负责人 #{{ task.assigneeId }}</small></span>
-        <span class="task-created">{{ formatTime(task.planStartTime || task.createTime) }}</span>
+        <span class="task-owner"><b>{{ task.deptName }}</b><small v-if="task.assigneeName || task.assigneeId">{{ task.assigneeName || `负责人 #${task.assigneeId}` }}</small></span>
+        <span class="task-created">{{ formatTime(task.createTime) }}</span>
         <span class="task-range">
           <TaskRangeThumbnail v-if="taskRangeGeometries[task.id]" :geo-json="taskRangeGeometries[task.id]!" />
           <i v-else class="range-thumb range-thumb--empty" :title="taskRangePreviewLoading ? '正在读取真实任务范围' : '暂无任务范围'">{{ taskRangePreviewLoading ? '…' : '—' }}</i>
@@ -456,8 +465,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
 .task-name b, .task-owner b { color: #32485e; font-size: 13px; }
 .task-name small, .task-owner small, .task-table-row > span > small { color: #99a6b2; font-size: 11px; }
 .scene-tag { color: #397cae; background: #edf6fc; border-color: #c6e1f3; }
-.status-tag { max-width: none; display: inline-flex; align-items: center; color: #367eb5; background: #edf6fc; border-color: #c6e1f3; line-height: 1.25; white-space: nowrap; }
-.task-table-row > span:nth-child(4) { min-width: 92px; overflow: visible; white-space: nowrap; }
+.status-tag { max-width: 100%; box-sizing: border-box; display: inline-block; color: #367eb5; background: #edf6fc; border-color: #c6e1f3; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.task-table-row > span:nth-child(4) { min-width: 0; overflow: hidden; white-space: normal; }
 .status-tag.done { color: #258965; background: #eaf7f1; border-color: #bfe7d7; }
 .status-tag.pending { color: #b4772d; background: #fff6e8; border-color: #f0d6ad; }
 .task-actions button { color: #277ebd; background: #fff; border-color: #bcd8eb; border-radius: 4px; }
