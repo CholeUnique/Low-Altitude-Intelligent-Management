@@ -28,6 +28,7 @@ export interface WorkflowNode {
   overdue?: boolean
   createTime?: string
   submitTime?: string
+  prevNodeInstId?: string | number | null
   resultData?: unknown
   files?: WorkflowFile[]
   operateLogs?: GovernanceTaskOperateLog[]
@@ -51,6 +52,14 @@ export interface WorkflowSubmitInput {
 
 export function submitWorkflowNode(input: WorkflowSubmitInput) {
   return apiClient.post<never, void>('/v1/workflow/submit', input)
+}
+export function uploadWorkflowFiles(nodeInstId: string, files: File[]) {
+  const form = new FormData()
+  files.forEach(file => form.append('files', file))
+  return apiClient.post<never, void>('/v1/workflow/file/upload', form, { params: { nodeInstId } })
+}
+export function deleteWorkflowFile(fileId: string) {
+  return apiClient.post<never, void>('/v1/workflow/file/delete', undefined, { params: { fileId } })
 }
 
 function normalizeNode(raw: WorkflowNode): WorkflowNode {

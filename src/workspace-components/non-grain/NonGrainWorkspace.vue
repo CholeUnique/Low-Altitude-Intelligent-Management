@@ -9,6 +9,11 @@ import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import NonGrainNodePanel from './NonGrainNodePanel.vue'
 import TaskAcceptancePanel from '@/workspace-components/shared/TaskAcceptancePanel.vue'
 import NonGrainPreliminaryReviewPanel from './NonGrainPreliminaryReviewPanel.vue'
+import NonGrainInspectionPanel from './NonGrainInspectionPanel.vue'
+import NonGrainArchivePanel from './NonGrainArchivePanel.vue'
+import NonGrainRectificationPanel from './NonGrainRectificationPanel.vue'
+import NonGrainDroneReviewPanel from './NonGrainDroneReviewPanel.vue'
+import WorkbenchReadonlyHint from '@/workspace-components/shared/WorkbenchReadonlyHint.vue'
 import logoUrl from '@/assets/非粮工作台logo.png'
 
 const props = defineProps<{ taskId?: string; taskName?: string; taskNo?: string; taskStatus?: string }>()
@@ -33,6 +38,11 @@ const selectedKey = computed(() => {
 })
 const selectedNode = computed(() => workflow.value.find(node => node.key === selectedKey.value))
 const canOperate = computed(() => canOperateWorkflowNode(selectedNode.value?.instance, String(user.currentUser?.id || '')))
+const workbenchBody = ref<HTMLElement | null>(null)
+const readonlyControlHint = computed(() => {
+  if (selectedNode.value?.status === 'completed') return '已完成工作，无法更改'
+  return selectedNode.value?.instance && !canOperate.value ? '没有工作权限' : ''
+})
 const noticeTasks = computed(() => todos.value.filter(task => task.id !== props.taskId))
 function isMyNode(node: typeof workflow.value[number]) { return Boolean(node.instance && isNodeMine(node.instance, String(user.currentUser?.id || ''))) }
 function selectNode(node: typeof workflow.value[number]) {
@@ -41,10 +51,17 @@ function selectNode(node: typeof workflow.value[number]) {
 }
 function nodeHint(node: typeof workflow.value[number]) {
   if (!node.viewable) return '还未进行到此流程'
-  if (node.status === 'active' && !isMyNode(node)) return '没有工作权限，当前页面只读'
+  if (node.status === 'active' && !isMyNode(node)) return '由其他办理人处理，可查看办理页面'
   return node.status === 'completed' ? '已处理，当前页面只读' : '本人办理节点'
 }
 function openNoticeTask(task: MyWorkflowTask) { void router.push({ name: 'workspace', params: { sceneId: task.sceneCode, taskId: task.id } }) }
+async function inspectionSubmitted() {
+  await loadHeader()
+  // 提交后优先展示后端实际进入的下一节点；旧节点仍能从流程图回看。
+  const query = { ...route.query }
+  delete query.node
+  await router.replace({ query })
+}
 async function loadHeader() {
   const current = ++version
   flowLoading.value = true; flow.value = undefined; todos.value = []; noticeError.value = ''; flowError.value = ''
@@ -113,9 +130,15 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
       </div>
     </header>
 
-    <main class="ng-workspace-body">
+    <WorkbenchReadonlyHint :root="workbenchBody" :message="readonlyControlHint" :page-key="selectedKey" />
+    <main ref="workbenchBody" class="ng-workspace-body">
       <TaskAcceptancePanel v-if="selectedKey === 'task-acceptance'" :task-id="taskId" />
       <NonGrainPreliminaryReviewPanel v-else-if="selectedKey === 'section-preliminary-review'" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="loadHeader" />
+      <NonGrainPreliminaryReviewPanel v-else-if="selectedKey === 'department-confirmation'" stage="department" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="loadHeader" />
+      <NonGrainInspectionPanel v-else-if="selectedKey === 'on-site-verification'" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="inspectionSubmitted" />
+      <NonGrainRectificationPanel v-else-if="selectedKey === 'rectification-disposal'" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="inspectionSubmitted" />
+      <NonGrainDroneReviewPanel v-else-if="selectedKey === 'drone-review'" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="inspectionSubmitted" />
+      <NonGrainArchivePanel v-else-if="selectedKey === 'case-archive'" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="loadHeader" />
       <NonGrainNodePanel v-else :task-id="taskId" :node-key="selectedKey" :flow-error="flowError" :flow-loading="flowLoading" :readonly="!canOperate" />
     </main>
   </div>
@@ -219,6 +242,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
 .ng-steps button:not(:last-child)::after {
   content: '';
   position: absolute;
+  z-index: 0;
   top: 12px;
   left: calc(50% + 14px);
   width: calc(100% - 28px);
@@ -244,12 +268,14 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
 
 .ng-steps span {
   position: relative;
+  z-index: 2;
   font-size: 11px;
   white-space: nowrap;
 }
 
 .ng-steps span em {
   position: absolute;
+  z-index: 3;
   top: -21px;
   right: -13px;
   min-width: 15px;

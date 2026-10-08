@@ -3,10 +3,15 @@ import { computed } from 'vue'
 import { useBackendTaskData } from '@/workspace-components/shared/use-backend-task'
 import TaskRangeMap from '@/components/TaskRangeMap.vue'
 import NonGrainImageryComparison from './NonGrainImageryComparison.vue'
+import { nodeResultFields } from './node-result-fields'
+import { useUserStore } from '@/stores/user'
+import { workflowNodeReadonlyMessage } from '@/utils/task-workflow-state'
 import './workspace.scss'
 
 const props = defineProps<{ taskId?: string; nodeKey?: string; flowError?: string; flowLoading?: boolean; readonly?: boolean }>()
 const { detail, flow, geometry, abnormals, results, images, logs, loading, errors, activeSpotId, task, selectedNode, selectedSpot, text, handleLabel, load } = useBackendTaskData(props)
+const user = useUserStore()
+const readonlyMessage = computed(() => workflowNodeReadonlyMessage(selectedNode.value, String(user.currentUser?.id || '')))
 const isAcceptance = computed(() => props.nodeKey === 'task-acceptance')
 const summaries = computed(() => [
   { icon: '单', label: '任务编号', value: task.value?.taskNo },
@@ -26,9 +31,7 @@ const nodeLayout = computed(() => ({
   'case-archive': { left: 'span-5', right: 'span-7', overview: '结案依据概览', title: '结案信息填报', fields: ['结案结论', '结案说明', '归档材料'] },
 } as Record<string, { left: string; right: string; overview: string; title: string; fields: string[] }>)[props.nodeKey || ''] || { left: 'span-6', right: 'span-6', overview: '任务图斑', title: '节点办理记录', fields: [] })
 const nodeFields = computed(() => {
-  const value = selectedNode.value?.resultData
-  if (value && typeof value === 'object' && !Array.isArray(value)) return Object.entries(value).map(([label, content]) => ({ label, value: typeof content === 'object' ? JSON.stringify(content) : text(content) }))
-  return nodeLayout.value.fields.map(label => ({ label, value: '暂无数据' }))
+  return nodeResultFields(props.nodeKey || '', selectedNode.value?.resultData)
 })
 const comparisonImages = computed(() => task.value?.comparisonImages || [])
 const showLogError = computed(() => errors.value.some(message => message.startsWith('操作记录')))
@@ -36,7 +39,7 @@ const showLogError = computed(() => errors.value.some(message => message.startsW
 
 <template>
   <div class="ng-page" :class="isAcceptance ? 'ng-page-acceptance' : 'ng-page-stage'">
-    <div v-if="!loading && nodeKey && readonly" class="ng-readonly">当前节点只读：已处理或不属于本人的工作权限</div>
+    <div v-if="!loading && selectedNode && readonly" class="ng-readonly" role="status">{{ readonlyMessage }}</div>
     <div v-if="loading" class="ng-readonly" role="status">正在加载后端数据…</div>
     <div v-else-if="errors.length || flowError" class="ng-readonly" role="alert">{{ [...errors, flowError].filter(Boolean).join('；') }}</div>
     <div class="ng-grid">

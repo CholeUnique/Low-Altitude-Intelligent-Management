@@ -10,6 +10,14 @@ export function canViewWorkflowNode(node?: WorkflowNode) {
 export function canOperateWorkflowNode(node: WorkflowNode | undefined, userId: string) {
   return Boolean(node && node.status === 'PROCESSING' && isNodeMine(node, userId))
 }
+export function workflowNodeReadonlyMessage(node: WorkflowNode | undefined, userId: string) {
+  if (node?.status === 'COMPLETED') {
+    return isNodeMine(node, userId)
+      ? '你已完成此节点办理，可查看办理结果，不能修改或再次提交。'
+      : '此节点已完成，可查看办理结果，不能修改或再次提交。'
+  }
+  return '此节点由其他办理人处理，当前可查看，不能修改或提交。'
+}
 export function workflowNodeState(node?: WorkflowNode): 'completed' | 'active' | 'pending' {
   return node?.status === 'COMPLETED' ? 'completed' : node?.status === 'PROCESSING' ? 'active' : 'pending'
 }
@@ -17,7 +25,15 @@ export function nonGrainNodeKey(node: WorkflowNode) {
   const normalized = node.nodeKey.toLowerCase().replace(/_/g, '-')
   // 非粮化 NON_GRAIN_MONITOR 的真实首审标识（任务 1314 联调确认）。
   // 工作台按业务称为科室初核，提交仍使用后端的节点实例 ID，不改写流程数据。
-  if (normalized === 'review-city' && node.nodeType === 'REVIEW') return 'section-preliminary-review'
+  if (['review-city', 'review-owner'].includes(normalized) && node.nodeType === 'REVIEW') return 'section-preliminary-review'
+  const configuredNodes: Record<string, string> = {
+    'review-county': 'department-confirmation',
+    implement: 'on-site-verification',
+    rectify: 'rectification-disposal',
+    'uav-recheck': 'drone-review',
+    finish: 'case-archive',
+  }
+  if (configuredNodes[normalized]) return configuredNodes[normalized]
   return NON_GRAIN_WORKFLOW.find(step => step.key === normalized || step.name === node.nodeName)?.key
 }
 export function workflowNodeDisplayName(node: WorkflowNode, sceneCode: string) {

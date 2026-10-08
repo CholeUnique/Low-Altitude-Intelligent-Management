@@ -413,7 +413,7 @@ function cancelTaskEdit() {
         <label>任务名称 *</label><input v-model="form.name" placeholder="请输入任务名称" />
         <div class="form-columns"><div><label>所属场景 *</label><select v-model="form.sceneId" :disabled="isEditing"><option v-for="scene in scenes" :key="scene.id" :value="scene.id">{{ scene.name }}</option></select></div><div><label>优先级</label><select v-model="form.priority"><option value="2">高</option><option value="1">中</option><option value="0">低</option></select></div></div>
         <p v-if="submitError" class="task-form-error">{{ submitError }}</p>
-        <button v-if="assignmentFailed" type="button" :disabled="submitting" @click="retryReviewAssignment">{{ submitting ? '正在分派…' : '重试分派给 admin' }}</button>
+        <button v-if="assignmentFailed" type="button" :disabled="submitting" @click="retryReviewAssignment">{{ submitting ? '正在分派…' : '重试分派给 nyncKZ' }}</button>
         <template>
           <label>主责部门 *</label>
           <select v-model="form.deptId" :disabled="departmentsLoading || !departmentOptions.length">
@@ -429,7 +429,7 @@ function cancelTaskEdit() {
         <label>成果要求</label><div class="requirement-list"><label v-for="item in ['照片','视频','直播','二维成果','三维成果','全景','事件','巡检报告']" :key="item"><input v-model="form.requirements" type="checkbox" :value="item" />{{ item }}</label></div>
         <label>联系人与联系电话</label><div class="form-columns"><input v-model="form.contact" maxlength="100" placeholder="联系人（可选）" /><input v-model="form.phone" maxlength="32" placeholder="联系电话（可选）" /></div>
         <template>
-          <div class="form-columns"><div><label>{{ autoAssignReview ? '科室初核负责人' : '负责人 ID' }}</label><input v-if="autoAssignReview" value="admin（创建后自动分派）" readonly /><input v-else v-model="form.assigneeId" inputmode="numeric" placeholder="可暂不填写" /></div><div><label>关联类型</label><select v-model="form.refType"><option value="NONE">不关联</option><option value="PLAN">飞行计划</option><option value="TASK">飞行任务</option></select></div></div>
+          <div class="form-columns"><div><label>{{ autoAssignReview ? '科室初核负责人' : '负责人 ID' }}</label><input v-if="autoAssignReview" value="nyncKZ（创建后自动分派）" readonly /><input v-else v-model="form.assigneeId" inputmode="numeric" placeholder="可暂不填写" /></div><div><label>关联类型</label><select v-model="form.refType"><option value="NONE">不关联</option><option value="PLAN">飞行计划</option><option value="TASK">飞行任务</option></select></div></div>
           <label v-if="form.refType !== 'NONE'">关联对象 ID *</label><input v-if="form.refType !== 'NONE'" v-model="form.refId" inputmode="numeric" placeholder="请输入飞行计划或飞行任务 ID" />
           <label>内部备注</label><textarea v-model="form.remark" maxlength="1000" placeholder="仅管理员可见，可暂不填写"></textarea>
           <template v-if="!isEditing">

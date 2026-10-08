@@ -306,7 +306,7 @@ onMounted(async () => {
   if (props.period.kind !== 'image') enableViewSynchronization()
   resizeObserver = new ResizeObserver(() => {
     if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
-    resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: false }))
+    resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: true, animate: false }))
   })
   resizeObserver.observe(container.value)
 })
