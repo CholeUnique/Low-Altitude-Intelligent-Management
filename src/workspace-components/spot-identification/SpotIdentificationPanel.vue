@@ -39,7 +39,10 @@ const servicePickerLoading = ref(false)
 const servicePickerError = ref('')
 const imageryMapServices = ref<MapServiceItem[]>([])
 const selectedMapServiceIds = ref<string[]>([])
+const taskAbnormalCounts = ref<Record<string, number | undefined>>({})
 let requestVersion = 0
+let taskCountRequestVersion = 0
+let taskSelectedByUser = false
 
 const taskStatusOptions = [
   { value: 0, label: '待执行' },
@@ -50,9 +53,17 @@ const taskStatusOptions = [
   { value: 5, label: '已完成' },
 ]
 const taskSceneOptions = computed(() => [...new Map(props.tasks.map((task) => [task.sceneCode, task.sceneName || task.sceneCode])).entries()])
-const filteredTasks = computed(() => props.tasks.filter((task) =>
-  (!taskSceneFilter.value || task.sceneCode === taskSceneFilter.value)
-  && (taskStatusFilter.value === '' || task.taskStatus === taskStatusFilter.value)))
+const filteredTasks = computed(() => props.tasks
+  .filter((task) => (!taskSceneFilter.value || task.sceneCode === taskSceneFilter.value)
+    && (taskStatusFilter.value === '' || task.taskStatus === taskStatusFilter.value))
+  .map((task, originalIndex) => ({ task, originalIndex }))
+  .sort((left, right) => {
+    const leftHasNoSpots = taskAbnormalCounts.value[left.task.id] === 0
+    const rightHasNoSpots = taskAbnormalCounts.value[right.task.id] === 0
+    if (leftHasNoSpots !== rightHasNoSpots) return leftHasNoSpots ? 1 : -1
+    return left.originalIndex - right.originalIndex
+  })
+  .map(({ task }) => task))
 const typeOptions = computed(() => [...new Map(records.value.map((item) => [item.abnormalType, item.abnormalTypeDesc])).entries()])
 const filtered = computed(() => records.value.filter((item) => {
   const matchKeyword = !keyword.value.trim() || `${item.id} ${item.title} ${item.description} ${item.abnormalTypeDesc}`.toLowerCase().includes(keyword.value.trim().toLowerCase())
@@ -133,6 +144,7 @@ function selectSpot(id: string) {
   activeImageIndex.value = 0
 }
 function selectTask(id: string) {
+  taskSelectedByUser = true
   if (id !== props.selectedTaskId) emit('select-task', id)
 }
 function selectImage(index: number) {
@@ -262,11 +274,30 @@ async function loadTaskAbnormals(taskId?: string, preferredSpotNo?: string) {
   }
 }
 
+async function loadTaskAbnormalCounts(tasks: GovernanceTask[]) {
+  const version = ++taskCountRequestVersion
+  taskAbnormalCounts.value = {}
+  const results = await Promise.allSettled(tasks.map((task) => getTaskAbnormalPage({
+    bizTaskId: task.id,
+    pageNum: 1,
+    pageSize: 1,
+  })))
+  if (version !== taskCountRequestVersion) return
+  taskAbnormalCounts.value = Object.fromEntries(tasks.map((task, index) => {
+    const result = results[index]
+    return [task.id, result?.status === 'fulfilled' ? result.value.total : undefined]
+  }))
+  if (!taskSelectedByUser) emit('select-task', filteredTasks.value[0]?.id || '')
+}
+
 watch(() => props.task?.id, (taskId) => {
   clearManualImagery()
   loadHiddenImagery(taskId)
   pendingDeleteImage.value = undefined
   void loadTaskAbnormals(taskId)
+}, { immediate: true })
+watch(() => props.tasks.map((task) => task.id).join(','), () => {
+  void loadTaskAbnormalCounts(props.tasks)
 }, { immediate: true })
 watch(filteredTasks, (items) => {
   if (!items.some((item) => item.id === props.selectedTaskId)) emit('select-task', items[0]?.id || '')
@@ -433,6 +464,7 @@ onBeforeUnmount(() => {
 .task-selector { display: flex; flex-direction: column; }.task-filters { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 7px; padding: 9px; border-bottom: 1px solid #e8eff3; }.task-filters select { min-width: 0; height: 33px; padding: 0 7px; color: #38586a; background: #fbfdfe; border: 1px solid #c9dce7; border-radius: 4px; font-size: 11px; outline: none; }.task-filters select:hover,.task-filters select:focus { color:#fff; background:#075273; border-color:#1599c1; }.task-filters select option { color:#38586a; background:#fff; }.task-scroll { min-height:0; flex:1; overflow-y:auto; }.recognition-task-item { width:100%; display:block; padding:8px 10px; color:#29475a; border:0; border-bottom:1px solid #e8eef2; background:#fff; text-align:left; cursor:pointer; }.recognition-task-item:hover { background:#f2f9fc; }.recognition-task-item.active { padding-left:6px; border-left:4px solid #129bc3; background:#e5f5fb; }.recognition-task-item span,.recognition-task-item b,.recognition-task-item small { display:block; min-width:0; }.recognition-task-item b,.recognition-task-item small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.recognition-task-item b { color:#1d435b; font-size:12px; }.recognition-task-item small { margin-top:3px; color:#708897; font-size:10px; }.task-empty { display:grid; min-height:70px; place-items:center; padding:12px; color:#6f8796; font-size:12px; text-align:center; }
 .spot-list { display: flex; flex-direction: column; }.filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-bottom: 1px solid #e8eff3; }.filters input { grid-column: 1 / -1; }.filters input,.filters select { min-width: 0; height: 34px; padding: 0 9px; color: #38586a; background: #fbfdfe; border: 1px solid #c9dce7; border-radius: 4px; font-size: 12px; outline: none; }.filters input:focus,.filters select:focus { border-color: #1a9ac0; box-shadow: 0 0 0 2px #1a9ac01c; }
 .filters select:hover,.filters select:focus { color:#fff; background:#075273; border-color:#1599c1; }.filters select option { color:#38586a; background:#fff; }
+.filters input:focus::placeholder { color: transparent; }
 .spot-scroll { min-height: 0; overflow: auto; }.spot-item { width: 100%; display: grid; grid-template-columns: 31px minmax(0,1fr) auto; gap: 9px; align-items: center; padding: 11px 10px; border: 0; border-bottom: 1px solid #e8eef2; background: #fff; color: #29475a; text-align: left; cursor: pointer; transition: background .15s; }.spot-item:hover { background: #f2f9fc; }.spot-item.active { background: #e5f5fb; border-left: 4px solid #129bc3; padding-left: 6px; }.spot-item>i { display: grid; width: 28px; height: 28px; place-items: center; color: #ffffff; background: #3e91b1; border-radius: 50%; font-style: normal; font-size: 13px; font-weight: 700; }.spot-item>i.level-2 { background: #d79228; }.spot-item>i.level-3 { background: #d55762; }.spot-item b,.spot-item small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.spot-item b { color:#1d435b; font-size:14px; }.spot-item small { margin-top:4px;color:#6f8796;font-size:11px; }.spot-item em { padding:4px 6px;border-radius:3px;font-style:normal;font-size:11px;white-space:nowrap; }.status-0 { color:#9a680f;background:#fff3d9; }.status-1 { color:#1b79a2;background:#e2f3fa; }.status-2 { color:#21875e;background:#e3f6ed; }.status-3 { color:#667986;background:#ecf0f2; }.list-empty { display:grid; min-height:150px; place-items:center; padding:16px; color:#6f8796; font-size:13px; text-align:center; }.list-empty--error { color:#c7535e; }
 .center-column { display:contents; }.map-panel { grid-column:2; grid-row:1; display:flex; flex-direction:column; }.map-header-actions{min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:10px}.map-header-actions small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.map-header-actions button{flex:none;height:30px;padding:0 11px;color:#167895;background:#f3fafc;border:1px solid #8fc8d8;border-radius:4px;font-size:12px;font-weight:700;cursor:pointer}.map-header-actions button:hover,.map-header-actions button:focus-visible{color:#fff;background:#137f9e;border-color:#137f9e;outline:none}.map-panel.map-panel--fullscreen{position:fixed;z-index:4000;inset:0;grid-column:auto;grid-row:auto;border:0;border-radius:0;background:#c9d8df;box-shadow:none}.map-panel.map-panel--fullscreen>.panel-title{height:54px;flex:0 0 54px;padding-inline:18px;color:#fff;background:#07344f;border-color:#1e6684;font-size:18px}.map-panel.map-panel--fullscreen .map-header-actions small{color:#b4d7e5;font-size:13px}.map-panel.map-panel--fullscreen .map-header-actions button{color:#fff;background:#126f91;border-color:#6ed8eb}.map-compare { flex:1; min-height:0; display:grid; gap:4px; padding:4px; background:#c9d8df; }.map-compare.compare-2,.map-compare.compare-3 { grid-template-columns:repeat(var(--period-count),minmax(0,1fr)); }.map-compare.compare-2 { --period-count:2; }.map-compare.compare-3 { --period-count:3; }.map-compare.compare-4 { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }.map-compare :deep(.spot-map) { min-width:0; min-height:0; border:1px solid #adc6d2; }.map-empty { display:grid; flex:1; place-items:center; color:#6b8493; background:#eef3f5; font-size:14px; }
 .analysis { grid-column:2 / 4; grid-row:2; display:flex; flex-direction:column; }.periods { display:flex; align-items:center; gap:7px; padding:9px 11px 7px; }.periods button { padding:7px 11px; color:#426478; background:#f5f9fb; border:1px solid #cbdde7; border-radius:4px; font-size:12px; cursor:pointer; }.periods button.active { color:#fff; background:#168db5; border-color:#168db5; box-shadow:0 2px 5px #168db544; }.periods button:disabled { color:#9eacb3; background:#eef2f4; border-color:#dce4e8; box-shadow:none; cursor:not-allowed; opacity:.72; }.periods span { margin-left:auto; overflow:hidden; color:#6f8796; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.imagery { flex:1; min-height:0; display:flex; gap:8px; padding:0 11px 11px; overflow-x:auto; }.image-card { position:relative; flex:0 0 180px; height:112px; overflow:hidden; padding:9px; color:#f4fcff; background:linear-gradient(135deg,#276c80,#17445b); border:1px solid transparent; border-radius:5px; text-align:left; cursor:pointer; transition:border-color .18s,box-shadow .18s; }.image-card:hover,.image-card.active { border-color:#13a9d3; box-shadow:0 0 0 2px #13a9d325; }.image-card.displayed { border-color:#ff4054; box-shadow:0 0 4px #ff4054b8,inset 0 0 2px #ff8a9699; }.image-card__map-thumbnail { position:absolute; inset:0; display:block; opacity:.82; pointer-events:none; }.image-card>img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.66; }.image-card>span { display:grid; height:100%; place-items:center; color:#d5e1e6; background:#53616a; font-size:12px; }.image-card b,.image-card small { position:relative; z-index:1; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card b { margin-top:48px; font-size:13px; }.image-card small { margin-top:4px; font-size:11px; }.image-card.unavailable { cursor:not-allowed; opacity:.7; }.imagery-empty { display:grid; min-width:260px; place-items:center; padding:0 16px; color:#728796; background:#f3f6f8; border:1px dashed #c4d3db; border-radius:5px; font-size:12px; line-height:1.6; }.imagery-empty--error { color:#b24e58; border-color:#e2aeb4; background:#fff5f6; }

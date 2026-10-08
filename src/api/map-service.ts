@@ -11,6 +11,10 @@ export interface MapServiceItem {
   remark?: string
   createTime?: string
   updateTime?: string
+  /** 前端展开 ArcGIS MapServer 时使用的子图层信息，不参与后端接口提交。 */
+  sourceServiceId?: string | number
+  arcGisLayerId?: number
+  arcGisGeometryType?: string
 }
 
 export interface MapServiceListQuery {
