@@ -38,6 +38,37 @@
 .ng-card h3 { min-height: 24px; margin: 0 0 clamp(6px, .8vh, 10px); display: flex; align-items: center; gap: 7px; color: var(--ng-title); font-size: clamp(13px, .95vw, 16px); line-height: 1.3; }
 .ng-card h3 > i { width: 22px; height: 22px; display: inline-grid; place-items: center; color: #1687ef; background: #e9f5ff; border-radius: 5px; font-size: 11px; font-style: normal; }
 .ng-card h3 small { color: #6f879a; font-size: 11px; font-weight: 500; }
+.ng-card.plot-guide-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.plot-guide-card > .plot-scroll {
+  flex: 1;
+  min-height: 65px;
+  overflow: auto;
+}
+.plot-guide-card > .plot-guide {
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 5px;
+  background: #eff7ff;
+  color: #607e91;
+}
+.ng-card.plot-guide-card > .plot-guide h4 {
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  color: #1687ef;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ng-card.plot-guide-card > .plot-guide p {
+  margin: 3px 0;
+  font-size: 11px;
+  line-height: 1.7;
+}
 .ng-card h4 { margin: clamp(7px, .9vh, 12px) 0 7px; color: #264f69; font-size: clamp(11px, .78vw, 13px); }
 .ng-card-head { min-height: 25px; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .ng-card-head h3 { margin-bottom: 0; }

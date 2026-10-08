@@ -106,6 +106,11 @@ export function changeMyPassword(input: { deptId?: string; oldPassword: string; 
 export function getUserPage(query: UserPageQuery) {
   return apiClient.post<never, UserPage>('/v1/user/page', withoutEmptyFilter(query as Record<string, unknown>))
 }
+export type UserOption = Pick<CurrentUser, 'id' | 'username' | 'realName' | 'nickname'>
+export async function getDeptUserPage(query: { deptId: string; pageNum?: number; pageSize?: number; keyword?: string; includeChild?: boolean }) {
+  const page = await apiClient.post<never, { records: UserOption[]; total: number; pageNum?: number; pageSize?: number }>('/v1/user/dept/page', { ...query, pageSize: Math.min(query.pageSize || 100, 100) })
+  return { ...page, pageNum: page.pageNum || query.pageNum || 1, pageSize: page.pageSize || Math.min(query.pageSize || 100, 100), records: page.records.map(person => ({ ...person, id: String(person.id) })) }
+}
 
 export function getUserDetail(id: string, deptId?: string) {
   return apiClient.post<never, CurrentUser>('/v1/user/detail', { id, deptId })

@@ -78,3 +78,141 @@ assert.equal(state.workflowNodeDisplayName(ownerReview, 'CULTIVATED_LAND_USE_CON
 assert.equal(state.nonGrainWorkflow({ ...reviewFlow, currentNode: ownerReview, timeline: [ownerReview] }, true)[1].status, 'active')
 assert.equal(listState.projectTaskListWorkflow(waitingTask, { ...reviewFlow, currentNode: ownerReview, timeline: [ownerReview] }).taskStatusDesc, '科室初核处理中')
 console.log('PASS: REVIEW_OWNER real non-grain first node and assignee permissions')
+
+const county = { ...realReview, id: 'next-node', nodeKey: 'REVIEW_COUNTY', nodeName: '区县审核', assigneeId: '694', bizTaskId: '1314' }
+const completedCity = { ...realReview, status: 'COMPLETED', bizTaskId: '1314', resultData: { result: 'FORWARD', opinion: '疑似非粮化，建议下发核查' } }
+const forwardedFlow = { ...reviewFlow, timeline: [completedCity, county], currentNode: county }
+assert.equal(state.workflowNodeDisplayName(county, waitingTask.sceneCode), '部门确认')
+assert.equal(state.nonGrainWorkflow(forwardedFlow, true)[1].status, 'completed')
+assert.equal(state.nonGrainWorkflow(forwardedFlow, true)[2].status, 'active')
+assert.equal(state.canOperateWorkflowNode(county, '694'), true)
+assert.equal(state.canOperateWorkflowNode(county, '692'), false)
+assert.equal(state.myTaskWorkState(forwardedFlow, '692'), 'handled')
+assert.equal(state.myTaskWorkState(forwardedFlow, '694'), 'pending')
+const pagination = { collectPages: async fn => (await fn(1, 200)).records }
+const myTasks = load('src/api/my-workflow-tasks.ts', {
+  './governance-task': {
+    getMyTodoTaskPage: async () => ({ records: [] }),
+    getGovernanceTaskPage: async () => ({ records: [] }),
+    getGovernanceTaskDetail: async id => { assert.equal(id, '1314'); return { task: waitingTask } },
+  },
+  './task-workflow': { getTaskWorkflow: async () => forwardedFlow, getWorkflowTodos: async () => [county], workflowSteps: f => f.timeline.map(n => ({ key: n.nodeKey, name: n.nodeName, status: n.status })) },
+  './pagination': pagination,
+  '@/utils/task-workflow-state': state,
+})
+const recipientTodos = await myTasks.getMyWorkflowTasks('694', '1')
+assert.equal(recipientTodos.records.length, 1, '业务负责人接口没有任务时，仍从真实工作流待办补全接收人的任务')
+assert.equal(recipientTodos.records[0].myWorkState, 'pending')
+assert.equal(recipientTodos.records[0].myNodes[0].nodeKey, 'REVIEW_COUNTY')
+assert.equal(recipientTodos.records[0].workflow[1].name, '部门确认')
+assert.equal((await myTasks.getMyWorkflowTasks('692', '1')).records[0].myWorkState, 'handled')
+const assignmentCalls = []
+const assignment = load('src/api/non-grain-assignment.ts', {
+  './account-management': {
+    getDeptUserPage: async query => { assert.equal(query.keyword, 'nyncKZ'); assert.equal(query.includeChild, false); return { records: query.deptId === '1' ? [{ id: '1', username: 'admin' }, { id: '692', username: 'nyncKZ' }] : [], total: 2, pageSize: 100 } },
+  },
+  './client': { apiClient: { post: async (url, body) => { assignmentCalls.push({ url, body }) } }, ApiBusinessError: class extends Error {} },
+  './task-workflow': { getTaskWorkflow: async () => reviewFlow },
+})
+globalThis.window = { dispatchEvent: () => {} }
+assert.equal(await assignment.getNonGrainReviewerId('1'), '692')
+await assert.rejects(assignment.getNonGrainReviewerId('2'), /未找到/)
+await assignment.assignNonGrainReview('1314', '1', '692')
+assert.deepEqual(assignmentCalls, [{ url: '/v1/workflow/start', body: { bizTaskId: '1314', deptId: '1', assigneeId: '692' } }])
+delete globalThis.window
+console.log('PASS: county handoff, recipient todo fallback, completed reviewer history and nyncKZ startup assignment')
+
+const dataErrors = load('src/workspace-components/shared/task-data-errors.ts')
+for (const index of [2, 3]) {
+  assert.equal(dataErrors.shouldShowTaskDataError(index, new Error('无权限访问'), true), false, '已完成节点的可选材料访问限制不遮挡回看')
+  assert.equal(dataErrors.shouldShowTaskDataError(index, { response: { status: 403 } }, true), false)
+  assert.equal(dataErrors.shouldShowTaskDataError(index, new Error('网络连接失败'), true), true, '真实加载故障不能当作权限限制隐藏')
+  assert.equal(dataErrors.shouldShowTaskDataError(index, new Error('无权限访问'), false), true, '本人正在办理的节点仍提示材料访问错误')
+}
+assert.equal(dataErrors.shouldShowTaskDataError(4, new Error('无权限访问'), true), true, '工作流的核心访问限制仍须报告')
+assert.equal(dataErrors.shouldShowTaskDataError(0, new Error('无权限访问'), true), true)
+console.log('PASS: readonly optional material permissions and essential/network error reporting')
+
+class GridPermissionError extends Error { constructor() { super('无权限访问'); this.code = '403' } }
+let denyGridUsers = false
+const gridUsersApi = load('src/api/grid-dispatch-users.ts', {
+  './account-management': { getDeptUserPage: async query => {
+    assert.equal(query.deptId, '1')
+    assert.equal(query.role, undefined, '网格员的管理员角色不应导致漏查')
+    if (denyGridUsers) throw new GridPermissionError()
+    return { records: [
+      { id: '719', username: 'wgy1', realName: '九龙镇姚家村网格员', role: 'USER', status: 1 },
+      { id: '720', username: 'wgy2', realName: '九龙镇张巷村网格员', role: 'ADMIN', status: 1 },
+      { id: '694', username: 'hlqNYNCJ', realName: '海陵区农业农村局', role: 'USER', status: 1 },
+      { id: '692', username: 'nyncKZ', role: 'ADMIN', status: 1 },
+    ] }
+  } },
+  './pagination': pagination,
+  './client': { ApiBusinessError: GridPermissionError },
+})
+assert.deepEqual((await gridUsersApi.getGridDispatchUsers('1')).map(u => u.id), ['719', '720'])
+await assert.rejects(gridUsersApi.getGridDispatchUsers(), /未提供所属部门/)
+denyGridUsers = true
+await assert.rejects(gridUsersApi.getGridDispatchUsers('1'), /开通下发对象查询权限/)
+const implement = { ...county, id: 'implementation', nodeKey: 'IMPLEMENT', nodeType: 'IMPLEMENT', assigneeId: '719' }
+const implementingFlow = { ...forwardedFlow, timeline: [completedCity, { ...county, status: 'COMPLETED' }, implement], currentNode: implement }
+assert.equal(state.myTaskWorkState(implementingFlow, '719'), 'pending')
+assert.equal(state.myTaskWorkState(implementingFlow, '720'), undefined)
+assert.equal(state.myTaskWorkState(implementingFlow, '694'), 'handled')
+assert.equal(state.nonGrainWorkflow(implementingFlow, true)[3].status, 'active')
+assert.equal(state.workflowNodeDisplayName(implement, waitingTask.sceneCode), '现场核查')
+console.log('PASS: department-scoped grid users, permission denial, and IMPLEMENT recipient/history permissions')
+
+const inspection = load('src/utils/non-grain-inspection.ts')
+const inspectedPlot = { abnormalId: '439', result: 'NO_PROBLEM', landUse: '0201', description: '现场仍为粮食作物', noProblemReason: '识别误差', attachment: [] }
+const inspectionFlow = { ...implementingFlow, timeline: [{ ...completedCity, deptId: '1' }, { ...county, status: 'COMPLETED' }, implement], currentNode: { ...implement, deptId: '1' } }
+assert.deepEqual(inspection.inspectionRoute([inspectedPlot], inspectionFlow), { result: 'NO_PROBLEM', assigneeId: '692', deptId: '1', nextKey: 'FINISH' }, '无问题返回真实首审用户，不写死 nyncKZ ID')
+const problemPlot = { ...inspectedPlot, abnormalId: '440', result: 'PROBLEM', attachment: ['file-1'] }
+assert.equal(inspection.inspectionRoute([inspectedPlot, problemPlot], inspectionFlow, '744').assigneeId, '744')
+assert.equal(inspection.inspectionRoute([inspectedPlot, problemPlot], inspectionFlow, '744').nextKey, 'RECTIFY')
+assert.throws(() => inspection.inspectionRoute([{ ...problemPlot, attachment: [] }], inspectionFlow, '744'), /现场拍摄图片/)
+assert.throws(() => inspection.inspectionRoute([problemPlot], inspectionFlow), /ntjsg/)
+assert.throws(() => inspection.inspectionRoute([{ ...inspectedPlot, noProblemReason: '' }], inspectionFlow), /无问题原因/)
+assert.throws(() => inspection.inspectionRoute([], inspectionFlow), /没有待核查/)
+const archive = { ...implement, id: 'finish', nodeKey: 'FINISH', status: 'PROCESSING', assigneeId: '692' }
+const archivedRoute = state.nonGrainWorkflow({ ...inspectionFlow, currentNode: archive, timeline: [...inspectionFlow.timeline.map(n => ({ ...n, status: 'COMPLETED' })), archive] }, true)
+assert.equal(archivedRoute[4].viewable, false, '跳过的整改节点保持灰色且不可点击')
+assert.equal(archivedRoute[5].viewable, false, '跳过的无人机复核保持灰色且不可点击')
+assert.equal(archivedRoute[6].status, 'active')
+console.log('PASS: inspection validation, mixed plots, real recipient routing and skipped stages')
+const selectorCalls = []
+const selector = load('src/api/account-management.ts', { './client': { apiClient: { post: async (path, body) => {
+  selectorCalls.push({ path, body })
+  return { records: [{ id: 744, username: 'ntjsg', realName: '农田建设股' }], total: 1 }
+} } } })
+const selectorPage = await selector.getDeptUserPage({ deptId: '1', pageNum: 2, pageSize: 200, keyword: 'ntjsg' })
+assert.equal(selectorCalls[0].path, '/v1/user/dept/page')
+assert.equal(selectorCalls[0].body.pageSize, 100, '选人接口最大每页 100，不能因分页上限遗漏数据')
+assert.equal(selectorPage.records[0].id, '744')
+assert.equal(selectorPage.pageSize, 100)
+assert.equal(selectorPage.pageNum, 2)
+console.log('PASS: dept selection endpoint, page size limit and slim user ID normalization')
+const inspectionFiles = load('src/utils/inspection-files.ts')
+for (const name of ['现场.PNG', 'boundary.svg', 'photo.jpeg', 'photo.webp', 'photo.HEIC']) {
+  assert.equal(inspectionFiles.inspectionFileError([{ name, size: 1024 }], true), '')
+  assert.match(inspectionFiles.inspectionFileError([{ name, size: 1024 }], false), /图片请使用/)
+}
+for (const name of ['报告.pdf', '说明.doc', '说明.docx']) {
+  assert.equal(inspectionFiles.inspectionFileError([{ name, size: 1024 }], false), '')
+  assert.match(inspectionFiles.inspectionFileError([{ name, size: 1024 }], true), /上传附件/)
+}
+assert.match(inspectionFiles.inspectionFileError([{ name: 'bad.exe', size: 1024 }], true), /仅接收图片/)
+assert.match(inspectionFiles.inspectionFileError([{ name: 'huge.jpg', size: 10 * 1024 * 1024 + 1 }], true), /10MB/)
+assert.match(inspectionFiles.inspectionFileError([{ name: 'a.jpg', size: 1024 }, { name: 'b.docx', size: 1024 }], true), /上传附件/)
+console.log('PASS: disjoint image/document upload filters and batch size validation')
+const recheck = load('src/utils/non-grain-recheck.ts')
+const previousRectifier = { ...implement, nodeKey: 'RECTIFY', status: 'COMPLETED', assigneeId: '743', deptId: '1' }
+const latestRectifier = { ...previousRectifier, id: 'rectify-latest', assigneeId: '744' }
+const recheckingFlow = { ...inspectionFlow, timeline: [...inspectionFlow.timeline, previousRectifier, latestRectifier] }
+assert.deepEqual(recheck.recheckRoute(['NO_PROBLEM'], recheckingFlow), { result: 'NO_PROBLEM', assigneeId: '692', deptId: '1', nextKey: 'FINISH' })
+assert.deepEqual(recheck.recheckRoute(['NO_PROBLEM', 'PROBLEM'], recheckingFlow), { result: 'PROBLEM', assigneeId: '744', deptId: '1', nextKey: 'RECTIFY' }, '循环复核退回最近一轮整改办理人')
+assert.throws(() => recheck.recheckRoute([], recheckingFlow), /所有图斑/)
+assert.throws(() => recheck.recheckRoute([''], recheckingFlow), /所有图斑/)
+assert.throws(() => recheck.recheckRoute(['PROBLEM'], inspectionFlow), /上一轮整改办理人/)
+assert.throws(() => recheck.recheckRoute(['NO_PROBLEM'], { ...recheckingFlow, timeline: [latestRectifier] }), /首审办理人/)
+console.log('PASS: drone review mixed outcomes, latest rectifier, first reviewer archive and missing routes')

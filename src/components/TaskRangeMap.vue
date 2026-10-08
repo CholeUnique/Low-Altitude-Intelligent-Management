@@ -21,6 +21,8 @@ const props = withDefaults(defineProps<{
   /** 仅用于对比窗口：在任务范围底图上叠加 DOM 正射影像。 */
   showDomImagery?: boolean
   fitAbnormalPoints?: boolean
+  /** 小尺寸图斑缩略图可减少边距，避免边距超过地图容器尺寸。 */
+  fitPadding?: number
   /** 由主图负责初始范围适配；从图仅跟随共享视野，避免覆盖联合范围。 */
   autoFit?: boolean
   /** 父页面在异步要素全部到达后递增，用于强制按当前可见图层重新计算范围。 */
@@ -70,7 +72,7 @@ function tileUrl(layer: 'img' | 'cia') {
 }
 
 function fitRange(bounds: L.LatLngBounds) {
-  if (map && bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] })
+  if (map && bounds.isValid()) map.fitBounds(bounds, { padding: [props.fitPadding ?? 30, props.fitPadding ?? 30] })
 }
 
 function renderDomImagery() {
@@ -436,7 +438,7 @@ function focusAbnormal(item: TaskAbnormal) {
     try {
       const bounds = L.geoJSON(item.boundaryGeoJson as GeoJSON.FeatureCollection).getBounds()
       if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
-        map.fitBounds(bounds, { padding: [55, 55], animate: true })
+        map.fitBounds(bounds, { padding: [props.fitPadding ?? 55, props.fitPadding ?? 55], animate: true })
         return
       }
     } catch {
@@ -448,7 +450,7 @@ function focusAbnormal(item: TaskAbnormal) {
     try {
       const bounds = L.geoJSON(feature as GeoJSON.Feature).getBounds()
       if (bounds.isValid() && !bounds.getNorthEast().equals(bounds.getSouthWest())) {
-        map.fitBounds(bounds, { padding: [55, 55], animate: true })
+        map.fitBounds(bounds, { padding: [props.fitPadding ?? 55, props.fitPadding ?? 55], animate: true })
         return
       }
     } catch {
@@ -492,7 +494,7 @@ onMounted(async () => {
   applyExternalView(props.view)
   resizeObserver = new ResizeObserver(() => {
     if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
-    resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: false }))
+    resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: true, animate: false }))
   })
   resizeObserver.observe(container.value)
   if (props.editable) {

@@ -10,7 +10,7 @@ const { detail, flow, geometry, abnormals, results, images, logs, loading, error
 <template>
   <div class="backend-task-panel">
     <header class="panel-heading"><div><h2>{{ title || '任务工作台' }}</h2><p>{{ task?.name || (loading ? '正在读取任务…' : '请选择业务任务') }}</p></div><button :disabled="loading" @click="load">刷新</button></header>
-    <p v-if="loading" role="status">正在加载后端数据…</p>
+
     <div v-for="message in errors" :key="message" class="error" role="alert">{{ message }}</div>
     <template v-if="task">
       <section class="card"><h3>任务统计</h3><dl class="fields"><div v-for="[label, value] in statisticsFields" :key="label"><dt>{{ label }}</dt><dd>{{ text(value) }}</dd></div></dl></section>
