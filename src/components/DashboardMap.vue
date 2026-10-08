@@ -10,6 +10,7 @@ import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import type { DashboardMapLayer, DashboardMapTask, DronePatrolRoute } from '@/types'
 import {
   createMapServiceLayer,
+  expandMapServiceSublayers,
   MAP_SERVICE_IMAGERY_PANE,
   MAP_SERVICE_VECTOR_PANE,
   type MapServiceLayerHandle,
@@ -229,7 +230,8 @@ async function loadMapServices() {
   mapServicesLoading.value = true
   mapServicesError.value = ''
   try {
-    const services = await listEnabledMapServices()
+    const sourceServices = await listEnabledMapServices()
+    const services = (await Promise.all(sourceServices.map(expandMapServiceSublayers))).flat()
     const activeIds = new Set(services.map((service) => String(service.id)))
     mapServiceLayers.forEach((handle, id) => {
       if (activeIds.has(id)) return
