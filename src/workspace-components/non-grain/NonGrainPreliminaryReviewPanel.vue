@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { taskImageryService } from '@/utils/task-imagery'
 import WorkbenchFeedback from '@/workspace-components/shared/WorkbenchFeedback.vue'
 import { computed, ref, watch } from 'vue'
 import { useBackendTaskData } from '@/workspace-components/shared/use-backend-task'
@@ -198,7 +199,7 @@ async function submitReview() {
           <article v-for="(spot, index) in abnormals" :key="spot.id" class="review-plot" :class="{ selected: activeSpotId === spot.id, 'selectable-plot': departmentMode }" @click="activeSpotId = spot.id">
             <input v-if="departmentMode" class="plot-checkbox" type="checkbox" :aria-label="`选择图斑${index + 1}：${spot.title}`" :checked="selectedPlotIds.includes(spot.id)" :disabled="!canEdit || dispatchedPlotIds.has(spot.id)" @change="togglePlot(spot.id)" />
             <div role="button" tabindex="0" class="plot-thumbnail" :aria-label="`查看图斑${index + 1}：${spot.title}`" @click="previewPlot = spot" @keydown.enter="previewPlot = spot" @keydown.space.prevent="previewPlot = spot">
-              <TaskRangeMap v-if="spotPeriod(spot).kind === 'empty'" :abnormal-points="[spot]" :active-abnormal-id="spot.id" fit-abnormal-points show-dom-imagery />
+              <TaskRangeMap v-if="spotPeriod(spot).kind === 'empty'" :abnormal-points="[spot]" :active-abnormal-id="spot.id" fit-abnormal-points show-dom-imagery :imagery-service="taskImageryService(task?.comparisonImages)" />
               <SpotDistributionMap v-else :key="`${spot.id}-${spotPeriod(spot).imageUrl || spotPeriod(spot).mapService?.id}`" :spot="spot" :period="spotPeriod(spot)" thumbnail />
             </div>
             <span class="plot-content"><b><i>{{ index + 1 }}</i>{{ spot.title }}</b><span>面积：<strong>{{ spot.area == null ? '暂无数据' : `${spot.area} ㎡` }}</strong></span><small>{{ spot.abnormalTypeDesc }} · {{ handleLabel(spot.handleStatus) }}</small><small v-if="departmentMode" :class="dispatchedPlotIds.has(spot.id) ? 'plot-dispatched' : 'plot-pending'">{{ dispatchedPlotIds.has(spot.id) ? '已下发' : '待下发' }}</small><small>{{ spot.description || '暂无图斑说明' }}</small></span>
@@ -257,7 +258,7 @@ async function submitReview() {
 
       </aside>
     </div>
-    <Teleport to="body"><div v-if="previewPlot" class="plot-preview-backdrop" @click.self="previewPlot = undefined" @keydown.esc="previewPlot = undefined"><section role="dialog" aria-modal="true" aria-label="图斑详情地图" class="plot-preview"><header><b>{{ previewPlot.title }} · {{ previewPlot.area == null ? '暂无面积' : `${previewPlot.area} ㎡` }}</b><button type="button" autofocus @click="previewPlot = undefined">关闭</button></header><TaskRangeMap :abnormal-points="[previewPlot]" :active-abnormal-id="previewPlot.id" fit-abnormal-points show-dom-imagery /><small>展示真实图斑边界与配置底图。</small></section></div></Teleport>
+    <Teleport to="body"><div v-if="previewPlot" class="plot-preview-backdrop" @click.self="previewPlot = undefined" @keydown.esc="previewPlot = undefined"><section role="dialog" aria-modal="true" aria-label="图斑详情地图" class="plot-preview"><header><b>{{ previewPlot.title }} · {{ previewPlot.area == null ? '暂无面积' : `${previewPlot.area} ㎡` }}</b><button type="button" autofocus @click="previewPlot = undefined">关闭</button></header><TaskRangeMap :abnormal-points="[previewPlot]" :active-abnormal-id="previewPlot.id" fit-abnormal-points show-dom-imagery :imagery-service="taskImageryService(task?.comparisonImages)" /><small>展示真实图斑边界与配置底图。</small></section></div></Teleport>
   </div>
 </template>
 

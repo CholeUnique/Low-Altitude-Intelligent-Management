@@ -18,18 +18,19 @@ const rangeView = ref<{ center: [number, number]; zoom: number }>()
 const hasTaskMap = computed(() => Boolean(props.geometry?.features.length || props.abnormals?.length))
 const viewport = ref<HTMLElement>()
 const choices = computed(() => {
-  const images = [...props.images]
+  const images = props.images.filter(image => !image.mapService || Number(image.mapService.status) === 1)
   if (props.spot?.imageUrl && !images.some(image => image.imageUrl === props.spot?.imageUrl)) {
     images.push({ id: `spot-image-${props.spot.id}`, label: `${props.spot.title} · 问题图斑影像`, imageUrl: props.spot.imageUrl })
   }
   return images
 })
 const selectedImages = computed(() => [choices.value.find(image => image.id === historyId.value), choices.value.find(image => image.id === currentId.value)])
-watch(() => `${props.spot?.id || ''}:${props.images.map(image => image.id).join(',')}`, () => {
-  historyId.value = props.images[0]?.id || ''
-  currentId.value = choices.value.find(image => image.id === `spot-image-${props.spot?.id}`)?.id || props.images[1]?.id || ''
+watch([() => props.spot?.id, () => props.spot?.imageUrl, () => props.images], () => {
+  const references = props.images.filter(image => !image.mapService || Number(image.mapService.status) === 1)
+  historyId.value = references[0]?.id || ''
+  currentId.value = choices.value.find(image => image.id === `spot-image-${props.spot?.id}`)?.id || references[references.length - 1]?.id || ''
   view.value = undefined
-}, { immediate: true })
+}, { immediate: true, deep: true })
 const periods = computed<ComparisonPeriod[]>(() => [0, 1].map(index => {
   const image = selectedImages.value[index]
   return { number: index + 1, label: image?.label || (index ? '当前影像' : '历史影像'), kind: image?.mapService ? 'map-service' : image?.imageUrl ? 'image' : 'empty', mapService: image?.mapService, imageUrl: image?.imageUrl }

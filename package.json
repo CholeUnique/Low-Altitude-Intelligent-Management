@@ -12,9 +12,11 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
+    "@mapbox/shp-write": "^0.4.3",
     "axios": "^1.11.0",
     "echarts": "^6.1.0",
     "element-plus": "^2.11.1",
+    "geotiff": "^3.0.5",
     "jsencrypt": "^3.5.4",
     "leaflet": "^1.9.4",
     "pinia": "^3.0.3",

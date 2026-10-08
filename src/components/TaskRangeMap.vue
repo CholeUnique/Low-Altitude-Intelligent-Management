@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { TaskAbnormal, TaskGeometryFeatureCollection } from '@/api/governance-task'
+import type { MapServiceItem } from '@/api/map-service'
+import { createMapServiceLayer, MAP_SERVICE_IMAGERY_PANE, MAP_SERVICE_VECTOR_PANE } from '@/utils/map-service-layer'
 
 type TaskMapView = { center: [number, number]; zoom: number }
 
@@ -20,6 +22,7 @@ const props = withDefaults(defineProps<{
   abnormalFillOpacity?: number
   /** 仅用于对比窗口：在任务范围底图上叠加 DOM 正射影像。 */
   showDomImagery?: boolean
+  imageryService?: MapServiceItem
   fitAbnormalPoints?: boolean
   /** 小尺寸图斑缩略图可减少边距，避免边距超过地图容器尺寸。 */
   fitPadding?: number
@@ -54,17 +57,14 @@ let vertexLayer: L.LayerGroup | undefined
 let geoJsonLayer: L.GeoJSON | undefined
 let taskRangeLayer: L.GeoJSON | undefined
 let abnormalLayer: L.FeatureGroup | undefined
-let domImageryLayer: L.TileLayer | undefined
+let domImageryLayer: L.Layer | undefined
+let imageryRequestVersion = 0
+const imageryError = ref('')
 let taskRangeBounds: L.LatLngBounds | undefined
 let applyingExternalView = false
 let releaseExternalViewTimer: number | undefined
 let autoFitFrame: number | undefined
 const token = import.meta.env.VITE_TIANDITU_TOKEN
-const domXyzTileUrl = import.meta.env.VITE_DOM_XYZ_TILE_URL?.trim()
-const domBounds = L.latLngBounds(
-  [32.48574015140688, 119.8412888155381],
-  [32.49689672806349, 119.85940753661878],
-)
 const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
 
 function tileUrl(layer: 'img' | 'cia') {
@@ -75,20 +75,20 @@ function fitRange(bounds: L.LatLngBounds) {
   if (map && bounds.isValid()) map.fitBounds(bounds, { padding: [props.fitPadding ?? 30, props.fitPadding ?? 30] })
 }
 
-function renderDomImagery() {
+async function renderDomImagery() {
+  const version = ++imageryRequestVersion
   domImageryLayer?.remove()
   domImageryLayer = undefined
-  if (!map || !props.showDomImagery || !domXyzTileUrl) return
-  domImageryLayer = L.tileLayer(domXyzTileUrl, {
-    bounds: domBounds,
-    minNativeZoom: 16,
-    maxNativeZoom: 22,
-    maxZoom: 22,
-    tms: true,
-    opacity: .9,
-    noWrap: true,
-    attribution: 'DOM 正射影像',
-  }).addTo(map)
+  imageryError.value = ''
+  if (!map || !props.showDomImagery || !props.imageryService) return
+  const currentMap = map
+  try {
+    const handle = await createMapServiceLayer(props.imageryService)
+    if (version !== imageryRequestVersion || map !== currentMap) return
+    domImageryLayer = handle.layer.addTo(currentMap)
+  } catch (reason) {
+    if (version === imageryRequestVersion) imageryError.value = `任务影像加载失败：${reason instanceof Error ? reason.message : '服务不可用'}`
+  }
 }
 
 /** 以 WGS84 球面近似计算多边形面积，单位：平方米。 */
@@ -481,6 +481,8 @@ onMounted(async () => {
   map = L.map(container.value, { center: [32.455, 119.923], zoom: 10, maxZoom: 22, zoomControl: false, attributionControl: false })
   // 地图本身不限制放大级别；18 级以上复用最高级底图瓦片进行放大。
   const base = L.tileLayer(tileUrl('img'), { subdomains, maxNativeZoom: 18, maxZoom: 22 }).addTo(map)
+  map.createPane(MAP_SERVICE_IMAGERY_PANE).style.zIndex = '250'
+  map.createPane(MAP_SERVICE_VECTOR_PANE).style.zIndex = '350'
   const labelsPane = map.createPane('labels')
   labelsPane.style.zIndex = '450'
   labelsPane.style.pointerEvents = 'none'
@@ -517,6 +519,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  imageryRequestVersion += 1
   clearPreview()
   if (autoFitFrame !== undefined) window.cancelAnimationFrame(autoFitFrame)
   if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
@@ -540,6 +543,7 @@ watch(() => props.abnormalPoints, () => renderAbnormalPoints(true), { deep: true
 watch(() => props.activeAbnormalId, () => renderAbnormalPoints())
 watch(() => props.fitRequest, () => scheduleFitOnce())
 watch(() => props.showDomImagery, renderDomImagery)
+watch(() => props.imageryService, renderDomImagery, { deep: true })
 watch(() => props.view, applyExternalView, { deep: true })
 </script>
 
@@ -547,6 +551,7 @@ watch(() => props.view, applyExternalView, { deep: true })
   <div class="task-range-map" :class="{ 'task-range-map--drawing': isDrawing }">
     <div ref="container" class="task-range-map__canvas"></div>
     <div v-if="error" class="map-error">{{ error }}</div>
+    <div v-else-if="imageryError" class="map-error">{{ imageryError }}</div>
     <div v-if="editable" class="draw-tip">ⓘ {{ isDrawing ? '点击地图依次绘制作业范围，至少选择3个点，单击鼠标右键完成绘制' : '拖动顶点调整范围，右键顶点可删除；清空后可重新绘制' }}</div>
     <div class="range-tools">
       <button v-if="editable" @click="clearRange">♲ 清空</button>

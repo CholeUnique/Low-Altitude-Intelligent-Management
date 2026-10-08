@@ -855,7 +855,7 @@ Vue 前端
 项目正式后端接口以用户开发环境中的内网 Swagger 为准：
 
 ```text
-http://223.2.38.27:8080/swagger-ui/index.html#/
+http://223.2.41.169:8080/swagger-ui/index.html#/
 ```
 
 该地址不保证在外部环境可访问，因此正式开发时由运行 Cursor 的开发机直接读取 Swagger/OpenAPI。
