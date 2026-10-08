@@ -35,6 +35,7 @@ interface ArcGisMapServiceMetadata {
 
 interface ArcGisLayerMetadata {
   geometryType?: string
+  displayField?: string
   fields?: Array<{ name?: string; alias?: string }>
 }
 
@@ -225,6 +226,7 @@ class ArcGisExportLayer extends L.GridLayer {
     private readonly url: string,
     private readonly imageServer = false,
     private readonly vectorLayerId?: number,
+    private readonly vectorGeometryType = 'esriGeometryPolygon',
   ) {
     super({
       pane: vectorLayerId === undefined ? MAP_SERVICE_IMAGERY_PANE : MAP_SERVICE_VECTOR_PANE,
@@ -253,6 +255,17 @@ class ArcGisExportLayer extends L.GridLayer {
       f: 'image',
     })
     if (this.vectorLayerId !== undefined) {
+      const symbol = this.vectorGeometryType === 'esriGeometryPoint'
+        ? {
+            type: 'esriSMS', style: 'esriSMSCircle', color: [255, 208, 0, 230], size: 9,
+            outline: { type: 'esriSLS', style: 'esriSLSSolid', color: [255, 0, 0, 255], width: 1.5 },
+          }
+        : this.vectorGeometryType === 'esriGeometryPolyline'
+          ? { type: 'esriSLS', style: 'esriSLSSolid', color: [255, 0, 0, 255], width: 2.5 }
+          : {
+              type: 'esriSFS', style: 'esriSFSSolid', color: [255, 0, 0, 51],
+              outline: { type: 'esriSLS', style: 'esriSLSSolid', color: [255, 0, 0, 255], width: 2 },
+            }
       parameters.set('_filterRevision', String(this.filterRevision))
       parameters.set('layers', `show:${this.vectorLayerId}`)
       parameters.set('layerDefs', JSON.stringify({ [this.vectorLayerId]: this.definitionExpression }))
@@ -266,12 +279,7 @@ class ArcGisExportLayer extends L.GridLayer {
           showLabels: false,
           renderer: {
             type: 'simple',
-            symbol: {
-              type: 'esriSFS',
-              style: 'esriSFSSolid',
-              color: [255, 0, 0, 51],
-              outline: { type: 'esriSLS', style: 'esriSLSSolid', color: [255, 0, 0, 255], width: 2 },
-            },
+            symbol,
           },
         },
       }]))
@@ -291,17 +299,34 @@ class ArcGisExportLayer extends L.GridLayer {
   }
 
   createFilteredCopy(expression: string) {
-    const layer = new ArcGisExportLayer(this.url, this.imageServer, this.vectorLayerId)
+    const layer = new ArcGisExportLayer(this.url, this.imageServer, this.vectorLayerId, this.vectorGeometryType)
     layer.definitionExpression = expression
     layer.filterRevision = this.filterRevision + 1
     return layer
   }
 }
 
-function hoverField(fields: ArcGisLayerMetadata['fields']) {
+function categoryField(fields: ArcGisLayerMetadata['fields']) {
   const candidates = ['DLMC', '地类名称', '变化类']
   return candidates.flatMap((candidate) => (fields || []).filter((field) =>
     field.name?.toUpperCase() === candidate.toUpperCase() || field.alias?.toUpperCase() === candidate.toUpperCase()))[0]
+}
+
+function hoverField(metadata: ArcGisLayerMetadata) {
+  const fields = metadata.fields || []
+  const preferredNames = [metadata.displayField, 'GCMC', 'XMMC', 'DKBM', 'DCBH', 'DLMC', '地类名称', '变化类']
+    .filter((name): name is string => Boolean(name))
+  return preferredNames.flatMap((candidate) => fields.filter((field) =>
+    field.name?.toUpperCase() === candidate.toUpperCase() || field.alias?.toUpperCase() === candidate.toUpperCase()))[0]
+}
+
+function fieldLabel(field?: { name?: string; alias?: string }) {
+  const name = field?.name || ''
+  const labels: Record<string, string> = {
+    GCMC: '工程名称', XMMC: '项目名称', DKBM: '地块编码', DCBH: '地块编号',
+    DLMC: '地类名称', '变化类': '变化类型',
+  }
+  return labels[name] || field?.alias || name || '名称'
 }
 
 class ArcGisVectorLayer extends L.LayerGroup {
@@ -358,14 +383,21 @@ class ArcGisVectorLayer extends L.LayerGroup {
     const sequence = ++this.requestSequence
     this.hoverTimer = window.setTimeout(async () => {
       this.hoverTimer = undefined
+      const map = this._map
+      if (!map) return
+      const pointer = map.latLngToContainerPoint(event.latlng)
+      const northWest = map.containerPointToLatLng(pointer.subtract([6, 6]))
+      const southEast = map.containerPointToLatLng(pointer.add([6, 6]))
       const parameters = new URLSearchParams({
         where: this.definitionExpression,
         geometry: JSON.stringify({
-          x: event.latlng.lng,
-          y: event.latlng.lat,
+          xmin: northWest.lng,
+          ymin: southEast.lat,
+          xmax: southEast.lng,
+          ymax: northWest.lat,
           spatialReference: { wkid: 4326 },
         }),
-        geometryType: 'esriGeometryPoint',
+        geometryType: 'esriGeometryEnvelope',
         inSR: '4326',
         spatialRel: 'esriSpatialRelIntersects',
         outFields: fieldName,
@@ -534,7 +566,45 @@ function createWmsLayer(url: string, config: ServiceRemarkConfig) {
   })
 }
 
-async function createArcGisLayer(url: string, imageServer: boolean, config: ServiceRemarkConfig): Promise<MapServiceLayerHandle> {
+async function createArcGisVectorHandle(
+  url: string,
+  layerId: number,
+  layerMetadata: ArcGisLayerMetadata,
+  bounds?: L.LatLngBounds,
+): Promise<MapServiceLayerHandle> {
+  const tooltipField = hoverField(layerMetadata)
+  const tooltipLabel = fieldLabel(tooltipField)
+  const filterField = categoryField(layerMetadata.fields)
+  const filterLabel = fieldLabel(filterField)
+  const imageLayer = new ArcGisExportLayer(url, false, layerId, layerMetadata.geometryType)
+  const vectorLayer = new ArcGisVectorLayer(imageLayer, url, layerId, tooltipField?.name, tooltipLabel)
+  let categoryFilter: MapServiceCategoryFilter | undefined
+  if (filterField?.name) {
+    try {
+      const values = await queryCategoryValues(url, layerId, filterField.name)
+      if (values.length) {
+        categoryFilter = {
+          fieldLabel: filterLabel,
+          values,
+          setVisibleValues: (visibleValues) => vectorLayer.setDefinitionExpression(
+            categoryExpression(filterField.name!, values, visibleValues),
+          ),
+        }
+      }
+    } catch {
+      // 分类查询失败不影响矢量图层本身显示。
+    }
+  }
+  return { layer: vectorLayer, bounds, categoryFilter }
+}
+
+async function createArcGisLayer(
+  url: string,
+  imageServer: boolean,
+  config: ServiceRemarkConfig,
+  selectedLayerId?: number,
+  selectedGeometryType?: string,
+): Promise<MapServiceLayerHandle> {
   const metadata = await loadArcGisMetadata(url)
   const bounds = config.bounds || extentBounds(metadata.fullExtent || metadata.initialExtent)
   if (metadata.singleFusedMapCache) {
@@ -553,37 +623,17 @@ async function createArcGisLayer(url: string, imageServer: boolean, config: Serv
     }
   }
   if (!imageServer) {
+    if (selectedLayerId !== undefined) {
+      const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${selectedLayerId}`)
+      if (selectedGeometryType && !layerMetadata.geometryType) layerMetadata.geometryType = selectedGeometryType
+      if (layerMetadata.geometryType) return createArcGisVectorHandle(url, selectedLayerId, layerMetadata, bounds)
+    }
     for (const definition of (metadata.layers || []).slice(0, 12)) {
       if (!Number.isFinite(Number(definition.id))) continue
       const layerId = Number(definition.id)
       const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${layerId}`)
       if (layerMetadata.geometryType !== 'esriGeometryPolygon') continue
-      const field = hoverField(layerMetadata.fields)
-      const fieldLabel = field?.name === '变化类' ? '变化类' : '地类名称'
-      const imageLayer = new ArcGisExportLayer(url, false, layerId)
-      const vectorLayer = new ArcGisVectorLayer(imageLayer, url, layerId, field?.name, fieldLabel)
-      let categoryFilter: MapServiceCategoryFilter | undefined
-      if (field?.name) {
-        try {
-          const values = await queryCategoryValues(url, layerId, field.name)
-          if (values.length) {
-            categoryFilter = {
-              fieldLabel,
-              values,
-              setVisibleValues: (visibleValues) => vectorLayer.setDefinitionExpression(
-                categoryExpression(field.name!, values, visibleValues),
-              ),
-            }
-          }
-        } catch {
-          // 分类查询失败不影响矢量边界图层本身显示。
-        }
-      }
-      return {
-        layer: vectorLayer,
-        bounds,
-        categoryFilter,
-      }
+      return createArcGisVectorHandle(url, layerId, layerMetadata, bounds)
     }
   }
   return { layer: new ArcGisExportLayer(url, imageServer), bounds }
@@ -602,9 +652,50 @@ export async function createMapServiceLayer(service: MapServiceItem): Promise<Ma
     return createArcGisLayer(url, true, config)
   }
   if (type.includes('ARCGIS_MAPSERVER') || type === 'ARCGIS' || /\/MapServer(?:\?|$)/i.test(url)) {
-    return createArcGisLayer(url, false, config)
+    return createArcGisLayer(url, false, config, service.arcGisLayerId, service.arcGisGeometryType)
   }
   throw new Error(`暂不支持地图服务类型：${service.type || '未知'}`)
+}
+
+/**
+ * 将动态 ArcGIS MapServer 中的矢量子图层展开为独立的图层管理条目。
+ * 缓存影像、ImageServer 以及没有多个矢量子图层的服务保持原有名称和条目数量。
+ */
+export async function expandMapServiceSublayers(service: MapServiceItem): Promise<MapServiceItem[]> {
+  const url = serviceRoot(service.serviceUrl)
+  const type = normalizedType(service.type)
+  if (!(type.includes('ARCGIS_MAPSERVER') || type === 'ARCGIS' || /\/MapServer(?:\?|$)/i.test(url))) return [service]
+
+  try {
+    const metadata = await loadArcGisMetadata(url)
+    if (metadata.singleFusedMapCache) return [service]
+    const layers = (await Promise.all((metadata.layers || []).slice(0, 50).map(async (definition) => {
+      const layerId = Number(definition.id)
+      if (!Number.isFinite(layerId)) return undefined
+      try {
+        const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${layerId}`)
+        if (!layerMetadata.geometryType) return undefined
+        return { id: layerId, name: definition.name || `子图层${layerId}`, geometryType: layerMetadata.geometryType }
+      } catch {
+        return undefined
+      }
+    }))).filter((layer): layer is { id: number; name: string; geometryType: string } => Boolean(layer))
+
+    if (layers.length <= 1) {
+      const layer = layers[0]
+      return layer ? [{ ...service, arcGisLayerId: layer.id, arcGisGeometryType: layer.geometryType }] : [service]
+    }
+    return layers.map((layer) => ({
+      ...service,
+      id: `${service.id}::${layer.id}`,
+      name: `${service.name}-${layer.name}`,
+      sourceServiceId: service.id,
+      arcGisLayerId: layer.id,
+      arcGisGeometryType: layer.geometryType,
+    }))
+  } catch {
+    return [service]
+  }
 }
 
 /**
