@@ -19,6 +19,8 @@ const error = ref('')
 const warnings = ref<string[]>([])
 const keyword = ref('')
 const category = ref<TodoCategory>('all')
+const selectedScene = ref('')
+const sceneOptions = computed(() => [...new Map(tasks.value.filter(task => task.sceneName).map(task => [task.sceneCode || task.sceneName, { code: task.sceneCode || task.sceneName, name: task.sceneName }])).values()])
 const processType = ref<GovernanceTaskStatus | ''>('')
 const deadlineSort = ref<DeadlineSort>('asc')
 let requestVersion = 0
@@ -32,7 +34,7 @@ function myNodeName(task: MyWorkflowTask) {
   return node ? workflowNodeDisplayName(node, task.sceneCode) : '—'
 }
 
-const myWorkTasks = computed(() => displayTasks.value)
+const myWorkTasks = computed(() => displayTasks.value.filter(task => !selectedScene.value || (task.sceneCode || task.sceneName) === selectedScene.value))
 
 function deadlineTime(task: MyWorkflowTask) {
   if (!task.myDeadline) return Number.POSITIVE_INFINITY
@@ -110,6 +112,7 @@ async function loadTasks() {
     const result = await getMyWorkflowTasks(currentUserId.value, user.activeDeptId)
     if (version !== requestVersion) return
     tasks.value = result.records
+    if (selectedScene.value && !sceneOptions.value.some(scene => scene.code === selectedScene.value)) selectedScene.value = ''
     warnings.value = result.warnings
   } catch (reason) {
     if (version !== requestVersion) return
@@ -148,6 +151,7 @@ onBeforeUnmount(() => {
       <main class="todo-main">
         <section class="todo-filters">
           <label class="search-control">搜索任务<div><span>⌕</span><input v-model="keyword" placeholder="任务名称、编号、场景或部门" /></div></label>
+          <label>业务场景<select v-model="selectedScene" aria-label="按待办场景筛选"><option value="">全部场景</option><option v-for="scene in sceneOptions" :key="scene.code" :value="scene.code">{{ scene.name }}</option></select></label>
           <label>处理类型<select v-model="processType"><option value="">全部类型</option><option :value="0">待执行</option><option :value="1">执行中</option><option :value="2">待核查</option></select></label>
           <label>截止时间<select v-model="deadlineSort"><option value="asc">由近到远</option><option value="desc">由远到近</option></select></label>
         </section>
@@ -174,8 +178,8 @@ onBeforeUnmount(() => {
           </article>
 
           <div v-if="loading && !visibleTasks.length" class="todo-empty">正在加载真实待办任务…</div>
-          <div v-else-if="!myWorkTasks.length" class="todo-empty"><b>暂无与我相关的任务</b><p>暂无派发到本人处理中节点的任务，也暂无本人已完成节点记录。</p></div>
-          <div v-else-if="!visibleTasks.length" class="todo-empty"><b>当前分类暂无任务</b><p>可调整分类、关键词或处理类型后查看。</p></div>
+          <div v-else-if="!tasks.length" class="todo-empty"><b>暂无与我相关的任务</b><p>暂无派发到本人处理中节点的任务，也暂无本人已完成节点记录。</p></div>
+          <div v-else-if="!visibleTasks.length" class="todo-empty"><b>当前分类暂无任务</b><p>可调整场景、分类、关键词或处理类型后查看。</p></div>
         </section>
       </main>
 
@@ -205,7 +209,7 @@ onBeforeUnmount(() => {
 .todo-tabs button.active b { color: #267fbe; background: #e7f3fb; }
 .todo-layout { display: grid; grid-template-columns: minmax(0, 1fr) 245px; gap: 14px; margin-top: 14px; }
 .todo-main { min-width: 0; }
-.todo-filters { display: grid; grid-template-columns: minmax(260px, 1fr) 160px 160px; gap: 12px; padding: 13px 15px; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; }
+.todo-filters { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) 120px 120px; gap: 12px; padding: 13px 15px; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; }
 .todo-filters label { display: grid; gap: 6px; color: #65788b; font-size: 12px; }
 .todo-filters input, .todo-filters select, .search-control > div { height: 34px; color: #33495e; background: #fff; border: 1px solid #d8e0e7; border-radius: 4px; outline: 0; }
 .todo-filters select { padding: 0 9px; }
@@ -247,4 +251,6 @@ onBeforeUnmount(() => {
   .todo-layout { grid-template-columns: minmax(0, 1fr) 210px; }
   .task-body { grid-template-columns: 230px minmax(330px, 1fr) 100px; gap: 12px; }
 }
+@media(max-width:1100px){.todo-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.todo-filters{grid-template-columns:minmax(0,1fr)}}
 </style>

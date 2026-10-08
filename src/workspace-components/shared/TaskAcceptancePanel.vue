@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskHistory from '@/components/task-center/TaskHistory.vue'
 import WorkbenchFeedback from '@/workspace-components/shared/WorkbenchFeedback.vue'
 import { computed } from 'vue'
 import { useBackendTaskData } from './use-backend-task'
@@ -7,7 +8,7 @@ import { taskPriorityLabel } from '@/api/governance-task'
 import '@/workspace-components/non-grain/workspace.scss'
 
 const props = defineProps<{ taskId?: string }>()
-const { detail, geometry, abnormals, logs, loading, errors, activeSpotId, task, selectedSpot, text, handleLabel } = useBackendTaskData({ get taskId() { return props.taskId }, readonly: true, includeMaterials: false })
+const { detail, geometry, abnormals, logs, flow, loading, errors, activeSpotId, task, selectedSpot, text, handleLabel } = useBackendTaskData({ get taskId() { return props.taskId }, readonly: true, includeMaterials: false })
 const summaries = computed(() => [
   { icon: '景', label: '所属场景', value: task.value?.sceneName },
   { icon: '时', label: '创建时间', value: task.value?.createTime },
@@ -57,7 +58,7 @@ const detailFields = computed(() => {
           </section>
       <NonGrainImageryComparison :images="task?.comparisonImages || []" :spot="selectedSpot" :geometry="geometry" :abnormals="abnormals" :allow-image-selection="false" />
       <section class="ng-card acceptance-detail-panel"><h3><i>详</i>疑似图斑详情</h3><div class="acceptance-scroll"><dl class="detail-pairs"><template v-for="[label, value] in detailFields" :key="label"><dt>{{ label }}</dt><dd>{{ text(value) }}</dd></template></dl></div></section>
-      <section class="ng-card acceptance-record-panel"><h3><i>痕</i>任务处理记录 <small>{{ logs.length }} 条</small></h3><div class="acceptance-scroll"><article v-for="log in logs" :key="log.id" class="result-row"><b>{{ log.operateTypeDesc }}</b><small>{{ text(log.createTime) }} · {{ log.operatorName || '暂无操作人' }}</small><p>{{ log.operateDesc }}</p><details v-if="log.detailJson"><summary>变更明细</summary><pre>{{ log.detailJson }}</pre></details></article><p v-if="!logs.length" class="empty-copy">暂无操作留痕</p></div></section>
+      <section class="ng-card acceptance-record-panel"><TaskHistory :task="task" :logs="logs" :flow="flow" :spots="abnormals" :loading="loading" /></section>
     </div>
   </div>
 </template>
@@ -77,8 +78,7 @@ const detailFields = computed(() => {
 .acceptance-plots img,.plot-placeholder{width:100%;height:85px;object-fit:cover;border-radius:5px}
 .plot-placeholder{display:grid;place-items:center;background:#e7f2fa;color:#1687ef;font-size:22px}
 .acceptance-plots b{font-size:12px}.acceptance-plots small{font-size:10px;color:#8195a6}.acceptance-plots strong{font-size:15px;color:#147dda}
-.result-row{padding:10px 0;border-bottom:1px solid #e7eff5;font-size:12px}.result-row:first-child{padding-top:0}
-.result-row b,.result-row small{display:block}.result-row small{color:#8195a6;margin-top:5px}.result-row p{margin:6px 0;line-height:1.5}.result-row pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.acceptance-record-panel{padding:0!important;overflow:hidden}
 .empty-copy{margin:16px 0;color:#8195a6;font-size:12px;text-align:center}
 @media(max-width:1100px){.acceptance-summary{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:8px}}
 @media(max-width:800px){.acceptance-layout{flex:none;grid-template-columns:minmax(0,1fr);grid-template-rows:260px 360px 360px 360px}.acceptance-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
