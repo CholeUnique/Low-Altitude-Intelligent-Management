@@ -1,4 +1,4 @@
-import { apiClient, isMockMode } from './client'
+import { apiClient } from './client'
 
 export interface GovernanceResultFile {
   id: string
@@ -33,6 +33,7 @@ export interface GovernanceResult {
 }
 
 export interface GovernanceResultPageQuery {
+  deptId?: string
   pageNum: number
   pageSize: number
   bizTaskId?: string
@@ -169,7 +170,6 @@ function toEvidenceImage(item: BizImageDto): TaskEvidenceImage {
 }
 
 export async function getGovernanceResultPage(query: GovernanceResultPageQuery): Promise<GovernanceResultPage> {
-  if (isMockMode()) return { records: [], total: 0, pageNum: query.pageNum, pageSize: query.pageSize }
   const page = await apiClient.post<never, {
     records?: BizResultDto[]
     total?: number | string
@@ -192,10 +192,10 @@ export async function getGovernanceResultDetail(resultId: string): Promise<Gover
 /**
  * R12 影像接口读取的是任务关联飞行任务的 UAV 素材，不等同于成果上传文件。
  */
-export async function getTaskEvidenceImages(bizTaskId: string): Promise<TaskEvidenceImage[]> {
-  if (isMockMode()) return []
+export async function getTaskEvidenceImages(bizTaskId: string, deptId?: string): Promise<TaskEvidenceImage[]> {
   const data = await apiClient.post<never, BizImageDto[]>('/v1/biz/result/image/list', {
     bizTaskId,
+    deptId,
     onlyWithLocation: false,
   })
   return (data || []).map(toEvidenceImage)

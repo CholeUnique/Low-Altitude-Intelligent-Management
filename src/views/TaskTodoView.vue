@@ -1,63 +1,52 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
-import TaskWorkflowProgress, { getTaskWorkflowSteps, isNonGrainTask } from '@/components/task-center/TaskWorkflowProgress.vue'
-import { getGovernanceTaskPage, type GovernanceTask, type GovernanceTaskStatus } from '@/api/governance-task'
+import TaskWorkflowProgress from '@/components/task-center/TaskWorkflowProgress.vue'
+import { getMyWorkflowTasks, type MyWorkflowTask } from '@/api/my-workflow-tasks'
+import { type GovernanceTaskStatus } from '@/api/governance-task'
 import { useUserStore } from '@/stores/user'
-import { isTaskVisibleForOrganization } from '@/utils/scene-visibility'
-import { createNonGrainDemoTasks, isNonGrainDemoTaskId, NON_GRAIN_VIEWER_NODE_KEY } from '@/mocks/non-grain-workspace'
+import { workflowNodeDisplayName } from '@/utils/task-workflow-state'
 
 type TodoCategory = 'all' | 'pending' | 'handled'
 type DeadlineSort = 'asc' | 'desc'
 
 const user = useUserStore()
 const router = useRouter()
-const tasks = ref<GovernanceTask[]>([])
+const tasks = ref<MyWorkflowTask[]>([])
 const loading = ref(false)
 const error = ref('')
+const warnings = ref<string[]>([])
 const keyword = ref('')
 const category = ref<TodoCategory>('all')
 const processType = ref<GovernanceTaskStatus | ''>('')
 const deadlineSort = ref<DeadlineSort>('asc')
 let requestVersion = 0
 
-const currentUserId = computed(() =>
-  String(user.currentUser?.id || user.currentUser?.username || 'non-grain-demo-user'))
-const demoTasks = computed(() =>
-  createNonGrainDemoTasks(currentUserId.value, user.activeDeptId, '海陵区农业农村局'))
-const displayTasks = computed(() => [
-  ...demoTasks.value,
-  ...tasks.value.filter((task) => !isNonGrainDemoTaskId(task.id)),
-])
-type MyWorkState = 'pending' | 'handled'
+const currentUserId = computed(() => String(user.currentUser?.id || ''))
+const displayTasks = computed(() => tasks.value)
 
-function myWorkState(task: GovernanceTask): MyWorkState | undefined {
-  if (isNonGrainTask(task)) {
-    const myNode = getTaskWorkflowSteps(task).find((node) => node.key === NON_GRAIN_VIEWER_NODE_KEY)
-    if (myNode?.status === 'active') return 'pending'
-    if (myNode?.status === 'done') return 'handled'
-    return undefined
-  }
-  if (task.assigneeId !== currentUserId.value) return undefined
-  return [3, 4, 5].includes(task.taskStatus) ? 'handled' : 'pending'
+function myWorkState(task: MyWorkflowTask) { return task.myWorkState }
+function myNodeName(task: MyWorkflowTask) {
+  const node = [...task.myNodes].reverse().find(node => node.status === (task.myWorkState === 'pending' ? 'PROCESSING' : 'COMPLETED'))
+  return node ? workflowNodeDisplayName(node, task.sceneCode) : '—'
 }
 
-const myWorkTasks = computed(() => displayTasks.value.filter((task) => Boolean(myWorkState(task))))
+const myWorkTasks = computed(() => displayTasks.value)
 
-function deadlineTime(task: GovernanceTask) {
-  if (!task.planEndTime) return Number.POSITIVE_INFINITY
-  const value = new Date(task.planEndTime).getTime()
+function deadlineTime(task: MyWorkflowTask) {
+  if (!task.myDeadline) return Number.POSITIVE_INFINITY
+  const value = new Date(task.myDeadline).getTime()
   return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY
 }
 
-function isDueSoon(task: GovernanceTask) {
+function isDueSoon(task: MyWorkflowTask) {
   const deadline = deadlineTime(task)
   const remaining = deadline - Date.now()
   return remaining >= 0 && remaining <= 3 * 24 * 60 * 60 * 1000
 }
 
-function isOverdue(task: GovernanceTask) {
+function isOverdue(task: MyWorkflowTask) {
   return deadlineTime(task) < Date.now()
 }
 
@@ -105,11 +94,10 @@ function priorityLabel(priority: number) {
   return priority === 2 ? '高' : priority === 1 ? '中' : '低'
 }
 
-function openWorkspace(task: GovernanceTask) {
+function openWorkspace(task: MyWorkflowTask) {
   router.push({
     name: 'workspace',
     params: { sceneId: task.sceneCode, taskId: task.id },
-    query: { node: isNonGrainTask(task) ? NON_GRAIN_VIEWER_NODE_KEY : undefined },
   })
 }
 
@@ -117,16 +105,12 @@ async function loadTasks() {
   const version = ++requestVersion
   loading.value = true
   error.value = ''
+  warnings.value = []
   try {
-    const page = await getGovernanceTaskPage({
-      pageNum: 1,
-      pageSize: 200,
-      deptId: user.activeDeptId,
-      organizationId: user.organizationId,
-    })
+    const result = await getMyWorkflowTasks(currentUserId.value, user.activeDeptId)
     if (version !== requestVersion) return
-    tasks.value = page.records.filter((task) =>
-      isTaskVisibleForOrganization(user.organization, task, user.activeDeptId))
+    tasks.value = result.records
+    warnings.value = result.warnings
   } catch (reason) {
     if (version !== requestVersion) return
     tasks.value = []
@@ -136,12 +120,20 @@ async function loadTasks() {
   }
 }
 
-watch([() => user.organizationId, () => user.activeDeptId], () => void loadTasks())
-onMounted(() => void loadTasks())
+watch([() => user.organizationId, () => user.activeDeptId, () => user.currentUser?.id], () => void loadTasks())
+function refreshWorkflowTodos() { void loadTasks() }
+onMounted(() => {
+  window.addEventListener('workflow-todos-changed', refreshWorkflowTodos)
+  void loadTasks()
+})
+onBeforeUnmount(() => {
+  requestVersion += 1
+  window.removeEventListener('workflow-todos-changed', refreshWorkflowTodos)
+})
 </script>
 
 <template>
-  <TaskCenterLayout title="我的待办" :subtitle="`${user.organization.name} · 展示待我处理及我已处理的任务`">
+  <TaskCenterLayout title="我的待办" :subtitle="`${user.organization.name} · 展示派发到本人节点的待办及已办记录`">
     <template #actions>
       <button class="refresh-button" :disabled="loading" @click="loadTasks">{{ loading ? '加载中…' : '刷新待办' }}</button>
     </template>
@@ -160,7 +152,8 @@ onMounted(() => void loadTasks())
           <label>截止时间<select v-model="deadlineSort"><option value="asc">由近到远</option><option value="desc">由远到近</option></select></label>
         </section>
 
-        <p v-if="error" class="todo-warning">真实待办加载失败：{{ error }}。已保留非粮监管演示任务供工作台查看。</p>
+        <p v-if="error" class="todo-warning">真实待办加载失败：{{ error }}。请重试。</p>
+        <p v-for="warning in warnings" :key="warning" class="todo-warning">部分记录未加载：{{ warning }}</p>
         <section class="todo-list">
           <article v-for="task in visibleTasks" :key="task.id" class="todo-item">
             <div class="task-meta">
@@ -170,18 +163,18 @@ onMounted(() => void loadTasks())
               </div>
               <div class="deadline" :class="{ overdue: isOverdue(task), soon: isDueSoon(task) }">
                 <span>{{ isOverdue(task) ? '已逾期' : isDueSoon(task) ? '即将到期' : '截止时间' }}</span>
-                <strong>{{ formatTime(task.planEndTime) }}</strong>
+                <strong>{{ formatTime(task.myDeadline) }}</strong>
               </div>
             </div>
             <div class="task-body">
-              <dl><div><dt>所属部门</dt><dd>{{ task.deptName || '-' }}</dd></div><div><dt>当前状态</dt><dd>{{ task.taskStatusDesc }}</dd></div><div><dt>创建时间</dt><dd>{{ formatTime(task.createTime) }}</dd></div></dl>
+              <dl><div><dt>所属部门</dt><dd>{{ task.deptName || '-' }}</dd></div><div><dt>我的办理节点</dt><dd>{{ myNodeName(task) }}</dd></div><div><dt>创建时间</dt><dd>{{ formatTime(task.createTime) }}</dd></div></dl>
               <TaskWorkflowProgress :task="task" />
-              <button class="workspace-button" @click="openWorkspace(task)">{{ myWorkState(task) === 'handled' ? '查看我的办理' : '进入工作台' }}</button>
+              <button class="workspace-button" @click="openWorkspace(task)">{{ myWorkState(task) === 'handled' ? '查看工作台' : '进入工作台' }}</button>
             </div>
           </article>
 
           <div v-if="loading && !visibleTasks.length" class="todo-empty">正在加载真实待办任务…</div>
-          <div v-else-if="!myWorkTasks.length" class="todo-empty"><b>暂无与我相关的任务</b><p>任务尚未到达我的办理节点，或当前用户没有相关办理记录。</p></div>
+          <div v-else-if="!myWorkTasks.length" class="todo-empty"><b>暂无与我相关的任务</b><p>暂无派发到本人处理中节点的任务，也暂无本人已完成节点记录。</p></div>
           <div v-else-if="!visibleTasks.length" class="todo-empty"><b>当前分类暂无任务</b><p>可调整分类、关键词或处理类型后查看。</p></div>
         </section>
       </main>
@@ -191,11 +184,12 @@ onMounted(() => void loadTasks())
         <div class="workload-total"><strong>{{ myWorkTasks.length }}</strong><span>与我相关的任务</span></div>
         <ul>
           <li><span><i class="blue"></i>待我处理</span><b>{{ workload.pending }}</b></li>
-          <li><span><i class="cyan"></i>我已处理</span><b>{{ workload.handled }}</b></li>
+
+          <li><span><i class="blue"></i>我已处理</span><b>{{ workload.handled }}</b></li>
           <li><span><i class="orange"></i>即将到期</span><b>{{ workload.dueSoon }}</b></li>
           <li><span><i class="red"></i>已逾期</span><b>{{ workload.overdue }}</b></li>
         </ul>
-        <p class="workload-note">工作负载包含固定非粮监管演示任务及当前部门接口返回的前 200 条任务。</p>
+        <p class="workload-note">待办只包含已派发到本人办理节点的任务，已办按本人已完成的节点历史保留。截止时间使用节点办理期限；未启动工作流的任务不计入待办。</p>
       </aside>
     </div>
   </TaskCenterLayout>

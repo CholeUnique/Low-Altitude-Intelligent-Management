@@ -1,0 +1,33 @@
+{
+  "code": "0",
+  "data": {
+    "pageNum": 1,
+    "pageSize": 100,
+    "records": [
+      {
+        "abnormalLevel": 1,
+        "abnormalType": "ILLEGAL_OCCUPY",
+        "abnormalTypeDesc": "违法占用",
+        "area": 83.31,
+        "bizTaskId": 902,
+        "boundaryGeojson": "{\"type\":\"MultiPolygon\",\"coordinates\":[[[[119.84208538467952,32.49541657714323],[119.842209592606,32.49542567999546],[119.84221638871335,32.49536276092155],[119.8420914796622,32.49535216602108],[119.84208538467952,32.49541657714323]]]]}",
+        "createTime": "2026-09-17T12:17:56",
+        "deptId": 2,
+        "description": null,
+        "foundTime": "2026-09-16T00:00:00",
+        "handleStatus": 1,
+        "id": 399,
+        "imageMediaId": null,
+        "imageUrl": null,
+        "lat": 32.49538892300827,
+        "lng": 119.84215088669643,
+        "sceneCode": "FOREST_LAW_ENFORCE",
+        "taskId": null,
+        "title": "地面硬化",
+        "updateTime": "2026-09-30T14:35:53"
+      }
+    ],
+    "total": 1
+  },
+  "msg": "success"
+}

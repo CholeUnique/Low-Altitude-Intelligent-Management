@@ -1,0 +1,65 @@
+{
+  "queriedAt": "2026-10-06T15:37:00.981Z",
+  "createRequest": {
+    "sceneCode": "CULTIVATED_LAND_USE_CONTROL",
+    "deptId": "1",
+    "name": "非粮化流程联调验证-2026-10-06-15:35:48",
+    "refType": "NONE",
+    "executeMode": "MANUAL",
+    "assigneeId": "1",
+    "description": "验证前端创建后立即启动科室初核、分派 admin 的真实接口联调任务。"
+  },
+  "created": {
+    "code": "0",
+    "data": {
+      "actualEndTime": null,
+      "actualStartTime": null,
+      "assigneeId": 1,
+      "assigneeName": "系统管理员",
+      "contactName": null,
+      "contactPhone": null,
+      "coverImageThumbnailUrl": null,
+      "coverImageUrl": null,
+      "createBy": 1,
+      "createTime": null,
+      "deptId": 1,
+      "deptName": "农业农村局",
+      "description": "验证前端创建后立即启动科室初核、分派 admin 的真实接口联调任务。",
+      "executeMode": "MANUAL",
+      "geometryAvailable": false,
+      "geometryFeatureCount": null,
+      "geometryUpdatedAt": null,
+      "id": 1315,
+      "imageCount": 0,
+      "mapServices": null,
+      "name": "非粮化流程联调验证-2026-10-06-15:35:48",
+      "planEndTime": null,
+      "planStartTime": null,
+      "priority": 0,
+      "rangeArea": null,
+      "rangeAreaUnit": "km2",
+      "rangeName": null,
+      "refId": null,
+      "refType": "NONE",
+      "resultRequirements": null,
+      "sceneCode": "CULTIVATED_LAND_USE_CONTROL",
+      "sceneName": "耕地种植用途管控与\"非粮化\"动态监测",
+      "sourceAbnormalId": null,
+      "taskNo": "NYNCJ-20261006-002",
+      "taskStatus": 0,
+      "taskStatusDesc": "待执行",
+      "updateTime": null
+    },
+    "msg": "success"
+  },
+  "startRequest": {
+    "bizTaskId": "1315",
+    "assigneeId": "1",
+    "deptId": "1"
+  },
+  "error": "/workflow/start: 200 10512 处理人不属于目标部门",
+  "adminDepartments": {
+    "deptId": null,
+    "deptList": []
+  }
+}

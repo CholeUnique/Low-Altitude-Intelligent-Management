@@ -17,7 +17,6 @@ declare module 'vue' {
     DomainProgressChart: typeof import('./src/components/DomainProgressChart.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
-    ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElPopover: typeof import('element-plus/es')['ElPopover']
     MapServiceManagementPanel: typeof import('./src/components/MapServiceManagementPanel.vue')['default']

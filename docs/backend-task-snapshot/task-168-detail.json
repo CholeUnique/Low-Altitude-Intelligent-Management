@@ -1,0 +1,108 @@
+{
+  "code": "0",
+  "data": {
+    "abnormalArea": 0,
+    "abnormalCount": 0,
+    "images": [],
+    "process": {
+      "logs": [
+        {
+          "createTime": "2026-09-18T03:50:27",
+          "detailJson": "{\"featureCount\":1,\"area\":0.6539,\"areaUnit\":\"km2\"}",
+          "id": 2414,
+          "operateDesc": "保存任务范围",
+          "operateType": "GEOMETRY_UPSERT",
+          "operateTypeDesc": "保存任务范围",
+          "operatorId": 1,
+          "operatorName": "系统管理员"
+        },
+        {
+          "createTime": "2026-09-18T03:50:27",
+          "detailJson": null,
+          "id": 2413,
+          "operateDesc": "修改业务任务",
+          "operateType": "TASK_UPDATE",
+          "operateTypeDesc": "修改任务",
+          "operatorId": 1,
+          "operatorName": "系统管理员"
+        }
+      ],
+      "remark": null
+    },
+    "refSummary": "未关联无人机飞行数据（纯人工任务）",
+    "results": [],
+    "statistics": {
+      "abnormalArea": 0,
+      "abnormalCount": 0,
+      "flightCount": 0,
+      "flightHours": null,
+      "patrolArea": 0.6539,
+      "patrolAreaUnit": "km2"
+    },
+    "task": {
+      "actualEndTime": null,
+      "actualStartTime": "2026-09-14T17:21:37",
+      "assigneeId": null,
+      "assigneeName": null,
+      "contactName": null,
+      "contactPhone": null,
+      "coverImageThumbnailUrl": null,
+      "coverImageUrl": null,
+      "createBy": 1,
+      "createTime": "2026-09-14T09:21:37",
+      "deptId": 2,
+      "deptName": "自然资源和规划局",
+      "description": null,
+      "executeMode": "MANUAL",
+      "geometryAvailable": true,
+      "geometryFeatureCount": 1,
+      "geometryUpdatedAt": "2026-09-18T11:50:27",
+      "id": 168,
+      "imageCount": 0,
+      "mapServices": [
+        {
+          "createTime": "2026-09-24T11:35:44",
+          "id": 1,
+          "name": "202604局部0.02米影像",
+          "preset": 1,
+          "remark": "{\r\n  \"bounds\": {\r\n    \"west\": 119.8412888155381,\r\n    \"south\": 32.48574015140688,\r\n    \"east\": 119.85940753661878,\r\n    \"north\": 32.49689672806349\r\n  },\r\n  \"wkid\": 4326,\r\n  \"minZoom\": 16,\r\n  \"maxZoom\": 22\r\n}",
+          "serviceUrl": "http://58.213.29.198:9624/arcgis198/arcgis/rest/services/taizhou_temp/Jiulong_04_gaofen/MapServer",
+          "sort": 1,
+          "status": 1,
+          "type": "ARCGIS_MAPSERVER",
+          "updateTime": "2026-09-28T16:45:39"
+        },
+        {
+          "createTime": "2026-09-28T15:23:30",
+          "id": 6,
+          "name": "2026年9月12日九龙镇无人机正射影像",
+          "preset": 1,
+          "remark": "{\r\n  \"bounds\": {\r\n    \"west\": 119.8412888155381,\r\n    \"south\": 32.48574015140688,\r\n    \"east\": 119.85940753661878,\r\n    \"north\": 32.49689672806349\r\n  },\r\n  \"wkid\": 4326,\r\n  \"minZoom\": 16,\r\n  \"maxZoom\": 22\r\n}",
+          "serviceUrl": "https://das-fly-online-1301434080.cos.ap-guangzhou.myqcloud.com/assets/2093223140942544896/2098618921722638336/dom-tms/{z}/{x}/{y}.png",
+          "sort": 6,
+          "status": 0,
+          "type": "TMS",
+          "updateTime": "2026-10-05T17:13:38"
+        }
+      ],
+      "name": "成果上传任务d775d5e0",
+      "planEndTime": "2026-09-24T00:00:00",
+      "planStartTime": "2026-09-17T00:00:00",
+      "priority": 0,
+      "rangeArea": 0.6539,
+      "rangeAreaUnit": "km2",
+      "rangeName": null,
+      "refId": null,
+      "refType": "NONE",
+      "resultRequirements": null,
+      "sceneCode": "FOREST_LAW_ENFORCE",
+      "sceneName": "林业执法监管",
+      "sourceAbnormalId": null,
+      "taskNo": "ZRZY-20260914-037",
+      "taskStatus": 2,
+      "taskStatusDesc": "待核查",
+      "updateTime": "2026-09-18T03:50:27"
+    }
+  },
+  "msg": "success"
+}

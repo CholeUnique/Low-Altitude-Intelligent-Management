@@ -1,0 +1,86 @@
+{
+  "code": "0",
+  "data": [
+    {
+      "createTime": "2026-09-18T03:02:28",
+      "detailJson": "{\"featureCount\":1,\"area\":12.7103,\"areaUnit\":\"km2\"}",
+      "id": 2412,
+      "operateDesc": "保存任务范围",
+      "operateType": "GEOMETRY_UPSERT",
+      "operateTypeDesc": "保存任务范围",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    },
+    {
+      "createTime": "2026-09-18T03:02:28",
+      "detailJson": null,
+      "id": 2411,
+      "operateDesc": "修改业务任务",
+      "operateType": "TASK_UPDATE",
+      "operateTypeDesc": "修改任务",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    },
+    {
+      "createTime": "2026-09-15T04:30:06",
+      "detailJson": null,
+      "id": 1229,
+      "operateDesc": "修改业务任务",
+      "operateType": "TASK_UPDATE",
+      "operateTypeDesc": "修改任务",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    },
+    {
+      "createTime": "2026-09-15T04:29:42",
+      "detailJson": null,
+      "id": 1228,
+      "operateDesc": "修改业务任务",
+      "operateType": "TASK_UPDATE",
+      "operateTypeDesc": "修改任务",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    },
+    {
+      "createTime": "2026-09-15T02:38:43",
+      "detailJson": "{\"resultId\":206,\"parser\":\"DefaultResultParser\",\"parseStatus\":2}",
+      "id": 1227,
+      "operateDesc": "成果解析成功：DefaultResultParser",
+      "operateType": "RESULT_PARSE",
+      "operateTypeDesc": "解析成果",
+      "operatorId": null,
+      "operatorName": "系统"
+    },
+    {
+      "createTime": "2026-09-15T02:38:43",
+      "detailJson": "{\"from\":1,\"to\":2}",
+      "id": 1226,
+      "operateDesc": "上传成果：ILLEGAL_FOREST_POINT（1 个文件）",
+      "operateType": "RESULT_UPLOAD",
+      "operateTypeDesc": "上传成果",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    },
+    {
+      "createTime": "2026-09-15T02:38:20",
+      "detailJson": "{\"from\":0,\"to\":1}",
+      "id": 1225,
+      "operateDesc": "触发任务执行",
+      "operateType": "TASK_EXECUTE",
+      "operateTypeDesc": "触发执行",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    },
+    {
+      "createTime": "2026-09-14T13:05:37",
+      "detailJson": "{\"sceneCode\":\"FOREST_LAW_ENFORCE\",\"refType\":\"NONE\",\"refId\":null}",
+      "id": 1224,
+      "operateDesc": "创建业务任务",
+      "operateType": "TASK_CREATE",
+      "operateTypeDesc": "创建任务",
+      "operatorId": 1,
+      "operatorName": "系统管理员"
+    }
+  ],
+  "msg": "success"
+}

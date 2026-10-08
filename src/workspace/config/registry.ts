@@ -64,6 +64,8 @@ const sceneAliases: Record<string, string> = {
   '非粮化监测': 'non-grain-monitoring',
   '耕地种植用途管控与“非粮化”动态监测': 'non-grain-monitoring',
   NON_GRAIN: 'non-grain-monitoring',
+  CULTIVATED_LAND_USE_CONTROL: 'non-grain-monitoring',
+  '耕地种植用途管控与"非粮化"动态监测': 'non-grain-monitoring',
   NON_GRAIN_MONITORING: 'non-grain-monitoring',
   '种植补贴': 'planting-subsidy',
   '种植面积精准核定与惠农补贴监管': 'planting-subsidy',

@@ -1,76 +1,17 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed } from 'vue'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
-import { dispatchRecords, problemSpots } from '@/mocks/governance'
-
+import { useBackendTaskData } from '@/workspace-components/shared/use-backend-task'
 const props = defineProps<{ task?: PortalTask; sceneName?: string; node?: WorkspaceNodeConfig }>()
-const isForestry = computed(() => props.node?.key === 'task-dispatch')
-const objectLabel = computed(() => isForestry.value ? '图斑' : '业务对象')
-const selected = ref<string[]>([problemSpots.find((item) => item.status === '已确认')?.id || problemSpots[0]!.id])
-const preview = ref(false)
-const feedback = ref('')
-const form = reactive({
-  area: props.task?.area || '任务巡查区域',
-  unit: '九龙镇自然资源所',
-  receiver: '王强',
-  deadline: '2026-09-18',
-  contact: '张明',
-  phone: '138****6812',
-  priority: '高',
-  requirement: '请现场核实业务对象范围与现状，拍摄全景及细节照片并在期限内反馈。',
-})
-const selectedSpots = computed(() => problemSpots.filter((item) => selected.value.includes(item.id)))
-function action(text: string) { feedback.value = `${text}成功：已选择 ${selected.value.length} 个${objectLabel.value}` }
+const source = computed(() => props.task?.id)
+const { task: backendTask, abnormals, logs, loading, errors, taskFields, text, load } = useBackendTaskData({ get taskId() { return source.value } })
 </script>
-
 <template>
   <div class="dispatch-page">
-    <aside class="panel spots">
-      <div class="panel-title">待下发{{ objectLabel }} <small>已选 {{ selected.length }}</small></div>
-      <label v-for="item in problemSpots.filter(s => s.status === '已确认')" :key="item.id" class="spot-row">
-        <input v-model="selected" type="checkbox" :value="item.id" />
-        <i></i><span><b>{{ item.type }}</b><small>{{ item.id }} · {{ item.area }} ha</small></span>
-        <em>{{ item.risk }}</em>
-      </label>
-      <div class="batch-tip">支持勾选多个已确认{{ objectLabel }}，统一生成{{ node?.name || '核查' }}任务。</div>
-    </aside>
-
-    <section class="panel form-panel">
-      <div class="panel-title">核查任务编制 <small>{{ task?.name }}</small></div>
-      <div class="form-grid">
-        <label class="wide">核查区域<input v-model="form.area" /></label>
-        <label>接收单位<select v-model="form.unit"><option>九龙镇自然资源所</option><option>城西街道综合执法队</option><option>苏陈镇林业站</option></select></label>
-        <label>接收人员<select v-model="form.receiver"><option>王强</option><option>李宁</option><option>赵峰</option></select></label>
-        <label>核查期限<input v-model="form.deadline" type="date" /></label>
-        <label>优先级<select v-model="form.priority"><option>高</option><option>中</option><option>低</option></select></label>
-        <label>联系人<input v-model="form.contact" /></label>
-        <label>联系方式<input v-model="form.phone" /></label>
-        <label class="wide">核查要求<textarea v-model="form.requirement"></textarea></label>
-        <label class="wide upload">附件<input type="file" multiple /><span>＋ 上传任务附件（支持图片、PDF、文档）</span></label>
-      </div>
-      <div class="selected-summary">
-        <b>关联{{ objectLabel }}</b><span v-for="item in selectedSpots" :key="item.id">{{ item.id }} · {{ item.type }}</span>
-      </div>
-    </section>
-
-    <aside class="right-col">
-      <section class="panel preview">
-        <div class="panel-title">任务预览</div>
-        <dl><dt>任务标题</dt><dd>{{ form.area }}{{ isForestry ? '林业问题核查' : (node?.name || '现场处置') }}</dd><dt>接收对象</dt><dd>{{ form.unit }} / {{ form.receiver }}</dd><dt>期限</dt><dd>{{ form.deadline }}</dd><dt>优先级</dt><dd>{{ form.priority }}</dd><dt>{{ objectLabel }}数量</dt><dd>{{ selected.length }} 个</dd></dl>
-        <p v-if="preview">{{ form.requirement }}</p>
-      </section>
-      <section class="panel records">
-        <div class="panel-title">下发记录</div>
-        <div v-for="item in dispatchRecords" :key="item.id" class="record"><b>{{ item.id }} · {{ item.status }}</b><span>{{ item.unit }} / {{ item.receiver }}</span><small>{{ item.spotId }} · {{ item.time }}</small></div>
-      </section>
-    </aside>
-
-    <footer class="action-bar panel">
-      <span>{{ feedback || '填写完整后可保存草稿、预览或确认下发' }}</span>
-      <button @click="action('保存草稿')">保存草稿</button><button @click="preview = true">预览任务</button>
-      <button class="primary" :disabled="!selected.length" @click="action('确认下发')">确认下发</button>
-      <button class="primary" :disabled="selected.length < 2" @click="action('批量下发')">批量下发</button>
-    </footer>
+    <aside class="panel spots"><div class="panel-title">关联图斑 <small>{{ abnormals.length }} 个</small></div><label v-for="spot in abnormals" :key="spot.id" class="spot-row"><i v-if="spot.imageUrl" :style="{ background: `url(${spot.imageUrl}) center / cover` }"></i><span><b>{{ spot.title }}</b><small>{{ spot.spotNo || spot.id }} · {{ spot.area ?? '—' }} ㎡</small></span><em>{{ spot.abnormalTypeDesc }}</em></label><div v-if="!abnormals.length" class="batch-tip">暂无关联图斑</div></aside>
+    <section class="panel form-panel"><div class="panel-title">核查任务编制 <small>{{ backendTask?.name }}</small></div><div class="form-grid"><label v-for="[label, value] in taskFields" :key="label">{{ label }}<input :value="text(value)" readonly /></label><label class="wide">核查要求<textarea :value="backendTask?.description || '暂无数据'" readonly /></label><label class="wide">成果要求<textarea :value="backendTask?.resultRequirements?.join('、') || '暂无数据'" readonly /></label></div></section>
+    <aside class="right-col"><section class="panel preview"><div class="panel-title">任务预览</div><dl><dt>任务标题</dt><dd>{{ backendTask?.name }}</dd><dt>接收对象</dt><dd>{{ backendTask?.deptName }} / {{ backendTask?.assigneeName || '暂无负责人' }}</dd><dt>期限</dt><dd>{{ text(backendTask?.planEndTime) }}</dd><dt>任务状态</dt><dd>{{ backendTask?.taskStatusDesc }}</dd><dt>图斑数量</dt><dd>{{ abnormals.length }} 个</dd></dl></section><section class="panel records"><div class="panel-title">任务操作留痕 <small>{{ logs.length }} 条</small></div><div v-for="log in logs" :key="log.id" class="record"><b>{{ log.operateTypeDesc }}</b><span>{{ log.operatorName || '暂无操作人' }} · {{ log.operateDesc }}</span><small>{{ text(log.createTime) }}</small><details v-if="log.detailJson"><summary>变更明细</summary><pre>{{ log.detailJson }}</pre></details></div></section></aside>
+    <footer class="action-bar panel"><span role="status">{{ errors.join('；') || (loading ? '正在加载真实任务…' : '任务数据来自后端') }}</span><button :disabled="loading" @click="load">刷新任务</button></footer>
   </div>
 </template>
 
@@ -81,4 +22,8 @@ function action(text: string) { feedback.value = `${text}成功：已选择 ${se
 .right-col{min-height:0;display:grid;grid-template-rows:auto 1fr;gap:8px}.preview dl{display:grid;grid-template-columns:82px 1fr;margin:0;padding:9px 12px}.preview dt,.preview dd{margin:0;padding:7px 0;border-bottom:1px solid #edf2f5;font-size:11px}.preview dt{color:#7a8f9e}.preview dd{text-align:right;font-weight:600}.preview p{margin:0 12px 12px;padding:9px;color:#6b7f8c;background:#f5f8fa;font-size:10px;line-height:1.6}.records{overflow:auto}.record{padding:10px 12px;border-bottom:1px solid #edf2f5}.record b,.record span,.record small{display:block;font-size:10px}.record b{color:#187caa}.record span{margin-top:4px}.record small{margin-top:3px;color:#8294a1}
 .action-bar{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 12px}.action-bar span{margin-right:auto;color:#66808f;font-size:11px}.action-bar button{height:34px;padding:0 16px;color:#426174;background:#fff;border:1px solid #c8d9e4;border-radius:4px;cursor:pointer}.action-bar button.primary{color:#fff;background:#168bd2;border-color:#168bd2}.action-bar button:disabled{opacity:.45;cursor:not-allowed}
 @media (max-width:1180px){.dispatch-page{grid-template-columns:clamp(210px,22vw,250px) minmax(380px,1fr) clamp(230px,24vw,275px);gap:6px;padding:6px}.form-grid{gap:9px;padding:10px}}
+</style>
+
+<style scoped>
+.spot-row{grid-template-columns:1fr auto}.spot-row>i{display:none}.record pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px}.record details{font-size:10px}
 </style>

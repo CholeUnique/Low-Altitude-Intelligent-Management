@@ -21,7 +21,7 @@ defineProps<{
       <dl v-if="task" class="task-summary">
         <div><dt>关联任务</dt><dd>{{ task.name }}</dd></div>
         <div><dt>任务区域</dt><dd>{{ task.area }}</dd></div>
-        <div><dt>当前进度</dt><dd>{{ task.progress }}%</dd></div>
+        <div><dt>任务状态</dt><dd>{{ task.status }}</dd></div>
         <div><dt>负责人</dt><dd>{{ task.assignee }}</dd></div>
       </dl>
 

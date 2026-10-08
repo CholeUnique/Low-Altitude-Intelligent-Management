@@ -15,6 +15,7 @@ import {
   type RecognitionSpotItem,
 } from '@/api/recognition-spot'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
+import { assignNonGrainReview, getNonGrainReviewerId, isNonGrainScene } from '@/api/non-grain-assignment'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { inspectMapService } from '@/utils/map-service-layer'
 import { useUserStore } from '@/stores/user'
@@ -370,6 +371,10 @@ async function loadSpots(preferredSpotNo?: string) {
 }
 
 function openTaskCreateDialog() {
+  if (user.currentUser?.role !== 'ADMIN') {
+    operationError.value = '只有管理员可以创建任务。'
+    return
+  }
   if (!selected.value.length) return
   taskPriority.value = 1
   taskCreateError.value = ''
@@ -377,13 +382,19 @@ function openTaskCreateDialog() {
 }
 
 async function createSelectedTasks() {
+  if (user.currentUser?.role !== 'ADMIN') {
+    taskCreateError.value = '只有管理员可以创建任务。'
+    return
+  }
   if (!selected.value.length || creatingTasks.value) return
   creatingTasks.value = true
   operationError.value = ''
   operationMessage.value = ''
   taskCreateError.value = ''
   const createdIds = [...selectedIds.value]
+  let createdTasks: GovernanceTask[] = []
   try {
+    const reviewerId = selected.value.some(spot => isNonGrainScene(spot.sceneCode)) ? await getNonGrainReviewerId(selected.value[0]?.deptId || user.activeDeptId) : undefined
     const tasks = await createTasksFromAbnormals({
       deptId: selected.value[0]?.deptId || user.activeDeptId,
       abnormalIds: createdIds,
@@ -391,6 +402,17 @@ async function createSelectedTasks() {
       priority: taskPriority.value,
       startFlow: false,
     })
+    createdTasks = tasks
+    // 派生已成功后立即清除已创建的选择，后续分派失败也不能再次创建。
+    records.value = records.value.filter((item) => !createdIds.includes(item.id))
+    selectedIds.value = []
+    if (reviewerId) {
+      for (const task of tasks.filter(task => isNonGrainScene(task.sceneCode))) {
+        const deptId = task.deptId || user.activeDeptId
+        if (!deptId) throw new Error(`任务 ${task.id} 未返回处理部门，无法启动工作流。`)
+        await assignNonGrainReview(task.id, deptId, reviewerId)
+      }
+    }
     operationMessage.value = `已成功创建 ${tasks.length || createdIds.length} 个核查任务，图斑已从原任务移出。`
     records.value = records.value.filter((item) => !createdIds.includes(item.id))
     selectedIds.value = []
@@ -398,7 +420,8 @@ async function createSelectedTasks() {
     window.dispatchEvent(new CustomEvent('abnormal-tasks-created', { detail: { abnormalIds: createdIds } }))
     await loadSpots()
   } catch (error) {
-    taskCreateError.value = error instanceof Error ? error.message : '核查任务创建失败。'
+    const message = error instanceof Error ? error.message : '核查任务创建失败。'
+    taskCreateError.value = createdTasks.length ? `任务已创建（ID：${createdTasks.map(task => task.id).join('、')}），但工作流分派未完成：${message}。请勿重复创建。` : message
   } finally {
     creatingTasks.value = false
   }

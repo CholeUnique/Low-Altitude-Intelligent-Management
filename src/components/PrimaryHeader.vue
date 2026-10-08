@@ -4,9 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import OrganizationSwitcher from '@/components/OrganizationSwitcher.vue'
 import UserAccountMenu from '@/components/UserAccountMenu.vue'
-import { getGovernanceTaskPage } from '@/api/governance-task'
+import { getWorkflowTodos } from '@/api/task-workflow'
 import { useUserStore } from '@/stores/user'
-import { isTaskVisibleForOrganization } from '@/utils/scene-visibility'
 import { recognitionPermissionOrder, taskPermissionOrder, uavPermissionOrder, type AppPermissionKey } from '@/utils/access-control'
 
 const router = useRouter()
@@ -20,6 +19,7 @@ const todoRefreshClock = window.setInterval(() => void loadTodoCount(), 60_000)
 const dateText = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' }).format(now.value))
 const timeText = computed(() => now.value.toLocaleTimeString('zh-CN', { hour12: false }))
 onBeforeUnmount(() => {
+  window.removeEventListener('workflow-todos-changed', refreshWorkflowTodos)
   window.clearInterval(clock)
   window.clearInterval(todoRefreshClock)
 })
@@ -54,27 +54,9 @@ async function loadTodoCount() {
     return
   }
   try {
-    const records = []
-    let pageNum = 1
-    let total = Number.POSITIVE_INFINITY
-    while (records.length < total) {
-      const page = await getGovernanceTaskPage({
-        pageNum,
-        pageSize: 200,
-        deptId: user.activeDeptId,
-        organizationId: user.organizationId,
-      })
-      if (version !== todoRequestVersion) return
-      records.push(...page.records)
-      total = page.total
-      if (!page.records.length) break
-      pageNum += 1
-    }
+    const nodes = await getWorkflowTodos(user.activeDeptId)
     if (version !== todoRequestVersion) return
-    todoCount.value = records.filter((task) =>
-      isTaskVisibleForOrganization(user.organization, task, user.activeDeptId)
-      && task.assigneeId === currentUserId
-      && ![3, 4, 5].includes(task.taskStatus)).length
+    todoCount.value = new Set(nodes.filter(node => node.status === 'PROCESSING' && node.assigneeId === String(user.currentUser?.id || '')).map(node => node.bizTaskId)).size
   } catch {
     if (version === todoRequestVersion) todoCount.value = undefined
   }
@@ -86,7 +68,11 @@ function openTodo() {
 }
 
 watch([() => user.organizationId, () => user.activeDeptId, () => user.currentUser?.id, () => user.currentUser?.username], () => void loadTodoCount())
-onMounted(() => void loadTodoCount())
+function refreshWorkflowTodos() { void loadTodoCount() }
+onMounted(() => {
+  window.addEventListener('workflow-todos-changed', refreshWorkflowTodos)
+  void loadTodoCount()
+})
 </script>
 
 <template>

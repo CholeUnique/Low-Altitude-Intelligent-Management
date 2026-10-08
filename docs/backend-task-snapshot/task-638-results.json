@@ -1,0 +1,41 @@
+{
+  "code": "0",
+  "data": {
+    "pageNum": 1,
+    "pageSize": 100,
+    "records": [
+      {
+        "bizTaskId": 638,
+        "collectTime": "2026-09-15T10:40:00",
+        "createTime": "2026-09-15T02:38:43",
+        "fileCount": 1,
+        "files": [
+          {
+            "createTime": "2026-09-15T02:38:43",
+            "fileExt": "png",
+            "fileMd5": "aead493361b27e7510691c5d7072dfc1",
+            "fileName": "临时接口验证成果-20260915.png",
+            "fileRole": "MAIN",
+            "fileRoleDesc": "主文件",
+            "fileSize": 13057,
+            "id": 653
+          }
+        ],
+        "id": 206,
+        "operator": "临时接口验证",
+        "parseStatus": 2,
+        "parseStatusDesc": "解析成功",
+        "process": {
+          "keyInfoJson": "{\"temporary\":true,\"purpose\":\"前端成果与证据接口验证\",\"deleteAfterUserConfirmation\":true}",
+          "parseRetryCount": 0,
+          "parseTime": "2026-09-15T10:38:44",
+          "uploadBy": 1
+        },
+        "resultType": "ILLEGAL_FOREST_POINT",
+        "sceneCode": "FOREST_LAW_ENFORCE"
+      }
+    ],
+    "total": 1
+  },
+  "msg": "success"
+}
