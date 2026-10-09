@@ -2,17 +2,24 @@ import { getGovernanceTaskDetail, getGovernanceTaskPage, getMyTodoTaskPage, type
 import { getTaskWorkflow, getWorkflowTodos, workflowSteps, type TaskWorkflow, type WorkflowNode } from './task-workflow'
 import { collectPages } from './pagination'
 import { myTaskWorkState, workflowNodeDisplayName } from '@/utils/task-workflow-state'
+import { getBizSceneAssignees } from './scene'
 
 export interface MyWorkflowTask extends GovernanceTask {
-  myWorkState: 'pending' | 'handled'
+  myWorkState: 'pending' | 'handled' | 'scene'
   myDeadline?: string
   myNodes: WorkflowNode[]
-  flow: TaskWorkflow
+  flow?: TaskWorkflow
 }
 
-/** 业务负责人列表仅作为候选；待办/已办必须由本人真实节点实例证明。 */
+/** 本人待办/已办按真实节点识别；场景负责人另可查看该场景历史。 */
 export async function getMyWorkflowTasks(userId: string, deptId?: string): Promise<{ records: MyWorkflowTask[]; warnings: string[] }> {
   if (!userId) return { records: [], warnings: [] }
+  const warnings: string[] = []
+  const sceneAssignees = await getBizSceneAssignees(deptId).catch(reason => {
+    warnings.push(`场景负责人配置读取失败：${reason instanceof Error ? reason.message : '请重试'}`)
+    return []
+  })
+  const managedScenes = new Set(sceneAssignees.filter(item => String(item.assigneeId) === userId && (!deptId || item.deptId == null || String(item.deptId) === deptId)).map(item => item.sceneCode))
   const [assigned, visible, todos] = await Promise.all([
     collectPages((pageNum, pageSize) => getMyTodoTaskPage({ pageNum, pageSize, deptId })),
     collectPages((pageNum, pageSize) => getGovernanceTaskPage({ pageNum, pageSize, deptId })),
@@ -26,7 +33,6 @@ export async function getMyWorkflowTasks(userId: string, deptId?: string): Promi
     if (detail) candidates.set(id, detail.task)
   }
   const records: MyWorkflowTask[] = []
-  const warnings: string[] = []
   const pendingIds = new Set(todos.filter(node => node.status === 'PROCESSING' && node.assigneeId === userId).map(node => node.bizTaskId))
   // 控制并发，兼容大任务列表；每条历史来自服务端，不依赖本地缓存。
   const tasks = [...candidates.values()]
@@ -35,8 +41,9 @@ export async function getMyWorkflowTasks(userId: string, deptId?: string): Promi
       try {
         const flow = await getTaskWorkflow(task.id)
         const state = pendingIds.has(task.id) && myTaskWorkState(flow, userId) === 'pending' ? 'pending'
-          : flow?.timeline.some(node => node.status === 'COMPLETED' && node.assigneeId === userId) ? 'handled' : undefined
-        if (!flow || !state) return
+          : flow?.timeline.some(node => node.status === 'COMPLETED' && node.assigneeId === userId) ? 'handled'
+          : managedScenes.has(task.sceneCode) ? 'scene' : undefined
+        if (!state) return
         // 只对本人相关任务读取详情，使用用户创建/编辑后的任务名称。
         let taskName = task.name
         try {
@@ -45,11 +52,11 @@ export async function getMyWorkflowTasks(userId: string, deptId?: string): Promi
         } catch (reason) {
           warnings.push(`${task.taskNo}：任务名称核实失败，${reason instanceof Error ? reason.message : '详情读取失败'}`)
         }
-        const myNodes = flow.timeline.filter(node => node.assigneeId === userId)
-        if (flow.currentNode?.assigneeId === userId && !myNodes.some(node => node.id === flow.currentNode?.id)) myNodes.push(flow.currentNode)
-        const current = flow.currentNode?.assigneeId === userId && flow.currentNode.status === 'PROCESSING'
+        const myNodes = flow?.timeline.filter(node => node.assigneeId === userId) || []
+        if (flow?.currentNode?.assigneeId === userId && !myNodes.some(node => node.id === flow.currentNode?.id)) myNodes.push(flow.currentNode)
+        const current = flow?.currentNode?.assigneeId === userId && flow.currentNode.status === 'PROCESSING'
           ? flow.currentNode : [...myNodes].reverse().find(node => node.status === 'PROCESSING')
-        const workflow = workflowSteps(flow).map((step, index) => ({ ...step, name: workflowNodeDisplayName(flow.timeline[index]!, task.sceneCode) }))
+        const workflow = flow ? workflowSteps(flow).map((step, index) => ({ ...step, name: workflowNodeDisplayName(flow.timeline[index]!, task.sceneCode) })) : task.workflow
         records.push({ ...task, name: taskName, flow, workflow, myNodes, myWorkState: state, myDeadline: current?.deadline || [...myNodes].reverse().find(node => node.status === 'COMPLETED')?.deadline })
       } catch (reason) {
         warnings.push(`${task.taskNo}：${reason instanceof Error ? reason.message : '工作流读取失败'}`)

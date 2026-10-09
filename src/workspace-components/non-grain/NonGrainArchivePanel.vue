@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { taskImageryService } from '@/utils/task-imagery'
 import WorkbenchFeedback from '@/workspace-components/shared/WorkbenchFeedback.vue'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useBackendTaskData } from '@/workspace-components/shared/use-backend-task'
 import { useUserStore } from '@/stores/user'
 import { canOperateWorkflowNode } from '@/utils/task-workflow-state'
@@ -19,6 +19,7 @@ const canEdit = computed(() => !props.readonly && !loading.value && !submitting.
 const submitting = ref(false)
 const error = ref('')
 const activeId = ref('')
+const archiveForm = ref<HTMLFormElement>()
 const draft = ref<ArchiveRecord[]>([])
 const archiveDate = ref('')
 const options = ref<MetadataOption[]>([])
@@ -70,7 +71,15 @@ function evidenceDescription(data: unknown) {
 }
 async function submit() {
   if (!canEdit.value || !props.taskId || !selectedNode.value) return
-  submitting.value = true; error.value = ''
+  error.value = ''
+  const missingType = draft.value.find(plot => !plot.archiveType)
+  if (missingType) {
+    activeId.value = missingType.abnormalId
+    await nextTick()
+    archiveForm.value?.querySelector<HTMLInputElement>('input[type=radio][required]')?.reportValidity()
+    return
+  }
+  submitting.value = true
   try {
     if (!draft.value.length) throw new Error('任务暂无图斑，无法填写结案结果。')
     for (const plot of draft.value) {
@@ -102,7 +111,7 @@ async function submit() {
         <section class="ng-card archive-help"><h3>ⓘ 归档说明</h3><p>1. 依据核查、整改及复核结果填写最终结案信息。</p><p>2. 逐一记录图斑结果，再提交整条任务结案。</p><p>3. 已完成的结案记录可查看，不能再次修改或提交。</p></section>
       </aside>
       <section class="ng-card archive-form"><h3>结案信息填报</h3><div class="form-summary"><span>任务编号<b>{{ task?.taskNo || '—' }}</b></span><span>当前图斑<b>{{ activeSpot?.title || '—' }}</b></span><span>结案人<b>{{ selectedNode?.assigneeName || '—' }}</b></span><span>结案日期<b>{{ selectedNode?.status === 'COMPLETED' ? String(record.archiveDate || selectedNode.submitTime || '').slice(0,10) || '—' : archiveDate }}</b></span></div>
-        <form v-if="active" @submit.prevent="submit"><fieldset :disabled="!canEdit"><h4>结案类型</h4><div class="archive-types"><label v-for="item in types" :key="item.value" :class="{ chosen: active.archiveType === item.value }"><input v-model="active.archiveType" type="radio" :value="item.value" /><span><b>{{ item.title }}</b><small>{{ item.description }}</small></span></label></div>
+        <form v-if="active" ref="archiveForm" @submit.prevent="submit"><fieldset :disabled="!canEdit"><h4>结案类型</h4><div class="archive-types"><label v-for="item in types" :key="item.value" :class="{ chosen: active.archiveType === item.value }"><input v-model="active.archiveType" type="radio" :name="`archive-type-${active.abnormalId}`" :value="item.value" required /><span><b>{{ item.title }}</b><small>{{ item.description }}</small></span></label></div>
           <h4>结案结果</h4><div class="fields"><label><span>{{ active.archiveType === 'RESTORED' ? '* ' : '' }}复耕复种情况</span><select v-model="active.restoration" :disabled="active.archiveType !== 'RESTORED'"><option value="">请选择</option><option value="RESTORED">已完成复耕复种</option><option value="RESTORED_PARTIAL">部分完成复耕复种</option></select></label><label><span>{{ active.archiveType === 'RESTORED' ? '* ' : '' }}复耕面积</span><div class="area-input"><input v-model="active.restoredArea" type="number" min="0" step="any" :disabled="active.archiveType !== 'RESTORED'" /><small>㎡</small></div></label><label><span>* 当前种植用途</span><select v-model="active.landUse" required><option value="">请选择</option><option v-if="active.landUse && !useOptions.some(item => item.code === active?.landUse)" :value="active.landUse">{{ active.landUse }}</option><option v-for="item in useOptions" :key="item.id" :value="item.code">{{ item.code }} {{ item.name }}</option></select></label><label><span>* 结案状态</span><select v-model="active.archiveStatus" required><option value="">请选择</option><option value="NO_PROBLEM">核查无问题</option><option value="COMPLETED">已完成治理</option><option value="SPECIAL">特殊情形结案</option></select></label><label class="wide"><span>无法复耕原因</span><input v-model="active.unableReason" :disabled="active.archiveType !== 'SPECIAL'" :required="active.archiveType === 'SPECIAL'" maxlength="500" placeholder="填写无法复耕原因及依据" /></label><label class="wide"><span>* 结案说明</span><textarea v-model="active.description" required maxlength="500" placeholder="结合核查、整改及复核结果填写结案说明" /><small class="counter">{{ active.description?.length || 0 }}/500</small></label></div>
           <h4>结案归档材料</h4><div class="materials"><article v-for="group in materialGroups" :key="group.key"><b>{{ group.title }}材料</b><ul v-if="group.files.length"><li v-for="file in group.files" :key="file.id">{{ file.fileName }}</li></ul><p v-else>{{ group.node ? '暂无附件' : '未经过此节点' }}</p></article></div><footer><button type="submit" :disabled="!canEdit">{{ submitting ? '正在结案…' : selectedNode?.status === 'COMPLETED' ? '已完成结案' : '确认结案' }}</button></footer>
         </fieldset></form><p v-else class="empty">暂无可填写的图斑结案记录。</p>

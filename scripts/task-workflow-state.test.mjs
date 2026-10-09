@@ -9,6 +9,14 @@ function load(path, dependencies = {}) {
   new Function('require', 'module', 'exports', source)(id => dependencies[id] || require(id), module, module.exports)
   return module.exports
 }
+const todoState = load('src/utils/task-todo-state.ts')
+assert.equal(todoState.todoTaskStatus({ myWorkState: 'handled', taskStatus: 0, flow: { status: 'FINISHED' } }), 'archived', '真实结案优先于已办和滞后的任务状态')
+assert.equal(todoState.todoTaskStatus({ myWorkState: 'handled', taskStatus: 1, flow: { status: 'RUNNING' } }), 'handled')
+assert.equal(todoState.todoTaskStatus({ myWorkState: 'pending', taskStatus: 5, flow: { status: 'RUNNING' } }), 'pending', '流程仍运行时不采用错误的已完成业务状态')
+assert.equal(todoState.todoTaskStatus({ myWorkState: 'scene', taskStatus: 0 }), 'pending')
+assert.equal(todoState.todoTaskStatus({ myWorkState: 'scene', taskStatus: 5 }), 'archived')
+assert.equal(todoState.todoTaskStatusLabel({ myWorkState: 'scene', taskStatus: 0, flow: { status: 'COMPLETED' } }), '已结案')
+console.log('PASS: todo handled/pending/archived filters and workflow status priority')
 const config = load('src/workspace/config/non-grain-workflow.ts')
 const state = load('src/utils/task-workflow-state.ts', { '../workspace/config/non-grain-workflow': config })
 const node = (key, status, assigneeId = '1', id = key) => ({ id, bizTaskId: '900', nodeKey: key, nodeName: key, nodeType: 'REVIEW', status, assigneeId })
@@ -91,6 +99,7 @@ assert.equal(state.myTaskWorkState(forwardedFlow, '692'), 'handled')
 assert.equal(state.myTaskWorkState(forwardedFlow, '694'), 'pending')
 const pagination = { collectPages: async fn => (await fn(1, 200)).records }
 const myTasks = load('src/api/my-workflow-tasks.ts', {
+  './scene': { getBizSceneAssignees: async () => [] },
   './governance-task': {
     getMyTodoTaskPage: async () => ({ records: [] }),
     getGovernanceTaskPage: async () => ({ records: [] }),
@@ -107,6 +116,7 @@ assert.equal(recipientTodos.records[0].myNodes[0].nodeKey, 'REVIEW_COUNTY')
 assert.equal(recipientTodos.records[0].workflow[1].name, '部门确认')
 assert.equal((await myTasks.getMyWorkflowTasks('692', '1')).records[0].myWorkState, 'handled')
 const namedTodos = load('src/api/my-workflow-tasks.ts', {
+  './scene': { getBizSceneAssignees: async () => [] },
   './governance-task': {
     getMyTodoTaskPage: async () => ({ records: [{ ...waitingTask, name: '旧待办名称' }] }),
     getGovernanceTaskPage: async () => ({ records: [{ ...waitingTask, name: '列表名称' }] }),
@@ -117,6 +127,24 @@ const namedTodos = load('src/api/my-workflow-tasks.ts', {
   '@/utils/task-workflow-state': state,
 })
 assert.equal((await namedTodos.getMyWorkflowTasks('694', '1')).records[0].name, '用户最新填写的任务名称', '待办使用当前业务任务名称，不被旧待办记录覆盖')
+const restoredSceneTasks = load('src/api/my-workflow-tasks.ts', {
+  './scene': { getBizSceneAssignees: async () => [{ sceneCode: waitingTask.sceneCode, deptId: 1, assigneeId: 773 }] },
+  './governance-task': {
+    getMyTodoTaskPage: async () => ({ records: [] }),
+    getGovernanceTaskPage: async () => ({ records: [waitingTask, { ...waitingTask, id: 'not-started' }, { ...waitingTask, id: 'other-scene', sceneCode: 'OTHER' }] }),
+    getGovernanceTaskDetail: async () => ({ task: waitingTask }),
+  },
+  './task-workflow': { getTaskWorkflow: async id => id === 'not-started' ? undefined : forwardedFlow, getWorkflowTodos: async () => [], workflowSteps: f => f.timeline.map(n => ({ key: n.nodeKey, name: n.nodeName, status: n.status })) },
+  './pagination': pagination,
+  '@/utils/task-workflow-state': state,
+})
+const restoredHistory = await restoredSceneTasks.getMyWorkflowTasks('773', '1')
+assert.equal(restoredHistory.records.length, 2, '现任场景负责人可查看旧账号关联任务和未启动任务，排除其他场景')
+assert.ok(restoredHistory.records.every(task => task.myWorkState === 'scene' && task.myNodes.length === 0), '历史任务不能假冒新账号待办或已办')
+assert.equal(restoredHistory.records.find(task => task.id === '1314').flow.timeline[0].assigneeId, '692', '保留原历史办理人')
+assert.equal((await restoredSceneTasks.getMyWorkflowTasks('999', '1')).records.length, 0, '其他用户不能因场景负责人配置扩大历史范围')
+assert.equal((await restoredSceneTasks.getMyWorkflowTasks('773', '2')).records.length, 0, '场景负责人历史按部门隔离')
+console.log('PASS: recreated scene owner history, unstarted tasks, actual identity, other users and department isolation')
 const assignmentCalls = []
 const assignment = load('src/api/non-grain-assignment.ts', {
   './account-management': {

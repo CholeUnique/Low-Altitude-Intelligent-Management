@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElSelect, ElOption } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
 import TaskWorkflowProgress from '@/components/task-center/TaskWorkflowProgress.vue'
 import { getMyWorkflowTasks, type MyWorkflowTask } from '@/api/my-workflow-tasks'
-import { type GovernanceTaskStatus } from '@/api/governance-task'
+import { todoTaskStatus, todoTaskStatusLabel, type TodoTaskStatus } from '@/utils/task-todo-state'
 import { useUserStore } from '@/stores/user'
 import { workflowNodeDisplayName } from '@/utils/task-workflow-state'
 
-type TodoCategory = 'all' | 'pending' | 'handled'
 type DeadlineSort = 'asc' | 'desc'
 
 const user = useUserStore()
@@ -18,10 +20,9 @@ const loading = ref(false)
 const error = ref('')
 const warnings = ref<string[]>([])
 const keyword = ref('')
-const category = ref<TodoCategory>('all')
 const selectedScene = ref('')
 const sceneOptions = computed(() => [...new Map(tasks.value.filter(task => task.sceneName).map(task => [task.sceneCode || task.sceneName, { code: task.sceneCode || task.sceneName, name: task.sceneName }])).values()])
-const processType = ref<GovernanceTaskStatus | ''>('')
+const processType = ref<TodoTaskStatus | ''>('')
 const deadlineSort = ref<DeadlineSort>('asc')
 let requestVersion = 0
 
@@ -32,6 +33,11 @@ function myWorkState(task: MyWorkflowTask) { return task.myWorkState }
 function myNodeName(task: MyWorkflowTask) {
   const node = [...task.myNodes].reverse().find(node => node.status === (task.myWorkState === 'pending' ? 'PROCESSING' : 'COMPLETED'))
   return node ? workflowNodeDisplayName(node, task.sceneCode) : '—'
+}
+function sceneProgress(task: MyWorkflowTask) {
+  if (task.flow?.currentNode) return workflowNodeDisplayName(task.flow.currentNode, task.sceneCode)
+  if (task.flow?.status === 'FINISHED' || task.flow?.status === 'COMPLETED') return '已结案'
+  return task.flow ? '流程已结束' : '未启动'
 }
 
 const myWorkTasks = computed(() => displayTasks.value.filter(task => !selectedScene.value || (task.sceneCode || task.sceneName) === selectedScene.value))
@@ -52,18 +58,11 @@ function isOverdue(task: MyWorkflowTask) {
   return deadlineTime(task) < Date.now()
 }
 
-const categoryCounts = computed(() => ({
-  all: myWorkTasks.value.length,
-  pending: myWorkTasks.value.filter((task) => myWorkState(task) === 'pending').length,
-  handled: myWorkTasks.value.filter((task) => myWorkState(task) === 'handled').length,
-}))
-
 const visibleTasks = computed(() => {
   const normalizedKeyword = keyword.value.trim().toLocaleLowerCase()
   return myWorkTasks.value
     .filter((task) => {
-      if (category.value !== 'all' && myWorkState(task) !== category.value) return false
-      if (processType.value !== '' && task.taskStatus !== processType.value) return false
+      if (processType.value !== '' && todoTaskStatus(task) !== processType.value) return false
       return !normalizedKeyword
         || `${task.name} ${task.taskNo} ${task.sceneName} ${task.deptName}`.toLocaleLowerCase().includes(normalizedKeyword)
     })
@@ -136,24 +135,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <TaskCenterLayout title="我的待办" :subtitle="`${user.organization.name} · 展示派发到本人节点的待办及已办记录`">
+  <TaskCenterLayout title="我的待办" :subtitle="`${user.organization.name} · 本人待办、已办及负责场景的历史任务`">
     <template #actions>
       <button class="refresh-button" :disabled="loading" @click="loadTasks">{{ loading ? '加载中…' : '刷新待办' }}</button>
     </template>
-
-    <section class="todo-tabs" aria-label="待办分类">
-      <button :class="{ active: category === 'all' }" @click="category = 'all'">全部相关 <b>{{ categoryCounts.all }}</b></button>
-      <button :class="{ active: category === 'pending' }" @click="category = 'pending'">待我处理 <b>{{ categoryCounts.pending }}</b></button>
-      <button :class="{ active: category === 'handled' }" @click="category = 'handled'">我已处理 <b>{{ categoryCounts.handled }}</b></button>
-    </section>
 
     <div class="todo-layout">
       <main class="todo-main">
         <section class="todo-filters">
           <label class="search-control">搜索任务<div><span>⌕</span><input v-model="keyword" placeholder="任务名称、编号、场景或部门" /></div></label>
-          <label>业务场景<select v-model="selectedScene" aria-label="按待办场景筛选"><option value="">全部场景</option><option v-for="scene in sceneOptions" :key="scene.code" :value="scene.code">{{ scene.name }}</option></select></label>
-          <label>处理类型<select v-model="processType"><option value="">全部类型</option><option :value="0">待执行</option><option :value="1">执行中</option><option :value="2">待核查</option></select></label>
-          <label>截止时间<select v-model="deadlineSort"><option value="asc">由近到远</option><option value="desc">由远到近</option></select></label>
+          <label>业务场景<ElSelect v-model="selectedScene" aria-label="按待办场景筛选" popper-class="todo-filter-options"><ElOption label="全部场景" value="" /><ElOption v-for="scene in sceneOptions" :key="scene.code" :value="scene.code" :label="scene.name" /></ElSelect></label>
+          <label>处理类型<ElSelect v-model="processType" aria-label="处理类型" popper-class="todo-filter-options"><ElOption label="全部类型" value="" /><ElOption label="已处理" value="handled" /><ElOption label="待处理" value="pending" /><ElOption label="已结案" value="archived" /></ElSelect></label>
+          <label>截止时间<ElSelect v-model="deadlineSort" aria-label="截止时间排序" popper-class="todo-filter-options"><ElOption label="由近到远" value="asc" /><ElOption label="由远到近" value="desc" /></ElSelect></label>
         </section>
 
         <p v-if="error" class="todo-warning">真实待办加载失败：{{ error }}。请重试。</p>
@@ -163,17 +156,17 @@ onBeforeUnmount(() => {
             <div class="task-meta">
               <div class="task-title">
                 <span class="priority" :class="`priority-${task.priority}`">{{ priorityLabel(task.priority) }}</span>
-                <div><h2>{{ task.name }} <em class="work-state" :class="myWorkState(task)">{{ myWorkState(task) === 'handled' ? '我已处理' : '待我处理' }}</em></h2><p>{{ task.taskNo }} · {{ task.sceneName }}</p></div>
+                <div><h2>{{ task.name }} <em class="work-state" :class="todoTaskStatus(task)">{{ todoTaskStatusLabel(task) }}</em></h2><p>{{ task.taskNo }} · {{ task.sceneName }}</p></div>
               </div>
               <div class="deadline" :class="{ overdue: isOverdue(task), soon: isDueSoon(task) }">
-                <span>{{ isOverdue(task) ? '已逾期' : isDueSoon(task) ? '即将到期' : '截止时间' }}</span>
-                <strong>{{ formatTime(task.myDeadline) }}</strong>
+                <span>{{ task.myWorkState === 'scene' ? '当前办理节点' : isOverdue(task) ? '已逾期' : isDueSoon(task) ? '即将到期' : '截止时间' }}</span>
+                <strong>{{ task.myWorkState === 'scene' ? sceneProgress(task) : formatTime(task.myDeadline) }}</strong>
               </div>
             </div>
             <div class="task-body">
-              <dl><div><dt>所属部门</dt><dd>{{ task.deptName || '-' }}</dd></div><div><dt>我的办理节点</dt><dd>{{ myNodeName(task) }}</dd></div><div><dt>创建时间</dt><dd>{{ formatTime(task.createTime) }}</dd></div></dl>
+              <dl><div><dt>所属部门</dt><dd>{{ task.deptName || '-' }}</dd></div><div><dt>{{ task.myWorkState === 'scene' ? '当前办理人' : '我的办理节点' }}</dt><dd>{{ task.myWorkState === 'scene' ? task.flow?.currentNode?.assigneeName || '—' : myNodeName(task) }}</dd></div><div><dt>创建时间</dt><dd>{{ formatTime(task.createTime) }}</dd></div></dl>
               <TaskWorkflowProgress :task="task" />
-              <button class="workspace-button" @click="openWorkspace(task)">{{ myWorkState(task) === 'handled' ? '查看工作台' : '进入工作台' }}</button>
+              <button class="workspace-button" @click="openWorkspace(task)">{{ myWorkState(task) === 'pending' ? '进入工作台' : '查看工作台' }}</button>
             </div>
           </article>
 
@@ -193,7 +186,7 @@ onBeforeUnmount(() => {
           <li><span><i class="orange"></i>即将到期</span><b>{{ workload.dueSoon }}</b></li>
           <li><span><i class="red"></i>已逾期</span><b>{{ workload.overdue }}</b></li>
         </ul>
-        <p class="workload-note">待办只包含已派发到本人办理节点的任务，已办按本人已完成的节点历史保留。截止时间使用节点办理期限；未启动工作流的任务不计入待办。</p>
+        <p class="workload-note">待办按本人处理中节点统计，已办按本人完成记录保留。场景负责人还可查看所负责场景的历史任务；历史查看不会改变节点办理人，未启动任务不计入待办。</p>
       </aside>
     </div>
   </TaskCenterLayout>
@@ -202,23 +195,16 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .refresh-button { height: 34px; padding: 0 15px; color: #fff; background: #2389d3; border: 1px solid #1880c8; border-radius: 4px; cursor: pointer; }
 .refresh-button:disabled { opacity: .6; cursor: wait; }
-.todo-tabs { height: 48px; display: flex; align-items: stretch; padding: 0 16px; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px 6px 0 0; }
-.todo-tabs button { min-width: 120px; padding: 0 18px; color: #718295; background: transparent; border: 0; border-bottom: 3px solid transparent; cursor: pointer; font-size: 13px; }
-.todo-tabs button.active { color: #267fbe; border-bottom-color: #2d8fd4; font-weight: 600; }
-.todo-tabs b { min-width: 20px; display: inline-block; margin-left: 5px; padding: 1px 6px; color: #718295; background: #eef2f5; border-radius: 9px; font-size: 10px; }
-.todo-tabs button.active b { color: #267fbe; background: #e7f3fb; }
-.todo-layout { display: grid; grid-template-columns: minmax(0, 1fr) 245px; gap: 14px; margin-top: 14px; }
+.todo-layout { display: grid; grid-template-columns: minmax(0, 1fr) 245px; gap: 14px; }
 .todo-main { min-width: 0; }
 .todo-filters { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) 120px 120px; gap: 12px; padding: 13px 15px; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; }
-.todo-filters label { display: grid; gap: 6px; color: #65788b; font-size: 12px; }
+.todo-filters label { min-width: 0; display: grid; gap: 6px; color: #65788b; font-size: 12px; }
 .todo-filters input, .todo-filters select, .search-control > div { height: 34px; color: #33495e; background: #fff; border: 1px solid #d8e0e7; border-radius: 4px; outline: 0; }
 .todo-filters select { padding: 0 9px; }
-.todo-filters select:not(:disabled):hover,
-.todo-filters select:not(:disabled):focus-visible {
-  color: #fff !important;
-  background-color: #176f9f !important;
-  border-color: #2aa9df !important;
-}
+.todo-filters :deep(.el-select) { width: 100%; min-width: 0; font-size: 12px; }
+.todo-filters :deep(.el-select__wrapper) { height: 34px; min-height: 34px; background: #fff; box-shadow: 0 0 0 1px #d8e0e7 inset; font-family: inherit; }
+.todo-filters :deep(.el-select__input) { height: auto; padding: 0; border: 0; border-radius: 0; outline: none; background: transparent; }
+.todo-filters :deep(.el-select__selected-item) { min-width: 0; color: #33495e; font-size: 12px; }
 .search-control > div { display: flex; align-items: center; gap: 8px; padding: 0 10px; }
 .search-control span { color: #8c9aa8; }
 .search-control input { min-width: 0; flex: 1; height: 30px; padding: 0; border: 0; }
@@ -230,7 +216,7 @@ onBeforeUnmount(() => {
 .task-title h2, .task-title p { margin: 0; }
 .task-title h2 { overflow: hidden; color: #30465c; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .work-state { margin-left: 6px; padding: 2px 6px; color: #277fbf; background: #eaf5fd; border-radius: 9px; font-size: 9px; font-style: normal; font-weight: 500; vertical-align: 2px; }
-.work-state.handled { color: #248263; background: #e7f7f0; }
+.work-state.handled, .work-state.archived { color: #248263; background: #e7f7f0; }
 .task-title p { margin-top: 5px; color: #97a4b1; font-size: 10px; }
 .priority { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; color: #738396; background: #edf1f4; border-radius: 50%; font-size: 10px; }
 .priority-2 { color: #c95353; background: #fff0ef; }.priority-1 { color: #bd7a2b; background: #fff5e7; }
@@ -253,4 +239,12 @@ onBeforeUnmount(() => {
 }
 @media(max-width:1100px){.todo-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.todo-filters{grid-template-columns:minmax(0,1fr)}}
+</style>
+
+<style lang="scss">
+.todo-filter-options.el-popper { background: #fff; border-color: #d8e0e7; }
+.todo-filter-options .el-select-dropdown__item { background: #fff; color: #33495e; font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif; font-size: 12px; }
+.todo-filter-options .el-select-dropdown__item.is-selected { color: #33495e; font-weight: 600; }
+.todo-filter-options .el-select-dropdown__item.is-hovering,
+.todo-filter-options .el-select-dropdown__item:hover { background: #f1f2f4; }
 </style>
