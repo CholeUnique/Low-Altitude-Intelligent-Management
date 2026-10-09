@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import WorkflowAssigneePicker from '@/workspace-components/shared/WorkflowAssigneePicker.vue'
+import type { WorkbenchUser } from '@/api/workbench-users'
 import { taskImageryService } from '@/utils/task-imagery'
 import WorkbenchFeedback from '@/workspace-components/shared/WorkbenchFeedback.vue'
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useBackendTaskData } from '@/workspace-components/shared/use-backend-task'
-import { getDeptUserPage } from '@/api/account-management'
-import { collectPages } from '@/api/pagination'
 import { getMetadataOptions, type MetadataOption } from '@/api/metadata'
 import { getTaskWorkflow, submitWorkflowNode, uploadWorkflowFiles, deleteWorkflowFile } from '@/api/task-workflow'
 import { canOperateWorkflowNode } from '@/utils/task-workflow-state'
@@ -23,6 +23,10 @@ const busy = ref(false)
 const error = ref('')
 const options = ref<MetadataOption[]>([])
 const optionError = ref('')
+const recipient = ref<WorkbenchUser>()
+const nextNode = computed(() => flow.value?.timeline.find(node => String(node.prevNodeInstId || '') === selectedNode.value?.id))
+const dispatchBranch = computed(() => records.value.some(plot => plot.result === 'PROBLEM') ? 'RECTIFY' : 'FINISH')
+const preferredRecipientIds = computed(() => dispatchBranch.value === 'FINISH' ? [flow.value?.timeline.find(node => node.nodeKey === 'REVIEW_CITY')?.assigneeId || ''] : [])
 const activeId = ref('')
 const drafts = ref<PlotInspection[]>([])
 const checkTime = ref('')
@@ -35,6 +39,7 @@ const records = computed<PlotInspection[]>(() => {
   if (Array.isArray(saved)) return saved as PlotInspection[]
   return abnormals.value.map(spot => ({ ...emptyPlot(spot.id), ...nodeRecord.value, abnormalId: spot.id })) as PlotInspection[]
 })
+watch(dispatchBranch, () => { recipient.value = undefined })
 const active = computed(() => records.value.find(item => item.abnormalId === activeId.value))
 const files = computed(() => selectedNode.value?.files || [])
 const photoFiles = computed(() => files.value.filter(file => isInspectionImage(file.fileName)))
@@ -139,19 +144,13 @@ async function submit() {
     const current = await getTaskWorkflow(props.taskId)
     if (!current?.currentNode || current.currentNode.id !== selectedNode.value.id || current.currentNode.nodeKey !== 'IMPLEMENT' || !canOperateWorkflowNode(current.currentNode, String(user.currentUser?.id || ''))) throw new Error('节点状态已变化，请刷新后重试。')
     if (!checkTime.value || !checker.value.trim()) throw new Error('请填写核查日期和核查人。')
-    let rectifyUserId: string | undefined
-    if (drafts.value.some(plot => plot.result === 'PROBLEM')) {
-      const deptId = current.currentNode.deptId || task.value?.deptId
-      if (!deptId) throw new Error('缺少处理部门，无法查询 ntjsg。')
-      const members = await collectPages((pageNum, pageSize) => getDeptUserPage({ deptId, keyword: 'ntjsg', includeChild: false, pageNum, pageSize }))
-      rectifyUserId = members.find(person => person.username === 'ntjsg')?.id
-    }
-    const route = inspectionRoute(drafts.value, current, rectifyUserId)
+    if (!recipient.value) throw new Error('请选择下一节点办理人。')
+    const route = inspectionRoute(drafts.value, current, undefined, { assigneeId: recipient.value.id, deptId: recipient.value.deptId })
     const primary = drafts.value.find(plot => plot.result === route.result)!
-    await submitWorkflowNode({ nodeInstId: current.currentNode.id, targetAssigneeId: route.assigneeId, targetDeptId: route.deptId, resultData: { result: route.result, landUse: primary.landUse, checkTime: checkTime.value, checker: checker.value.trim(), description: primary.description, attachment: files.value.map(file => file.id), plotResults: drafts.value.map(plot => ({ ...plot })), targetAssigneeId: route.assigneeId, targetDeptId: route.deptId } })
+    await submitWorkflowNode({ nodeInstId: current.currentNode.id, targetAssigneeId: route.assigneeId, targetDeptId: route.deptId, resultData: { result: route.result, landUse: primary.landUse, checkTime: checkTime.value, checker: checker.value.trim(), description: primary.description, attachment: files.value.map(file => file.id), plotResults: drafts.value.map(plot => ({ ...plot })), targetAssigneeId: route.assigneeId, targetDeptId: route.deptId, targetAssigneeName: recipient.value.realName || recipient.value.nickname || recipient.value.username, targetDeptName: recipient.value.deptName } })
     await load(); emit('submitted'); window.dispatchEvent(new Event('workflow-todos-changed'))
     if (flow.value?.currentNode && flow.value.currentNode.nodeKey !== route.nextKey) error.value = '核查已提交，但后端返回的下一节点与预期不同，请核对流程配置。'
-    if (flow.value?.currentNode?.nodeKey === 'FINISH' && flow.value.currentNode.assigneeId !== route.assigneeId) error.value = '后端已进入归档，但归档办理人未按首节点办理人分派，请核对后端 FINISH 的接收人处理。'
+    if (flow.value?.currentNode?.nodeKey === route.nextKey && flow.value.currentNode.assigneeId !== route.assigneeId) error.value = '结果已提交，但后端未分派给所选办理人，请核对节点接收人配置。'
   } catch (reason) { error.value = reason instanceof Error ? reason.message : '核查提交失败' }
   finally { busy.value = false }
 }
@@ -167,11 +166,11 @@ async function submit() {
       <aside><section class="ng-card plot-list plot-guide-card"><h3>▣ 待核查图斑（{{ abnormals.length }} 个）</h3><div class="plot-scroll"><button v-for="(spot, index) in abnormals" :key="spot.id" type="button" :class="{ selected: activeId === spot.id }" @click="activeId = spot.id"><span class="radio">{{ activeId === spot.id ? '●' : '○' }}</span><div class="thumb"><img v-if="spot.imageUrl" :src="spot.imageUrl" :alt="spot.title" /><TaskRangeMap v-else :abnormal-points="[spot]" :active-abnormal-id="spot.id" fit-abnormal-points show-dom-imagery :imagery-service="taskImageryService(task?.comparisonImages)" /></div><span><b>图斑{{ index + 1 }}</b><span>{{ spot.title }}</span><small>面积：{{ spot.area ?? '—' }} ㎡</small></span></button><p v-if="!abnormals.length">暂无后端图斑</p></div><div class="plot-guide"><h4>ⓘ 填写说明</h4><p>① 选择图斑，填写核查结论及说明。</p><p>② 上传现场照片，填写定位信息。</p><p>③ 全部无问题时进入结案归档；存在问题时进入整改处理。</p></div></section></aside>
       <section class="ng-card inspection-form"><h3>▤ 现场核查填报</h3>
         <div class="summary"><span>任务编号<b>{{ task?.taskNo || '—' }}</b></span><span>当前图斑<b>{{ abnormals.find(spot => spot.id === activeId)?.title || '—' }}</b></span><span>核查人<input v-if="canEdit" v-model="checker" aria-label="核查人" /><b v-else>{{ displayChecker || '—' }}</b></span><span>核查日期<input v-if="canEdit" v-model="checkTime" type="date" aria-label="核查日期" /><b v-else>{{ displayTime || '—' }}</b></span></div>
-        <form v-if="active" @submit.prevent="submit"><fieldset :disabled="!canEdit"><h4>◇ 核查结论</h4><div class="conclusions"><label><input v-model="active.result" type="radio" value="PROBLEM" />问题图斑</label><label><input v-model="active.result" type="radio" value="NO_PROBLEM" />无问题图斑</label></div><p class="tip">请逐一填写所有图斑。全部无问题流转至首节点办理人归档；存在问题流转至农田建设股整改。</p>
+        <form v-if="active" @submit.prevent="submit"><fieldset :disabled="!canEdit"><h4>◇ 核查结论</h4><div class="conclusions"><label><input v-model="active.result" type="radio" value="PROBLEM" />问题图斑</label><label><input v-model="active.result" type="radio" value="NO_PROBLEM" />无问题图斑</label></div><p class="tip">请逐一填写所有图斑。全部无问题进入结案归档，存在问题进入整改处置；原指定办理人优先显示，可选择其他用户。</p>
           <div class="fields"><label><span>* 核查用途</span><select v-model="active.landUse" required><option value="">请选择</option><option v-if="active.landUse && !flatOptions.some(item => item.code === active?.landUse)" :value="active.landUse">{{ active.landUse }}</option><option v-for="item in flatOptions" :key="item.id" :value="item.code">{{ item.code }} / {{ item.name }}</option></select></label><label v-for="field in (['summerCrop','earlyCrop','autumnCrop'] as const)" :key="field"><span>{{ { summerCrop: '夏收作物', earlyCrop: '早稻作物', autumnCrop: '秋收作物' }[field] }}</span><select v-model="active[field]"><option value="">请选择</option><option v-if="active[field] && !flatOptions.some(item => item.code === active?.[field])" :value="active[field]">{{ active[field] }}</option><option v-for="item in flatOptions" :key="item.id" :value="item.code">{{ item.name }}</option></select></label><label v-if="active.result === 'NO_PROBLEM'" class="wide"><span>* 无问题原因</span><textarea v-model="active.noProblemReason" required maxlength="500" /></label><label class="wide"><span>* 核查说明</span><textarea v-model="active.description" required maxlength="500" placeholder="填写现场实际用途及核查依据" /><small>{{ active.description?.length || 0 }}/500</small></label></div>
           <h4>▧ 拍照信息（上传图片）</h4><div class="photo-grid"><article v-for="file in files" :key="file.id"><img v-if="previewUrls[file.id]" :src="previewUrls[file.id]" :alt="file.fileName" /><span v-else class="file-icon">{{ photoFiles.includes(file) ? '▧' : '▤' }}</span><b>{{ file.fileName }}</b><small>{{ file.createTime }}</small><button v-if="canEdit" type="button" @click="removeFile(file.id)">删除</button></article><label class="upload"><span>◎</span><b>上传现场图片</b><small>PNG、SVG、JPG 等图片，可拖入页面上传</small><input type="file" :accept="inspectionImageAccept" multiple @change="upload($event, true)" /></label><label class="upload"><span>♧</span><b>上传附件</b><small>PDF、Word 等文档，单个不超过 10MB</small><input type="file" :accept="inspectionDocumentAccept" multiple @change="upload($event, false)" /></label></div>
           <h4>♧ 现场定位与附加信息</h4><div class="fields location"><label><span>经度</span><input v-model="active.longitude" inputmode="decimal" /></label><label><span>纬度</span><input v-model="active.latitude" inputmode="decimal" /></label><button type="button" @click="locate">获取现场定位</button><label><span>所属村组</span><input v-model="active.village" /></label><label><span>联系电话</span><input v-model="active.phone" type="tel" /></label></div>
-          <footer><button type="submit" :disabled="!canEdit">{{ busy ? '正在处理…' : selectedNode?.status === 'COMPLETED' ? '已提交核查结果' : '提交核查结果' }}</button></footer>
+          <WorkflowAssigneePicker v-model="recipient" :dept-id="task?.deptId || selectedNode?.deptId" :node-id="selectedNode?.id" :preferred-ids="preferredRecipientIds" :preferred-usernames="dispatchBranch === 'RECTIFY' ? ['ntjsg'] : ['nyncKZ']" :readonly="!canEdit" :saved-name="String(nodeRecord.targetAssigneeName || nextNode?.assigneeName || '')" :label="dispatchBranch === 'RECTIFY' ? '整改处置办理人' : '结案归档办理人'" :key="dispatchBranch" /><footer><button type="submit" :disabled="!canEdit">{{ busy ? '正在处理…' : selectedNode?.status === 'COMPLETED' ? '已提交核查结果' : '提交核查结果' }}</button></footer>
         </fieldset></form><p v-else>暂无可核查图斑。</p>
       </section>
     </div>

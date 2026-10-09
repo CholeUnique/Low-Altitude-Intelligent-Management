@@ -7,10 +7,8 @@ import SpotDistributionMap from '@/workspace-components/spot-identification/Spot
 import TaskRangeMap from '@/components/TaskRangeMap.vue'
 import type { ComparisonPeriod } from '@/workspace-components/spot-identification/SpotDistributionMap.vue'
 import type { TaskAbnormal } from '@/api/governance-task'
-import { getDepartmentList, getDeptUserPage, type UserOption, type DepartmentInfo } from '@/api/account-management'
+import { getWorkbenchUsers, prioritizeWorkbenchUsers, type WorkbenchUser } from '@/api/workbench-users'
 import { getTaskWorkflow, submitWorkflowNode } from '@/api/task-workflow'
-import { getGridDispatchUsers } from '@/api/grid-dispatch-users'
-import { collectPages } from '@/api/pagination'
 import { useUserStore } from '@/stores/user'
 import { canOperateWorkflowNode } from '@/utils/task-workflow-state'
 
@@ -52,23 +50,15 @@ function spotPeriod(spot: TaskAbnormal): ComparisonPeriod {
 }
 
 const canEdit = computed(() => !props.readonly && !loading.value && canOperateWorkflowNode(selectedNode.value, String(user.currentUser?.id || '')) && flow.value?.currentNode?.id === selectedNode.value?.id)
-const departments = ref<Array<DepartmentInfo & { assigneeId?: string; sourceDeptId?: string }>>([])
-const departmentSearch = ref('')
-const visibleDepartments = computed(() => canEdit.value ? departments.value.filter(dept => dept.name.includes(departmentSearch.value.trim())) : readonlyDepartments.value)
-// 接口一次只接受一个目标部门，不能把多选显示成一次成功下发多个部门。
-function toggleDepartment(id: string) { draft.value.targetDeptId = draft.value.targetDeptId === id ? '' : id }
-function selectAllDepartments() { if (visibleDepartments.value.length === 1) draft.value.targetDeptId = String(visibleDepartments.value[0]!.id) }
-function invertDepartments() { if (visibleDepartments.value.length === 1) toggleDepartment(String(visibleDepartments.value[0]!.id)) }
-const recipients = ref<UserOption[]>([])
-const gridUsers = ref<UserOption[]>([])
+const gridUsers = ref<WorkbenchUser[]>([])
 const gridSearch = ref('')
-const visibleGridUsers = computed(() => gridUsers.value.filter(person => `${person.realName || ''} ${person.username} ${person.nickname || ''}`.includes(gridSearch.value.trim())))
+const visibleGridUsers = computed(() => gridUsers.value.filter(person => `${person.realName || ''} ${person.username} ${person.nickname || ''}`.toLowerCase().includes(gridSearch.value.trim().toLowerCase())))
 const readonlyGridUsers = computed(() => readonlyForm.value.targetAssigneeId ? [{ id: readonlyForm.value.targetAssigneeId, name: readonlyAssigneeName.value }] : [])
-const gridOptions = computed(() => canEdit.value ? visibleGridUsers.value.map(person => ({ id: String(person.id), name: person.realName || person.nickname || person.username })) : readonlyGridUsers.value)
+const gridOptions = computed(() => canEdit.value ? visibleGridUsers.value.map(person => ({ id: String(person.id), name: `${person.realName || person.nickname || person.username}（${person.username}）${person.id === String(user.currentUser?.id) ? " · 我" : ""}` })) : readonlyGridUsers.value)
 function selectGridUser(id: string) {
   if (!canEdit.value) return
   draft.value.targetAssigneeId = draft.value.targetAssigneeId === id ? '' : id
-  draft.value.targetDeptId = task.value?.deptId || selectedNode.value?.deptId || ''
+  draft.value.targetDeptId = gridUsers.value.find(person => person.id === id)?.deptId || ''
 }
 const optionsLoading = ref(false)
 const optionsError = ref('')
@@ -91,59 +81,28 @@ const readonlyForm = computed(() => ({
   remark: String(record.value.remark ?? ''),
 }))
 const reviewForm = computed(() => canEdit.value ? draft.value : readonlyForm.value)
-const readonlyDepartments = computed(() => readonlyForm.value.targetDeptId ? [{
-  id: readonlyForm.value.targetDeptId,
-  name: String(record.value.targetDeptName ?? (nextNode.value?.assigneeName?.includes('农业农村局') ? nextNode.value.assigneeName : nextNode.value?.deptName) ?? '暂无部门名称'),
-  status: 1,
-}] : [])
 const readonlyAssigneeName = computed(() => String(record.value.targetAssigneeName ?? nextNode.value?.assigneeName ?? '暂无处理人'))
 let optionsVersion = 0
 watch(() => selectedNode.value?.id, () => {
   draft.value = { reviewConclusion: String(record.value.opinion ?? record.value.reviewConclusion ?? record.value['初核结论'] ?? ''), targetDeptId: '', targetAssigneeId: '', dispatchMode: String(record.value.dispatchMode ?? (departmentMode.value ? '直接指派' : '逐级下发')), deadline: '', remark: String(record.value.remark ?? '') }
   submitError.value = ''
-  gridSearch.value = ''; departmentSearch.value = ''
+  gridSearch.value = ''
   selectedPlotIds.value = []; previewPlot.value = undefined
 })
 watch([canEdit, departmentMode, () => props.taskId], async ([editable]) => {
-  if (!editable) return
+  if (!editable) { optionsVersion++; optionsLoading.value = false; return }
+  gridUsers.value = []
   optionsLoading.value = true; optionsError.value = ''
   const version = ++optionsVersion
   try {
-    if (departmentMode.value) {
-      const members = await getGridDispatchUsers(task.value?.deptId || selectedNode.value?.deptId)
-      if (version !== optionsVersion) return
-      gridUsers.value = members
-      return
-    }
-    // 非粮化首期仅开放农业农村部门，名称和 ID 保留接口原值。
-    const relatedDepartments = (await getDepartmentList({ status: 1 })).filter(dept => dept.name.includes('农业农村'))
-    const destinations = await Promise.all(relatedDepartments.map(async dept => {
-      const members = await collectPages((pageNum, pageSize) => getDeptUserPage({ deptId: String(dept.id), pageNum, pageSize }))
-      // 本系统的区级单位以用户身份接收任务，使用其真实名称及 ID 路由。
-      const units = members.filter(member => (member.realName || '').includes('农业农村局'))
-      return units.length ? units.map(member => ({ ...dept, id: `${dept.id}:${member.id}`, name: member.realName!, assigneeId: String(member.id), sourceDeptId: String(dept.id) })) : [dept]
-    }))
-    if (version === optionsVersion) departments.value = destinations.flat()
+    const result = await getWorkbenchUsers(task.value?.deptId || selectedNode.value?.deptId, user.currentUser, user.activeDeptId)
+    if (version !== optionsVersion) return
+    gridUsers.value = prioritizeWorkbenchUsers(result.users, departmentMode.value ? { gridUsers: true } : { usernames: ['hlqNYNCJ'] })
+    optionsError.value = result.warnings.length ? `部分部门用户未加载：${result.warnings.join('；')}` : ''
+
   }
   catch (error) { if (version === optionsVersion) optionsError.value = error instanceof Error ? error.message : '下发对象读取失败' }
   finally { if (version === optionsVersion) optionsLoading.value = false }
-})
-watch(() => draft.value.targetDeptId, async deptId => {
-  if (departmentMode.value) return
-  const version = ++optionsVersion
-  recipients.value = []; draft.value.targetAssigneeId = ''; optionsError.value = ''
-  if (!deptId) { optionsLoading.value = false; return }
-  optionsLoading.value = true
-  try {
-    const records = await collectPages((pageNum, pageSize) => getDeptUserPage({ deptId: departments.value.find(dept => String(dept.id) === deptId)?.sourceDeptId || deptId, pageNum, pageSize }))
-    if (version === optionsVersion) {
-      recipients.value = records
-      const assigneeId = departments.value.find(dept => String(dept.id) === deptId)?.assigneeId
-      if (assigneeId && records.some(person => String(person.id) === assigneeId)) draft.value.targetAssigneeId = assigneeId
-    }
-  } catch (error) {
-    if (version === optionsVersion) optionsError.value = error instanceof Error ? error.message : '处理人读取失败'
-  } finally { if (version === optionsVersion) optionsLoading.value = false }
 })
 async function submitReview() {
   if (!canEdit.value || submitting.value || !props.taskId || !selectedNode.value) return
@@ -155,7 +114,7 @@ async function submitReview() {
     }
   }
   if (!draft.value.reviewConclusion.trim() || !draft.value.targetDeptId || !draft.value.targetAssigneeId || !draft.value.deadline) {
-    submitError.value = `请填写${pageLabel.value}意见，并选择${departmentMode.value ? '网格员' : '下发部门、处理人'}和办理期限。`; return
+    submitError.value = `请填写${pageLabel.value}意见，并选择下发用户和办理期限。`; return
   }
   const deadline = draft.value.deadline.length === 16 ? `${draft.value.deadline}:00` : draft.value.deadline
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(deadline) || !Number.isFinite(new Date(deadline).getTime())) {
@@ -167,11 +126,10 @@ async function submitReview() {
     if (current?.currentNode?.id !== selectedNode.value.id || !canOperateWorkflowNode(current.currentNode, String(user.currentUser?.id || ''))) throw new Error('节点状态或办理人已变化，请刷新后重试')
     if (current.currentNode.nodeKey !== (departmentMode.value ? 'REVIEW_COUNTY' : 'REVIEW_CITY')) throw new Error(`当前节点不是非粮流程的${pageLabel.value}，请刷新或核实后端流程配置。`)
     // wf_node_def: REVIEW_CITY + FORWARD -> REVIEW_COUNTY; opinion 保存审核意见。
-    const department = departments.value.find(dept => String(dept.id) === draft.value.targetDeptId)
-    const targetDeptId = department?.sourceDeptId || draft.value.targetDeptId
-    const recipient = (departmentMode.value ? gridUsers.value : recipients.value).find(person => String(person.id) === draft.value.targetAssigneeId)
+    const targetDeptId = gridUsers.value.find(person => person.id === draft.value.targetAssigneeId)?.deptId
+    const recipient = gridUsers.value.find(person => String(person.id) === draft.value.targetAssigneeId)
     if (!recipient) throw new Error('选择的处理人已不在当前可下发用户列表，请重新选择。')
-    await submitWorkflowNode({ nodeInstId: current.currentNode.id, deadline, targetDeptId, targetAssigneeId: draft.value.targetAssigneeId, resultData: { opinion: draft.value.reviewConclusion.trim(), result: 'FORWARD', dispatchMode: draft.value.dispatchMode, remark: draft.value.remark.trim(), targetDeptId, targetDeptName: department?.name, targetAssigneeId: draft.value.targetAssigneeId, targetAssigneeName: recipient?.realName || recipient?.nickname || recipient?.username, deadline, ...(departmentMode.value ? { abnormalIds: selectedPlotIds.value } : {}) } })
+    await submitWorkflowNode({ nodeInstId: current.currentNode.id, deadline, targetDeptId, targetAssigneeId: draft.value.targetAssigneeId, resultData: { opinion: draft.value.reviewConclusion.trim(), result: 'FORWARD', dispatchMode: draft.value.dispatchMode, remark: draft.value.remark.trim(), targetDeptId, targetDeptName: recipient.deptName, targetAssigneeId: draft.value.targetAssigneeId, targetAssigneeName: recipient?.realName || recipient?.nickname || recipient?.username, deadline, ...(departmentMode.value ? { abnormalIds: selectedPlotIds.value } : {}) } })
     window.dispatchEvent(new Event('workflow-todos-changed'))
     await load(); emit('submitted')
   } catch (error) { submitError.value = error instanceof Error ? error.message : `${pageLabel.value}提交失败` }
@@ -214,42 +172,28 @@ async function submitReview() {
           <form class="review-unsubmitted review-edit-form" :class="{ 'review-readonly-form': !canEdit }" @submit.prevent="submitReview">
             <fieldset :disabled="submitting || !canEdit">
               <label>{{ pageLabel }}意见<textarea v-model="reviewForm.reviewConclusion" maxlength="2000" :placeholder="`填写${pageLabel}意见`" /></label>
-              <section v-if="departmentMode" class="dispatch-departments" aria-label="选择下发对象">
-                <p class="dispatch-label">选择下发对象 <small>本部门网格员</small></p>
-                <div class="department-search"><span aria-hidden="true">⌕</span><input v-model="gridSearch" aria-label="搜索网格员姓名或所属村组" placeholder="搜索网格员姓名或所属村组" /></div>
+              <section class="dispatch-departments" aria-label="选择下发用户">
+                <p class="dispatch-label">选择下发用户 <small>{{ departmentMode ? '原指定网格员优先' : '原指定办理人优先' }}，可选择其他用户或自己</small></p>
+                <div class="department-search"><span aria-hidden="true">⌕</span><input v-model="gridSearch" aria-label="搜索姓名、账号" placeholder="搜索姓名、账号" /></div>
                 <div class="department-list grid-user-list">
                   <label v-for="person in gridOptions" :key="person.id" class="department-option" :class="{ selected: reviewForm.targetAssigneeId === person.id }">
                     <input type="checkbox" :checked="reviewForm.targetAssigneeId === person.id" @change="selectGridUser(person.id)" />
                     <b>{{ person.name }}</b><span>将接收 <strong>{{ receiveCount }}</strong> 条</span>
                   </label>
                   <p v-if="canEdit && optionsError" class="review-status error" role="alert">{{ optionsError }}</p>
-                  <p v-else-if="!gridOptions.length" class="review-empty">{{ optionsLoading ? '正在读取网格员…' : gridSearch ? '没有匹配的网格员' : '暂无网格员记录' }}</p>
+                  <p v-else-if="!gridOptions.length" class="review-empty">{{ optionsLoading ? '正在读取用户…' : gridSearch ? '没有匹配的用户' : '暂无可选用户' }}</p>
                 </div>
-                <div class="department-selection"><div><button type="button" :disabled="gridOptions.length !== 1" @click="selectGridUser(gridOptions[0]!.id)">全选</button><button type="button" :disabled="gridOptions.length !== 1" @click="selectGridUser(gridOptions[0]!.id)">反选</button><button type="button" @click="reviewForm.targetAssigneeId = ''">清空</button></div><span>已选 <strong>{{ reviewForm.targetAssigneeId ? 1 : 0 }}</strong> 个网格员，合计接收 <strong>{{ reviewForm.targetAssigneeId ? receiveCount : 0 }}</strong> 条</span></div>
-                <small class="single-department-note">每次选择一位网格员接收此任务。</small>
+                <div class="department-selection"><div><button type="button" :disabled="gridOptions.length !== 1" @click="selectGridUser(gridOptions[0]!.id)">全选</button><button type="button" :disabled="gridOptions.length !== 1" @click="selectGridUser(gridOptions[0]!.id)">反选</button><button type="button" @click="reviewForm.targetAssigneeId = ''">清空</button></div><span>已选 <strong>{{ reviewForm.targetAssigneeId ? 1 : 0 }}</strong> 位用户，合计接收 <strong>{{ reviewForm.targetAssigneeId ? receiveCount : 0 }}</strong> 条</span></div>
+                <small class="single-department-note">每次选择一位用户接收此任务。</small>
               </section>
-              <section v-else class="dispatch-departments" aria-label="选择下发部门">
-                <p class="dispatch-label">选择下发部门</p>
-                <div class="department-search"><span aria-hidden="true">⌕</span><input v-model="departmentSearch" aria-label="搜索部门名称" placeholder="搜索部门名称" /></div>
-                <div class="department-list">
-                  <label v-for="dept in visibleDepartments" :key="dept.id" class="department-option">
-                    <input type="checkbox" :checked="reviewForm.targetDeptId === String(dept.id)" @change="toggleDepartment(String(dept.id))" />
-                    <b>{{ dept.name }}</b><span>将接收 <strong>{{ receiveCount }}</strong> 条</span>
-                  </label>
-                  <p v-if="!visibleDepartments.length" class="review-empty">{{ departmentSearch ? '没有匹配的部门' : '暂无可下发部门' }}</p>
-                </div>
-                <div class="department-selection"><div><button type="button" :disabled="visibleDepartments.length !== 1" @click="selectAllDepartments">全选</button><button type="button" :disabled="visibleDepartments.length !== 1" @click="invertDepartments">反选</button><button type="button" @click="reviewForm.targetDeptId = ''">清空</button></div><span>已选 <strong>{{ reviewForm.targetDeptId ? 1 : 0 }}</strong> 个部门，合计接收 <strong>{{ reviewForm.targetDeptId ? abnormals.length : 0 }}</strong> 条</span></div>
-                <small v-if="departments.length > 1" class="single-department-note">每次下发选择一个部门。</small>
-              </section>
-              <label v-if="!departmentMode">下一节点处理人<select v-model="reviewForm.targetAssigneeId" required :disabled="!reviewForm.targetDeptId || optionsLoading"><option value="">{{ optionsLoading ? '正在读取用户…' : '请选择处理人' }}</option><option v-if="!canEdit && reviewForm.targetAssigneeId" :value="reviewForm.targetAssigneeId">{{ readonlyAssigneeName }}</option><option v-for="person in recipients" :key="person.id" :value="String(person.id)">{{ person.realName || person.nickname || person.username }}（{{ person.username }}）</option></select></label>
               <section class="dispatch-method"><p class="dispatch-label">下发方式</p>
-                <div v-if="departmentMode" class="dispatch-method-options"><label class="unavailable-method"><input type="radio" disabled /><span><b>属地下发</b><small>暂无图斑属地与网格员对应数据</small></span></label><label :class="{ chosen: reviewForm.dispatchMode === '直接指派' }"><input v-model="reviewForm.dispatchMode" type="radio" value="直接指派" name="dispatch-mode" /><span><b>直接指派</b><small>选择网格员直接接收核查任务</small></span></label></div>
+                <div v-if="departmentMode" class="dispatch-method-options"><label class="unavailable-method"><input type="radio" disabled /><span><b>属地下发</b><small>暂无图斑属地与网格员对应数据</small></span></label><label :class="{ chosen: reviewForm.dispatchMode === '直接指派' }"><input v-model="reviewForm.dispatchMode" type="radio" value="直接指派" name="dispatch-mode" /><span><b>直接指派</b><small>选择用户直接接收核查任务</small></span></label></div>
                 <div v-else class="dispatch-method-options"><label :class="{ chosen: reviewForm.dispatchMode === '逐级下发' }"><input v-model="reviewForm.dispatchMode" type="radio" value="逐级下发" name="dispatch-mode" /><span><b>逐级下发</b><small>发给区级部门，由其接收后继续组织核查</small></span></label><label :class="{ chosen: reviewForm.dispatchMode === '直接下发至基层' }"><input v-model="reviewForm.dispatchMode" type="radio" value="直接下发至基层" name="dispatch-mode" /><span><b>直接下发至基层</b><small>跳过区级部门，直接发给基层核查单位</small></span></label></div>
               </section>
               <label class="dispatch-deadline">办理期限 <span class="required-hint">必填</span><input v-model="reviewForm.deadline" type="datetime-local" step="60" required aria-label="办理期限" /><small>请选择下一节点的办理截止日期和时间。</small></label>
               <label>备注<textarea v-model="reviewForm.remark" :maxlength="departmentMode ? 200 : 500" placeholder="请结合影像判读结果，填写核查要求" /><small class="remark-count">{{ reviewForm.remark.length }}/{{ departmentMode ? 200 : 500 }}</small></label>
 
-              <p v-if="canEdit && (submitError || (!departmentMode && optionsError))" class="review-status error" role="alert">{{ submitError || optionsError }}</p>
+              <p v-if="canEdit && submitError" class="review-status error" role="alert">{{ submitError }}</p>
               <div class="review-actions"><button type="submit" :disabled="!canEdit || optionsLoading">{{ submitting ? '正在提交…' : selectedNode?.status === 'COMPLETED' ? '已完成下发' : '确认下发' }}</button></div>
             </fieldset>
           </form>
