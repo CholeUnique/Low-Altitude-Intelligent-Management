@@ -8,8 +8,9 @@ import type { TaskWorkflow } from '@/api/task-workflow'
 import { nonGrainNodeKey } from '@/utils/task-workflow-state'
 import { collectPages } from '@/api/pagination'
 import type { ComparisonPeriod } from '@/workspace-components/spot-identification/SpotDistributionMap.vue'
+import { shouldShowTaskDataError } from './task-data-errors'
 
-export function useBackendTaskData(props: { taskId?: string; nodeKey?: string }) {
+export function useBackendTaskData(props: { taskId?: string; nodeKey?: string; readonly?: boolean; includeMaterials?: boolean }) {
   const detail = ref<GovernanceTaskDetail>()
   const flow = ref<TaskWorkflow>()
   const logs = ref<GovernanceTaskOperateLog[]>([])
@@ -73,20 +74,22 @@ export function useBackendTaskData(props: { taskId?: string; nodeKey?: string })
     const responses = await Promise.allSettled([
       getGovernanceTaskGeometry(taskId, undefined, false, deptId),
       collectPages((pageNum, pageSize) => getTaskAbnormalPage({ bizTaskId: taskId, deptId, pageNum, pageSize })),
-      collectPages((pageNum, pageSize) => getGovernanceResultPage({ bizTaskId: taskId, deptId, pageNum, pageSize })),
-      getTaskEvidenceImages(taskId, deptId), getTaskWorkflow(taskId), getGovernanceTaskOperateLogs(taskId, deptId),
+      props.includeMaterials === false ? Promise.resolve([] as GovernanceResult[]) : collectPages((pageNum, pageSize) => getGovernanceResultPage({ bizTaskId: taskId, deptId, pageNum, pageSize })),
+      props.includeMaterials === false ? Promise.resolve([] as TaskEvidenceImage[]) : getTaskEvidenceImages(taskId, deptId), getTaskWorkflow(taskId), getGovernanceTaskOperateLogs(taskId, deptId),
     ])
     if (current !== version) return
     const labels = ['任务范围', '异常图斑', '成果材料', '任务影像', '工作流', '操作记录']
+    const workflowResponse = responses[4]
+    if (workflowResponse?.status === 'fulfilled') flow.value = workflowResponse.value
+    const readOnly = props.readonly === true || selectedNode.value?.status === 'COMPLETED'
     responses.forEach((response, index) => {
-      if (response.status === 'rejected') errors.value.push(`${labels[index]}：${response.reason instanceof Error ? response.reason.message : '读取失败'}`)
+      if (response.status === 'rejected' && shouldShowTaskDataError(index, response.reason, readOnly)) errors.value.push(`${labels[index]}：${response.reason instanceof Error ? response.reason.message : '读取失败'}`)
     })
-    const [geometryResponse, spotResponse, resultResponse, imageResponse, workflowResponse, logResponse] = responses
+    const [geometryResponse, spotResponse, resultResponse, imageResponse, , logResponse] = responses
     if (geometryResponse.status === 'fulfilled') geometry.value = geometryResponse.value
     if (spotResponse.status === 'fulfilled') { abnormals.value = spotResponse.value; activeSpotId.value = spotResponse.value[0]?.id || '' }
     if (resultResponse.status === 'fulfilled') results.value = resultResponse.value
     if (imageResponse.status === 'fulfilled') images.value = imageResponse.value
-    if (workflowResponse.status === 'fulfilled') flow.value = workflowResponse.value
     if (logResponse.status === 'fulfilled') logs.value = logResponse.value
     loading.value = false
   }

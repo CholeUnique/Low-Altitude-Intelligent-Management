@@ -18,7 +18,8 @@ export async function getMyWorkflowTasks(userId: string, deptId?: string): Promi
     collectPages((pageNum, pageSize) => getGovernanceTaskPage({ pageNum, pageSize, deptId })),
     getWorkflowTodos(deptId),
   ])
-  const candidates = new Map([...visible, ...assigned].map(task => [task.id, task]))
+  // 待办记录可能保留流程启动时的旧名称；任务列表中的业务名称优先。
+  const candidates = new Map([...assigned, ...visible].map(task => [task.id, task]))
   for (const id of new Set(todos.map(node => node.bizTaskId))) {
     if (candidates.has(id)) continue
     const detail = await getGovernanceTaskDetail(id)
@@ -36,12 +37,20 @@ export async function getMyWorkflowTasks(userId: string, deptId?: string): Promi
         const state = pendingIds.has(task.id) && myTaskWorkState(flow, userId) === 'pending' ? 'pending'
           : flow?.timeline.some(node => node.status === 'COMPLETED' && node.assigneeId === userId) ? 'handled' : undefined
         if (!flow || !state) return
+        // 只对本人相关任务读取详情，使用用户创建/编辑后的任务名称。
+        let taskName = task.name
+        try {
+          const detail = await getGovernanceTaskDetail(task.id)
+          if (detail?.task.name && detail.task.name !== '未命名任务') taskName = detail.task.name
+        } catch (reason) {
+          warnings.push(`${task.taskNo}：任务名称核实失败，${reason instanceof Error ? reason.message : '详情读取失败'}`)
+        }
         const myNodes = flow.timeline.filter(node => node.assigneeId === userId)
         if (flow.currentNode?.assigneeId === userId && !myNodes.some(node => node.id === flow.currentNode?.id)) myNodes.push(flow.currentNode)
         const current = flow.currentNode?.assigneeId === userId && flow.currentNode.status === 'PROCESSING'
           ? flow.currentNode : [...myNodes].reverse().find(node => node.status === 'PROCESSING')
         const workflow = workflowSteps(flow).map((step, index) => ({ ...step, name: workflowNodeDisplayName(flow.timeline[index]!, task.sceneCode) }))
-        records.push({ ...task, flow, workflow, myNodes, myWorkState: state, myDeadline: current?.deadline || [...myNodes].reverse().find(node => node.status === 'COMPLETED')?.deadline })
+        records.push({ ...task, name: taskName, flow, workflow, myNodes, myWorkState: state, myDeadline: current?.deadline || [...myNodes].reverse().find(node => node.status === 'COMPLETED')?.deadline })
       } catch (reason) {
         warnings.push(`${task.taskNo}：${reason instanceof Error ? reason.message : '工作流读取失败'}`)
       }

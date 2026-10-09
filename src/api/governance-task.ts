@@ -95,6 +95,8 @@ export interface GovernanceTaskCreateInput {
   contactPhone?: string
   /** 创建时可一并关联的无人机素材 ID。 */
   mediaIds?: string[]
+  /** 创建时关联后端地图服务，供任务详情和工作台读取。 */
+  mapServiceIds?: string[]
 }
 
 export interface GovernanceTaskGeometryUpsertInput {

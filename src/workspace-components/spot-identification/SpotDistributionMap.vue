@@ -19,6 +19,8 @@ export interface ComparisonPeriod {
   kind: 'image' | 'map-service' | 'empty'
   imageUrl?: string
   mapService?: MapServiceItem
+  /** 已重投影至 Web Mercator 的影像，以 WGS84 四至定位。 */
+  bounds?: [number, number, number, number]
 }
 
 export interface SynchronizedMapView {
@@ -67,7 +69,7 @@ const synchronizationSource = Symbol('spot-map')
 const drawingCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M18.8 2.7l6.5 6.5-12.8 12.8-7.4 1.7 1.7-7.4z' fill='%23ffffff' stroke='%23073550' stroke-width='1.7' stroke-linejoin='round'/%3E%3Cpath d='M6.8 16.3l6.5 6.5-8.2 1.9z' fill='%2319a5c7' stroke='%23073550' stroke-width='1.7' stroke-linejoin='round'/%3E%3Cpath d='M17.1 4.4l6.5 6.5' stroke='%2319a5c7' stroke-width='2'/%3E%3C/svg%3E") 4 24, crosshair`
 
 function isSynchronizedImagery() {
-  return !props.thumbnail && (props.period.kind === 'map-service' || (props.period.kind === 'image' && props.synchronizeImages))
+  return !props.thumbnail && (props.period.kind === 'map-service' || Boolean(props.period.bounds) || (props.period.kind === 'image' && props.synchronizeImages))
 }
 
 function sameView(view: SynchronizedMapView) {
@@ -119,7 +121,7 @@ function isArea(bounds: L.LatLngBounds) {
 }
 
 function isDrawingOnThisMap() {
-  return !props.thumbnail && props.period.kind === 'map-service'
+  return !props.thumbnail && (props.period.kind === 'map-service' || Boolean(props.period.bounds))
     && (props.drawingMode === 'available' || props.drawingMode === 'active')
 }
 
@@ -196,10 +198,18 @@ function handleMapMouseOut() {
   clearDraftHover()
 }
 
-/**
- * 第 2 期及以后：以原图像素坐标创建独立查看器。
- * 这里没有天地图、图斑边界或视图同步，拖动与缩放只作用于本窗口。
- */
+/** GeoTIFF 预览已重投影到 Web Mercator，与地图服务共用地理视图。 */
+function createGeographicImageViewer(imageUrl: string) {
+  if (!container.value || !props.period.bounds) return
+  const [west, south, east, north] = props.period.bounds
+  const bounds = L.latLngBounds([south, west], [north, east])
+  map = L.map(container.value, { maxZoom: 24, attributionControl: false }).fitBounds(bounds, { animate: false })
+  map.createPane('spot-drawing').style.zIndex = '620'
+  L.imageOverlay(imageUrl, bounds).on('error', () => { imageError.value = true }).addTo(map)
+  imageReady = true
+  if (props.spot?.boundaryGeoJson) spotBoundaryLayer = L.geoJSON(props.spot.boundaryGeoJson as GeoJSON.FeatureCollection, { style: { color: '#ff4656', weight: 3, fillOpacity: .1, dashArray: '5 4' } }).addTo(map)
+}
+
 function createImageViewer(imageUrl: string) {
   if (!container.value) return
   map = L.map(container.value, {
@@ -296,6 +306,7 @@ onMounted(async () => {
   await nextTick()
   if (!container.value || props.period.kind === 'empty') return
   if (props.period.kind === 'map-service' && props.period.mapService) await createMapServiceViewer(props.period.mapService)
+  else if (props.period.imageUrl && props.period.bounds) createGeographicImageViewer(props.period.imageUrl)
   else if (props.period.imageUrl) createImageViewer(props.period.imageUrl)
   if (!map) return
   map.on('click', handleMapClick)
@@ -303,10 +314,10 @@ onMounted(async () => {
   map.on('mousemove', handleMapMouseMove)
   map.on('mouseout', handleMapMouseOut)
   updateDrawingMode()
-  if (props.period.kind !== 'image') enableViewSynchronization()
+  if (props.period.kind !== 'image' || props.period.bounds) enableViewSynchronization()
   resizeObserver = new ResizeObserver(() => {
     if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
-    resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: false }))
+    resizeFrame = window.requestAnimationFrame(() => map?.invalidateSize({ pan: true, animate: false }))
   })
   resizeObserver.observe(container.value)
 })
