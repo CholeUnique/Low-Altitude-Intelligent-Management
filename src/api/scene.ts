@@ -1,13 +1,71 @@
 import { apiClient, isMockMode } from './client'
 import type { Scene } from '@/types'
 
-interface BizSceneDto {
+export interface BizSceneMetric {
+  code?: string
+  name?: string
+  unit?: string
+  [key: string]: unknown
+}
+
+export interface BizSceneResultType {
+  code?: string
+  name?: string
+  [key: string]: unknown
+}
+
+export interface BizSceneDto {
   id: string | number
+  sceneCode: string
+  sceneName: string
+  deptId?: string | number
+  deptName?: string
+  category?: string
+  description?: string
+  governanceEnabled?: number
+  defaultRefType?: string
+  metricJson?: string
+  metrics?: BizSceneMetric[]
+  resultTypes?: BizSceneResultType[]
+  sort?: number
+  status?: number
+  createTime?: string
+  updateTime?: string
+}
+
+export interface BizSceneListQuery {
+  deptId?: string
+  keyword?: string
+  category?: string
+  status?: number | ''
+  groupByCategory?: boolean
+}
+
+export interface BizSceneInput {
+  deptId?: string
   sceneCode: string
   sceneName: string
   category?: string
   description?: string
+  governanceEnabled?: number
+  defaultRefType?: string
+  metricJson?: string
+  sort?: number
   status?: number
+}
+
+export interface BizSceneUpdateInput extends Omit<Partial<BizSceneInput>, 'sceneCode' | 'status'> {
+  id: string
+}
+
+export interface BizSceneAssignee {
+  sceneCode: string
+  sceneName?: string
+  deptId?: string | number
+  deptName?: string
+  assigneeId?: string | number | null
+  assigneeName?: string | null
+  updateTime?: string
 }
 
 /**
@@ -59,4 +117,44 @@ export async function getSceneDictionary(mockScenes: Scene[], deptId?: string): 
     deptId: deptId || undefined,
   })
   return scenes.map(toSceneDictionaryItem)
+}
+
+function withoutEmptyFilter<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== '')) as T
+}
+
+export function getBizSceneList(query: BizSceneListQuery = {}) {
+  return apiClient.post<never, BizSceneDto[]>('/v1/biz/scene/list', withoutEmptyFilter(query as Record<string, unknown>))
+}
+
+export function getBizSceneDetail(id: string, deptId?: string) {
+  return apiClient.post<never, BizSceneDto>('/v1/biz/scene/detail', { id, deptId })
+}
+
+export function addBizScene(input: BizSceneInput) {
+  return apiClient.post<never, void>('/v1/biz/scene/add', input)
+}
+
+export function updateBizScene(input: BizSceneUpdateInput) {
+  return apiClient.post<never, void>('/v1/biz/scene/update', input)
+}
+
+export function updateBizSceneStatus(id: string, status: number, deptId?: string) {
+  return apiClient.post<never, void>('/v1/biz/scene/status', { id, status, deptId })
+}
+
+export function deleteBizScene(id: string, deptId?: string) {
+  return apiClient.post<never, void>('/v1/biz/scene/delete', { id, deptId })
+}
+
+export function getBizSceneAssignees(deptId?: string, sceneCode?: string) {
+  return apiClient.post<never, BizSceneAssignee[]>('/v1/biz/scene/assignee/query', { deptId, sceneCode })
+}
+
+export function addBizSceneAssignee(sceneCode: string, assigneeId: string, deptId?: string) {
+  return apiClient.post<never, void>('/v1/biz/scene/assignee/add', { deptId, sceneCode, assigneeId })
+}
+
+export function updateBizSceneAssignee(sceneCode: string, assigneeId: string, deptId?: string) {
+  return apiClient.post<never, void>('/v1/biz/scene/assignee/update', { deptId, sceneCode, assigneeId })
 }

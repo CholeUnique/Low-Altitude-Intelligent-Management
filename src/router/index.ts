@@ -35,7 +35,7 @@ const router = createRouter({
     { path: '/workspace/:sceneId/:taskId?', name: 'workspace', component: () => import('@/views/WorkspaceView.vue'), meta: { title: '场景作业工作台' } },
     { path: '/algorithms', name: 'algorithms', component: () => import('@/views/AlgorithmRepositoryView.vue'), meta: { title: '算法能力仓库' } },
     { path: '/account-management', redirect: (to) => ({ name: 'account-management', params: { section: 'profile' }, query: to.query }) },
-    { path: '/account-management/:section(profile|users|departments|permissions|metadata|map-services)', name: 'account-management', component: () => import('@/views/AccountManagementView.vue'), meta: { title: '后台管理' } },
+    { path: '/account-management/:section(profile|users|departments|scenes|permissions|metadata|map-services)', name: 'account-management', component: () => import('@/views/AccountManagementView.vue'), meta: { title: '后台管理' } },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],
 })

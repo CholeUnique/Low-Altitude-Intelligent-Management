@@ -4,8 +4,7 @@ import { computed, ref, watch } from 'vue'
 const model = defineModel<string[]>({ default: () => [] })
 const props = withDefaults(defineProps<{ theme?: 'dark' | 'light' }>(), { theme: 'dark' })
 
-const datePopoverVisible = ref(false)
-const timePopoverVisible = ref(false)
+const popoverVisible = ref(false)
 const visibleMonth = ref(firstDayOfMonth(new Date()))
 const startDate = ref('')
 const endDate = ref('')
@@ -13,7 +12,7 @@ const startTime = ref('08:00')
 const endTime = ref('18:00')
 let isApplyingModel = false
 
-const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 const hours = Array.from({ length: 24 }, (_, value) => String(value).padStart(2, '0'))
 const minutes = Array.from({ length: 60 }, (_, value) => String(value).padStart(2, '0'))
 
@@ -28,16 +27,16 @@ function toDateKey(value: Date) {
   return `${year}-${month}-${day}`
 }
 
-function normaliseTime(value?: string) {
-  return /^\d{2}:\d{2}/.test(value || '') ? value!.slice(0, 5) : '00:00'
+function normaliseTime(value?: string, fallback = '00:00') {
+  return /^\d{2}:\d{2}/.test(value || '') ? value!.slice(0, 5) : fallback
 }
 
 function hydrate(values: string[] = []) {
   const [start, end] = values
   startDate.value = start?.slice(0, 10) || ''
   endDate.value = end?.slice(0, 10) || ''
-  startTime.value = normaliseTime(start?.slice(11))
-  endTime.value = normaliseTime(end?.slice(11))
+  startTime.value = normaliseTime(start?.slice(11), '08:00')
+  endTime.value = normaliseTime(end?.slice(11), '18:00')
   const anchor = startDate.value || endDate.value
   if (anchor) visibleMonth.value = firstDayOfMonth(new Date(`${anchor}T00:00:00`))
 }
@@ -51,36 +50,41 @@ watch(model, (values) => {
 }, { immediate: true, deep: true })
 
 const monthLabel = computed(() => `${visibleMonth.value.getFullYear()} 年 ${visibleMonth.value.getMonth() + 1} 月`)
-const timeDisabled = computed(() => !startDate.value || !endDate.value)
 const dateStartText = computed(() => startDate.value ? startDate.value.replace(/-/g, '/') : '开始日期')
 const dateEndText = computed(() => endDate.value ? endDate.value.replace(/-/g, '/') : '结束日期')
+const startDateTimeText = computed(() => startDate.value ? `${dateStartText.value} ${startTime.value}` : '开始时间')
+const endDateTimeText = computed(() => endDate.value ? `${dateEndText.value} ${endTime.value}` : '结束时间')
+const hasCompleteRange = computed(() => Boolean(startDate.value && endDate.value))
+const rangeIsValid = computed(() => {
+  if (!hasCompleteRange.value) return false
+  return `${startDate.value}T${startTime.value}` <= `${endDate.value}T${endTime.value}`
+})
+const rangeHint = computed(() => {
+  if (!startDate.value) return '请选择开始日期'
+  if (!endDate.value) return '请选择结束日期'
+  if (!rangeIsValid.value) return '结束时间不能早于开始时间'
+  return `${dateStartText.value} ${startTime.value} 至 ${dateEndText.value} ${endTime.value}`
+})
 
 const calendarDays = computed(() => {
   const month = visibleMonth.value
   const first = new Date(month.getFullYear(), month.getMonth(), 1)
   const begin = new Date(first)
-  begin.setDate(first.getDate() - first.getDay())
+  begin.setDate(first.getDate() - ((first.getDay() + 6) % 7))
   return Array.from({ length: 42 }, (_, index) => {
     const day = new Date(begin)
     day.setDate(begin.getDate() + index)
-    return {
-      key: toDateKey(day),
-      label: day.getDate(),
-      isCurrentMonth: day.getMonth() === month.getMonth(),
-    }
+    return { key: toDateKey(day), label: day.getDate(), isCurrentMonth: day.getMonth() === month.getMonth() }
   })
 })
 
 function applyModel() {
   isApplyingModel = true
-  if (!startDate.value || !endDate.value) {
+  if (!rangeIsValid.value) {
     model.value = []
     return
   }
-  model.value = [
-    `${startDate.value}T${startTime.value}:00`,
-    `${endDate.value}T${endTime.value}:00`,
-  ]
+  model.value = [`${startDate.value}T${startTime.value}:00`, `${endDate.value}T${endTime.value}:00`]
 }
 
 function selectDate(value: string) {
@@ -112,16 +116,17 @@ function handleMonthWheel(event: WheelEvent) {
   moveMonth(event.deltaY > 0 ? 1 : -1)
 }
 
-function setTime(target: 'start' | 'end', part: 'hour' | 'minute', value: string) {
+function setTime(target: 'start' | 'end', part: 'hour' | 'minute', event: Event) {
+  const value = (event.target as HTMLSelectElement).value
   const current = target === 'start' ? startTime : endTime
-  const [hour, minute] = current.value.split(':')
+  const [hour = '00', minute = '00'] = current.value.split(':')
   current.value = part === 'hour' ? `${value}:${minute}` : `${hour}:${value}`
   applyModel()
 }
 
-function isTimeSelected(target: 'start' | 'end', part: 'hour' | 'minute', value: string) {
-  const current = target === 'start' ? startTime.value : endTime.value
-  return current.split(':')[part === 'hour' ? 0 : 1] === value
+function timePart(target: 'start' | 'end', part: 'hour' | 'minute') {
+  const value = target === 'start' ? startTime.value : endTime.value
+  return value.split(':')[part === 'hour' ? 0 : 1]
 }
 
 function clearSchedule() {
@@ -129,85 +134,75 @@ function clearSchedule() {
   endDate.value = ''
   startTime.value = '08:00'
   endTime.value = '18:00'
-  isApplyingModel = true
-  model.value = []
+  applyModel()
+}
+
+function useCurrentRange() {
+  const now = new Date()
+  const later = new Date(now.getTime() + 60 * 60 * 1000)
+  startDate.value = toDateKey(now)
+  endDate.value = toDateKey(later)
+  startTime.value = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  endTime.value = `${String(later.getHours()).padStart(2, '0')}:${String(later.getMinutes()).padStart(2, '0')}`
+  visibleMonth.value = firstDayOfMonth(now)
+  applyModel()
+}
+
+function confirmSchedule() {
+  if (!rangeIsValid.value) return
+  applyModel()
+  popoverVisible.value = false
 }
 </script>
 
 <template>
   <div class="task-schedule-picker" :class="`is-${props.theme}`">
-    <el-popover v-model:visible="datePopoverVisible" trigger="click" placement="bottom-start" :width="318" :popper-class="props.theme === 'light' ? 'task-calendar-popper task-calendar-popper--light' : 'task-calendar-popper'">
+    <el-popover v-model:visible="popoverVisible" trigger="click" placement="bottom-start" :width="548" :popper-class="props.theme === 'light' ? 'task-schedule-popper task-schedule-popper--light' : 'task-schedule-popper'">
       <template #reference>
-        <button type="button" class="schedule-trigger schedule-date-trigger">
-          <span class="schedule-trigger-icon">▣</span>
-          <span class="schedule-trigger-start">{{ dateStartText }}</span>
-          <span class="schedule-trigger-separator">至</span>
-          <span class="schedule-trigger-end">{{ dateEndText }}</span>
-          <span class="schedule-trigger-arrow">⌄</span>
-        </button>
-      </template>
-
-      <section class="schedule-calendar" @wheel.prevent="handleMonthWheel">
-        <div class="schedule-calendar__header">
-          <button type="button" class="calendar-nav calendar-nav--year" title="上一年" @click="moveYear(-1)">‹‹</button>
-          <button type="button" class="calendar-nav" title="上个月" @click="moveMonth(-1)">‹</button>
-          <strong>{{ monthLabel }}</strong>
-          <button type="button" class="calendar-nav" title="下个月" @click="moveMonth(1)">›</button>
-          <button type="button" class="calendar-nav calendar-nav--year" title="下一年" @click="moveYear(1)">››</button>
-        </div>
-        <div class="schedule-calendar__weekdays"><span v-for="weekday in weekdays" :key="weekday">{{ weekday }}</span></div>
-        <div class="schedule-calendar__days">
-          <button v-for="day in calendarDays" :key="day.key" type="button" :class="{ 'is-other-month': !day.isCurrentMonth, 'is-range-start': day.key === startDate, 'is-range-end': day.key === endDate, 'is-in-range': isInRange(day.key) }" @click="selectDate(day.key)">
-            {{ day.label }}
+        <div class="schedule-trigger-group">
+          <button type="button" class="schedule-trigger">
+            <span class="schedule-trigger-icon">◷</span><span class="schedule-trigger-start">{{ startDateTimeText }}</span><span class="schedule-trigger-separator">-</span><span class="schedule-trigger-end">{{ endDateTimeText }}</span><span class="schedule-trigger-arrow">⌄</span>
           </button>
         </div>
-        <div class="schedule-calendar__footer">
-          <button type="button" @click="clearSchedule">清空</button>
-          <button type="button" class="calendar-confirm" @click="datePopoverVisible = false">确定</button>
-        </div>
-      </section>
-    </el-popover>
-
-    <el-popover v-model:visible="timePopoverVisible" trigger="click" placement="bottom-start" :width="388" :popper-class="props.theme === 'light' ? 'task-time-popper task-time-popper--light' : 'task-time-popper'" :disabled="timeDisabled">
-      <template #reference>
-        <button type="button" class="schedule-trigger schedule-time-trigger" :disabled="timeDisabled">
-          <span class="schedule-trigger-icon">◷</span>
-          <span class="schedule-trigger-start">{{ timeDisabled ? '开始时间' : startTime }}</span>
-          <span class="schedule-trigger-separator">－</span>
-          <span class="schedule-trigger-end">{{ timeDisabled ? '结束时间' : endTime }}</span>
-          <span class="schedule-trigger-arrow">⌄</span>
-        </button>
       </template>
 
-      <section class="schedule-time-picker">
-        <div v-for="target in ['start', 'end'] as const" :key="target" class="time-column">
-          <strong>{{ target === 'start' ? '开始时间' : '结束时间' }}</strong>
-          <div class="time-wheels">
-            <div class="time-wheel" aria-label="小时">
-              <button v-for="hour in hours" :key="hour" type="button" :class="{ active: isTimeSelected(target, 'hour', hour) }" @click="setTime(target, 'hour', hour)">{{ hour }}</button>
-            </div>
-            <div class="time-wheel" aria-label="分钟">
-              <button v-for="minute in minutes" :key="minute" type="button" :class="{ active: isTimeSelected(target, 'minute', minute) }" @click="setTime(target, 'minute', minute)">{{ minute }}</button>
-            </div>
+      <section class="schedule-range-panel">
+        <div class="schedule-calendar" @wheel.prevent="handleMonthWheel">
+          <div class="schedule-calendar__header">
+            <button type="button" class="calendar-nav calendar-nav--year" title="上一年" @click="moveYear(-1)">‹‹</button><button type="button" class="calendar-nav" title="上个月" @click="moveMonth(-1)">‹</button><strong>{{ monthLabel }}</strong><button type="button" class="calendar-nav" title="下个月" @click="moveMonth(1)">›</button><button type="button" class="calendar-nav calendar-nav--year" title="下一年" @click="moveYear(1)">››</button>
+          </div>
+          <div class="schedule-calendar__weekdays"><span v-for="weekday in weekdays" :key="weekday">{{ weekday }}</span></div>
+          <div class="schedule-calendar__days">
+            <button v-for="day in calendarDays" :key="day.key" type="button" :class="{ 'is-other-month': !day.isCurrentMonth, 'is-range-start': day.key === startDate, 'is-range-end': day.key === endDate, 'is-in-range': isInRange(day.key) }" @click="selectDate(day.key)">{{ day.label }}</button>
           </div>
         </div>
-        <div class="schedule-time-picker__footer">
-          <button type="button" @click="timePopoverVisible = false">取消</button>
-          <button type="button" class="calendar-confirm" @click="timePopoverVisible = false">确定</button>
-        </div>
+
+        <aside class="schedule-time-panel">
+          <strong>选择时间</strong>
+          <div v-for="target in ['start', 'end'] as const" :key="target" class="range-time-row">
+            <span>{{ target === 'start' ? '开始时间' : '结束时间' }}</span>
+            <div>
+              <select :value="timePart(target, 'hour')" :aria-label="`${target === 'start' ? '开始' : '结束'}小时`" @change="setTime(target, 'hour', $event)"><option v-for="hour in hours" :key="hour" :value="hour">{{ hour }}</option></select><b>:</b><select :value="timePart(target, 'minute')" :aria-label="`${target === 'start' ? '开始' : '结束'}分钟`" @change="setTime(target, 'minute', $event)"><option v-for="minute in minutes" :key="minute" :value="minute">{{ minute }}</option></select>
+            </div>
+            <em>{{ target === 'start' ? (dateStartText === '开始日期' ? '待选择日期' : dateStartText) : (dateEndText === '结束日期' ? '待选择日期' : dateEndText) }}</em>
+          </div>
+          <p :class="{ invalid: startDate && endDate && !rangeIsValid }">{{ rangeHint }}</p>
+        </aside>
+
+        <footer class="schedule-range-panel__footer">
+          <button type="button" @click="clearSchedule">清空</button><span></span><button type="button" @click="useCurrentRange">现在</button><button type="button" class="calendar-confirm" :disabled="!rangeIsValid" @click="confirmSchedule">确认</button>
+        </footer>
       </section>
     </el-popover>
   </div>
 </template>
 
 <style lang="scss">
-.task-schedule-picker { display: grid; gap: 7px; }
-.schedule-trigger { width: 100%; min-height: 38px; display: grid; grid-template-columns: 18px minmax(0, 1fr) 24px minmax(0, 1fr) 14px; align-items: center; column-gap: 6px; padding: 8px 10px; color: #d8f5fb; text-align: left; background: #03182d; border: 1px solid #155a7e; cursor: pointer; font: inherit; }
-.schedule-trigger:hover,.schedule-trigger:focus-visible { border-color: #28a7db; background: #063452; outline: none; }.schedule-trigger:disabled { color: #658b9b; cursor: not-allowed; opacity: .8; }.schedule-trigger-icon { color: #47cbed; }.schedule-trigger-start { min-width: 0; text-align: left; white-space: nowrap; }.schedule-trigger-separator { color: #a7ccda; text-align: center; }.schedule-trigger-end { min-width: 0; text-align: right; white-space: nowrap; }.schedule-trigger-arrow { color: #77b7ca; text-align: right; }
-.task-calendar-popper.el-popper,.task-time-popper.el-popper { padding: 0!important; color: #d7eff8; background: #282832!important; border: 1px solid #4a4a56!important; box-shadow: 0 12px 24px #0009!important; }.task-calendar-popper.el-popper .el-popper__arrow::before,.task-time-popper.el-popper .el-popper__arrow::before { background: #282832!important; border-color: #4a4a56!important; }
-.schedule-calendar { padding: 12px 14px 0; user-select: none; }.schedule-calendar__header { display: grid; grid-template-columns: 30px 28px 1fr 28px 30px; align-items: center; gap: 3px; margin-bottom: 12px; }.schedule-calendar__header strong { text-align: center; font-size: 15px; }.calendar-nav { height: 26px; padding: 0; color: #b9dce9; background: transparent; border: 0; cursor: pointer; font-size: 22px; line-height: 1; }.calendar-nav:hover { color: #3bd5ef; background: #183b4f; }.calendar-nav--year { color: #ff9a9a; font-size: 15px; }.schedule-calendar__weekdays,.schedule-calendar__days { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; }.schedule-calendar__weekdays { margin-bottom: 5px; padding-bottom: 7px; color: #bed5df; border-bottom: 1px solid #3d3d49; font-size: 13px; }.schedule-calendar__days button { position: relative; height: 32px; z-index: 0; padding: 0; color: #edf8fc; background: transparent; border: 0; cursor: pointer; font-size: 13px; }.schedule-calendar__days button:hover { color: white; background: #1e6986; }.schedule-calendar__days button.is-other-month { color: #777985; }.schedule-calendar__days button.is-in-range { color: #fff; background: #275d73; }.schedule-calendar__days button.is-range-start,.schedule-calendar__days button.is-range-end { color: #fff; background: #2683ef; border-radius: 16px; font-weight: bold; }.schedule-calendar__footer,.schedule-time-picker__footer { display: flex; justify-content: flex-end; gap: 14px; margin: 9px -14px 0; padding: 10px 14px; border-top: 1px solid #41414c; }.schedule-calendar__footer button,.schedule-time-picker__footer button { padding: 3px 8px; color: #d9edf4; background: transparent; border: 0; cursor: pointer; }.schedule-calendar__footer .calendar-confirm,.schedule-time-picker__footer .calendar-confirm { color: #49b9ff; }
-.schedule-time-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; padding: 14px 14px 0; }.time-column { min-width: 0; }.time-column>strong { display: block; margin-bottom: 9px; color: #f0f8fb; text-align: center; font-size: 14px; }.time-wheels { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }.time-wheel { height: 168px; overflow-y: auto; border: 1px solid #464653; scrollbar-color: #617888 #25252e; scroll-snap-type: y mandatory; }.time-wheel button { display: block; width: 100%; min-height: 28px; padding: 0; color: #b9c7ce; background: transparent; border: 0; cursor: pointer; scroll-snap-align: center; }.time-wheel button:hover { color: #fff; background: #3c5662; }.time-wheel button.active { color: #fff; background: #3e3e49; font-weight: bold; }.schedule-time-picker__footer { grid-column: 1 / -1; }
-.task-schedule-picker.is-light{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.task-schedule-picker.is-light .schedule-trigger{min-width:0;color:#29475a;background:#fbfdfe;border-color:#c8dae4;border-radius:4px}.task-schedule-picker.is-light .schedule-trigger:hover,.task-schedule-picker.is-light .schedule-trigger:focus-visible{color:#fff;background:#075273;border-color:#1599c1;box-shadow:0 0 0 2px #189abd1c}.task-schedule-picker.is-light .schedule-trigger-icon{color:#1599c1}.task-schedule-picker.is-light .schedule-trigger:hover .schedule-trigger-icon,.task-schedule-picker.is-light .schedule-trigger:focus-visible .schedule-trigger-icon,.task-schedule-picker.is-light .schedule-trigger:hover .schedule-trigger-separator,.task-schedule-picker.is-light .schedule-trigger:focus-visible .schedule-trigger-separator,.task-schedule-picker.is-light .schedule-trigger:hover .schedule-trigger-arrow,.task-schedule-picker.is-light .schedule-trigger:focus-visible .schedule-trigger-arrow{color:#fff}.task-schedule-picker.is-light .schedule-trigger-separator{color:#7f96a3}.task-schedule-picker.is-light .schedule-trigger-arrow{color:#668696}.task-schedule-picker.is-light .schedule-trigger:disabled{color:#93a5ae;background:#f3f6f8;border-color:#d7e1e6}
-.task-calendar-popper--light.el-popper,.task-time-popper--light.el-popper{color:#29475a;background:#fff!important;border-color:#c8dae4!important;box-shadow:0 12px 30px #29475a2e!important}.task-calendar-popper--light.el-popper .el-popper__arrow::before,.task-time-popper--light.el-popper .el-popper__arrow::before{background:#fff!important;border-color:#c8dae4!important}.task-calendar-popper--light .schedule-calendar__header strong{color:#24485d}.task-calendar-popper--light .calendar-nav{color:#58798a}.task-calendar-popper--light .calendar-nav:hover{color:#087fa4;background:#e8f5f8}.task-calendar-popper--light .calendar-nav--year{color:#c76363}.task-calendar-popper--light .schedule-calendar__weekdays{color:#718895;border-color:#e1ebef}.task-calendar-popper--light .schedule-calendar__days button{color:#35576a}.task-calendar-popper--light .schedule-calendar__days button:hover{color:#fff;background:#1796b7}.task-calendar-popper--light .schedule-calendar__days button.is-other-month{color:#b6c3c9}.task-calendar-popper--light .schedule-calendar__days button.is-in-range{color:#147896;background:#e0f2f7}.task-calendar-popper--light .schedule-calendar__days button.is-range-start,.task-calendar-popper--light .schedule-calendar__days button.is-range-end{color:#fff;background:#0c91b8}.task-calendar-popper--light .schedule-calendar__footer,.task-time-popper--light .schedule-time-picker__footer{border-color:#e1ebef}.task-calendar-popper--light .schedule-calendar__footer button,.task-time-popper--light .schedule-time-picker__footer button{color:#607987}.task-calendar-popper--light .schedule-calendar__footer .calendar-confirm,.task-time-popper--light .schedule-time-picker__footer .calendar-confirm{color:#078bad;font-weight:600}.task-time-popper--light .time-column>strong{color:#29475a}.task-time-popper--light .time-wheel{border-color:#d5e2e8;scrollbar-color:#a8c1cc #eef4f6}.task-time-popper--light .time-wheel button{color:#607987}.task-time-popper--light .time-wheel button:hover{color:#fff;background:#1796b7}.task-time-popper--light .time-wheel button.active{color:#fff;background:#0c91b8}
-@media(max-width:640px){.task-schedule-picker.is-light{grid-template-columns:1fr}}
+.task-schedule-picker{width:100%}.schedule-trigger-group{display:block}.schedule-trigger{width:100%;min-width:0;min-height:38px;display:grid;grid-template-columns:18px minmax(0,1fr) 16px minmax(0,1fr) 14px;align-items:center;column-gap:7px;padding:8px 10px;color:#d8f5fb;text-align:left;background:#03182d;border:1px solid #155a7e;cursor:pointer;font:inherit}.schedule-trigger:hover,.schedule-trigger:focus-visible{border-color:#28a7db;background:#063452;outline:none}.schedule-trigger-icon{color:#47cbed}.schedule-trigger-start,.schedule-trigger-end{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.schedule-trigger-start{text-align:left}.schedule-trigger-end{text-align:right}.schedule-trigger-separator{color:#a7ccda;text-align:center}.schedule-trigger-arrow{color:#77b7ca;text-align:right}
+.task-schedule-popper.el-popper{padding:0!important;color:#d7eff8;background:#282832!important;border:1px solid #4a4a56!important;border-radius:8px!important;box-shadow:0 14px 34px #0009!important}.task-schedule-popper.el-popper .el-popper__arrow::before{background:#282832!important;border-color:#4a4a56!important}.schedule-range-panel{display:grid;grid-template-columns:minmax(0,1fr) 205px;user-select:none}.schedule-calendar{padding:14px 15px 10px}.schedule-calendar__header{display:grid;grid-template-columns:30px 28px 1fr 28px 30px;align-items:center;gap:3px;margin-bottom:12px}.schedule-calendar__header strong{text-align:center;font-size:15px}.calendar-nav{height:27px;padding:0;color:#b9dce9;background:transparent;border:0;border-radius:4px;cursor:pointer;font-size:22px;line-height:1}.calendar-nav:hover{color:#3bd5ef;background:#183b4f}.calendar-nav--year{font-size:15px}.schedule-calendar__weekdays,.schedule-calendar__days{display:grid;grid-template-columns:repeat(7,1fr);text-align:center}.schedule-calendar__weekdays{margin-bottom:5px;padding-bottom:7px;color:#bed5df;border-bottom:1px solid #3d3d49;font-size:12px}.schedule-calendar__days button{height:32px;padding:0;color:#edf8fc;background:transparent;border:0;cursor:pointer;font-size:13px}.schedule-calendar__days button:hover{color:#fff;background:#1e6986;border-radius:4px}.schedule-calendar__days button.is-other-month{color:#777985}.schedule-calendar__days button.is-in-range{color:#fff;background:#275d73}.schedule-calendar__days button.is-range-start,.schedule-calendar__days button.is-range-end{color:#fff;background:#168fb4;border-radius:16px;font-weight:700}
+.schedule-time-panel{padding:15px 14px;background:#22222b;border-left:1px solid #41414c}.schedule-time-panel>strong{display:block;margin-bottom:12px;font-size:14px}.range-time-row{margin-bottom:14px}.range-time-row>span,.range-time-row>em{display:block}.range-time-row>span{margin-bottom:6px;color:#a9c2cc;font-size:12px}.range-time-row>div{display:grid;grid-template-columns:1fr 12px 1fr;align-items:center;gap:4px}.range-time-row select{width:100%;height:34px;padding:0 7px;color:#e7f6fa;background:#30303a;border:1px solid #51515e;border-radius:4px;outline:none}.range-time-row select:focus{border-color:#27b8d7}.range-time-row b{text-align:center}.range-time-row>em{margin-top:5px;color:#758f9a;font-size:11px;font-style:normal}.schedule-time-panel>p{margin:6px 0 0;padding:8px;color:#81cedd;background:#163642;border-radius:4px;font-size:11px;line-height:1.45}.schedule-time-panel>p.invalid{color:#ff9a9f;background:#4b292d}
+.schedule-range-panel__footer{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:9px;padding:10px 14px;border-top:1px solid #41414c}.schedule-range-panel__footer button{min-width:58px;height:31px;padding:0 12px;color:#d9edf4;background:transparent;border:1px solid #545461;border-radius:4px;cursor:pointer}.schedule-range-panel__footer button:hover{border-color:#2eb6d5}.schedule-range-panel__footer .calendar-confirm{color:#fff;background:#168fb4;border-color:#2dbdd8;font-weight:600}.schedule-range-panel__footer .calendar-confirm:disabled{color:#7e939c;background:#30343b;border-color:#454b52;cursor:not-allowed}
+.task-schedule-picker.is-light .schedule-trigger{color:#29475a;background:#fbfdfe;border-color:#c8dae4;border-radius:4px}.task-schedule-picker.is-light .schedule-trigger:hover,.task-schedule-picker.is-light .schedule-trigger:focus-visible{color:#fff;background:#075273;border-color:#1599c1;box-shadow:0 0 0 2px #189abd1c}.task-schedule-picker.is-light .schedule-trigger-icon{color:#1599c1}.task-schedule-picker.is-light .schedule-trigger:hover .schedule-trigger-icon,.task-schedule-picker.is-light .schedule-trigger:focus-visible .schedule-trigger-icon,.task-schedule-picker.is-light .schedule-trigger:hover .schedule-trigger-separator,.task-schedule-picker.is-light .schedule-trigger:focus-visible .schedule-trigger-separator,.task-schedule-picker.is-light .schedule-trigger:hover .schedule-trigger-arrow,.task-schedule-picker.is-light .schedule-trigger:focus-visible .schedule-trigger-arrow{color:#fff}.task-schedule-picker.is-light .schedule-trigger-separator{color:#7f96a3}.task-schedule-picker.is-light .schedule-trigger-arrow{color:#668696}
+.task-schedule-popper--light.el-popper{color:#29475a;background:#fff!important;border-color:#35a9c7!important;box-shadow:0 14px 38px #08364b47!important}.task-schedule-popper--light.el-popper .el-popper__arrow::before{background:#fff!important;border-color:#35a9c7!important}.task-schedule-popper--light .schedule-calendar__header strong{color:#24485d}.task-schedule-popper--light .calendar-nav{color:#58798a}.task-schedule-popper--light .calendar-nav:hover{color:#087fa4;background:#e8f5f8}.task-schedule-popper--light .schedule-calendar__weekdays{color:#718895;border-color:#e1ebef}.task-schedule-popper--light .schedule-calendar__days button{color:#35576a}.task-schedule-popper--light .schedule-calendar__days button:hover{color:#fff;background:#1796b7}.task-schedule-popper--light .schedule-calendar__days button.is-other-month{color:#b6c3c9}.task-schedule-popper--light .schedule-calendar__days button.is-in-range{color:#147896;background:#e0f2f7}.task-schedule-popper--light .schedule-calendar__days button.is-range-start,.task-schedule-popper--light .schedule-calendar__days button.is-range-end{color:#fff;background:#0c91b8}.task-schedule-popper--light .schedule-time-panel{background:#f6fafb;border-color:#d6e4ea}.task-schedule-popper--light .schedule-time-panel>strong{color:#24485d}.task-schedule-popper--light .range-time-row>span{color:#607987}.task-schedule-popper--light .range-time-row select{color:#29475a;background:#fff;border-color:#bfd4de}.task-schedule-popper--light .range-time-row select:hover,.task-schedule-popper--light .range-time-row select:focus{color:#fff;background:#075273;border-color:#1599c1}.task-schedule-popper--light .range-time-row select option{color:#29475a;background:#fff}.task-schedule-popper--light .range-time-row>em{color:#8297a2}.task-schedule-popper--light .schedule-time-panel>p{color:#087f9e;background:#e3f4f8}.task-schedule-popper--light .schedule-time-panel>p.invalid{color:#b94c55;background:#fff0f1}.task-schedule-popper--light .schedule-range-panel__footer{background:#f3f8fa;border-color:#c8dae2}.task-schedule-popper--light .schedule-range-panel__footer button{color:#537481;background:#fff;border-color:#bfd3dc}.task-schedule-popper--light .schedule-range-panel__footer .calendar-confirm{color:#fff;background:#168fad;border-color:#168fad}.task-schedule-popper--light .schedule-range-panel__footer .calendar-confirm:disabled{color:#93a5ae;background:#eef3f5;border-color:#d7e1e6}
+@media(max-width:640px){.schedule-trigger-group{grid-template-columns:1fr}.schedule-range-panel{grid-template-columns:1fr}.schedule-time-panel{border-top:1px solid #41414c;border-left:0}.task-schedule-popper.el-popper{max-width:calc(100vw - 16px)}}
 </style>

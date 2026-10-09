@@ -7,9 +7,12 @@ import {
   getRequestTicketPage,
   getRequestTicketTypes,
   type RequestTicket,
+  type RequestTicketScope,
   type RequestTicketTypeOption,
 } from '@/api/request-ticket'
+import type { TaskGeometryFeatureCollection } from '@/api/governance-task'
 import { getDepartmentOptions, getMyDepartments, type DepartmentOption } from '@/api/auth'
+import TaskRangeMap from '@/components/TaskRangeMap.vue'
 import TaskSchedulePicker from '@/components/TaskSchedulePicker.vue'
 
 const records = ref<RequestTicket[]>([])
@@ -25,6 +28,7 @@ const message = ref('')
 const detail = ref<RequestTicket>()
 const showCreate = ref(false)
 const submitting = ref(false)
+const scopeCoordinates = ref<[number, number][]>([])
 const filters = reactive<{ name: string; type: string; priority: string; status: string }>({ name: '', type: '', priority: '', status: '' })
 const form = reactive({ name: '', type: '', description: '', requester: '', contactPerson: '', contactNumber: '', startTime: '', endTime: '', frequency: '', priority: '1', resultTypes: [] as string[] })
 const resultTypeOptions = [
@@ -39,6 +43,14 @@ const ticketSchedule = computed<string[]>({
     form.startTime = value[0] || ''
     form.endTime = value[1] || ''
   },
+})
+const detailScopeGeoJson = computed<TaskGeometryFeatureCollection | undefined>(() => {
+  const scope = detail.value?.scope
+  if (!scope?.coordinates?.length) return undefined
+  return {
+    type: 'FeatureCollection',
+    features: [{ type: 'Feature', geometry: scope, properties: { rangeType: 'request-ticket' } }],
+  }
 })
 function statusLabel(status?: number) { return ['待执行', '执行中', '已完成', '已关闭'][status ?? -1] || '--' }
 function priorityLabel(priority?: number) { return ['高', '中', '低'][priority ?? -1] || '--' }
@@ -123,8 +135,21 @@ async function loadInitial() {
 function applyFilters() { pageNum.value = 1; void loadPage() }
 function resetFilters() { Object.assign(filters, { name: '', type: '', priority: '', status: '' }); pageNum.value = 1; void loadPage() }
 function changePage(next: number) { if (next < 1 || next > pageCount.value || next === pageNum.value) return; pageNum.value = next; void loadPage() }
-function resetForm() { Object.assign(form, { name: '', type: '', description: '', requester: '', contactPerson: '', contactNumber: '', startTime: '', endTime: '', frequency: '', priority: '1', resultTypes: [] }) }
+function resetForm() {
+  Object.assign(form, { name: '', type: '', description: '', requester: '', contactPerson: '', contactNumber: '', startTime: '', endTime: '', frequency: '', priority: '1', resultTypes: [] })
+  scopeCoordinates.value = []
+}
 function openCreate() { resetForm(); showCreate.value = true }
+
+function requestTicketScope(): RequestTicketScope | undefined {
+  if (!scopeCoordinates.value.length) return undefined
+  if (scopeCoordinates.value.length < 3) throw new Error('作业范围至少需要绘制三个点')
+  const ring = scopeCoordinates.value.map((point) => [...point])
+  const first = ring[0]!
+  const last = ring[ring.length - 1]!
+  if (first[0] !== last[0] || first[1] !== last[1]) ring.push([...first])
+  return { type: 'Polygon', coordinates: [ring] }
+}
 
 async function submitTicket() {
   if (!form.name.trim() || !form.type) { message.value = '请填写工单名称并选择工单类型'; return }
@@ -132,11 +157,13 @@ async function submitTicket() {
   submitting.value = true
   message.value = ''
   try {
+    const scope = requestTicketScope()
     await addRequestTicket({
       name: form.name.trim(), type: form.type, description: form.description.trim() || undefined,
       requester: form.requester.trim() || undefined, contactPerson: form.contactPerson.trim() || undefined,
       contactNumber: form.contactNumber.trim() || undefined, startTime: toTimestamp(form.startTime), endTime: toTimestamp(form.endTime),
       frequency: form.frequency.trim() || undefined, priority: Number(form.priority), resultTypes: form.resultTypes,
+      scope,
     })
     showCreate.value = false
     message.value = '需求工单提交成功'
@@ -167,7 +194,6 @@ onMounted(() => void loadInitial())
 
 <template>
   <section class="ticket-page">
-    <header class="ticket-heading"><button type="button" @click="openCreate">＋ 新建工单</button></header>
     <section class="summary-cards">
       <article><i>▣</i><div><span>工单总数</span><b>{{ displayCount(summaryCounts.total) }}<small>条</small></b><em>当前单位全部需求</em></div></article>
       <article><i>◷</i><div><span>待执行</span><b>{{ displayCount(summaryCounts.pending) }}<small>条</small></b><em>等待排期与资源确认</em></div></article>
@@ -175,11 +201,46 @@ onMounted(() => void loadInitial())
       <article><i>✓</i><div><span>已完成</span><b>{{ displayCount(summaryCounts.completed) }}<small>条</small></b><em>可查看历史执行记录</em></div></article>
     </section>
     <section class="ticket-card filters-card"><header><b>筛选工单</b><button type="button" @click="resetFilters">重置筛选</button></header><div class="filter-grid"><label><span>工单名称</span><input v-model="filters.name" placeholder="搜索工单名称" @keyup.enter="applyFilters" /></label><label><span>工单类型</span><select v-model="filters.type" @change="applyFilters"><option value="">全部类型</option><option v-for="item in types" :key="item.id" :value="item.name">{{ item.name }}</option></select></label><label><span>优先级</span><select v-model="filters.priority" @change="applyFilters"><option value="">全部优先级</option><option value="0">高</option><option value="1">中</option><option value="2">低</option></select></label><label><span>工单状态</span><select v-model="filters.status" @change="applyFilters"><option value="">全部状态</option><option value="0">待执行</option><option value="1">执行中</option><option value="2">已完成</option><option value="3">已关闭</option></select></label></div></section>
-    <section class="ticket-card table-card"><header><div><b>工单列表</b><span>共 {{ total }} 条结果</span></div><div class="flow"><span>● 需求受理</span><i>→</i><span>排期确认</span><i>→</i><span>执行反馈</span></div></header><div class="table-wrap"><table><thead><tr><th>工单编号</th><th>工单名称</th><th>工单描述</th><th>工单类型</th><th>优先级</th><th>状态</th><th>工单期限</th><th>操作</th></tr></thead><tbody><tr v-for="ticket in records" :key="ticket.id"><td><b class="number">{{ ticket.number || ticket.id }}</b></td><td><b>{{ ticket.name }}</b><small>{{ ticket.createByName || '--' }}</small></td><td class="description">{{ ticket.description || '--' }}</td><td><span class="type-tag">{{ typeLabel(ticket.type) }}</span></td><td><span class="priority" :class="`p-${ticket.priority}`">{{ priorityLabel(ticket.priority) }}</span></td><td><span class="status" :class="`s-${ticket.status}`">● {{ statusLabel(ticket.status) }}</span></td><td>{{ formatTime(ticket.startTime) }}<br />至 {{ formatTime(ticket.endTime) }}</td><td><button type="button" @click="openDetail(ticket.id)">查看</button><button type="button" class="danger" @click="removeTicket(ticket)">删除</button></td></tr><tr v-if="loading"><td colspan="8" class="empty-row">正在加载需求工单…</td></tr><tr v-else-if="error"><td colspan="8" class="empty-row error">{{ error }}</td></tr><tr v-else-if="!records.length"><td colspan="8" class="empty-row">暂无符合条件的需求工单</td></tr></tbody></table></div><footer><span>第 {{ pageNum }} / {{ pageCount }} 页，共 {{ total }} 条</span><div><button :disabled="pageNum <= 1" @click="changePage(pageNum - 1)">‹</button><b>{{ pageNum }}</b><button :disabled="pageNum >= pageCount" @click="changePage(pageNum + 1)">›</button></div></footer></section>
+    <section class="ticket-card table-card"><header><div><b>工单列表</b><span>共 {{ total }} 条结果</span></div><button type="button" @click="openCreate">新建工单</button></header><div class="table-wrap"><table><thead><tr><th>工单编号</th><th>工单名称</th><th>工单描述</th><th>工单类型</th><th>优先级</th><th>状态</th><th>工单期限</th><th>操作</th></tr></thead><tbody><tr v-for="ticket in records" :key="ticket.id"><td><b class="number">{{ ticket.number || ticket.id }}</b></td><td><b>{{ ticket.name }}</b><small>{{ ticket.createByName || '--' }}</small></td><td class="description">{{ ticket.description || '--' }}</td><td><span class="type-tag">{{ typeLabel(ticket.type) }}</span></td><td><span class="priority" :class="`p-${ticket.priority}`">{{ priorityLabel(ticket.priority) }}</span></td><td><span class="status" :class="`s-${ticket.status}`">● {{ statusLabel(ticket.status) }}</span></td><td>{{ formatTime(ticket.startTime) }}<br />至 {{ formatTime(ticket.endTime) }}</td><td><button type="button" @click="openDetail(ticket.id)">查看</button><button type="button" class="danger" @click="removeTicket(ticket)">删除</button></td></tr><tr v-if="loading"><td colspan="8" class="empty-row">正在加载需求工单…</td></tr><tr v-else-if="error"><td colspan="8" class="empty-row error">{{ error }}</td></tr><tr v-else-if="!records.length"><td colspan="8" class="empty-row">暂无符合条件的需求工单</td></tr></tbody></table></div><footer><span>第 {{ pageNum }} / {{ pageCount }} 页，共 {{ total }} 条</span><div><button :disabled="pageNum <= 1" @click="changePage(pageNum - 1)">‹</button><b>{{ pageNum }}</b><button :disabled="pageNum >= pageCount" @click="changePage(pageNum + 1)">›</button></div></footer></section>
     <p v-if="message" class="ticket-message" @click="message = ''">{{ message }}</p>
 
-    <div v-if="showCreate" class="modal-mask" @click.self="showCreate = false"><form class="ticket-modal create-modal" @submit.prevent="submitTicket"><header><div><h2>新建需求工单</h2><p>填写需求信息并提交至后端工单服务</p></div><button type="button" @click="showCreate = false">×</button></header><div class="form-grid"><label><span>工单名称 *</span><input v-model="form.name" maxlength="100" required /></label><label><span>工单类型 *</span><select v-model="form.type" required><option value="" disabled>请选择工单类型</option><option v-for="item in types" :key="item.id" :value="item.name">{{ item.name }}</option></select></label><label class="wide"><span>工单描述</span><textarea v-model="form.description" rows="3"></textarea></label><label><span>需求单位</span><select v-model="form.requester"><option value="" disabled>{{ requesterOptions.length ? '请选择需求单位' : '暂无可选需求单位' }}</option><option v-for="item in requesterOptions" :key="item.deptId" :value="item.deptName">{{ item.deptName }}</option></select></label><label><span>执行频率</span><input v-model="form.frequency" placeholder="如：每周一次" /></label><label><span>联系人</span><input v-model="form.contactPerson" /></label><label><span>联系电话</span><input v-model="form.contactNumber" /></label><label class="wide schedule-field"><span>计划时间</span><TaskSchedulePicker v-model="ticketSchedule" theme="light" /></label><label><span>优先级</span><select v-model="form.priority"><option value="0">高</option><option value="1">中</option><option value="2">低</option></select></label><fieldset class="wide"><legend>期望成果类型</legend><label v-for="item in resultTypeOptions" :key="item[0]"><input v-model="form.resultTypes" type="checkbox" :value="item[0]" />{{ item[1] }}</label></fieldset></div><footer><button type="button" @click="showCreate = false">取消</button><button type="submit" class="primary" :disabled="submitting">{{ submitting ? '提交中…' : '提交工单' }}</button></footer></form></div>
-    <div v-if="detail" class="modal-mask" @click.self="detail = undefined"><section class="ticket-modal detail-modal"><header><div><h2>{{ detail.name }}</h2><p>{{ detail.number || detail.id }}</p></div><button type="button" @click="detail = undefined">×</button></header><dl><div><dt>工单类型</dt><dd>{{ typeLabel(detail.type) }}</dd></div><div><dt>状态</dt><dd>{{ statusLabel(detail.status) }}</dd></div><div><dt>优先级</dt><dd>{{ priorityLabel(detail.priority) }}</dd></div><div><dt>需求单位</dt><dd>{{ detail.requester || '--' }}</dd></div><div><dt>联系人</dt><dd>{{ detail.contactPerson || '--' }}</dd></div><div><dt>联系电话</dt><dd>{{ detail.contactNumber || '--' }}</dd></div><div><dt>执行频率</dt><dd>{{ detail.frequency || '--' }}</dd></div><div><dt>工单期限</dt><dd>{{ formatTime(detail.startTime) }} 至 {{ formatTime(detail.endTime) }}</dd></div><div class="wide"><dt>期望成果</dt><dd>{{ detail.resultTypes?.map(item => resultTypeOptions.find(row => row[0] === item)?.[1] || item).join('、') || '--' }}</dd></div><div class="wide"><dt>工单描述</dt><dd>{{ detail.description || '--' }}</dd></div></dl></section></div>
+    <div v-if="showCreate" class="modal-mask" @click.self="showCreate = false">
+      <form class="ticket-modal create-modal" @submit.prevent="submitTicket">
+        <header><div><h2>新建需求工单</h2><p>填写需求信息并绘制作业范围</p></div><button type="button" @click="showCreate = false">×</button></header>
+        <div class="create-modal__body">
+          <div class="form-grid">
+            <label><span>工单名称 *</span><input v-model="form.name" maxlength="100" required /></label>
+            <label><span>工单类型 *</span><select v-model="form.type" required><option value="" disabled>请选择工单类型</option><option v-for="item in types" :key="item.id" :value="item.name">{{ item.name }}</option></select></label>
+            <label class="wide"><span>工单描述</span><textarea v-model="form.description" rows="3"></textarea></label>
+            <label><span>需求单位</span><select v-model="form.requester"><option value="" disabled>{{ requesterOptions.length ? '请选择需求单位' : '暂无可选需求单位' }}</option><option v-for="item in requesterOptions" :key="item.deptId" :value="item.deptName">{{ item.deptName }}</option></select></label>
+            <label><span>执行频率</span><input v-model="form.frequency" placeholder="如：每周一次" /></label>
+            <label><span>联系人</span><input v-model="form.contactPerson" /></label>
+            <label><span>联系电话</span><input v-model="form.contactNumber" /></label>
+            <label class="wide schedule-field"><span>计划时间</span><TaskSchedulePicker v-model="ticketSchedule" theme="light" /></label>
+            <label><span>优先级</span><select v-model="form.priority"><option value="0">高</option><option value="1">中</option><option value="2">低</option></select></label>
+            <fieldset class="wide"><legend>期望成果类型</legend><label v-for="item in resultTypeOptions" :key="item[0]"><input v-model="form.resultTypes" type="checkbox" :value="item[0]" />{{ item[1] }}</label></fieldset>
+          </div>
+          <section class="scope-editor">
+            <header><div><b>作业范围</b><span>在地图上绘制本次工单的作业区域</span></div><em>{{ scopeCoordinates.length ? `已选择 ${scopeCoordinates.length} 个点` : '选填' }}</em></header>
+            <div class="scope-map"><TaskRangeMap v-model:coordinates="scopeCoordinates" editable /></div>
+          </section>
+        </div>
+        <footer><button type="button" @click="showCreate = false">取消</button><button type="submit" class="primary" :disabled="submitting">{{ submitting ? '提交中…' : '提交工单' }}</button></footer>
+      </form>
+    </div>
+    <div v-if="detail" class="modal-mask" @click.self="detail = undefined">
+      <section class="ticket-modal detail-modal">
+        <header><div><h2>{{ detail.name }}</h2><p>{{ detail.number || detail.id }}</p></div><button type="button" @click="detail = undefined">×</button></header>
+        <div class="detail-modal__body">
+          <dl><div><dt>工单类型</dt><dd>{{ typeLabel(detail.type) }}</dd></div><div><dt>状态</dt><dd>{{ statusLabel(detail.status) }}</dd></div><div><dt>优先级</dt><dd>{{ priorityLabel(detail.priority) }}</dd></div><div><dt>需求单位</dt><dd>{{ detail.requester || '--' }}</dd></div><div><dt>联系人</dt><dd>{{ detail.contactPerson || '--' }}</dd></div><div><dt>联系电话</dt><dd>{{ detail.contactNumber || '--' }}</dd></div><div><dt>执行频率</dt><dd>{{ detail.frequency || '--' }}</dd></div><div><dt>工单期限</dt><dd>{{ formatTime(detail.startTime) }} 至 {{ formatTime(detail.endTime) }}</dd></div><div class="wide"><dt>期望成果</dt><dd>{{ detail.resultTypes?.map(item => resultTypeOptions.find(row => row[0] === item)?.[1] || item).join('、') || '--' }}</dd></div><div class="wide"><dt>工单描述</dt><dd>{{ detail.description || '--' }}</dd></div></dl>
+          <section class="detail-scope">
+            <header><div><b>作业范围</b><span>工单提交时保存的作业区域</span></div><em v-if="detailScopeGeoJson">GeoJSON Polygon</em></header>
+            <div v-if="detailScopeGeoJson" class="scope-map"><TaskRangeMap :geo-json="detailScopeGeoJson" :show-abnormal="false" /></div>
+            <div v-else class="scope-empty"><i>◇</i><b>暂未绘制作业范围</b><span>该工单提交时未保存范围数据</span></div>
+          </section>
+        </div>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -191,4 +252,30 @@ onMounted(() => void loadInitial())
 .form-grid select:hover,.form-grid select:focus{color:#fff;background:#075273;border-color:#1599c1;box-shadow:0 0 0 2px #189abd1c}
 .form-grid select option{color:#29475a;background:#fff}
 .form-grid input:focus::placeholder,.form-grid textarea:focus::placeholder{color:transparent}
+.create-modal,.detail-modal{width:min(1220px,96vw);height:min(820px,92vh);display:flex;flex-direction:column;overflow:hidden}
+.create-modal__body{min-height:0;display:grid;grid-template-columns:minmax(410px,.82fr) minmax(520px,1.35fr);flex:1;overflow:hidden;background:#f7fafc}
+.create-modal__body>.form-grid{align-content:start;overflow:auto;background:#fff;border-right:1px solid #dce8ed}
+.scope-editor,.detail-scope{min-width:0;min-height:0;display:flex;flex-direction:column;margin:18px;border:1px solid #c7dce6;border-radius:6px;overflow:hidden;background:#fff;box-shadow:0 4px 14px #23485a10}
+.scope-editor>header,.detail-scope>header{min-height:52px;display:flex;align-items:center;justify-content:space-between;gap:15px;padding:0 15px;border-bottom:1px solid #dbe7ed;background:linear-gradient(90deg,#f7fbfd,#eef6f9)}
+.scope-editor>header div,.detail-scope>header div{min-width:0}
+.scope-editor>header b,.scope-editor>header span,.detail-scope>header b,.detail-scope>header span{display:block}
+.scope-editor>header b,.detail-scope>header b{color:#284d61;font-size:15px}
+.scope-editor>header span,.detail-scope>header span{margin-top:3px;color:#8297a2;font-size:11px}
+.scope-editor>header em,.detail-scope>header em{flex:0 0 auto;padding:4px 8px;color:#168eac;background:#e6f6fa;border-radius:11px;font-size:11px;font-style:normal}
+.scope-map{min-height:0;flex:1}
+.scope-map :deep(.task-range-map){min-height:100%}
+.detail-modal{height:min(690px,90vh)}
+.detail-modal__body{min-height:0;display:grid;grid-template-columns:minmax(390px,.78fr) minmax(500px,1.22fr);flex:1;overflow:hidden;background:#f7fafc}
+.detail-modal__body>dl{min-height:0;align-content:start;overflow:auto;background:#fff;border-right:1px solid #dce8ed}
+.detail-scope{margin:18px}
+.scope-empty{min-height:0;display:grid;place-content:center;justify-items:center;flex:1;color:#8ba0aa;text-align:center;background:linear-gradient(145deg,#f8fbfc,#eef5f7)}
+.scope-empty i{width:52px;height:52px;display:grid;place-items:center;margin-bottom:12px;color:#59a9bc;background:#e4f3f6;border:1px solid #b9dce5;border-radius:50%;font-size:27px;font-style:normal}
+.scope-empty b{color:#587381;font-size:15px}
+.scope-empty span{margin-top:7px;font-size:12px}
+@media(max-width:980px){.create-modal,.detail-modal{height:94vh;overflow:auto}.create-modal__body,.detail-modal__body{display:block;overflow:visible}.create-modal__body>.form-grid,.detail-modal__body>dl{overflow:visible;border-right:0}.scope-editor,.detail-scope{height:430px;margin-top:0}}
+.ticket-page{grid-template-rows:auto auto minmax(0,1fr)}
+.summary-cards span{font-size:13px}.summary-cards b{font-size:27px}.summary-cards b small{font-size:12px}.summary-cards em{font-size:11px;line-height:1.5}
+.ticket-card>header{height:46px}.ticket-card>header b{font-size:16px}.ticket-card>header span{font-size:12px}.ticket-card>header button{font-size:13px}
+.filter-grid{padding:14px 15px}.filter-grid label span{margin-bottom:7px;font-size:13px}.filter-grid input,.filter-grid select{height:38px;font-size:14px}
+.table-wrap table{font-size:13px}.table-wrap th{height:44px;font-size:13px}.table-wrap td{height:62px;font-size:13px;line-height:1.5}.table-wrap td>b{font-size:14px}.table-wrap td>small{font-size:11px}.type-tag,.priority{padding:4px 8px;font-size:12px}.status{font-size:12px}.table-wrap td button{font-size:13px}.table-card>footer{height:46px;font-size:12px}
 </style>

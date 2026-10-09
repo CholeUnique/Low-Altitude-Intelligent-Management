@@ -1,4 +1,5 @@
 import type { Organization, Scene } from '@/types'
+import { portalData } from '@/mocks/portal'
 import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
 
 function normalizeSceneKey(value?: string) {
@@ -40,6 +41,14 @@ export function isTaskVisibleForOrganization(
   task: UnitScopedTask,
   activeDeptId?: string,
 ) {
+  // 已在门户中明确配置归属的场景只能出现在所属单位视角。
+  // 后端历史数据可能存在“部门属于农业农村局、场景却是林业执法监管”这类交叉记录，
+  // 仅按 deptName 过滤会导致两个单位同时看到同一场景。
+  const configuredOwner = portalData.organizations.find((candidate) => (
+    findOrganizationScene(candidate, task.sceneCode, task.sceneName)
+  ))
+  if (configuredOwner && configuredOwner.id !== organization.id) return false
+
   const deptName = task.deptName?.trim()
   // 任务接口的 deptId 在部分版本中是数字主键或历史 ID，不能优先拿它与
   // 切换接口返回的部门 ID 做严格比较；有名称时以名称作为可靠的展示隔离依据。

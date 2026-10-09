@@ -10,14 +10,14 @@ import FlightPlanCalendarPanel from '@/workspace-components/flight-plan/FlightPl
 import { useUserStore } from '@/stores/user'
 
 type UavTab = 'fleet' | 'live' | 'ticket' | 'route' | 'plan' | 'schedule'
-type RouteAction = 'create' | 'edit' | 'cockpit' | 'playback'
+type RouteAction = 'create' | 'edit' | 'cockpit'
 type RouteMenuAction = RouteAction | 'plan'
 
 const route = useRoute()
 const router = useRouter()
 const user = useUserStore()
 const tabs: UavTab[] = ['fleet', 'live', 'ticket', 'route', 'plan', 'schedule']
-const routeActions: RouteAction[] = ['create', 'edit', 'cockpit', 'playback']
+const routeActions: RouteAction[] = ['create', 'edit', 'cockpit']
 const active = computed<UavTab>(() => tabs.includes(route.params.tab as UavTab) ? route.params.tab as UavTab : 'fleet')
 const items = computed(() => [
   { key: 'fleet' as const, icon: '▦', label: '机队总览', permission: 'fleet-overview' as const },
@@ -28,7 +28,6 @@ const routeSubItems = computed(() => [
   { key: 'create' as const, icon: '⌁', label: '创建航线' },
   { key: 'edit' as const, icon: '✎', label: '编辑航线' },
   { key: 'cockpit' as const, icon: '▣', label: '虚拟座舱' },
-  { key: 'playback' as const, icon: '↻', label: '轨迹回放' },
   ...(user.hasPermission('flight-plan') ? [{ key: 'plan' as const, icon: '✈', label: '计划起飞' }] : []),
 ])
 const routeFlightPlanPanel = ref<InstanceType<typeof RouteFlightPlanPanel>>()
@@ -39,7 +38,6 @@ async function syncRoutePanel(tab: UavTab) {
   if (tab === 'plan') routeFlightPlanPanel.value?.openFlightPlanCreate()
   else if (routeAction.value === 'edit') routeFlightPlanPanel.value?.openWaylineEdit()
   else if (routeAction.value === 'cockpit') routeFlightPlanPanel.value?.openCockpit()
-  else if (routeAction.value === 'playback') routeFlightPlanPanel.value?.openTrajectoryPlayback()
   else routeFlightPlanPanel.value?.openWaylineCreate()
 }
 

@@ -1583,7 +1583,7 @@ ProblemSpot
 当前所有正式后端 API 均以以下内网 Swagger 为准：
 
 ```text
-http://223.2.38.27:8080/swagger-ui/index.html#/
+http://223.2.41.169:8080/swagger-ui/index.html#/
 ```
 
 该地址属于内网环境，本对话环境无法保证能够访问；但是用户运行 Cursor 的开发电脑可以访问。
@@ -1666,8 +1666,8 @@ Cursor 应：
 若页面配置符合 SpringDoc 常见结构，可以尝试：
 
 ```text
-http://223.2.38.27:8080/v3/api-docs
-http://223.2.38.27:8080/v3/api-docs/swagger-config
+http://223.2.41.169:8080/v3/api-docs
+http://223.2.41.169:8080/v3/api-docs/swagger-config
 ```
 
 但只能作为“探测”，不能因为常见就写死。

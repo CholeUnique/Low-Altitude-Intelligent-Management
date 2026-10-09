@@ -5,6 +5,11 @@ export interface RequestTicketTypeOption {
   name: string
 }
 
+export interface RequestTicketScope {
+  type: 'Polygon'
+  coordinates: number[][][]
+}
+
 export interface RequestTicket {
   id: string
   name: string
@@ -22,7 +27,7 @@ export interface RequestTicket {
   createTime?: string
   createByName?: string
   resultTypes?: string[]
-  scope?: { type: string; coordinates: number[][][] }
+  scope?: RequestTicketScope
 }
 
 export interface RequestTicketPageQuery {
@@ -46,6 +51,8 @@ export interface AddRequestTicketPayload {
   endTime?: number
   frequency?: string
   priority?: number
+  /** 工单作业范围，WGS84 GeoJSON Polygon。 */
+  scope?: RequestTicketScope
 }
 
 function optionalNumber(value: unknown) {
