@@ -106,6 +106,17 @@ assert.equal(recipientTodos.records[0].myWorkState, 'pending')
 assert.equal(recipientTodos.records[0].myNodes[0].nodeKey, 'REVIEW_COUNTY')
 assert.equal(recipientTodos.records[0].workflow[1].name, '部门确认')
 assert.equal((await myTasks.getMyWorkflowTasks('692', '1')).records[0].myWorkState, 'handled')
+const namedTodos = load('src/api/my-workflow-tasks.ts', {
+  './governance-task': {
+    getMyTodoTaskPage: async () => ({ records: [{ ...waitingTask, name: '旧待办名称' }] }),
+    getGovernanceTaskPage: async () => ({ records: [{ ...waitingTask, name: '列表名称' }] }),
+    getGovernanceTaskDetail: async () => ({ task: { ...waitingTask, name: '用户最新填写的任务名称' } }),
+  },
+  './task-workflow': { getTaskWorkflow: async () => forwardedFlow, getWorkflowTodos: async () => [county], workflowSteps: f => f.timeline.map(n => ({ key: n.nodeKey, name: n.nodeName, status: n.status })) },
+  './pagination': pagination,
+  '@/utils/task-workflow-state': state,
+})
+assert.equal((await namedTodos.getMyWorkflowTasks('694', '1')).records[0].name, '用户最新填写的任务名称', '待办使用当前业务任务名称，不被旧待办记录覆盖')
 const assignmentCalls = []
 const assignment = load('src/api/non-grain-assignment.ts', {
   './account-management': {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import WorkflowAssigneePicker from '@/workspace-components/shared/WorkflowAssigneePicker.vue'
+import type { WorkbenchUser } from '@/api/workbench-users'
 import { taskImageryService } from '@/utils/task-imagery'
 import WorkbenchFeedback from '@/workspace-components/shared/WorkbenchFeedback.vue'
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
@@ -21,6 +23,12 @@ const { task, flow, selectedNode, abnormals, loading, errors, load } = useBacken
 const busy = ref(false)
 const canEdit = computed(() => !props.readonly && !loading.value && !busy.value && canOperateWorkflowNode(selectedNode.value, String(user.currentUser?.id || '')) && selectedNode.value?.id === flow.value?.currentNode?.id)
 const error = ref('')
+const recipient = ref<WorkbenchUser>()
+const nextNode = computed(() => flow.value?.timeline.find(node => String(node.prevNodeInstId || '') === selectedNode.value?.id))
+const preferredRecipientIds = computed(() => {
+  const previous = [...(flow.value?.timeline || [])].reverse().find(node => node.nodeKey === 'UAV_RECHECK')
+  return previous?.assigneeId ? [previous.assigneeId] : [task.value?.createBy || '', flow.value?.timeline.find(node => node.nodeKey === 'REVIEW_CITY')?.assigneeId || '']
+})
 const activeId = ref('')
 const draft = ref<RectificationRecord[]>([])
 const fillDate = ref('')
@@ -126,10 +134,12 @@ async function submit() {
     }
     const current = await getTaskWorkflow(props.taskId)
     if (!current?.currentNode || current.currentNode.id !== selectedNode.value.id || current.currentNode.nodeKey !== 'RECTIFY' || !canOperateWorkflowNode(current.currentNode, String(user.currentUser?.id || ''))) throw new Error('整改节点状态或办理人已变化，请刷新后重试。')
-    // wf_node_def: RECTIFY + DONE -> UAV_RECHECK，复核办理人由后端 taskCreator 规则确定。
-    await submitWorkflowNode({ nodeInstId: current.currentNode.id, resultData: { result: 'DONE', description: draft.value.map(plot => plot.description.trim()).join('；'), attachment: [...new Set(draft.value.flatMap(plot => plot.attachment))], plotResults: draft.value.map(plot => ({ ...plot, area: Number(plot.area), restoredArea: Number(plot.restoredArea) })), fillDate: fillDate.value, operatorName: user.name } })
+    if (!recipient.value) throw new Error('请选择无人机复核办理人。')
+    const target = recipient.value
+    await submitWorkflowNode({ nodeInstId: current.currentNode.id, targetAssigneeId: target.id, targetDeptId: target.deptId, resultData: { targetAssigneeId: target.id, targetDeptId: target.deptId, targetAssigneeName: target.realName || target.nickname || target.username, targetDeptName: target.deptName, result: 'DONE', description: draft.value.map(plot => plot.description.trim()).join('；'), attachment: [...new Set(draft.value.flatMap(plot => plot.attachment))], plotResults: draft.value.map(plot => ({ ...plot, area: Number(plot.area), restoredArea: Number(plot.restoredArea) })), fillDate: fillDate.value, operatorName: user.name } })
     await load(); window.dispatchEvent(new Event('workflow-todos-changed')); emit('submitted')
     if (flow.value?.currentNode?.nodeKey !== 'UAV_RECHECK') error.value = '整改结果已提交，但后端尚未返回无人机复核节点，请刷新核对。'
+    if (flow.value?.currentNode?.nodeKey === 'UAV_RECHECK' && flow.value.currentNode.assigneeId !== target.id) error.value = '结果已提交，但后端未分派给所选复核办理人，请核对节点接收人配置。'
   } catch (reason) { error.value = reason instanceof Error ? reason.message : '整改提交失败' }
   finally { busy.value = false }
 }
@@ -147,7 +157,7 @@ async function submit() {
       <section class="ng-card rectification-form"><h3>✎ 整改结果填报</h3><div class="form-summary"><span>任务编号<b>{{ task?.taskNo || '—' }}</b></span><span>当前图斑<b>{{ activeSpot?.title || '—' }}</b></span><span>填报人<b>{{ selectedNode?.assigneeName || '—' }}</b></span><span>填报日期<b>{{ selectedNode?.status === 'COMPLETED' ? String(record.fillDate || selectedNode.submitTime || '').slice(0,10) || '—' : fillDate }}</b></span></div>
         <form v-if="active" @submit.prevent="submit"><fieldset :disabled="!canEdit"><h4>整改结果</h4><div class="result-options"><label><input v-model="active.rectificationStatus" type="radio" value="DONE" />已完成整改</label><label><input v-model="active.rectificationStatus" type="radio" value="IN_PROGRESS" />整改进行中</label><label><input v-model="active.rectificationStatus" type="radio" value="UNABLE" />暂不具备整改条件</label></div>
           <h4>治理填报</h4><div class="fields"><label><span>区划代码</span><input v-model="active.regionCode" /></label><label><span>要素代码</span><input v-model="active.elementCode" /></label><label><span>地块代码</span><input v-model="active.parcelCode" /></label><label><span>* 地块面积</span><div class="area-input"><input v-model="active.area" type="number" min="0" step="any" required /><small>㎡</small></div></label><label><span>* 治理类型</span><input v-model="active.treatmentType" required placeholder="填写实际治理类型" /></label><label><span>* 复耕复种面积</span><div class="area-input"><input v-model="active.restoredArea" type="number" min="0" step="any" required /><small>㎡</small></div></label><label><span>* 种植用途</span><select v-model="active.landUse" required><option value="">请选择</option><option v-if="active.landUse && !plantingOptions.some(item => item.code === active?.landUse)" :value="active.landUse">{{ active.landUse }}</option><option v-for="item in plantingOptions" :key="item.id" :value="item.code">{{ item.code }} {{ item.name }}</option></select></label><label class="wide"><span>* 备注／整改说明</span><textarea v-model="active.description" required maxlength="500" placeholder="填写整改措施和恢复种植情况" /><small class="counter">{{ active.description?.length || 0 }}/500</small></label></div>
-          <h4>♧ 整改证明材料</h4><div class="materials"><article v-for="file in visibleFiles" :key="file.id"><img v-if="previewUrls[file.id]" :src="previewUrls[file.id]" :alt="file.fileName" /><span v-else class="file-symbol">{{ isInspectionImage(file.fileName) ? '▧' : '▤' }}</span><b>{{ file.fileName }}</b><small>{{ file.createTime }}</small><label v-if="canEdit" class="material-association"><input type="checkbox" :checked="active.attachment.includes(file.id)" @change="toggleAttachment(file.id)" />用于当前图斑</label><button v-if="canEdit" type="button" @click="removeFile(file.id)">删除</button></article><label class="upload"><span>＋</span><b>上传整改图片</b><small>PNG、SVG、JPG 等图片</small><input type="file" :accept="inspectionImageAccept" multiple @change="choose($event,true)" /></label><label class="upload"><span>▤</span><b>上传附件</b><small>PDF、Word 等文档</small><input type="file" :accept="inspectionDocumentAccept" multiple @change="choose($event,false)" /></label></div><p class="upload-tip">可将图片、文档拖入此页面，自动上传到当前图斑；单个文件不超过 10MB。</p><footer><button type="submit" :disabled="!canEdit">{{ busy ? '正在处理…' : selectedNode?.status === 'COMPLETED' ? '已提交整改结果' : '提交整改结果' }}</button></footer>
+          <h4>♧ 整改证明材料</h4><div class="materials"><article v-for="file in visibleFiles" :key="file.id"><img v-if="previewUrls[file.id]" :src="previewUrls[file.id]" :alt="file.fileName" /><span v-else class="file-symbol">{{ isInspectionImage(file.fileName) ? '▧' : '▤' }}</span><b>{{ file.fileName }}</b><small>{{ file.createTime }}</small><label v-if="canEdit" class="material-association"><input type="checkbox" :checked="active.attachment.includes(file.id)" @change="toggleAttachment(file.id)" />用于当前图斑</label><button v-if="canEdit" type="button" @click="removeFile(file.id)">删除</button></article><label class="upload"><span>＋</span><b>上传整改图片</b><small>PNG、SVG、JPG 等图片</small><input type="file" :accept="inspectionImageAccept" multiple @change="choose($event,true)" /></label><label class="upload"><span>▤</span><b>上传附件</b><small>PDF、Word 等文档</small><input type="file" :accept="inspectionDocumentAccept" multiple @change="choose($event,false)" /></label></div><p class="upload-tip">可将图片、文档拖入此页面，自动上传到当前图斑；单个文件不超过 10MB。</p><WorkflowAssigneePicker v-model="recipient" :dept-id="task?.deptId || selectedNode?.deptId" :node-id="selectedNode?.id" :preferred-ids="preferredRecipientIds" :preferred-usernames="['nyncKZ']" :readonly="!canEdit" :saved-name="String(record.targetAssigneeName || nextNode?.assigneeName || '')" label="无人机复核办理人" /><footer><button type="submit" :disabled="!canEdit">{{ busy ? '正在处理…' : selectedNode?.status === 'COMPLETED' ? '已提交整改结果' : '提交整改结果' }}</button></footer>
         </fieldset></form><p v-else>暂无可填写的整改图斑。</p>
       </section>
     </div>
