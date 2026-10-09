@@ -20,6 +20,7 @@ import RouteFlightPlanPanel from '@/workspace-components/route-flight-plan/Route
 import RealtimeCruisePanel from '@/workspace-components/realtime-cruise/RealtimeCruisePanel.vue'
 import NonGrainWorkspace from '@/workspace-components/non-grain/NonGrainWorkspace.vue'
 import TaskAcceptancePanel from '@/workspace-components/shared/TaskAcceptancePanel.vue'
+import { vWorkbenchValidation } from '@/workspace-components/shared/workbench-validation'
 
 const route = useRoute()
 const router = useRouter()
@@ -170,6 +171,7 @@ onMounted(() => void loadTaskContext())
   </div>
 
   <NonGrainWorkspace
+    v-workbench-validation
     v-else-if="!taskError && task && workspaceSceneId === 'non-grain-monitoring'"
     :key="task?.id || String(route.params.taskId || '')"
     :task-id="task?.id || String(route.params.taskId || '')"
@@ -200,7 +202,7 @@ onMounted(() => void loadTaskContext())
     </main>
   </div>
 
-  <div v-else class="workspace">
+  <div v-else v-workbench-validation class="workspace">
     <header class="workspace-header">
       <div class="workspace-return">
         <el-button class="workspace-return-button" @click="$router.push('/tasks/todo')">‹ 返回任务</el-button>

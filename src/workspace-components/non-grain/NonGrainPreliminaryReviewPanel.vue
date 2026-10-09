@@ -141,7 +141,7 @@ async function submitReview() {
 <template>
   <div class="ng-page preliminary-review">
 
-    <WorkbenchFeedback :message="[...errors, flowError].filter(Boolean).join('；')" />
+    <WorkbenchFeedback :message="[...errors, flowError, submitError].filter(Boolean).join('；')" />
 
     <section class="ng-summary ng-summary--compact review-summary">
       <article class="ng-summary-card"><i>单</i><span><small>任务编号</small><b>{{ text(task?.taskNo) }}</b></span></article>
@@ -171,9 +171,9 @@ async function submitReview() {
         <section class="ng-card review-record"><h3 class="dispatch-heading"><i></i>{{ task?.taskNo }} 下发</h3>
           <form class="review-unsubmitted review-edit-form" :class="{ 'review-readonly-form': !canEdit }" @submit.prevent="submitReview">
             <fieldset :disabled="submitting || !canEdit">
-              <label>{{ pageLabel }}意见<textarea v-model="reviewForm.reviewConclusion" maxlength="2000" :placeholder="`填写${pageLabel}意见`" /></label>
+              <label>* {{ pageLabel }}意见<textarea v-model="reviewForm.reviewConclusion" required maxlength="2000" :placeholder="`填写${pageLabel}意见`" /></label>
               <section class="dispatch-departments" aria-label="选择下发用户">
-                <p class="dispatch-label">选择下发用户 <small>{{ departmentMode ? '原指定网格员优先' : '原指定办理人优先' }}，可选择其他用户或自己</small></p>
+                <p class="dispatch-label">* 选择下发用户 <small>{{ departmentMode ? '原指定网格员优先' : '原指定办理人优先' }}，可选择其他用户或自己</small></p>
                 <div class="department-search"><span aria-hidden="true">⌕</span><input v-model="gridSearch" aria-label="搜索姓名、账号" placeholder="搜索姓名、账号" /></div>
                 <div class="department-list grid-user-list">
                   <label v-for="person in gridOptions" :key="person.id" class="department-option" :class="{ selected: reviewForm.targetAssigneeId === person.id }">
@@ -190,10 +190,9 @@ async function submitReview() {
                 <div v-if="departmentMode" class="dispatch-method-options"><label class="unavailable-method"><input type="radio" disabled /><span><b>属地下发</b><small>暂无图斑属地与网格员对应数据</small></span></label><label :class="{ chosen: reviewForm.dispatchMode === '直接指派' }"><input v-model="reviewForm.dispatchMode" type="radio" value="直接指派" name="dispatch-mode" /><span><b>直接指派</b><small>选择用户直接接收核查任务</small></span></label></div>
                 <div v-else class="dispatch-method-options"><label :class="{ chosen: reviewForm.dispatchMode === '逐级下发' }"><input v-model="reviewForm.dispatchMode" type="radio" value="逐级下发" name="dispatch-mode" /><span><b>逐级下发</b><small>发给区级部门，由其接收后继续组织核查</small></span></label><label :class="{ chosen: reviewForm.dispatchMode === '直接下发至基层' }"><input v-model="reviewForm.dispatchMode" type="radio" value="直接下发至基层" name="dispatch-mode" /><span><b>直接下发至基层</b><small>跳过区级部门，直接发给基层核查单位</small></span></label></div>
               </section>
-              <label class="dispatch-deadline">办理期限 <span class="required-hint">必填</span><input v-model="reviewForm.deadline" type="datetime-local" step="60" required aria-label="办理期限" /><small>请选择下一节点的办理截止日期和时间。</small></label>
+              <label class="dispatch-deadline">* 办理期限<input v-model="reviewForm.deadline" type="datetime-local" step="60" required aria-label="办理期限" /><small>请选择下一节点的办理截止日期和时间。</small></label>
               <label>备注<textarea v-model="reviewForm.remark" :maxlength="departmentMode ? 200 : 500" placeholder="请结合影像判读结果，填写核查要求" /><small class="remark-count">{{ reviewForm.remark.length }}/{{ departmentMode ? 200 : 500 }}</small></label>
 
-              <p v-if="canEdit && submitError" class="review-status error" role="alert">{{ submitError }}</p>
               <div class="review-actions"><button type="submit" :disabled="!canEdit || optionsLoading">{{ submitting ? '正在提交…' : selectedNode?.status === 'COMPLETED' ? '已完成下发' : '确认下发' }}</button></div>
             </fieldset>
           </form>
