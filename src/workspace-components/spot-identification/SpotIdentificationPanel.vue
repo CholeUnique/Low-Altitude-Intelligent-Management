@@ -4,10 +4,14 @@ import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { getTaskAbnormalPage } from '@/api/governance-task'
 import type { GovernanceTask, TaskAbnormal } from '@/api/governance-task'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { inspectMapService } from '@/utils/map-service-layer'
+import { useUserStore } from '@/stores/user'
 import SpotDistributionMap from './SpotDistributionMap.vue'
-import type { ComparisonPeriod, SynchronizedMapView } from './SpotDistributionMap.vue'
+import ManualSpotCreatePanel from './ManualSpotCreatePanel.vue'
+import type { ComparisonPeriod, SpotDrawingMode, SynchronizedMapView } from './SpotDistributionMap.vue'
 
+const user = useUserStore()
 const props = withDefaults(defineProps<{
   task?: PortalTask
   tasks?: GovernanceTask[]
@@ -39,6 +43,10 @@ const servicePickerLoading = ref(false)
 const servicePickerError = ref('')
 const imageryMapServices = ref<MapServiceItem[]>([])
 const selectedMapServiceIds = ref<string[]>([])
+const scenes = ref<SceneDictionaryItem[]>([])
+const spotDrawing = ref(false)
+const drawingPeriod = ref<number>()
+const draftCoordinates = ref<Array<[number, number]>>([])
 const taskAbnormalCounts = ref<Record<string, number | undefined>>({})
 let requestVersion = 0
 let taskCountRequestVersion = 0
@@ -114,6 +122,7 @@ const taskComparisonImagery = computed<RelatedImagery[]>(() => (selectedGovernan
 })))
 const displayableImagery = computed(() => [...taskComparisonImagery.value, ...currentManualImagery.value]
   .filter((item) => Boolean(item.url || item.mapService) && !currentHiddenImageIds.value.includes(item.id)))
+const activeMapServiceIds = computed<Array<string | number>>(() => displayableImagery.value.flatMap((image) => image.mapService ? [image.mapService.id] : []))
 const comparisonPeriods = computed<ComparisonPeriod[]>(() => {
   const images = displayableImagery.value
   return Array.from({ length: periods.value }, (_, index) => {
@@ -148,6 +157,7 @@ function selectTask(id: string) {
   if (id !== props.selectedTaskId) emit('select-task', id)
 }
 function selectImage(index: number) {
+  if (spotDrawing.value || draftCoordinates.value.length) cancelSpotDrawing()
   activeImageIndex.value = index
 }
 function isImageDisplayed(index: number) {
@@ -156,8 +166,44 @@ function isImageDisplayed(index: number) {
 }
 function selectPeriods(value: number) {
   if (value > displayableImagery.value.length) return
+  if (spotDrawing.value || draftCoordinates.value.length) cancelSpotDrawing()
   periods.value = value
   periodsManuallySelected.value = true
+}
+function drawingMode(period: ComparisonPeriod): SpotDrawingMode {
+  if (!spotDrawing.value) {
+    return draftCoordinates.value.length >= 3 && (period.kind === 'map-service' || Boolean(period.bounds)) ? 'preview' : 'off'
+  }
+  if (period.kind !== 'map-service') return 'blocked'
+  if (drawingPeriod.value === undefined) return 'available'
+  return drawingPeriod.value === period.number ? 'active' : 'blocked'
+}
+function startSpotDrawing() {
+  clearSpotDrawing()
+  spotDrawing.value = true
+}
+function cancelSpotDrawing() {
+  clearSpotDrawing()
+  spotDrawing.value = false
+}
+function finishSpotDrawing() {
+  if (draftCoordinates.value.length >= 3) spotDrawing.value = false
+}
+function addSpotDrawingPoint(period: number, coordinate: [number, number]) {
+  if (!spotDrawing.value || (drawingPeriod.value !== undefined && drawingPeriod.value !== period)) return
+  if (drawingPeriod.value === undefined) drawingPeriod.value = period
+  draftCoordinates.value = [...draftCoordinates.value, coordinate]
+}
+function undoSpotDrawingPoint() {
+  draftCoordinates.value = draftCoordinates.value.slice(0, -1)
+  if (!draftCoordinates.value.length) drawingPeriod.value = undefined
+}
+function clearSpotDrawing() {
+  draftCoordinates.value = []
+  drawingPeriod.value = undefined
+}
+function handleSpotCreated() {
+  cancelSpotDrawing()
 }
 function synchronizeMapView(view: SynchronizedMapView) {
   synchronizedMapView.value = view
@@ -291,6 +337,7 @@ async function loadTaskAbnormalCounts(tasks: GovernanceTask[]) {
 }
 
 watch(() => props.task?.id, (taskId) => {
+  cancelSpotDrawing()
   clearManualImagery()
   loadHiddenImagery(taskId)
   pendingDeleteImage.value = undefined
@@ -309,6 +356,7 @@ watch(filtered, (items) => {
   }
 })
 watch(() => active.value?.id, () => {
+  cancelSpotDrawing()
   synchronizedMapView.value = undefined
   periodsManuallySelected.value = false
   periods.value = displayableImagery.value.length >= 2 ? 2 : 1
@@ -324,7 +372,15 @@ watch(() => displayableImagery.value.length, (imageCount) => {
     : Math.min(2, availablePeriods)
   activeImageIndex.value = Math.min(activeImageIndex.value, Math.max(0, imageCount - 1))
 })
-onMounted(() => window.addEventListener('keydown', handleMapFullscreenKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', handleMapFullscreenKeydown)
+  void loadImageryMapServices().catch((error) => {
+    servicePickerError.value = error instanceof Error ? error.message : '参考影像地图服务加载失败。'
+  })
+  void getSceneDictionary(user.organization.scenes, user.activeDeptId)
+    .then((items) => { scenes.value = items.filter((scene) => scene.enabled) })
+    .catch(() => { scenes.value = [] })
+})
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleMapFullscreenKeydown)
 })
@@ -379,8 +435,12 @@ onBeforeUnmount(() => {
             :spot="active"
             :period="period"
             :synchronized-view="synchronizedMapView"
+            :drawing-mode="drawingMode(period)"
+            :draft-coordinates="draftCoordinates"
             @select="selectSpot"
             @view-change="synchronizeMapView"
+            @draw-point="addSpotDrawingPoint"
+            @finish-drawing="finishSpotDrawing"
           />
         </div>
         <div v-else class="map-empty">{{ loading ? '正在加载图斑地图…' : '请选择当前任务中的异常图斑' }}</div>
@@ -406,6 +466,24 @@ onBeforeUnmount(() => {
     </section>
 
     <aside class="right-column">
+      <ManualSpotCreatePanel
+        :key="selectedTaskId || 'no-task'"
+        :scene-code="selectedGovernanceTask?.sceneCode || active?.sceneCode"
+        :scenes="scenes"
+        :dept-id="selectedGovernanceTask?.deptId || user.activeDeptId"
+        :map-services="imageryMapServices"
+        :initial-map-service-ids="activeMapServiceIds"
+        :drawing-available="displayableImagery.some((image) => Boolean(image.mapService))"
+        :drawing="spotDrawing"
+        :drawing-period="drawingPeriod"
+        :coordinates="draftCoordinates"
+        @start-drawing="startSpotDrawing"
+        @cancel-drawing="cancelSpotDrawing"
+        @finish-drawing="finishSpotDrawing"
+        @undo-point="undoSpotDrawingPoint"
+        @clear-drawing="clearSpotDrawing"
+        @created="handleSpotCreated"
+      />
       <section class="panel detail">
         <div class="panel-title">异常图斑详细信息</div>
         <template v-if="active">
@@ -460,19 +538,19 @@ onBeforeUnmount(() => {
 .panel { min-height: 0; overflow: hidden; background: #fff; border: 1px solid #cbdbe5; border-radius: 7px; box-shadow: 0 2px 9px #1c3b5214; }
 .panel-title { height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 13px; border-bottom: 1px solid #e1ebf1; color: #173c54; font-size: 15px; font-weight: 700; }.panel-title small { color: #6c8595; font-size: 12px; font-weight: 500; }
 .analysis-title-hint { margin-left:4px; color:#6c8595; font-size:12px; font-weight:500; white-space:nowrap; }
-.left-column { min-height: 0; grid-column:1; grid-row:1 / 3; display: grid; grid-template-rows: 290px minmax(0, 1fr); gap: 10px; }
+.left-column { min-height: 0; grid-column:1; grid-row:1 / 3; display: grid; grid-template-rows: 338px minmax(0, 1fr); gap: 10px; }
 .task-selector { display: flex; flex-direction: column; }.task-filters { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 7px; padding: 9px; border-bottom: 1px solid #e8eff3; }.task-filters select { min-width: 0; height: 33px; padding: 0 7px; color: #38586a; background: #fbfdfe; border: 1px solid #c9dce7; border-radius: 4px; font-size: 11px; outline: none; }.task-filters select:hover,.task-filters select:focus { color:#fff; background:#075273; border-color:#1599c1; }.task-filters select option { color:#38586a; background:#fff; }.task-scroll { min-height:0; flex:1; overflow-y:auto; }.recognition-task-item { width:100%; display:block; padding:8px 10px; color:#29475a; border:0; border-bottom:1px solid #e8eef2; background:#fff; text-align:left; cursor:pointer; }.recognition-task-item:hover { background:#f2f9fc; }.recognition-task-item.active { padding-left:6px; border-left:4px solid #129bc3; background:#e5f5fb; }.recognition-task-item span,.recognition-task-item b,.recognition-task-item small { display:block; min-width:0; }.recognition-task-item b,.recognition-task-item small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.recognition-task-item b { color:#1d435b; font-size:12px; }.recognition-task-item small { margin-top:3px; color:#708897; font-size:10px; }.task-empty { display:grid; min-height:70px; place-items:center; padding:12px; color:#6f8796; font-size:12px; text-align:center; }
 .spot-list { display: flex; flex-direction: column; }.filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-bottom: 1px solid #e8eff3; }.filters input { grid-column: 1 / -1; }.filters input,.filters select { min-width: 0; height: 34px; padding: 0 9px; color: #38586a; background: #fbfdfe; border: 1px solid #c9dce7; border-radius: 4px; font-size: 12px; outline: none; }.filters input:focus,.filters select:focus { border-color: #1a9ac0; box-shadow: 0 0 0 2px #1a9ac01c; }
 .filters select:hover,.filters select:focus { color:#fff; background:#075273; border-color:#1599c1; }.filters select option { color:#38586a; background:#fff; }
 .filters input:focus::placeholder { color: transparent; }
 .spot-scroll { min-height: 0; overflow: auto; }.spot-item { width: 100%; display: grid; grid-template-columns: 31px minmax(0,1fr) auto; gap: 9px; align-items: center; padding: 11px 10px; border: 0; border-bottom: 1px solid #e8eef2; background: #fff; color: #29475a; text-align: left; cursor: pointer; transition: background .15s; }.spot-item:hover { background: #f2f9fc; }.spot-item.active { background: #e5f5fb; border-left: 4px solid #129bc3; padding-left: 6px; }.spot-item>i { display: grid; width: 28px; height: 28px; place-items: center; color: #ffffff; background: #3e91b1; border-radius: 50%; font-style: normal; font-size: 13px; font-weight: 700; }.spot-item>i.level-2 { background: #d79228; }.spot-item>i.level-3 { background: #d55762; }.spot-item b,.spot-item small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.spot-item b { color:#1d435b; font-size:14px; }.spot-item small { margin-top:4px;color:#6f8796;font-size:11px; }.spot-item em { padding:4px 6px;border-radius:3px;font-style:normal;font-size:11px;white-space:nowrap; }.status-0 { color:#9a680f;background:#fff3d9; }.status-1 { color:#1b79a2;background:#e2f3fa; }.status-2 { color:#21875e;background:#e3f6ed; }.status-3 { color:#667986;background:#ecf0f2; }.list-empty { display:grid; min-height:150px; place-items:center; padding:16px; color:#6f8796; font-size:13px; text-align:center; }.list-empty--error { color:#c7535e; }
 .center-column { display:contents; }.map-panel { grid-column:2; grid-row:1; display:flex; flex-direction:column; }.map-header-actions{min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:10px}.map-header-actions small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.map-header-actions button{flex:none;height:30px;padding:0 11px;color:#167895;background:#f3fafc;border:1px solid #8fc8d8;border-radius:4px;font-size:12px;font-weight:700;cursor:pointer}.map-header-actions button:hover,.map-header-actions button:focus-visible{color:#fff;background:#137f9e;border-color:#137f9e;outline:none}.map-panel.map-panel--fullscreen{position:fixed;z-index:4000;inset:0;grid-column:auto;grid-row:auto;border:0;border-radius:0;background:#c9d8df;box-shadow:none}.map-panel.map-panel--fullscreen>.panel-title{height:54px;flex:0 0 54px;padding-inline:18px;color:#fff;background:#07344f;border-color:#1e6684;font-size:18px}.map-panel.map-panel--fullscreen .map-header-actions small{color:#b4d7e5;font-size:13px}.map-panel.map-panel--fullscreen .map-header-actions button{color:#fff;background:#126f91;border-color:#6ed8eb}.map-compare { flex:1; min-height:0; display:grid; gap:4px; padding:4px; background:#c9d8df; }.map-compare.compare-2,.map-compare.compare-3 { grid-template-columns:repeat(var(--period-count),minmax(0,1fr)); }.map-compare.compare-2 { --period-count:2; }.map-compare.compare-3 { --period-count:3; }.map-compare.compare-4 { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }.map-compare :deep(.spot-map) { min-width:0; min-height:0; border:1px solid #adc6d2; }.map-empty { display:grid; flex:1; place-items:center; color:#6b8493; background:#eef3f5; font-size:14px; }
-.analysis { grid-column:2 / 4; grid-row:2; display:flex; flex-direction:column; }.periods { display:flex; align-items:center; gap:7px; padding:9px 11px 7px; }.periods button { padding:7px 11px; color:#426478; background:#f5f9fb; border:1px solid #cbdde7; border-radius:4px; font-size:12px; cursor:pointer; }.periods button.active { color:#fff; background:#168db5; border-color:#168db5; box-shadow:0 2px 5px #168db544; }.periods button:disabled { color:#9eacb3; background:#eef2f4; border-color:#dce4e8; box-shadow:none; cursor:not-allowed; opacity:.72; }.periods span { margin-left:auto; overflow:hidden; color:#6f8796; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.imagery { flex:1; min-height:0; display:flex; gap:8px; padding:0 11px 11px; overflow-x:auto; }.image-card { position:relative; flex:0 0 180px; height:112px; overflow:hidden; padding:9px; color:#f4fcff; background:linear-gradient(135deg,#276c80,#17445b); border:1px solid transparent; border-radius:5px; text-align:left; cursor:pointer; transition:border-color .18s,box-shadow .18s; }.image-card:hover,.image-card.active { border-color:#13a9d3; box-shadow:0 0 0 2px #13a9d325; }.image-card.displayed { border-color:#ff4054; box-shadow:0 0 4px #ff4054b8,inset 0 0 2px #ff8a9699; }.image-card__map-thumbnail { position:absolute; inset:0; display:block; opacity:.82; pointer-events:none; }.image-card>img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.66; }.image-card>span { display:grid; height:100%; place-items:center; color:#d5e1e6; background:#53616a; font-size:12px; }.image-card b,.image-card small { position:relative; z-index:1; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card b { margin-top:48px; font-size:13px; }.image-card small { margin-top:4px; font-size:11px; }.image-card.unavailable { cursor:not-allowed; opacity:.7; }.imagery-empty { display:grid; min-width:260px; place-items:center; padding:0 16px; color:#728796; background:#f3f6f8; border:1px dashed #c4d3db; border-radius:5px; font-size:12px; line-height:1.6; }.imagery-empty--error { color:#b24e58; border-color:#e2aeb4; background:#fff5f6; }
+.analysis { grid-column:2; grid-row:2; display:flex; flex-direction:column; }.periods { display:flex; align-items:center; gap:7px; padding:9px 11px 7px; }.periods button { padding:7px 11px; color:#426478; background:#f5f9fb; border:1px solid #cbdde7; border-radius:4px; font-size:12px; cursor:pointer; }.periods button.active { color:#fff; background:#168db5; border-color:#168db5; box-shadow:0 2px 5px #168db544; }.periods button:disabled { color:#9eacb3; background:#eef2f4; border-color:#dce4e8; box-shadow:none; cursor:not-allowed; opacity:.72; }.periods span { margin-left:auto; overflow:hidden; color:#6f8796; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.imagery { flex:1; min-height:0; display:flex; gap:8px; padding:0 11px 11px; overflow-x:auto; }.image-card { position:relative; flex:0 0 180px; height:112px; overflow:hidden; padding:9px; color:#f4fcff; background:linear-gradient(135deg,#276c80,#17445b); border:1px solid transparent; border-radius:5px; text-align:left; cursor:pointer; transition:border-color .18s,box-shadow .18s; }.image-card:hover,.image-card.active { border-color:#13a9d3; box-shadow:0 0 0 2px #13a9d325; }.image-card.displayed { border-color:#ff4054; box-shadow:0 0 4px #ff4054b8,inset 0 0 2px #ff8a9699; }.image-card__map-thumbnail { position:absolute; inset:0; display:block; opacity:.82; pointer-events:none; }.image-card>img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.66; }.image-card>span { display:grid; height:100%; place-items:center; color:#d5e1e6; background:#53616a; font-size:12px; }.image-card b,.image-card small { position:relative; z-index:1; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card b { margin-top:48px; font-size:13px; }.image-card small { margin-top:4px; font-size:11px; }.image-card.unavailable { cursor:not-allowed; opacity:.7; }.imagery-empty { display:grid; min-width:260px; place-items:center; padding:0 16px; color:#728796; background:#f3f6f8; border:1px dashed #c4d3db; border-radius:5px; font-size:12px; line-height:1.6; }.imagery-empty--error { color:#b24e58; border-color:#e2aeb4; background:#fff5f6; }
 .image-card--add { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:#377b95; background:#f4fafc; border:1px dashed #69aec4; text-align:center; }.image-card--add:hover:not(:disabled) { color:#0b86ae; background:#e9f7fb; border-color:#159bc4; }.image-card--add:disabled { cursor:not-allowed; opacity:.55; }.image-card--add i { width:30px; height:30px; display:grid; place-items:center; border:1px solid currentColor; border-radius:50%; font-size:22px; font-style:normal; line-height:1; }.image-card--add b { margin:4px 0 0; color:currentColor; text-shadow:none; }.image-card--add small { color:#6d92a2; text-shadow:none; }
 .image-card > .image-card__delete { position:absolute; z-index:3; top:5px; right:5px; width:14px; height:14px; min-height:14px; padding:0; display:grid; place-items:center; color:#fff; background:#d64755; border:1px solid #fff8; border-radius:50%; box-shadow:0 1px 3px #3e1420aa; font-size:12px; font-weight:400; line-height:1; text-shadow:none; }.image-card > .image-card__delete:hover,.image-card > .image-card__delete:focus-visible { background:#b92739; outline:2px solid #ffd2d7; outline-offset:1px; }
 .image-delete-mask { position:fixed; z-index:3100; inset:0; display:grid; place-items:center; padding:20px; background:#10243180; }.image-delete-dialog { width:min(390px,calc(100vw - 40px)); overflow:hidden; color:#29475a; background:#fff; border:1px solid #b9d1dc; border-radius:7px; box-shadow:0 12px 32px #102a3d66; }.image-delete-dialog h3 { margin:0; padding:15px 18px; color:#203f53; border-bottom:1px solid #e0eaef; font-size:17px; }.image-delete-dialog p { margin:0; padding:18px; color:#5c7481; font-size:14px; line-height:1.7; }.image-delete-dialog footer { display:flex; justify-content:flex-end; gap:8px; padding:11px 18px; background:#f5f8fa; border-top:1px solid #e1ebef; }.image-delete-dialog button { min-width:76px; padding:7px 12px; color:#466877; background:#fff; border:1px solid #bfd4df; border-radius:4px; cursor:pointer; }.image-delete-dialog button.danger { color:#fff; background:#cf4655; border-color:#cf4655; }.image-delete-dialog button.danger:hover { background:#b92e40; }
 .service-picker-mask { position:fixed; z-index:4200; inset:0; display:grid; place-items:center; padding:24px; background:#102431b8; backdrop-filter:blur(3px); }.service-picker-dialog { width:min(720px,calc(100vw - 40px)); max-height:calc(100vh - 48px); display:flex; flex-direction:column; overflow:hidden; color:#29475a; background:#fff; border:1px solid #b9d1dc; border-radius:9px; box-shadow:0 20px 60px #001d2e66; }.service-picker-dialog>header { flex:none; display:flex; align-items:center; justify-content:space-between; padding:17px 20px; border-bottom:1px solid #d7e4ea; }.service-picker-dialog h3,.service-picker-dialog p { margin:0; }.service-picker-dialog h3 { color:#173c54; font-size:20px; }.service-picker-dialog header p { margin-top:4px; color:#7d929d; font-size:12px; }.service-picker-dialog header button { width:34px; height:34px; border:0; color:#627c89; background:transparent; font-size:26px; cursor:pointer; }.service-picker-body { min-height:0; overflow:auto; padding:18px 20px; }.service-picker-body fieldset { margin:0; padding:12px; border:1px solid #cbdde5; border-radius:6px; }.service-picker-body legend { padding:0 5px; color:#536f7d; font-size:13px; font-weight:700; }.service-picker-body legend em { color:#d14b58; font-style:normal; }.service-picker-body label { min-height:50px; display:flex; align-items:center; gap:10px; padding:7px 10px; border-bottom:1px solid #e6eef2; cursor:pointer; }.service-picker-body label:last-child { border-bottom:0; }.service-picker-body label:hover { background:#f2f9fc; }.service-picker-body label.added { color:#94a4ac; background:#f7f9fa; cursor:not-allowed; }.service-picker-body label input { flex:none; width:16px; height:16px; accent-color:#168eae; }.service-picker-body label span,.service-picker-body label b,.service-picker-body label small { display:block; min-width:0; }.service-picker-body label b { overflow:hidden; color:#294d60; font-size:14px; text-overflow:ellipsis; white-space:nowrap; }.service-picker-body label small { margin-top:4px; color:#718b98; font-size:11px; }.service-picker-body label.added b { color:#8d9ca4; }.service-picker-state { min-height:160px; display:grid; place-items:center; color:#718894; border:1px dashed #c8d9e1; border-radius:6px; font-size:14px; }.service-picker-state--error { color:#b84450; background:#fff4f5; }.service-picker-tip { margin:12px 0 0!important; padding:9px 11px; color:#587786; background:#edf7fa; border-left:3px solid #1b9cba; border-radius:4px; font-size:12px; line-height:1.6; }.service-picker-dialog>footer { flex:none; display:flex; justify-content:flex-end; gap:9px; padding:13px 20px; border-top:1px solid #d7e4ea; background:#fff; }.service-picker-dialog footer button { min-width:92px; height:38px; padding:0 15px; border:1px solid #168aa9; border-radius:4px; font-weight:700; cursor:pointer; }.service-picker-dialog footer button.cancel { color:#587786; background:#fff; border-color:#bfd4de; }.service-picker-dialog footer button.primary { color:#fff; background:#168eae; }.service-picker-dialog footer button:disabled { opacity:.45; cursor:not-allowed; }
-.right-column { min-height:0; grid-column:3; grid-row:1; display:flex; flex-direction:column; }.detail { min-height:0; flex:1; display:flex; flex-direction:column; overflow-y:auto; }.detail>.panel-title { flex:0 0 42px; }.detail dl { flex:0 0 auto; display:grid; grid-template-columns:94px 1fr; margin:0; padding:9px 13px; }.detail dt,.detail dd { margin:0; padding:8px 0; border-bottom:1px solid #edf2f5; font-size:12px; }.detail dt { color:#718895; }.detail dd { color:#29485a; font-weight:700; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.text-level-2 { color:#bd7a18!important; }.text-level-3 { color:#c94856!important; }.detail>p { flex:0 0 auto; margin:0 13px 11px; padding:10px; color:#607987; background:#f3f7f9; font-size:12px; line-height:1.7; }.detail-empty { display:grid; min-height:120px; place-items:center; color:#728796; font-size:13px; }
+.right-column { min-width:0; min-height:0; grid-column:3; grid-row:1 / 3; display:grid; grid-template-rows:minmax(0, 1.2fr) minmax(0, .8fr); gap:10px; }.detail { min-height:0; display:flex; flex-direction:column; overflow-y:auto; }.detail>.panel-title { flex:0 0 42px; }.detail dl { flex:0 0 auto; display:grid; grid-template-columns:94px 1fr; margin:0; padding:9px 13px; }.detail dt,.detail dd { margin:0; padding:8px 0; border-bottom:1px solid #edf2f5; font-size:12px; }.detail dt { color:#718895; }.detail dd { color:#29485a; font-weight:700; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.text-level-2 { color:#bd7a18!important; }.text-level-3 { color:#c94856!important; }.detail>p { flex:0 0 auto; margin:0 13px 11px; padding:10px; color:#607987; background:#f3f7f9; font-size:12px; line-height:1.7; }.detail-empty { display:grid; min-height:120px; place-items:center; color:#728796; font-size:13px; }
 
 /* 场景任务研判在大屏上仍保持清晰可读，统一放大各面板标题与正文层级。 */
 .panel-title {
@@ -481,6 +559,7 @@ onBeforeUnmount(() => {
   padding-inline: 14px;
   font-size: 17px;
 }
+.panel-title > span { color: inherit; font-size: inherit; font-weight: inherit; }
 .panel-title small { font-size: 13px; }
 .task-filters select,
 .filters input,
@@ -532,6 +611,6 @@ onBeforeUnmount(() => {
 .map-compare :deep(.empty-imagery) { font-size: 15px; }
 @media (max-width: 1180px) {
   .governance-page { grid-template-columns: clamp(215px, 23vw, 270px) minmax(400px, 1fr) clamp(235px, 24vw, 280px); gap: 7px; padding: 7px; }
-  .governance-page { grid-template-rows:minmax(300px,1fr) 230px; }.left-column { grid-template-rows: 270px minmax(0,1fr); gap:7px; }.filters { padding: 7px; }.task-filters { grid-template-columns:minmax(0,1fr); padding:7px; }
+  .governance-page { grid-template-rows:minmax(300px,1fr) 230px; }.left-column { grid-template-rows: 375px minmax(0,1fr); gap:7px; }.filters { padding: 7px; }.task-filters { grid-template-columns:minmax(0,1fr); padding:7px; }
 }
 </style>

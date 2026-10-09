@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { ElTooltip } from 'element-plus'
 
 type AlgorithmFamily = 'ai' | 'spatial'
 type ViewMode = 'grid' | 'list'
@@ -84,7 +85,13 @@ watch(pageCount, () => setPage(currentPage.value))
     </aside>
 
     <main class="repository-main">
-      <header class="repository-heading"><div><h1>{{ pageTitle }}</h1><p>{{ pageDescription }}</p></div><button class="add-button" @click="showNotice('新增算法功能使用 Mock 交互展示')"><b>＋</b> 新增算法</button></header>
+      <header class="repository-heading">
+        <div><h1>{{ pageTitle }}</h1><p>{{ pageDescription }}</p></div>
+        <ElTooltip trigger="click" placement="bottom-end" effect="light" :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }">
+          <template #content><div class="algorithm-pending-tip" role="status"><strong>该功能待后端接入</strong></div></template>
+          <button type="button" class="add-button">新增算法</button>
+        </ElTooltip>
+      </header>
       <section class="toolbar">
         <label class="search-box"><i>⌕</i><input v-model="keyword" placeholder="搜索算法名称、关键词或描述..." /></label>
         <label><span>算法类型</span><select v-model="category"><option v-for="item in categories" :key="item">{{ item }}</option></select></label>
@@ -94,7 +101,37 @@ watch(pageCount, () => setPage(currentPage.value))
 
       <section v-if="pageModels.length" class="algorithm-results" :class="`view-${viewMode}`">
         <article v-for="model in pageModels" :key="model.id" class="algorithm-card" tabindex="0" @click="selected=model" @keydown.enter="selected=model">
-          <div class="card-visual" :class="`visual-${model.visual}`"><span class="version">{{ model.version }}</span><span class="status" :class="{testing:model.status==='测试中'}"><i></i>{{ model.status }}</span><div v-if="model.visual==='change'" class="compare-line"><b>2023-03</b><em>›</em><b>2024-03</b></div><template v-else-if="family==='spatial'"><i class="shape shape-a"></i><i class="shape shape-b"></i><i class="map-pin"></i></template><template v-else><i class="detect detect-a"></i><i class="detect detect-b"></i></template></div>
+          <div class="card-visual" :class="`visual-${model.visual}`" aria-label="算法演示示意图">
+            <span class="version">{{ model.version }}</span>
+            <span class="status" :class="{testing:model.status==='测试中'}"><i></i>{{ model.status }}</span>
+            <span class="visual-demo">模拟示意</span>
+            <div v-if="model.visual==='change'" class="compare-line"><b>2023-03</b><em>›</em><b>2024-03</b></div>
+            <svg v-else-if="family==='spatial'" class="spatial-overlay" viewBox="0 0 600 320" preserveAspectRatio="none" aria-hidden="true">
+              <g v-if="model.visual==='overlay'">
+                <path class="overlay-blue" d="M125 83 258 66 301 146 270 237 154 221 103 151Z" />
+                <path class="overlay-green" d="M253 105 418 82 458 178 398 257 278 227 239 153Z" />
+              </g>
+              <g v-else-if="model.visual==='buffer'" class="buffer-rings">
+                <circle cx="302" cy="165" r="110" /><circle cx="302" cy="165" r="80" /><circle cx="302" cy="165" r="48" /><circle class="buffer-center" cx="302" cy="165" r="8" />
+              </g>
+              <g v-else-if="model.visual==='distance'" class="distance-line">
+                <path d="M146 196 451 114" /><circle cx="146" cy="196" r="8" /><circle cx="451" cy="114" r="8" /><text x="282" y="133">1.25 km</text>
+              </g>
+              <g v-else-if="model.visual==='range'" class="range-zone">
+                <path d="M174 110 291 65 411 119 444 224 318 264 169 218 143 155Z" /><circle cx="285" cy="170" r="8" /><circle cx="221" cy="194" r="6" /><circle cx="362" cy="200" r="6" />
+              </g>
+              <g v-else-if="model.visual==='clip'">
+                <path class="overlay-blue" d="M98 85 245 58 292 148 260 237 126 219 78 152Z" />
+                <path class="overlay-green" d="M357 106 478 89 512 184 464 249 358 224 324 151Z" />
+                <path class="clip-arrow" d="M278 164h54m-12-12 12 12-12 12" />
+              </g>
+              <g v-else class="nearby-zone">
+                <circle cx="306" cy="164" r="92" /><circle cx="306" cy="164" r="58" /><circle class="nearby-center" cx="306" cy="164" r="10" />
+                <circle class="nearby-point" cx="203" cy="110" r="8" /><circle class="nearby-point" cx="421" cy="105" r="8" /><circle class="nearby-point" cx="452" cy="213" r="8" /><circle class="nearby-point" cx="204" cy="232" r="8" />
+              </g>
+            </svg>
+            <template v-else><i class="detect detect-a"></i><i class="detect detect-b"></i><i v-if="model.visual==='road'" class="detect detect-c"></i></template>
+          </div>
           <div class="card-content"><h2>{{ model.name }}</h2><p>{{ model.description }}</p><div class="tags"><span v-for="tag in model.tags" :key="tag">{{ tag }}</span></div></div>
           <footer><span class="owner-avatar"></span><b>{{ model.owner }}</b><time>{{ model.updatedAt }}</time><div><button title="编辑" @click.stop="showNotice(`${model.name}：编辑功能为 Mock`)">✎</button><button title="统计" @click.stop="showNotice(`${model.name}：暂无运行统计`)">▥</button><button title="更多" @click.stop="showNotice(`${model.name}：暂无更多操作`)">•••</button></div></footer>
         </article>
@@ -104,7 +141,7 @@ watch(pageCount, () => setPage(currentPage.value))
     </main>
 
     <transition name="notice"><div v-if="notice" class="mock-notice">{{ notice }}</div></transition>
-    <div v-if="selected" class="detail-mask" @click.self="selected=undefined"><section class="detail-dialog"><header><div><small>{{ selected.version }} · {{ selected.status }}</small><h2>{{ selected.name }}</h2></div><button @click="selected=undefined">×</button></header><p>{{ selected.description }}</p><dl><div><dt>算法类型</dt><dd>{{ selected.category }}</dd></div><div><dt>应用场景</dt><dd>{{ selected.scene }}</dd></div><div><dt>能力标签</dt><dd>{{ selected.tags.join('、') }}</dd></div><div><dt>维护单位</dt><dd>{{ selected.owner }}</dd></div><div><dt>更新时间</dt><dd>{{ selected.updatedAt }}</dd></div></dl><footer><button @click="selected=undefined">关闭</button><button class="primary" @click="showNotice('算法配置功能为 Mock');selected=undefined">配置算法</button></footer></section></div>
+    <div v-if="selected" class="detail-mask" @click.self="selected=undefined"><section class="detail-dialog"><header><div><small>{{ selected.version }} · {{ selected.status }}</small><h2>{{ selected.name }}</h2></div><button @click="selected=undefined">×</button></header><p>{{ selected.description }}</p><dl><div><dt>算法类型</dt><dd>{{ selected.category }}</dd></div><div><dt>应用场景</dt><dd>{{ selected.scene }}</dd></div><div><dt>能力标签</dt><dd>{{ selected.tags.join('、') }}</dd></div><div><dt>维护单位</dt><dd>{{ selected.owner }}</dd></div><div><dt>更新时间</dt><dd>{{ selected.updatedAt }}</dd></div></dl><footer><button @click="selected=undefined">关闭</button><ElTooltip trigger="click" placement="top-end" effect="light" :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }"><template #content><div class="algorithm-pending-tip" role="status"><strong>该功能待后端接入</strong></div></template><button type="button" class="primary">配置算法</button></ElTooltip></footer></section></div>
   </div>
 </template>
 
@@ -114,5 +151,38 @@ watch(pageCount, () => setPage(currentPage.value))
 @media(max-width:1400px){.algorithm-page{grid-template-columns:235px minmax(0,1fr)}.repository-main{padding-inline:20px}.algorithm-results.view-grid{gap:11px}.toolbar{gap:10px}.toolbar>label:not(.search-box){grid-template-columns:1fr}.toolbar>label:not(.search-box) span{display:none}.algorithm-card>footer time{display:none}}
 @media(max-width:1050px){.algorithm-results.view-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.view-list .algorithm-card{grid-template-columns:190px minmax(0,1fr)}.view-list .algorithm-card>footer{display:none}}
 .toolbar select:hover,.toolbar select:focus{color:#fff;background:#315f91;border-color:#315f91}.toolbar select option{color:#53627a;background:#fff}
+.pagination select{cursor:pointer;transition:background-color .18s,border-color .18s,color .18s}
+.pagination select:hover,.pagination select:focus{color:#fff;background:#315f91;border-color:#315f91;outline:0}
+.pagination select option{color:#34445e;background:#fff}
+.algorithm-pending-tip{padding:9px 12px;border-radius:7px;background:linear-gradient(135deg,#fff,#fff5f6);font-family:"Microsoft YaHei",sans-serif}
+.algorithm-pending-tip strong{display:block;color:#c43b4d;font-size:12px;line-height:1.4;white-space:nowrap}
+/* Local demonstration imagery: generated aerial thumbnails and a shared GIS basemap. */
+.card-visual{background-position:center;background-size:cover}
+.visual-forest{background-image:url('../assets/algorithms/forest.jpg')}
+.visual-building{background-image:url('../assets/algorithms/building.jpg')}
+.visual-farmland{background-image:url('../assets/algorithms/farmland.jpg')}
+.visual-change{background-image:url('../assets/algorithms/change_before.jpg')}
+.visual-change::before{position:absolute;z-index:1;inset:0;background:url('../assets/algorithms/change_after.jpg') center/cover;clip-path:inset(0 0 0 36%);content:""}
+.visual-change::after{position:absolute;z-index:2;top:0;bottom:0;left:36%;width:2px;background:#fff;box-shadow:0 0 0 1px #17324b55;content:""}
+.visual-road{background-image:url('../assets/algorithms/road.jpg')}
+.visual-water{background-image:url('../assets/algorithms/water.jpg')}
+.visual-overlay,.visual-buffer,.visual-distance,.visual-range,.visual-clip,.visual-nearby{background-image:url('../assets/algorithms/spatial_map.jpg');background-size:135% auto}
+.visual-overlay{background-position:32% 42%}.visual-buffer{background-position:62% 50%}.visual-distance{background-position:47% 59%}.visual-range{background-position:20% 66%}.visual-clip{background-position:78% 45%}.visual-nearby{background-position:54% 32%}
+.visual-demo{position:absolute;z-index:4;right:10px;bottom:9px;padding:3px 7px;border:1px solid #ffffff80;border-radius:4px;color:#fff;background:#102b3cb5;font-size:10px;letter-spacing:.5px;pointer-events:none}
+.visual-change .visual-demo{bottom:45px}
+.compare-line{z-index:3}.compare-line em{z-index:2}.visual-change .compare-line em{position:absolute;left:36%;transform:translateX(-50%)}
+.detect{z-index:2;border:2px solid #ff555d;background:#ff555d21;box-shadow:0 0 0 1px #fff8,0 0 7px #fa313b99}
+.visual-forest .detect-a{left:37%;top:22%;width:35%;height:52%}.visual-forest .detect-b{left:22%;top:39%;width:16%;height:26%}
+.visual-building .detect-a{left:37%;top:26%;width:29%;height:40%}.visual-building .detect-b{left:62%;top:18%;width:17%;height:24%}
+.visual-farmland .detect-a{left:44%;top:28%;width:26%;height:46%;border-color:#f2d83c;background:#e7d52a23;box-shadow:0 0 0 1px #fff8}.visual-farmland .detect-b{display:none}
+.visual-road .detect-a{left:24%;top:13%;width:13%;height:17%}.visual-road .detect-b{left:59%;top:10%;width:13%;height:18%}.visual-road .detect-c{left:55%;top:73%;width:17%;height:17%}
+.visual-water .detect-a{left:29%;top:37%;width:24%;height:32%}.visual-water .detect-b{left:58%;top:52%;width:16%;height:22%}
+.spatial-overlay{position:absolute;z-index:2;inset:0;width:100%;height:100%;filter:drop-shadow(0 1px 2px #173b614a)}
+.spatial-overlay .overlay-blue{fill:#397cff50;stroke:#3678fa;stroke-width:3}.spatial-overlay .overlay-green{fill:#22c97867;stroke:#0cad70;stroke-width:3}
+.buffer-rings circle{fill:#4a7cf021;stroke:#3f76f0;stroke-width:2}.buffer-rings circle:nth-child(2){fill:#4a7cf02e}.buffer-rings circle:nth-child(3){fill:#4a7cf044}.buffer-rings .buffer-center{fill:#fc575c;stroke:#fff;stroke-width:3}
+.distance-line path{fill:none;stroke:#337cff;stroke-width:4;stroke-dasharray:10 7}.distance-line circle{fill:#337cff;stroke:#fff;stroke-width:4}.distance-line text{fill:#234670;font-size:20px;font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:5}
+.range-zone path{fill:#fc5b6359;stroke:#f5505c;stroke-width:3}.range-zone circle{fill:#367cf3;stroke:#fff;stroke-width:3}
+.clip-arrow{fill:none;stroke:#294967;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
+.nearby-zone circle{fill:#397cff12;stroke:#397cff;stroke-width:2;stroke-dasharray:8 7}.nearby-zone .nearby-center{fill:#fb5964;stroke:#fff;stroke-width:3;stroke-dasharray:none}.nearby-zone .nearby-point{fill:#397cff;stroke:#fff;stroke-width:3;stroke-dasharray:none}
 /* Keep this style block versioned with the light algorithm-management layout. */
 </style>

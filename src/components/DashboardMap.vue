@@ -159,6 +159,7 @@ const toolMessage = ref('')
 const measureOpen = ref(false)
 const baseMapOpen = ref(false)
 const activeTool = ref<'distance' | 'area' | 'marker' | null>(null)
+const locating = ref(false)
 const measureResult = ref('')
 const scaleWidth = ref(96)
 const scaleLabel = ref('5 km')
@@ -198,6 +199,7 @@ let searchHighlightGroup: L.LayerGroup | undefined
 let administrativeBoundaryGroup: L.LayerGroup | undefined
 let hailingBoundaryGroup: L.LayerGroup | undefined
 let toolMessageTimer: ReturnType<typeof window.setTimeout> | undefined
+let markerHintTimer: ReturnType<typeof window.setTimeout> | undefined
 let sceneFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 let overviewFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 let searchFocusTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -634,9 +636,11 @@ function locateUser() {
     showToolMessage('当前浏览器不支持定位')
     return
   }
+  locating.value = true
   showToolMessage('正在获取当前位置…', 10000)
   navigator.geolocation.getCurrentPosition(
     ({ coords }) => {
+      locating.value = false
       locationGroup?.clearLayers()
       const point = L.latLng(coords.latitude, coords.longitude)
       L.circle(point, { radius: Math.max(coords.accuracy, 20), color: '#33d9ff', fillOpacity: .12 }).addTo(locationGroup!)
@@ -645,7 +649,10 @@ function locateUser() {
       map?.setView(point, 15)
       showToolMessage('定位成功')
     },
-    () => { showToolMessage('定位失败，请允许浏览器访问位置') },
+    () => {
+      locating.value = false
+      showToolMessage('定位失败，请允许浏览器访问位置')
+    },
     { enableHighAccuracy: true, timeout: 10000 },
   )
 }
@@ -661,13 +668,28 @@ function resetNorth() {
   showToolMessage('已回到海陵区默认视角，地图保持正北向上')
 }
 
+function toggleMeasureMenu() {
+  measureOpen.value = !measureOpen.value
+  if (!measureOpen.value && (activeTool.value === 'distance' || activeTool.value === 'area')) activeTool.value = null
+}
+
+const markerHint = '点击地图添加可拖动标注'
+
+function clearMarkerHint() {
+  if (markerHintTimer) window.clearTimeout(markerHintTimer)
+  markerHintTimer = undefined
+  if (measureResult.value === markerHint) measureResult.value = ''
+}
+
 function startTool(tool: 'distance' | 'area' | 'marker') {
+  clearMarkerHint()
   activeTool.value = activeTool.value === tool ? null : tool
   measureOpen.value = tool !== 'marker'
   baseMapOpen.value = false
   measurePoints = []
   if (tool !== 'marker') measureGroup?.clearLayers()
-  measureResult.value = tool === 'distance' ? '点击地图连续选取测距点，单击鼠标右键结束' : tool === 'area' ? '点击地图绘制范围，单击鼠标右键结束' : '点击地图添加可拖动标注'
+  measureResult.value = activeTool.value === 'distance' ? '点击地图连续选取测距点，单击鼠标右键结束' : activeTool.value === 'area' ? '点击地图绘制范围，单击鼠标右键结束' : activeTool.value === 'marker' ? markerHint : ''
+  if (activeTool.value === 'marker') markerHintTimer = window.setTimeout(clearMarkerHint, 4000)
 }
 
 function geodesicArea(points: L.LatLng[]) {
@@ -732,6 +754,7 @@ function finishMeasurement(event: L.LeafletMouseEvent) {
 }
 
 function addAnnotation(point: L.LatLng) {
+  clearMarkerHint()
   const icon = L.divIcon({ className: 'custom-annotation', html: '<span>⌖</span>', iconSize: [27, 27], iconAnchor: [13, 26] })
   L.marker(point, { icon, draggable: true })
     .bindPopup(`地图标注<br>${point.lng.toFixed(6)}, ${point.lat.toFixed(6)}`)
@@ -747,6 +770,7 @@ function clearMeasurements() {
 }
 
 function clearAnnotations() {
+  clearMarkerHint()
   annotationGroup?.clearLayers()
   if (activeTool.value === 'marker') activeTool.value = null
   showToolMessage('已清除全部标注')
@@ -942,6 +966,7 @@ watch(searchKeyword, (value) => {
 })
 onBeforeUnmount(() => {
   if (toolMessageTimer) window.clearTimeout(toolMessageTimer)
+  if (markerHintTimer) window.clearTimeout(markerHintTimer)
   if (sceneFocusTimer) window.clearTimeout(sceneFocusTimer)
   if (overviewFocusTimer) window.clearTimeout(overviewFocusTimer)
   if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
@@ -960,6 +985,7 @@ onBeforeUnmount(() => {
     <div v-if="mapError" class="dashboard-map__empty"><span>{{ mapError }}</span><button @click="retryMap">重新加载</button></div>
     <div v-else-if="!mapReady" class="dashboard-map__loading">正在加载江苏泰州天地图…</div>
 
+    <div class="left-map-rail">
     <div class="layer-panel-stack" :class="{ 'is-collapsed': layerPanelCollapsed }">
       <button
         class="layer-panel-handle"
@@ -990,30 +1016,33 @@ onBeforeUnmount(() => {
         </div>
       </aside>
 
-      <aside v-if="vectorFilterPanels.length" class="parcel-type-panel" :inert="layerPanelCollapsed" :aria-hidden="layerPanelCollapsed">
-        <div class="tool-title"><b>地块类型</b></div>
-        <section v-for="panel in vectorFilterPanels" :key="panel.serviceId" class="parcel-filter-group">
-          <div class="parcel-filter-heading"><b>{{ panel.serviceName }}</b><small>{{ panel.fieldLabel }}</small></div>
-          <label class="parcel-filter-row parcel-filter-all">
-            <span>全部地块</span>
-            <input
-              type="checkbox"
-              :checked="allVectorCategoriesChecked(panel)"
-              :indeterminate="someVectorCategoriesChecked(panel)"
-              @change="toggleAllVectorCategories(panel, $event)"
-            />
-          </label>
-          <label v-for="item in panel.items" :key="item.value" class="parcel-filter-row">
-            <span>{{ item.label }}</span>
-            <input v-model="item.checked" type="checkbox" @change="applyVectorCategoryFilter(panel)" />
-          </label>
-        </section>
-      </aside>
+    </div>
+
+    <aside class="map-tools">
+      <div class="map-mode-switch" aria-label="底图选择">
+        <button type="button" :class="{ active: mapMode === 'image' }" aria-label="卫星地图" :aria-pressed="mapMode === 'image'" @click="switchMode('image')"><i class="map-tool-icon"><Picture /></i><span>卫星地图</span></button>
+        <button type="button" :class="{ active: mapMode === 'vector' }" aria-label="电子地图" :aria-pressed="mapMode === 'vector'" @click="switchMode('vector')"><i class="map-tool-icon"><MapLocation /></i><span>电子地图</span></button>
+      </div>
+      <button type="button" :class="{ 'is-busy': locating }" aria-label="定位当前位置" :aria-busy="locating" @click="locateUser"><i class="map-tool-icon"><Aim /></i><span>定位当前位置</span></button>
+      <button type="button" aria-label="回到默认视角" @click="resetNorth"><i class="map-tool-icon"><Compass /></i><span>回到默认视角</span></button>
+      <div class="measure-tool" :class="{ 'is-open': measureOpen }">
+        <button type="button" :class="{ active: measureOpen || activeTool === 'distance' || activeTool === 'area' }" aria-label="测量工具" :aria-expanded="measureOpen" @click="toggleMeasureMenu"><i class="map-tool-icon"><EditPen /></i><span>测量工具</span></button>
+        <div v-if="measureOpen" class="tool-submenu right-submenu">
+          <button type="button" :class="{ active: activeTool === 'distance' }" @click="startTool('distance')">距离测量</button>
+          <button type="button" :class="{ active: activeTool === 'area' }" @click="startTool('area')">面积测量</button>
+          <button type="button" @click="clearMeasurements">清除测量</button>
+        </div>
+      </div>
+      <button type="button" :class="{ active: activeTool === 'marker' }" aria-label="添加标注" :aria-pressed="activeTool === 'marker'" @click="startTool('marker')"><i class="map-tool-icon"><Location /></i><span>添加标注</span></button>
+      <button type="button" aria-label="清除标注" @click="clearAnnotations"><i class="map-tool-icon"><Delete /></i><span>清除标注</span></button>
+      <button type="button" aria-label="放大地图" @click="map?.zoomIn()"><i class="map-tool-icon"><ZoomIn /></i><span>放大地图</span></button>
+      <button type="button" aria-label="缩小地图" @click="map?.zoomOut()"><i class="map-tool-icon"><ZoomOut /></i><span>缩小地图</span></button>
+    </aside>
     </div>
 
     <div class="map-search" :class="{ expanded: searchExpanded }">
       <input v-if="searchExpanded" ref="searchInput" v-model="searchKeyword" placeholder="搜索地块类型、名称或地点" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="toggleSearch" />
-      <button class="map-search-toggle" type="button" :aria-label="searchExpanded ? '收起地图搜索' : '展开地图搜索'" :title="searchExpanded ? '收起搜索' : '搜索任务'" @click="toggleSearch">
+      <button class="map-search-toggle" type="button" :aria-label="searchExpanded ? '收起地图搜索' : '展开地图搜索'" :title="searchExpanded ? '收起搜索' : '搜索地块或地点'" @click="toggleSearch">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/></svg>
       </button>
       <div v-if="showSearchSuggestions" class="search-results" aria-live="polite">
@@ -1031,23 +1060,24 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <aside class="map-tools">
-      <div class="map-mode-switch" aria-label="底图选择">
-        <button :class="{ active: mapMode === 'image' }" title="切换卫星影像" @click="switchMode('image')"><i class="map-tool-icon"><Picture /></i><span>卫星地图</span></button>
-        <button :class="{ active: mapMode === 'vector' }" title="切换电子地图" @click="switchMode('vector')"><i class="map-tool-icon"><MapLocation /></i><span>电子地图</span></button>
-      </div>
-      <button title="当前位置" @click="locateUser"><i class="map-tool-icon"><Aim /></i><span>定位</span></button>
-      <button title="回到海陵区默认视角并保持正北" @click="resetNorth"><i class="map-tool-icon"><Compass /></i><span>指南针</span></button>
-      <button :class="{ active: measureOpen }" title="测量工具" @click="measureOpen = !measureOpen"><i class="map-tool-icon"><EditPen /></i><span>测量</span></button>
-      <div v-if="measureOpen" class="tool-submenu right-submenu">
-        <button :class="{ active: activeTool === 'distance' }" @click="startTool('distance')">距离测量</button>
-        <button :class="{ active: activeTool === 'area' }" @click="startTool('area')">面积测量</button>
-        <button @click="clearMeasurements">清除测量</button>
-      </div>
-      <button :class="{ active: activeTool === 'marker' }" title="添加标注" @click="startTool('marker')"><i class="map-tool-icon"><Location /></i><span>标注</span></button>
-      <button title="清除标注" @click="clearAnnotations"><i class="map-tool-icon"><Delete /></i><span>清除</span></button>
-      <button title="放大地图" @click="map?.zoomIn()"><i class="map-tool-icon"><ZoomIn /></i><span>放大</span></button>
-      <button title="缩小地图" @click="map?.zoomOut()"><i class="map-tool-icon"><ZoomOut /></i><span>缩小</span></button>
+    <aside v-if="vectorFilterPanels.length" class="parcel-type-panel">
+      <div class="tool-title"><b>地块类型</b></div>
+      <section v-for="panel in vectorFilterPanels" :key="panel.serviceId" class="parcel-filter-group">
+        <div class="parcel-filter-heading"><b>{{ panel.serviceName }}</b><small>{{ panel.fieldLabel }}</small></div>
+        <label class="parcel-filter-row parcel-filter-all">
+          <span>全部地块</span>
+          <input
+            type="checkbox"
+            :checked="allVectorCategoriesChecked(panel)"
+            :indeterminate="someVectorCategoriesChecked(panel)"
+            @change="toggleAllVectorCategories(panel, $event)"
+          />
+        </label>
+        <label v-for="item in panel.items" :key="item.value" class="parcel-filter-row">
+          <span>{{ item.label }}</span>
+          <input v-model="item.checked" type="checkbox" @change="applyVectorCategoryFilter(panel)" />
+        </label>
+      </section>
     </aside>
 
     <div v-if="measureResult" class="measure-result" role="status">
@@ -1079,7 +1109,7 @@ onBeforeUnmount(() => {
 .measure-result,.tool-message { position: absolute; z-index: 550; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 7px 12px; color: #c8f8ff; background: #03223aef; border: 1px solid #18a2c1; font-size: 14px; box-shadow: 0 0 10px #12bbd544; }.tool-message { bottom: 46px; cursor: pointer; }.tool-message-enter-active,.tool-message-leave-active { transition: opacity .2s ease, transform .2s ease; }.tool-message-enter-from,.tool-message-leave-to { opacity: 0; transform: translate(-50%, 6px); }.map-scale { position: absolute; z-index: 500; right: 68px; bottom: 7px; padding: 4px 8px; color: #77a9b9; background: #021728cc; font-size: 12px; }
 :deep(.business-task-marker),:deep(.business-drone-marker),:deep(.custom-annotation) { background: transparent; border: 0; }:deep(.business-task-marker span) { width: 23px; height: 23px; display: grid; place-items: center; color: white; background: color-mix(in srgb, var(--marker-color), #062239 35%); border: 2px solid var(--marker-color); border-radius: 50% 50% 50% 5px; transform: rotate(-45deg); box-shadow: 0 0 10px var(--marker-color); font-size: 14px; }:deep(.business-drone-marker) { display: flex; align-items: center; gap: 4px; color: #79eff9; }:deep(.business-drone-marker span) { width: 24px; height: 24px; display: grid; place-items: center; background: #087b9e; border: 1px solid #4defff; border-radius: 50%; box-shadow: 0 0 10px #22e5f4; }:deep(.business-drone-marker b) { padding: 2px 4px; background: #03233ddd; font-size: 12px; white-space: nowrap; }:deep(.business-task-label),:deep(.measure-index) { color: #c9f7ff; background: #03223ddd; border: 1px solid #17698e; box-shadow: none; border-radius: 2px; font: 11px "Microsoft YaHei"; }:deep(.leaflet-popup-content-wrapper),:deep(.leaflet-popup-tip) { color: #d9f8ff; background: #061d34; border: 1px solid #1685ad; border-radius: 2px; }:deep(.business-popup strong),:deep(.business-popup span),:deep(.business-popup small) { display: block; }:deep(.business-popup span) { margin-top: 5px; color: #8db5c3; font-size: 14px; }:deep(.business-popup small) { margin-top: 6px; color: #5d899b; }:deep(.custom-annotation span) { width: 25px; height: 25px; display: grid; place-items: center; color: #fff; background: #e86835; border: 2px solid #ffd7a8; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 0 8px #ff8a45; }
 
-/* The layer panel is the only left-side control; operational tools form one right-side rail. */
+/* Map layer controls and tools share the left rail; category filters sit beneath search. */
 .layer-manager { width: 100%; height: auto; max-height: min(350px,48vh); display: flex; flex: 0 0 auto; flex-direction: column; transform: none; overflow: hidden; border: 1px solid #1688bf; border-radius: 14px; background: #031c37b8; box-shadow: 0 0 18px #00a7d534; }.layer-manager-list{min-height:0;overflow-x:hidden;overflow-y:auto;scrollbar-color:#1688bf #031c37;scrollbar-width:thin}.tool-title { min-height: 46px; flex:0 0 46px; padding: 0 15px; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg, #056ea7c9, #073f6dc9); font-size: 18px; }.tool-title button { font-size: 14px; }.layer-row { box-sizing: border-box; min-height: 43px; flex: 0 0 43px; grid-template-columns: 18px 1fr auto; gap: 10px; padding: 9px 16px; border: 0; border-bottom: 1px solid #0d5278; background: #031c37b8; }.layer-row:last-child { border-bottom: 0; }.layer-row b { font-size: 17px; }.layer-row em { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; font-size: 0; transform: translateX(-8px); }.layer-row.active em { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }.layer-row>i { width: 16px; height: 16px; border-radius: 1px; box-shadow: none; }.layer-row.disabled { cursor: not-allowed; opacity: .55; }.dom-imagery-symbol { width: 16px!important; height: 2px!important; border: 0!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#20b9ff 0 4px,transparent 4px 7px)!important; }
 .layer-section-title { min-height: 36px; flex: 0 0 36px; display: flex; align-items: center; margin: 0; padding: 0 15px; color: #a9dce9; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg,#064367d9,#032a49d9); font-size: 14px; font-weight: 700; letter-spacing: .5px; }.layer-row.jiulong-imagery-row { min-height: 43px; height: auto; flex: 0 0 auto; grid-template-columns: minmax(0,1fr) auto; }.layer-row.jiulong-imagery-row b { overflow: visible; white-space: normal; line-height: 1.35; text-overflow: clip; }.jiulong-vector-symbol { width: 16px!important; height: 2px!important; border: 0!important; border-radius: 0!important; background: #ff3f4d!important; box-shadow: 0 0 5px #ff3f4d!important; }
 .layer-manager .layer-row { min-height: 43px; height: auto; flex: 0 0 auto; }

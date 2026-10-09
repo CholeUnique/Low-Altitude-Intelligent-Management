@@ -238,6 +238,7 @@ function parseServiceRemark(remark?: string): ServiceRemarkConfig {
 class ArcGisExportLayer extends L.GridLayer {
   private definitionExpression = '1=1'
   private filterRevision = 0
+  private zooming = false
 
   constructor(
     private readonly url: string,
@@ -251,7 +252,49 @@ class ArcGisExportLayer extends L.GridLayer {
       noWrap: true,
       keepBuffer: 3,
       updateWhenIdle: false,
+      // Transparent vector tiles from two zoom levels must not be painted together.
+      updateWhenZooming: vectorLayerId === undefined,
     })
+  }
+
+  override onAdd(map: L.Map) {
+    super.onAdd(map)
+    if (this.vectorLayerId !== undefined) {
+      map.on('zoomstart', this.hideVectorTiles, this)
+      map.on('zoomend', this.finishVectorZoom, this)
+      this.on('load', this.showVectorTilesWhenReady, this)
+    }
+    return this
+  }
+
+  override onRemove(map: L.Map) {
+    if (this.vectorLayerId !== undefined) {
+      map.off('zoomstart', this.hideVectorTiles, this)
+      map.off('zoomend', this.finishVectorZoom, this)
+      this.off('load', this.showVectorTilesWhenReady, this)
+    }
+    this.zooming = false
+    super.onRemove(map)
+    return this
+  }
+
+  private hideVectorTiles() {
+    this.zooming = true
+    const container = this.getContainer()
+    if (container) container.style.visibility = 'hidden'
+  }
+
+  private finishVectorZoom() {
+    this.zooming = false
+    this.showVectorTilesWhenReady()
+  }
+
+  private showVectorTilesWhenReady() {
+    // Keep the old transparent tile level hidden until the new level is complete.
+    if (this.zooming) return
+    if (this.isLoading()) return
+    const container = this.getContainer()
+    if (container) container.style.visibility = ''
   }
 
   override createTile(coords: L.Coords, done: L.DoneCallback) {
@@ -389,12 +432,14 @@ class ArcGisVectorLayer extends L.LayerGroup {
     super.onAdd(map)
     map.on('mousemove', this.handleMouseMove, this)
     map.on('mouseout', this.closeVectorTooltip, this)
+    map.on('zoomstart', this.closeVectorTooltip, this)
     return this
   }
 
   override onRemove(map: L.Map) {
     map.off('mousemove', this.handleMouseMove, this)
     map.off('mouseout', this.closeVectorTooltip, this)
+    map.off('zoomstart', this.closeVectorTooltip, this)
     this.closeVectorTooltip()
     super.onRemove(map)
     return this
