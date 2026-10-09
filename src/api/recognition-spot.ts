@@ -26,12 +26,38 @@ export interface RecognitionSpotCreateResult {
   spotNos: string[]
 }
 
-export interface RecognitionSpotUploadInput {
+export interface RecognitionSpotUploadPreviewInput {
   files: File[]
-  mapServiceIds: Array<string | number>
   sceneCode: string
-  abnormalType: RecognitionAbnormalType
   deptId?: string
+}
+
+export interface RecognitionSpotUploadPreviewField {
+  name: string
+  type?: string
+  distinctValues: string[]
+}
+
+export interface RecognitionSpotUploadPreviewItem {
+  seq: number
+  geometryType?: string
+  areaSqm?: number | null
+  center?: number[]
+  properties?: Record<string, unknown>
+}
+
+export interface RecognitionSpotUploadPreviewResult {
+  batchNo: string
+  featureCount: number
+  fields: RecognitionSpotUploadPreviewField[]
+  preview: RecognitionSpotUploadPreviewItem[]
+}
+
+export interface RecognitionSpotUploadConfirmInput {
+  batchNo: string
+  typeField: string
+  typeMappings: Array<{ value: string; abnormalType: RecognitionAbnormalType }>
+  mapServiceIds: Array<string | number>
   title?: string
   description?: string
   foundTime?: string
@@ -152,18 +178,18 @@ export async function addRecognitionSpot(input: RecognitionSpotAddInput) {
   return apiClient.post<never, RecognitionSpotCreateResult>('/v1/biz/recognition/spot/add', input)
 }
 
-/** 上传 Shapefile 文件组并导入疑似异常图斑。 */
-export async function uploadRecognitionSpots(input: RecognitionSpotUploadInput) {
+/** 第一步：解析 Shapefile 并返回暂存 30 分钟的预览批次，不写入图斑。 */
+export async function previewRecognitionSpotUpload(input: RecognitionSpotUploadPreviewInput) {
   const form = new FormData()
   input.files.forEach((file) => form.append('files', file))
-  input.mapServiceIds.forEach((id) => form.append('mapServiceIds', String(id)))
   form.append('sceneCode', input.sceneCode)
-  form.append('abnormalType', input.abnormalType)
   if (input.deptId) form.append('deptId', input.deptId)
-  if (input.title?.trim()) form.append('title', input.title.trim())
-  if (input.description?.trim()) form.append('description', input.description.trim())
-  if (input.foundTime) form.append('foundTime', input.foundTime)
-  return apiClient.post<never, RecognitionSpotCreateResult>('/v1/biz/recognition/spot/upload', form)
+  return apiClient.post<never, RecognitionSpotUploadPreviewResult>('/v1/biz/recognition/spot/upload/preview', form)
+}
+
+/** 第二步：提交完整的字段取值映射，确认后才正式落库。 */
+export async function confirmRecognitionSpotUpload(input: RecognitionSpotUploadConfirmInput) {
+  return apiClient.post<never, RecognitionSpotCreateResult>('/v1/biz/recognition/spot/upload/confirm', input)
 }
 
 /** 查询识别图斑，用于让手工新增结果立即进入问题图斑列表。 */
