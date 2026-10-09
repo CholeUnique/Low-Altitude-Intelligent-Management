@@ -1,6 +1,6 @@
 # 后端 API 映射表
 
-> 来源：`http://223.2.38.27:8080/v3/api-docs`  
+> 来源：`http://223.2.41.169:8080/v3/api-docs`  
 > 原始 schema：`docs/openapi-raw.json`  
 > OpenAPI 标题：`TzScene 用户认证与管理 API`  
 > 生成时间：本轮第一阶段实施  

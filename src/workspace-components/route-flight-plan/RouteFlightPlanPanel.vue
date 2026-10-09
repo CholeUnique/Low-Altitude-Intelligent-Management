@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { Component } from 'vue'
-import { Connection, EditPen, Promotion, RefreshRight, VideoCamera } from '@element-plus/icons-vue'
+import { Connection, EditPen, Promotion, VideoCamera } from '@element-plus/icons-vue'
 import type { PortalTask } from '@/types'
 import { ApiBusinessError, isMockMode } from '@/api/client'
 import {
@@ -62,7 +62,6 @@ const openComponentItems: Array<{ type: UavOpenComponentType; label: string; ico
   { type: 'WAYLINE_EDIT', label: '编辑航线', icon: EditPen },
   { type: 'FLIGHT_CREATE', label: '创建飞行计划', icon: Promotion },
   { type: 'COCKPIT', label: '虚拟座舱', icon: VideoCamera },
-  { type: 'TRAJECTORY_PLAYBACK', label: '轨迹回放', icon: RefreshRight },
 ]
 /** 创建飞行计划由飞行作业主导航承载，避免在两级菜单重复出现。 */
 const openComponentNavItems = computed(() => openComponentItems.filter((item) => item.type !== 'FLIGHT_CREATE'))
@@ -116,7 +115,7 @@ const taskReferenceType = computed(() => String(props.task?.refType || 'NONE').t
 const taskReferenceId = computed(() => props.task?.refId || '')
 const isTaskPlanBound = computed(() => Boolean(props.task && taskReferenceType.value === 'PLAN' && taskReferenceId.value))
 const componentRequiresSelection = (type: UavOpenComponentType) =>
-  type === 'WAYLINE_EDIT' || type === 'COCKPIT' || type === 'TRAJECTORY_PLAYBACK'
+  type === 'WAYLINE_EDIT' || type === 'COCKPIT'
 const componentSelectorTitle = computed(() => activeOpenComponentType.value === 'WAYLINE_EDIT' ? '选择待编辑航线' : '选择关联飞行任务')
 const componentSelectorHint = computed(() => activeOpenComponentType.value === 'WAYLINE_EDIT'
   ? '请选择具有有效航线 ID 的航线，确认后将进入对应航线的编辑界面。'
@@ -184,7 +183,7 @@ function flightTaskSelections(source: UavFlightTaskOption[]): OpenComponentSelec
 }
 
 function componentAuthorizationError(type: UavOpenComponentType, error: unknown) {
-  const label = type === 'WAYLINE_EDIT' ? '编辑航线' : type === 'COCKPIT' ? '虚拟座舱' : '轨迹回放'
+  const label = type === 'WAYLINE_EDIT' ? '编辑航线' : '虚拟座舱'
   return error instanceof ApiBusinessError
     ? `后端生成${label}授权地址失败（错误码 ${error.code}）：${error.message}`
     : error instanceof Error ? `${label}地址验证失败：${error.message}` : `${label}地址验证失败。`
@@ -307,11 +306,7 @@ function openCockpit() {
   selectOpenComponent('COCKPIT')
 }
 
-function openTrajectoryPlayback() {
-  selectOpenComponent('TRAJECTORY_PLAYBACK')
-}
-
-defineExpose({ openFlightPlanCreate, openWaylineCreate, openWaylineEdit, openCockpit, openTrajectoryPlayback })
+defineExpose({ openFlightPlanCreate, openWaylineCreate, openWaylineEdit, openCockpit })
 
 async function confirmComponentSelection() {
   const selected = componentSelectorItems.value.find((item) => item.id === selectedComponentSelectionId.value)

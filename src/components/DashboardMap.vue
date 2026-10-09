@@ -7,12 +7,13 @@ import 'leaflet/dist/leaflet.css'
 import taizhouCityBoundary from '@/assets/geo/taizhou-city.json'
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
-import type { DashboardMapLayer, DashboardMapTask, DronePatrolRoute } from '@/types'
+import type { DashboardMapLayer, DronePatrolRoute } from '@/types'
 import {
   createMapServiceLayer,
   expandMapServiceSublayers,
   MAP_SERVICE_IMAGERY_PANE,
   MAP_SERVICE_VECTOR_PANE,
+  type MapServiceCategoryLocation,
   type MapServiceLayerHandle,
 } from '@/utils/map-service-layer'
 
@@ -113,17 +114,25 @@ const container = ref<HTMLElement>()
 const mapReady = ref(false)
 const mapError = ref('')
 const mapMode = ref<'vector' | 'image'>('image')
-const mapServices = ref<MapServiceItem[]>([])
+interface MapServiceGroup {
+  id: string
+  name: string
+  source: MapServiceItem
+  layers: MapServiceItem[]
+}
+const mapServiceGroups = ref<MapServiceGroup[]>([])
 const mapServicesLoading = ref(false)
 const mapServicesError = ref('')
 const layerPanelCollapsed = ref(false)
 const visibleMapServiceIds = ref<string[]>([])
+const expandedMapServiceGroupIds = ref<string[]>([])
 interface VectorFilterPanel {
   serviceId: string
   serviceName: string
   fieldLabel: string
-  items: Array<{ value: string; checked: boolean }>
+  items: Array<{ value: string; label: string; checked: boolean }>
   apply: (values: string[]) => void
+  locateValue: (value: string) => Promise<MapServiceCategoryLocation>
 }
 const vectorFilterPanels = ref<VectorFilterPanel[]>([])
 const searchExpanded = ref(false)
@@ -153,12 +162,27 @@ const activeTool = ref<'distance' | 'area' | 'marker' | null>(null)
 const measureResult = ref('')
 const scaleWidth = ref(96)
 const scaleLabel = ref('5 km')
-const taskSearchResults = computed(() => {
+interface ParcelSearchResult {
+  id: string
+  serviceName: string
+  fieldLabel: string
+  value: string
+  label: string
+  locate: () => Promise<MapServiceCategoryLocation>
+}
+const parcelSearchResults = computed<ParcelSearchResult[]>(() => {
   const keyword = searchKeyword.value.trim().toLowerCase()
   if (!keyword) return []
-  return props.layers.flatMap((layer) => layer.tasks.map((task) => ({ ...task, layerName: layer.name })))
-    .filter((task) => `${task.name}${task.taskId}${task.area}`.toLowerCase().includes(keyword))
-    .slice(0, 6)
+  return vectorFilterPanels.value.flatMap((panel) => panel.items.map((item) => ({
+    id: `${panel.serviceId}::${item.value}`,
+    serviceName: panel.serviceName,
+    fieldLabel: panel.fieldLabel,
+    value: item.value,
+    label: item.label,
+    locate: () => panel.locateValue(item.value),
+  })))
+    .filter((item) => `${item.label}${item.serviceName}${item.fieldLabel}`.toLowerCase().includes(keyword))
+    .slice(0, 12)
 })
 const showSearchSuggestions = computed(() => searchExpanded.value && Boolean(searchKeyword.value.trim()))
 
@@ -170,12 +194,15 @@ let labelLayer: L.TileLayer | undefined
 let measureGroup: L.LayerGroup | undefined
 let annotationGroup: L.LayerGroup | undefined
 let locationGroup: L.LayerGroup | undefined
+let searchHighlightGroup: L.LayerGroup | undefined
 let administrativeBoundaryGroup: L.LayerGroup | undefined
 let hailingBoundaryGroup: L.LayerGroup | undefined
 let toolMessageTimer: ReturnType<typeof window.setTimeout> | undefined
 let sceneFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 let overviewFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 let searchFocusTimer: ReturnType<typeof window.setTimeout> | undefined
+let searchHighlightTimer: ReturnType<typeof window.setInterval> | undefined
+let searchHighlightClearTimer: ReturnType<typeof window.setTimeout> | undefined
 let placeSearchRequestVersion = 0
 let searchPlaceMarker: L.CircleMarker | undefined
 let focusedSceneLayerId = ''
@@ -231,7 +258,14 @@ async function loadMapServices() {
   mapServicesError.value = ''
   try {
     const sourceServices = await listEnabledMapServices()
-    const services = (await Promise.all(sourceServices.map(expandMapServiceSublayers))).flat()
+    const expandedServices = await Promise.all(sourceServices.map(expandMapServiceSublayers))
+    const groups = sourceServices.map((source, index) => ({
+      id: String(source.id),
+      name: source.name,
+      source,
+      layers: expandedServices[index] || [source],
+    }))
+    const services = groups.flatMap((group) => group.layers)
     const activeIds = new Set(services.map((service) => String(service.id)))
     mapServiceLayers.forEach((handle, id) => {
       if (activeIds.has(id)) return
@@ -240,9 +274,12 @@ async function loadMapServices() {
     })
     visibleMapServiceIds.value = visibleMapServiceIds.value.filter((id) => activeIds.has(id))
     vectorFilterPanels.value = vectorFilterPanels.value.filter((panel) => activeIds.has(panel.serviceId))
-    mapServices.value = services
+    const groupIds = new Set(groups.filter((group) => group.layers.length > 1).map((group) => group.id))
+    expandedMapServiceGroupIds.value = expandedMapServiceGroupIds.value.filter((id) => groupIds.has(id))
+    mapServiceGroups.value = groups
   } catch (reason) {
-    mapServices.value = []
+    mapServiceGroups.value = []
+    expandedMapServiceGroupIds.value = []
     mapServicesError.value = reason instanceof Error ? reason.message : '地图服务列表加载失败'
   } finally {
     mapServicesLoading.value = false
@@ -271,8 +308,9 @@ async function toggleMapService(service: MapServiceItem) {
         serviceId: id,
         serviceName: service.name,
         fieldLabel: handle.categoryFilter.fieldLabel,
-        items: handle.categoryFilter.values.map((value) => ({ value, checked: true })),
+        items: handle.categoryFilter.values.map((item) => ({ ...item, checked: true })),
         apply: handle.categoryFilter.setVisibleValues,
+        locateValue: handle.categoryFilter.locateValue,
       }]
     }
     if (handle.bounds?.isValid()) {
@@ -290,6 +328,30 @@ async function toggleMapService(service: MapServiceItem) {
   } finally {
     loadingMapServiceIds.delete(id)
   }
+}
+
+function isMapServiceGroupActive(group: MapServiceGroup) {
+  if (group.layers.length > 1) return expandedMapServiceGroupIds.value.includes(group.id)
+  return group.layers.some((service) => visibleMapServiceIds.value.includes(String(service.id)))
+}
+
+function isMapServiceGroupExpanded(group: MapServiceGroup) {
+  return group.layers.length > 1 && expandedMapServiceGroupIds.value.includes(group.id)
+}
+
+async function toggleMapServiceGroup(group: MapServiceGroup) {
+  if (group.layers.length === 1) {
+    await toggleMapService(group.layers[0]!)
+    return
+  }
+  const hideGroup = isMapServiceGroupExpanded(group)
+  expandedMapServiceGroupIds.value = hideGroup
+    ? expandedMapServiceGroupIds.value.filter((id) => id !== group.id)
+    : [...expandedMapServiceGroupIds.value, group.id]
+  const targets = hideGroup
+    ? group.layers.filter((service) => visibleMapServiceIds.value.includes(String(service.id)))
+    : group.layers.slice(0, 1).filter((service) => !visibleMapServiceIds.value.includes(String(service.id)))
+  await Promise.all(targets.map(toggleMapService))
 }
 
 function applyVectorCategoryFilter(panel: VectorFilterPanel) {
@@ -357,14 +419,91 @@ function scheduleOverviewFocus() {
   }, 100)
 }
 
-function focusSearchResult(task: DashboardMapTask, clearKeyword = false) {
+function clearSearchHighlight() {
+  if (searchHighlightTimer !== undefined) window.clearInterval(searchHighlightTimer)
+  if (searchHighlightClearTimer !== undefined) window.clearTimeout(searchHighlightClearTimer)
+  searchHighlightTimer = undefined
+  searchHighlightClearTimer = undefined
+  searchHighlightGroup?.clearLayers()
+}
+
+function flashSearchLocation(location: MapServiceCategoryLocation) {
+  if (!map || !searchHighlightGroup) return
+  clearSearchHighlight()
+  const outlines: L.LatLngExpression[][] = []
+  const points: L.LatLngExpression[] = []
+  const toLatLngs = (coordinates?: number[][]) => (coordinates || []).flatMap((coordinate) => {
+    const [longitude, latitude] = coordinate
+    return Number.isFinite(longitude) && Number.isFinite(latitude)
+      ? [[latitude!, longitude!] as L.LatLngTuple]
+      : []
+  })
+  for (const geometry of location.geometries) {
+    for (const ring of geometry.rings || []) {
+      const latLngs = toLatLngs(ring)
+      if (latLngs.length > 1) outlines.push(latLngs)
+    }
+    for (const path of geometry.paths || []) {
+      const latLngs = toLatLngs(path)
+      if (latLngs.length > 1) outlines.push(latLngs)
+    }
+    for (const point of geometry.points || []) {
+      const latLngs = toLatLngs([point])
+      if (latLngs[0]) points.push(latLngs[0])
+    }
+    if (Number.isFinite(geometry.x) && Number.isFinite(geometry.y)) points.push([geometry.y!, geometry.x!])
+  }
+
+  const paths: L.Path[] = []
+  if (outlines.length) {
+    paths.push(L.polyline(outlines, {
+      pane: 'search-highlight',
+      interactive: false,
+      color: '#ffe13b',
+      weight: 5,
+      opacity: 1,
+    }).addTo(searchHighlightGroup))
+  }
+  for (const point of points) {
+    paths.push(L.circleMarker(point, {
+      pane: 'search-highlight',
+      interactive: false,
+      radius: 10,
+      color: '#ffe13b',
+      weight: 4,
+      fillColor: '#fff176',
+      fillOpacity: .35,
+    }).addTo(searchHighlightGroup))
+  }
+  if (!paths.length) return
+
+  let highlighted = true
+  searchHighlightTimer = window.setInterval(() => {
+    highlighted = !highlighted
+    paths.forEach((path) => path.setStyle({
+      opacity: highlighted ? 1 : .12,
+      fillOpacity: highlighted ? .35 : .04,
+    }))
+  }, 220)
+  searchHighlightClearTimer = window.setTimeout(clearSearchHighlight, 2200)
+}
+
+async function focusParcelSearchResult(result: ParcelSearchResult) {
   if (!map) return
-  const bounds = L.latLngBounds([])
-  const polygons = task.polygons?.length ? task.polygons : [task.polygon]
-  polygons.forEach((points) => points.forEach((point) => bounds.extend([point[1], point[0]])))
-  if (bounds.isValid()) map.fitBounds(bounds, { padding: [70, 70], maxZoom: 18 })
-  else map.setView([task.center[1], task.center[0]], 16, { animate: true })
-  if (clearKeyword) searchKeyword.value = ''
+  try {
+    const location = await result.locate()
+    const bounds = location.bounds
+    if (!bounds?.isValid()) {
+      showToolMessage(`${result.label} 暂无可定位的地块范围`)
+      return
+    }
+    map.invalidateSize({ pan: false })
+    map.fitBounds(bounds, { padding: [70, 70], maxZoom: 18, animate: true })
+    flashSearchLocation(location)
+    searchKeyword.value = ''
+  } catch {
+    showToolMessage(`${result.label} 地块范围查询失败`)
+  }
 }
 
 function coordinates(value: unknown) {
@@ -470,10 +609,6 @@ function focusPlaceResult(place: PlaceSearchResult) {
   searchKeyword.value = ''
 }
 
-function selectSearchResult(task: DashboardMapTask) {
-  focusSearchResult(task, true)
-}
-
 async function toggleSearch() {
   searchExpanded.value = !searchExpanded.value
   if (!searchExpanded.value) {
@@ -488,8 +623,8 @@ async function toggleSearch() {
 }
 
 function focusFirstSearchResult() {
-  const task = taskSearchResults.value[0]
-  if (task) focusSearchResult(task, true)
+  const parcel = parcelSearchResults.value[0]
+  if (parcel) void focusParcelSearchResult(parcel)
   else if (placeSearchResults.value[0]) focusPlaceResult(placeSearchResults.value[0])
 }
 
@@ -516,8 +651,14 @@ function locateUser() {
 }
 
 function resetNorth() {
-  map?.setView(TAIZHOU_CENTER, TAIZHOU_ZOOM)
-  showToolMessage('已回到江苏泰州，地图保持正北向上')
+  if (!map || !HAILING_DISTRICT) return
+  const bounds = L.geoJSON(HAILING_DISTRICT as GeoJsonObject).getBounds()
+  if (!bounds.isValid()) return
+  map.invalidateSize({ pan: false })
+  // 与首页刷新后的默认定位参数完全一致：展示完整海陵区边界并保持正北。
+  map.fitBounds(bounds, { padding: [36, 36], maxZoom: 13, animate: true })
+  overviewFocused = true
+  showToolMessage('已回到海陵区默认视角，地图保持正北向上')
 }
 
 function startTool(tool: 'distance' | 'area' | 'marker') {
@@ -526,7 +667,7 @@ function startTool(tool: 'distance' | 'area' | 'marker') {
   baseMapOpen.value = false
   measurePoints = []
   if (tool !== 'marker') measureGroup?.clearLayers()
-  measureResult.value = tool === 'distance' ? '点击地图连续选取测距点，双击结束' : tool === 'area' ? '点击地图绘制范围，双击结束' : '点击地图添加可拖动标注'
+  measureResult.value = tool === 'distance' ? '点击地图连续选取测距点，单击鼠标右键结束' : tool === 'area' ? '点击地图绘制范围，单击鼠标右键结束' : '点击地图添加可拖动标注'
 }
 
 function geodesicArea(points: L.LatLng[]) {
@@ -547,21 +688,46 @@ function formatArea(squareMetres: number) {
   return squareMetres >= 1_000_000 ? `${(squareMetres / 1_000_000).toFixed(2)} 平方公里` : `${squareMetres.toFixed(0)} 平方米`
 }
 
-function redrawMeasurement() {
+function redrawMeasurement(cursor?: L.LatLng) {
   if (!map || !measureGroup) return
   measureGroup.clearLayers()
   measurePoints.forEach((point, index) => {
-    L.circleMarker(point, { radius: 4, color: '#fff', fillColor: '#21dff1', fillOpacity: 1, weight: 1 })
+    L.circleMarker(point, { radius: 4, color: '#fff', fillColor: '#21dff1', fillOpacity: 1, weight: 1, interactive: false })
       .bindTooltip(String(index + 1), { permanent: true, className: 'measure-index', direction: 'top' }).addTo(measureGroup!)
   })
-  if (activeTool.value === 'distance' && measurePoints.length > 1) {
-    L.polyline(measurePoints, { color: '#22e5f4', weight: 3 }).addTo(measureGroup)
-    const distance = measurePoints.slice(1).reduce((sum, point, index) => sum + map!.distance(measurePoints[index]!, point), 0)
+  const previewPoints = cursor ? [...measurePoints, cursor] : measurePoints
+  if (activeTool.value === 'distance' && previewPoints.length > 1) {
+    L.polyline(previewPoints, { color: '#22e5f4', weight: 3, dashArray: cursor ? '7 5' : undefined, interactive: false }).addTo(measureGroup)
+    const distance = previewPoints.slice(1).reduce((sum, point, index) => sum + map!.distance(previewPoints[index]!, point), 0)
     measureResult.value = `测量距离：${formatDistance(distance)}`
   }
-  if (activeTool.value === 'area' && measurePoints.length > 2) {
-    L.polygon(measurePoints, { color: '#38e7c0', fillColor: '#1abf9b', fillOpacity: .22, weight: 2 }).addTo(measureGroup)
-    measureResult.value = `测量面积：${formatArea(geodesicArea(measurePoints))}`
+  if (activeTool.value === 'area' && previewPoints.length > 1) {
+    const options: L.PathOptions = { color: '#38e7c0', fillColor: '#1abf9b', fillOpacity: .22, weight: 2, dashArray: cursor ? '7 5' : undefined, interactive: false }
+    if (previewPoints.length > 2) {
+      L.polygon(previewPoints, options).addTo(measureGroup)
+      measureResult.value = `测量面积：${formatArea(geodesicArea(previewPoints))} · 右键结束`
+    } else {
+      L.polyline(previewPoints, options).addTo(measureGroup)
+    }
+  }
+}
+
+function finishMeasurement(event: L.LeafletMouseEvent) {
+  if (activeTool.value !== 'distance' && activeTool.value !== 'area') return
+  event.originalEvent.preventDefault()
+  const completedTool = activeTool.value
+  const minimum = completedTool === 'area' ? 3 : 2
+  if (measurePoints.length < minimum) {
+    showToolMessage(completedTool === 'area' ? '面积测量至少需要选择 3 个点' : '距离测量至少需要选择 2 个点')
+    return
+  }
+  // 先移除跟随鼠标的临时点并重绘最终形状，再退出绘制状态。
+  redrawMeasurement()
+  activeTool.value = null
+  if (completedTool === 'area') measureResult.value = `测量面积：${formatArea(geodesicArea(measurePoints))}`
+  else {
+    const distance = measurePoints.slice(1).reduce((sum, point, index) => sum + map!.distance(measurePoints[index]!, point), 0)
+    measureResult.value = `测量距离：${formatDistance(distance)}`
   }
 }
 
@@ -700,9 +866,13 @@ async function initMap() {
     const boundariesPane = map.createPane('administrative-boundaries')
     boundariesPane.style.zIndex = '350'
     boundariesPane.style.pointerEvents = 'none'
+    const searchHighlightPane = map.createPane('search-highlight')
+    searchHighlightPane.style.zIndex = '640'
+    searchHighlightPane.style.pointerEvents = 'none'
     measureGroup = L.layerGroup().addTo(map)
     annotationGroup = L.layerGroup().addTo(map)
     locationGroup = L.layerGroup().addTo(map)
+    searchHighlightGroup = L.layerGroup().addTo(map)
     addBaseLayers('image')
     if (showAdministrativeBoundaries) renderAdministrativeBoundaries()
     renderHailingBoundary()
@@ -718,7 +888,10 @@ async function initMap() {
         redrawMeasurement()
       }
     })
-    map.on('dblclick', () => { activeTool.value = null })
+    map.on('mousemove', (event) => {
+      if ((activeTool.value === 'distance' || activeTool.value === 'area') && measurePoints.length) redrawMeasurement(event.latlng)
+    })
+    map.on('contextmenu', finishMeasurement)
     resizeObserver = new ResizeObserver(() => {
       if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
       resizeFrame = window.requestAnimationFrame(() => {
@@ -764,9 +937,6 @@ watch(searchKeyword, (value) => {
     return
   }
   searchFocusTimer = window.setTimeout(() => {
-    const exact = taskSearchResults.value.find((task) =>
-      [task.name, task.taskId, task.area].some((field) => field.toLowerCase() === keyword))
-    if (exact) focusSearchResult(exact)
     void searchPlaces(value.trim())
   }, 260)
 })
@@ -775,6 +945,7 @@ onBeforeUnmount(() => {
   if (sceneFocusTimer) window.clearTimeout(sceneFocusTimer)
   if (overviewFocusTimer) window.clearTimeout(overviewFocusTimer)
   if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
+  clearSearchHighlight()
   if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
   resizeObserver?.disconnect()
   mapServiceLayers.forEach((handle) => handle.layer.remove())
@@ -784,7 +955,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="dashboard-map">
+  <div class="dashboard-map" :class="{ 'dashboard-map--measuring': activeTool === 'distance' || activeTool === 'area' || activeTool === 'marker' }">
     <div ref="container" class="dashboard-map__canvas"></div>
     <div v-if="mapError" class="dashboard-map__empty"><span>{{ mapError }}</span><button @click="retryMap">重新加载</button></div>
     <div v-else-if="!mapReady" class="dashboard-map__loading">正在加载江苏泰州天地图…</div>
@@ -803,11 +974,18 @@ onBeforeUnmount(() => {
         <div class="layer-manager-list">
           <div v-if="mapServicesLoading" class="layer-panel-message">正在读取地图服务…</div>
           <div v-else-if="mapServicesError" class="layer-panel-message error">{{ mapServicesError }}</div>
-          <div v-else-if="!mapServices.length" class="layer-panel-message">暂无已启用的地图服务</div>
+          <div v-else-if="!mapServiceGroups.length" class="layer-panel-message">暂无已启用的地图服务</div>
           <template v-else>
-            <button v-for="service in mapServices" :key="service.id" class="layer-row map-service-row" :class="{ active: visibleMapServiceIds.includes(String(service.id)) }" :title="service.name" @click="toggleMapService(service)">
-              <span><b>{{ service.name }}</b></span><em>{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
-            </button>
+            <div v-for="group in mapServiceGroups" :key="group.id" class="map-service-group">
+              <button class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group) }" :title="group.name" @click="toggleMapServiceGroup(group)">
+                <span><b>{{ group.name }}</b></span><em>{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
+              </button>
+              <div v-if="isMapServiceGroupExpanded(group)" class="map-service-sublayers">
+                <button v-for="service in group.layers" :key="service.id" class="layer-row map-service-row map-service-sublayer" :class="{ active: visibleMapServiceIds.includes(String(service.id)) }" :title="service.name" @click="toggleMapService(service)">
+                  <span><b>{{ service.name }}</b></span><em>{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
+                </button>
+              </div>
+            </div>
           </template>
         </div>
       </aside>
@@ -826,7 +1004,7 @@ onBeforeUnmount(() => {
             />
           </label>
           <label v-for="item in panel.items" :key="item.value" class="parcel-filter-row">
-            <span>{{ item.value }}</span>
+            <span>{{ item.label }}</span>
             <input v-model="item.checked" type="checkbox" @change="applyVectorCategoryFilter(panel)" />
           </label>
         </section>
@@ -834,22 +1012,22 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="map-search" :class="{ expanded: searchExpanded }">
-      <input v-if="searchExpanded" ref="searchInput" v-model="searchKeyword" placeholder="搜索任务名称、编号或地点" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="toggleSearch" />
+      <input v-if="searchExpanded" ref="searchInput" v-model="searchKeyword" placeholder="搜索地块类型、名称或地点" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="toggleSearch" />
       <button class="map-search-toggle" type="button" :aria-label="searchExpanded ? '收起地图搜索' : '展开地图搜索'" :title="searchExpanded ? '收起搜索' : '搜索任务'" @click="toggleSearch">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/></svg>
       </button>
       <div v-if="showSearchSuggestions" class="search-results" aria-live="polite">
-        <template v-if="taskSearchResults.length">
-          <div class="search-result-title">相关任务</div>
-          <button v-for="task in taskSearchResults" :key="task.taskId" @click="selectSearchResult(task)"><b>{{ task.name }}</b><small>{{ task.taskId }} · {{ task.area }}</small></button>
+        <template v-if="parcelSearchResults.length">
+          <div class="search-result-title">可能的地块类型或名称</div>
+          <button v-for="item in parcelSearchResults" :key="item.id" @click="focusParcelSearchResult(item)"><b>{{ item.label }}</b><small>{{ item.serviceName }} · {{ item.fieldLabel }}</small></button>
         </template>
         <template v-if="placeSearchResults.length">
-          <div class="search-result-title">可能的地点</div>
+          <div class="search-result-title" :class="{ separated: parcelSearchResults.length }">可能的地点</div>
           <button v-for="place in placeSearchResults" :key="place.id" @click="focusPlaceResult(place)"><b>{{ place.name }}</b><small>{{ place.address }}</small></button>
         </template>
         <p v-if="placeSearchLoading">正在搜索地点…</p>
         <p v-else-if="placeSearchError">{{ placeSearchError }}</p>
-        <p v-else-if="!taskSearchResults.length && !placeSearchResults.length">未找到相关任务或地点</p>
+        <p v-else-if="!parcelSearchResults.length && !placeSearchResults.length">未找到相关地块或地点</p>
       </div>
     </div>
 
@@ -859,7 +1037,7 @@ onBeforeUnmount(() => {
         <button :class="{ active: mapMode === 'vector' }" title="切换电子地图" @click="switchMode('vector')"><i class="map-tool-icon"><MapLocation /></i><span>电子地图</span></button>
       </div>
       <button title="当前位置" @click="locateUser"><i class="map-tool-icon"><Aim /></i><span>定位</span></button>
-      <button title="回到泰州并保持正北" @click="resetNorth"><i class="map-tool-icon"><Compass /></i><span>指南针</span></button>
+      <button title="回到海陵区默认视角并保持正北" @click="resetNorth"><i class="map-tool-icon"><Compass /></i><span>指南针</span></button>
       <button :class="{ active: measureOpen }" title="测量工具" @click="measureOpen = !measureOpen"><i class="map-tool-icon"><EditPen /></i><span>测量</span></button>
       <div v-if="measureOpen" class="tool-submenu right-submenu">
         <button :class="{ active: activeTool === 'distance' }" @click="startTool('distance')">距离测量</button>
@@ -891,6 +1069,7 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .dashboard-map { position: relative; width: 100%; height: 100%; overflow: hidden; background: #031a31; }.dashboard-map__canvas { position: absolute; inset: 0; }
+.dashboard-map--measuring :deep(.leaflet-container) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath fill='%2337dff3' stroke='%23042b44' stroke-width='2' d='m5 22 3-7L20 3l7 7L15 22l-7 3z'/%3E%3Cpath fill='%23fff' d='m18 5 7 7-2 2-7-7z'/%3E%3C/svg%3E") 4 26, crosshair!important; }
 .dashboard-map__empty,.dashboard-map__loading { position: absolute; z-index: 700; inset: 0; display: grid; place-content: center; gap: 12px; justify-items: center; color: #56ddef; background: #031a31e8; font-size: 15px; }.dashboard-map__empty button { padding: 6px 14px; color: #d8faff; background: #075477; border: 1px solid #24cbe3; cursor: pointer; }
 .layer-panel-stack { position: absolute; z-index: 500; top: 80px; left: 10px; width: 255px; height: calc(100% - 90px); display: flex; flex-direction: column; gap: 8px; }
 .layer-manager { position: relative; width: 100%; max-height: calc(100% - 20px); overflow-y: auto; color: #bde6ef; background: #03182eed; border: 1px solid #0b6189; box-shadow: 0 0 14px #00a7d52b; }.tool-title { min-height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: #06476b; border-bottom: 1px solid #0d6388; font-size: 15px; }.tool-title button { padding: 2px 4px; color: #7bdcea; background: transparent; border: 0; font-size: 12px; cursor: pointer; }
@@ -906,6 +1085,16 @@ onBeforeUnmount(() => {
 .layer-manager .layer-row { min-height: 43px; height: auto; flex: 0 0 auto; }
 .layer-manager .layer-row b { overflow: visible; white-space: normal; line-height: 1.35; text-overflow: clip; overflow-wrap: anywhere; }
 .layer-manager .map-service-row { grid-template-columns: minmax(0,1fr) auto; }
+.layer-manager .map-service-group { border-bottom: 1px solid #0d5278; }
+.layer-manager .map-service-group:last-child { border-bottom: 0; }
+.layer-manager .map-service-group>.map-service-row { border-bottom: 0; }
+.layer-manager .map-service-sublayers { position: relative; padding-left: 16px; border-top: 1px solid #0b4668; background: #02172dcc; }
+.layer-manager .map-service-sublayers::before { position: absolute; top: 0; bottom: 0; left: 17px; width: 1px; background: #1785aa80; content: ''; }
+.layer-manager .map-service-sublayer { position: relative; min-height: 38px; padding: 7px 16px 7px 24px; border-bottom: 1px dashed #0b4668; background: #04253ebf; }
+.layer-manager .map-service-sublayer:last-child { border-bottom: 0; }
+.layer-manager .map-service-sublayer::before { position: absolute; top: 50%; left: 0; width: 9px; height: 1px; background: #1785aa; content: ''; }
+.layer-manager .map-service-sublayer b { font-size: 14px; font-weight: 500; }
+.layer-manager .map-service-sublayer em { width: 11px; height: 11px; }
 .layer-panel-message { padding: 16px 14px; color: #83b5c6; font-size: 13px; line-height: 1.5; text-align: center; }
 .layer-panel-message.error { color: #ff8e98; }
 .parcel-type-panel { position: relative; width: 100%; min-height: 150px; flex: 1 1 auto; overflow-y: auto; color: #bde6ef; border: 1px solid #1688bf; border-radius: 14px; background: #031c37e8; box-shadow: 0 0 18px #00a7d534; }
@@ -922,6 +1111,7 @@ onBeforeUnmount(() => {
 .parcel-filter-all { color: #d6f8ff; background: #064367a6; font-weight: 700; }
 .tool-title-state{color:#91e6ff;font-size:14px;font-weight:400}
 .map-search { width: 42px; min-height: 42px; padding: 0; border-color: #188fc0; border-radius: 12px; background: #031a31b8; }.map-search.expanded { width: 340px; padding: 0 12px; }.map-search input { order: 1; height: 40px; font-size: 14px; }.map-search-toggle { order: 2; width: 42px; height: 42px; flex-basis: 42px; display: grid; place-items: center; margin-left: 4px; transform: none; }.map-search-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }.search-results { top: 42px; max-height: 360px; overflow-y: auto; border-radius: 0 0 12px 12px; box-shadow: 0 8px 16px #00101b77; }.search-result-title { padding: 7px 12px; color: #57ddeb; border-bottom: 1px solid #0b405c; background: #073a58; font-size: 12px; font-weight: 700; letter-spacing: .5px; }.search-results button { padding: 9px 12px; }.search-results button:last-child { border-bottom: 0; }.search-results b { color: #d6f8ff; font-size: 14px; }.search-results small { color: #78a8b9; font-size: 12px; }.search-results p { margin: 0; padding: 13px 12px; color: #7da7b8; font-size: 13px; }
+.search-result-title.separated { margin-top: 4px; border-top: 2px solid #1688bf; }
 .map-tools { top: 56px; right: 12px; bottom: 34px; width: 138px; display: flex; flex-direction: column; justify-content: center; gap: 5px; overflow: visible; border: 0; border-radius: 0; background: transparent; }.map-tools>button { min-height: 40px; flex: 0 0 40px; grid-template-columns: 26px 1fr; gap: 8px; padding: 5px 12px; border: 1px solid #155a7c; border-radius: 9px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-tools>button:last-of-type { border-bottom: 1px solid #155a7c; }.map-tools>button:hover,.map-tools>button.active { border-color: #24cbe3; background: #075477d0; }.map-tools i { font-size: 19px; }.map-tools span { font-size: 14px; white-space: nowrap; }.compass { width: 23px; height: 23px; font-size: 14px!important; }.right-submenu { top: 50%; right: 146px; width: 118px; transform: translateY(-50%); }.right-submenu button { font-size: 13px; }
 .map-mode-switch { flex: 0 0 82px; display: grid; grid-template-rows: 1fr 1fr; overflow: hidden; border: 1px solid #155a7c; border-radius: 9px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-mode-switch button { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 8px; padding: 4px 12px; color: #84b2c3; background: transparent; border: 0; cursor: pointer; }.map-mode-switch button+button { border-top: 1px solid #155a7c; }.map-mode-switch button:hover,.map-mode-switch button.active { color: #fff; background: #075477d0; }.map-mode-switch span { font-size: 14px; white-space: nowrap; }.mode-indicator { width: 15px; height: 15px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; }.map-mode-switch button.active .mode-indicator { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }
 .map-scale { right: 14px; bottom: 10px; width: 96px; height: 18px; padding: 0; color: #b9e7f4; background: transparent; font-size: 11px; text-align: center; }.map-scale b { position: relative; z-index: 1; display: block; font-size: 11px; font-weight: 600; line-height: 12px; }.map-scale i { position: absolute; right: 0; bottom: 0; left: 0; height: 7px; border-right: 2px solid #b9e7f4; border-bottom: 2px solid #b9e7f4; border-left: 2px solid #b9e7f4; }

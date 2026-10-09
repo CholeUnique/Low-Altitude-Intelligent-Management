@@ -171,6 +171,13 @@ function isTaskRangeFeature(feature: TaskGeometryFeatureCollection['features'][n
     && isEmptyReference(resultId)
 }
 
+function finishDrawing() {
+  if (props.coordinates.length < 3) return
+  drawingFinished.value = true
+  clearPreview()
+  renderPolygon()
+}
+
 function renderPolygon(points = props.coordinates) {
   if (!map) return
   polygon?.remove()
@@ -211,6 +218,13 @@ function renderPolygon(points = props.coordinates) {
       })
       marker.on('contextmenu', (event) => {
         L.DomEvent.stopPropagation(event)
+        event.originalEvent.preventDefault()
+        // 绘制中的最后一个顶点会覆盖地图本身的右键事件，因此在顶点上
+        // 直接完成绘制；完成后再恢复“右键顶点删除”的编辑语义。
+        if (!drawingFinished.value) {
+          finishDrawing()
+          return
+        }
         if (props.coordinates.length <= 3) return
         emit('update:coordinates', props.coordinates.filter((_, vertexIndex) => vertexIndex !== index))
       })
@@ -510,10 +524,7 @@ onMounted(async () => {
     map.on('mousemove', (event) => renderPreview(event.latlng))
     map.on('contextmenu', (event) => {
       event.originalEvent.preventDefault()
-      if (props.coordinates.length < 3) return
-      drawingFinished.value = true
-      clearPreview()
-      renderPolygon()
+      finishDrawing()
     })
   }
 })

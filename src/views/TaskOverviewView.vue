@@ -10,6 +10,7 @@ import { getGovernanceTaskPage, type GovernanceTask } from '@/api/governance-tas
 import { collectPages } from '@/api/pagination'
 import { useUserStore } from '@/stores/user'
 import { isTaskVisibleForOrganization } from '@/utils/scene-visibility'
+import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
 
 use([LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
@@ -28,7 +29,16 @@ let statusChart: EChartsType | undefined
 let requestVersion = 0
 let resizeObserver: ResizeObserver | undefined
 
-const taskSummary = computed(() => statistics.value?.taskSummary)
+const taskSummary = computed(() => tasks.value.reduce((summary, task) => {
+  summary.total += 1
+  if (task.taskStatus === 0) summary.pending += 1
+  else if (task.taskStatus === 1) summary.executing += 1
+  else if (task.taskStatus === 2) summary.pendingVerify += 1
+  else if (task.taskStatus === 3) summary.failed += 1
+  else if (task.taskStatus === 4) summary.canceled += 1
+  else if (task.taskStatus === 5) summary.finished += 1
+  return summary
+}, { total: 0, pending: 0, executing: 0, pendingVerify: 0, failed: 0, canceled: 0, finished: 0 }))
 const kpis = computed(() => [
   { label: '任务总数', value: taskSummary.value?.total, icon: '▣', tone: 'blue', note: '全部治理任务' },
   { label: '执行中', value: taskSummary.value?.executing, icon: '▶', tone: 'cyan', note: '正在办理任务' },
@@ -36,7 +46,17 @@ const kpis = computed(() => [
   { label: '待核查', value: taskSummary.value?.pendingVerify, icon: '⌕', tone: 'purple', note: '等待核查确认' },
   { label: '已完成', value: taskSummary.value?.finished, icon: '✓', tone: 'green', note: '已办结任务' },
 ])
-const trendItems = computed(() => statistics.value?.trend.items ?? [])
+const trendItems = computed(() => {
+  const taskCountsByDate = new Map<string, number>()
+  tasks.value.forEach((task) => {
+    const date = task.createTime?.slice(0, 10)
+    if (date) taskCountsByDate.set(date, (taskCountsByDate.get(date) || 0) + 1)
+  })
+  return (statistics.value?.trend.items ?? []).map((item) => ({
+    ...item,
+    taskCount: taskCountsByDate.get(item.date.slice(0, 10)) || 0,
+  }))
+})
 const statusItems = computed(() => {
   const summary = taskSummary.value
   if (!summary) return []
@@ -49,9 +69,20 @@ const statusItems = computed(() => {
     { name: '已取消', value: summary.canceled, itemStyle: { color: '#9ba8b4' } },
   ].filter((item) => item.value > 0)
 })
-const sceneRanking = computed(() => [...(statistics.value?.sceneStats ?? [])]
-  .sort((left, right) => right.taskCount - left.taskCount)
-  .slice(0, 5))
+const sceneRanking = computed(() => {
+  const grouped = new Map<string, { sceneId: string; sceneCode: string; sceneName: string; taskCount: number }>()
+  tasks.value.forEach((task) => {
+    const key = resolveWorkspaceSceneId(task.sceneCode, task.sceneName) || task.sceneCode || task.sceneName || 'uncategorized'
+    const current = grouped.get(key)
+    grouped.set(key, {
+      sceneId: key,
+      sceneCode: task.sceneCode,
+      sceneName: task.sceneName || task.sceneCode || '未分类场景',
+      taskCount: (current?.taskCount || 0) + 1,
+    })
+  })
+  return [...grouped.values()].sort((left, right) => right.taskCount - left.taskCount).slice(0, 5)
+})
 const maxSceneTasks = computed(() => Math.max(1, ...sceneRanking.value.map((item) => item.taskCount)))
 const sceneStatusBreakdown = computed(() => {
   const grouped = new Map<string, { pending: number; processing: number; closed: number }>()
@@ -266,7 +297,7 @@ onBeforeUnmount(() => {
     <section class="kpi-grid" aria-label="任务关键指标">
       <article v-for="kpi in kpis" :key="kpi.label" class="kpi-card" :class="`is-${kpi.tone}`">
         <i>{{ kpi.icon }}</i>
-        <div><span>{{ kpi.label }}</span><strong>{{ statisticsLoading ? '—' : (kpi.value ?? 0) }}</strong><small>{{ kpi.note }}</small></div>
+        <div><span>{{ kpi.label }}</span><strong>{{ tasksLoading ? '—' : (kpi.value ?? 0) }}</strong><small>{{ kpi.note }}</small></div>
       </article>
     </section>
 
@@ -285,16 +316,16 @@ onBeforeUnmount(() => {
         <header><div><h2>任务状态分布</h2><p>当前任务全生命周期状态</p></div></header>
         <div class="chart-wrap">
           <div ref="statusContainer" class="chart"></div>
-          <div v-if="statisticsLoading" class="panel-state">正在加载状态统计…</div>
-          <div v-else-if="statisticsError" class="panel-state error">状态统计暂不可用</div>
+          <div v-if="tasksLoading" class="panel-state">正在加载状态统计…</div>
+          <div v-else-if="tasksError" class="panel-state error">状态统计暂不可用</div>
           <div v-else-if="!statusItems.length" class="panel-state">暂无任务状态数据</div>
         </div>
       </article>
 
       <article class="panel ranking-panel">
         <header><div><h2>场景任务排行</h2><p>按任务总数由高到低排列</p></div></header>
-        <div v-if="statisticsLoading" class="panel-state standalone">正在加载场景数据…</div>
-        <div v-else-if="statisticsError" class="panel-state standalone error">场景排行暂不可用</div>
+        <div v-if="tasksLoading" class="panel-state standalone">正在加载场景数据…</div>
+        <div v-else-if="tasksError" class="panel-state standalone error">场景排行暂不可用</div>
         <div v-else-if="!sceneRanking.length" class="panel-state standalone">暂无场景任务数据</div>
         <ol v-else class="ranking-list">
           <li v-for="(scene, index) in sceneRanking" :key="scene.sceneId || scene.sceneCode">

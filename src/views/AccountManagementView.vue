@@ -25,9 +25,10 @@ import { useUserStore } from '@/stores/user'
 import MetadataManagementPanel from '@/components/MetadataManagementPanel.vue'
 import MapServiceManagementPanel from '@/components/MapServiceManagementPanel.vue'
 import PermissionManagementPanel from '@/components/PermissionManagementPanel.vue'
+import SceneManagementPanel from '@/components/SceneManagementPanel.vue'
 import type { CurrentUser } from '@/types'
 
-type Section = 'profile' | 'users' | 'departments' | 'permissions' | 'metadata' | 'map-services'
+type Section = 'profile' | 'users' | 'departments' | 'scenes' | 'permissions' | 'metadata' | 'map-services'
 type EditorMode = 'add' | 'edit' | 'view'
 
 const router = useRouter()
@@ -458,7 +459,7 @@ async function selectSection(section: Section) {
   })
 }
 
-const validSections = new Set<Section>(['profile', 'users', 'departments', 'permissions', 'metadata', 'map-services'])
+const validSections = new Set<Section>(['profile', 'users', 'departments', 'scenes', 'permissions', 'metadata', 'map-services'])
 
 async function syncSectionFromRoute() {
   const routeSection = String(route.params.section || 'profile') as Section
@@ -510,6 +511,9 @@ onMounted(loadProfile)
         </button>
         <button v-if="isAdmin" type="button" :class="{ active: activeSection === 'departments' }" @click="selectSection('departments')">
           <span>◇</span><i>部门管理</i>
+        </button>
+        <button v-if="isAdmin" type="button" :class="{ active: activeSection === 'scenes' }" @click="selectSection('scenes')">
+          <span>◫</span><i>场景管理</i>
         </button>
         <button v-if="isAdmin" type="button" :class="{ active: activeSection === 'permissions' }" @click="selectSection('permissions')">
           <span>▣</span><i>权限管理</i>
@@ -640,6 +644,7 @@ onMounted(loadProfile)
           </section>
         </template>
 
+        <SceneManagementPanel v-else-if="activeSection === 'scenes' && isAdmin" />
         <PermissionManagementPanel v-else-if="activeSection === 'permissions' && isAdmin" />
         <MetadataManagementPanel v-else-if="activeSection === 'metadata' && isAdmin" />
         <MapServiceManagementPanel v-else-if="activeSection === 'map-services' && isAdmin" />

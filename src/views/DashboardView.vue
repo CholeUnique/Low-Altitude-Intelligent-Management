@@ -22,6 +22,7 @@ import {
 import type { LiveStream } from '@/adapters/dasFly'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
 import { findOrganizationScene, isTaskVisibleForOrganization } from '@/utils/scene-visibility'
+import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
 import type { DashboardMapLayer } from '@/types'
 
 const router = useRouter()
@@ -91,62 +92,54 @@ const mapLayers = computed<DashboardMapLayer[]>(() => {
 // 无人机航线尚未接入真实后端接口，图层保留但当前不展示伪造航线。
 const patrolRoutes = computed(() => [])
 const scopeTitle = computed(() => activeScene.value?.name ?? `${organization.value.shortName}全部场景`)
-const unitTaskSummary = computed(() => {
-  // 首页的任务状态统计仅采信后端 /v1/biz/statistics/task-summary，
-  // 任务列表只用于展示，不再由前端自行计数生成统计值。
-  return statistics.value?.taskSummary
-})
+// 汇总接口可能包含归属其他单位场景的历史任务；首页任务统计统一基于完成
+// 部门与场景归属过滤后的任务明细计算，确保总数与场景圆环、任务列表一致。
+const unitTaskSummary = computed(() => currentUnitTasks.value.reduce((summary, task) => {
+  summary.total += 1
+  if (task.taskStatus === 0) summary.pending += 1
+  else if (task.taskStatus === 1) summary.executing += 1
+  else if (task.taskStatus === 2) summary.pendingVerify += 1
+  else if (task.taskStatus === 3) summary.failed += 1
+  else if (task.taskStatus === 4) summary.canceled += 1
+  else if (task.taskStatus === 5) summary.finished += 1
+  return summary
+}, { total: 0, pending: 0, executing: 0, pendingVerify: 0, failed: 0, canceled: 0, finished: 0 }))
 /**
- * 统计编码可能是旧编码、场景全称或当前编码。归并到当前单位的场景配置后展示，
- * 并在统计接口暂无明细时以当前单位任务生成最小可用的统计卡片。
+ * 直接按当前部门任务接口返回的全部真实任务归并场景。
+ * 已明确属于其他单位的场景会在任务可见性规则中排除；后端新增且尚未写入
+ * 静态配置的场景仍按接口编码保留，避免合法新业务在首页被漏计。
  */
 const sceneBusinessStats = computed(() => {
-  const taskCounts = new Map<string, number>()
-  currentUnitTasks.value.forEach((task) => {
-    const scene = findOrganizationScene(organization.value, task.sceneCode, task.sceneName)
-    if (scene) taskCounts.set(scene.id, (taskCounts.get(scene.id) || 0) + 1)
-  })
-  const matchedStatistics = (statistics.value?.sceneStats ?? []).flatMap((statistic) => {
-    const scene = findOrganizationScene(organization.value, statistic.sceneCode, statistic.sceneName)
-    return scene ? [{ statistic, scene }] : []
-  })
-  const listedSceneIds = new Set(matchedStatistics.map(({ scene }) => scene.id))
-  const fallbackTasks = new Map<string, { code: string; count: number }>()
-  const abnormalLabel = (sceneId: string, fallbackCount: number) => {
-    const count = sceneAbnormalCounts.value[sceneId]
-    return `异常 ${count ?? (sceneAbnormalCountsLoading.value ? '—' : fallbackCount)}`
-  }
+  const groupedScenes = new Map<string, {
+    id: string
+    code: string
+    name: string
+    taskCount: number
+    abnormalCount: number
+    description: string
+    visual: string
+  }>()
 
   currentUnitTasks.value.forEach((task) => {
     const scene = findOrganizationScene(organization.value, task.sceneCode, task.sceneName)
-    if (!scene || listedSceneIds.has(scene.id)) return
-    const current = fallbackTasks.get(scene.id)
-    fallbackTasks.set(scene.id, { code: current?.code || task.sceneCode, count: (current?.count || 0) + 1 })
-  })
-
-  return [
-    ...matchedStatistics.map(({ statistic, scene }) => ({
-      id: scene.id,
-      code: statistic.sceneCode,
-      name: scene.name,
-      taskCount: taskCounts.get(scene.id) ?? statistic.taskCount,
-      abnormalCount: sceneAbnormalCounts.value[scene.id] ?? statistic.abnormalCount,
-      description: `任务 ${taskCounts.get(scene.id) ?? statistic.taskCount} · ${abnormalLabel(scene.id, statistic.abnormalCount)}`,
+    const resolvedSceneId = resolveWorkspaceSceneId(task.sceneCode, task.sceneName)
+    const id = scene?.id || resolvedSceneId || task.sceneCode || task.sceneName || 'uncategorized'
+    const name = scene?.name || task.sceneName || task.sceneCode || '未分类场景'
+    const current = groupedScenes.get(id)
+    const taskCount = (current?.taskCount || 0) + 1
+    const abnormalCount = sceneAbnormalCounts.value[id] ?? current?.abnormalCount ?? 0
+    groupedScenes.set(id, {
+      id,
+      code: current?.code || task.sceneCode,
+      name,
+      taskCount,
+      abnormalCount,
+      description: `任务 ${taskCount} · 异常 ${sceneAbnormalCountsLoading.value && sceneAbnormalCounts.value[id] === undefined ? '—' : abnormalCount}`,
       visual: organization.value.id === 'agriculture-rural' ? 'field' : 'forest',
-    })),
-    ...[...fallbackTasks.entries()].map(([sceneId, taskSummary]) => {
-      const scene = organization.value.scenes.find((item) => item.id === sceneId)!
-      return {
-        id: scene.id,
-        code: taskSummary.code,
-        name: scene.name,
-        taskCount: taskSummary.count,
-        abnormalCount: sceneAbnormalCounts.value[sceneId] ?? 0,
-        description: `任务 ${taskSummary.count} · ${abnormalLabel(scene.id, 0)}`,
-        visual: organization.value.id === 'agriculture-rural' ? 'field' : 'forest',
-      }
-    }),
-  ].slice(0, 4).map((item, index) => ({ ...item, icon: ['林', '警', '巡', '复'][index]! }))
+    })
+  })
+
+  return [...groupedScenes.values()]
 })
 function percentage(numerator: number | undefined, denominator: number | undefined) {
   if (typeof numerator !== 'number' || typeof denominator !== 'number' || denominator <= 0) return undefined
@@ -172,7 +165,25 @@ const recognitionHandledRate = computed(() => {
   return percentage(Math.max(total - pending, 0), total)
 })
 const recognitionItems = computed(() => statistics.value?.abnormalSummary.typeCounts.slice(0, 4) || [])
-const maxSceneTaskCount = computed(() => Math.max(...sceneBusinessStats.value.map((item) => item.taskCount), 1))
+const sceneTaskRingColors = ['#37ead7', '#45a8ff', '#a17cff', '#ffbd4a', '#ff738d', '#57d68d']
+const sceneTaskTotal = computed(() => sceneBusinessStats.value.reduce((total, item) => total + Math.max(item.taskCount, 0), 0))
+const hoveredSceneTaskId = ref('')
+const sceneTaskChartItems = computed(() => {
+  let accumulatedPercentage = 0
+  return sceneBusinessStats.value.map((item, index) => {
+    const percentage = sceneTaskTotal.value > 0 ? Math.max(item.taskCount, 0) / sceneTaskTotal.value * 100 : 0
+    const chartItem = {
+      ...item,
+      color: sceneTaskRingColors[index % sceneTaskRingColors.length]!,
+      percentage,
+      dashArray: `${percentage} ${100 - percentage}`,
+      dashOffset: -accumulatedPercentage,
+    }
+    accumulatedPercentage += percentage
+    return chartItem
+  })
+})
+const hoveredSceneTask = computed(() => sceneTaskChartItems.value.find((item) => item.id === hoveredSceneTaskId.value))
 function openSceneTaskList(sceneId: string) {
   router.push({ name: 'tasks', query: { sceneId } })
 }
@@ -626,8 +637,49 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <h2>各场景任务数</h2>
                 <button v-if="user.hasPermission('task-overview')" class="overview-header-link" type="button" aria-label="进入任务总览" @click="openTaskOverview">任务总览 <span aria-hidden="true">›</span></button>
               </header>
-              <button v-for="item in sceneBusinessStats" :key="item.id" type="button" @click="openSceneTaskList(item.id)"><i>{{ item.icon }}</i><span><b>{{ item.name }}</b><em><u :style="{ width: `${item.taskCount / maxSceneTaskCount * 100}%` }"></u></em></span><strong>{{ item.taskCount }}</strong></button>
-              <div v-if="!sceneBusinessStats.length" class="float-empty">暂无场景任务数据</div>
+              <div v-if="sceneTaskChartItems.length" class="scene-task-chart">
+                <div class="scene-task-hover-card" :class="{ 'is-visible': hoveredSceneTask }" role="status">
+                  <i v-if="hoveredSceneTask" :style="{ backgroundColor: hoveredSceneTask.color, boxShadow: `0 0 8px ${hoveredSceneTask.color}` }"></i>
+                  <span>{{ hoveredSceneTask?.name }}</span>
+                  <strong v-if="hoveredSceneTask">{{ hoveredSceneTask.taskCount }} 项</strong>
+                </div>
+                <div class="scene-task-ring" :aria-label="`各场景共 ${sceneTaskTotal} 项任务`" role="img">
+                  <svg viewBox="0 0 100 100" aria-hidden="true">
+                    <circle class="scene-task-ring__track" cx="50" cy="50" r="42" pathLength="100" />
+                    <circle
+                      v-for="item in sceneTaskChartItems"
+                      :key="item.id"
+                      class="scene-task-ring__segment"
+                      cx="50"
+                      cy="50"
+                      r="42"
+                      pathLength="100"
+                      :stroke="item.color"
+                      :style="{ '--scene-ring-color': item.color }"
+                      :stroke-dasharray="item.dashArray"
+                      :stroke-dashoffset="item.dashOffset"
+                      :class="{ 'is-hovered': hoveredSceneTaskId === item.id }"
+                      @mouseenter="hoveredSceneTaskId = item.id"
+                      @mouseleave="hoveredSceneTaskId = ''"
+                    />
+                  </svg>
+                  <div class="scene-task-ring__center"><b>{{ sceneTaskTotal }}</b><span>任务总数</span></div>
+                </div>
+                <div class="scene-task-legend" aria-label="场景任务数图例">
+                  <button
+                    v-for="item in sceneTaskChartItems"
+                    :key="item.id"
+                    type="button"
+                    :title="`${item.name}：${item.taskCount} 项任务`"
+                    @click="openSceneTaskList(item.id)"
+                  >
+                    <i :style="{ backgroundColor: item.color, boxShadow: `0 0 7px ${item.color}` }"></i>
+                    <span>{{ item.name }}</span>
+                    <strong>{{ item.taskCount }}</strong>
+                  </button>
+                </div>
+              </div>
+              <div v-else class="float-empty">暂无场景任务数据</div>
             </section>
 
             <section class="overview-float-panel governance-panel">
@@ -701,14 +753,29 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
 .governance-summary dd,.recognition-summary dd { margin: 0; color: #e6faff; font-weight: 700; }
 .governance-flow-copy { margin: 17px 0 0; padding: 10px 6px; color: #63ddec; border: 1px solid #16789a; background: #0634519c; text-align: center; font-size: 11px; letter-spacing: 1px; }
 .scene-count-panel { display: flex; flex-direction: column; }
-.scene-count-panel > button { width: 100%; display: grid; grid-template-columns: 30px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 10px 0; color: #cbeef6; border: 0; border-bottom: 1px solid #15506d; background: transparent; text-align: left; cursor: pointer; }
-.scene-count-panel > button:hover { background: #0a46656e; }
-.scene-count-panel > button > i { width: 28px; height: 28px; display: grid; place-items: center; color: #5fe4ef; border: 1px solid #168ab0; border-radius: 3px; background: #0b4f6b; font-style: normal; }
-.scene-count-panel button span,.scene-count-panel button b,.scene-count-panel button em { display: block; min-width: 0; }
-.scene-count-panel button b { overflow: hidden; color: #e8fbff; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.scene-count-panel button em { height: 5px; margin-top: 7px; overflow: hidden; border-radius: 3px; background: #15425c; }
-.scene-count-panel button u { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #26a9df, #58e8e1); }
-.scene-count-panel button strong { color: #6beaf1; font-size: 18px; }
+.scene-task-chart { position: relative; min-height: 0; display: flex; flex: 1; flex-direction: column; align-items: center; }
+.scene-task-hover-card { position: absolute; z-index: 3; top: 0; left: 50%; width: max-content; max-width: calc(100% - 8px); min-height: 30px; display: grid; grid-template-columns: 8px minmax(0,1fr) auto; align-items: center; gap: 7px; padding: 6px 10px; color: #bfeaf2; border: 1px solid #247897; border-radius: 4px; background: #062c46ed; box-shadow: 0 7px 18px #00131da6, inset 0 0 12px #2bdce317; opacity: 0; pointer-events: none; transform: translate(-50%, -5px); transition: opacity .16s ease, transform .16s ease; }
+.scene-task-hover-card.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.scene-task-hover-card i { width: 7px; height: 7px; border-radius: 50%; }
+.scene-task-hover-card span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.scene-task-hover-card strong { color: #effeff; white-space: nowrap; font-size: 12px; }
+.scene-task-ring { position: relative; width: 126px; height: 126px; flex: 0 0 126px; margin: 38px 0 12px; filter: drop-shadow(0 0 7px #2adbe02b); }
+.scene-task-ring svg { width: 100%; height: 100%; overflow: visible; transform: rotate(-90deg); }
+.scene-task-ring circle { fill: none; }
+.scene-task-ring__track { stroke: #164761; stroke-width: 9; }
+.scene-task-ring__segment { stroke-width: 9; cursor: pointer; pointer-events: stroke; transform-box: fill-box; transform-origin: center; transition: stroke-width .18s ease, filter .18s ease, transform .18s ease; }
+.scene-task-ring__segment.is-hovered { stroke-width: 12; filter: drop-shadow(0 0 5px var(--scene-ring-color)); transform: scale(1.035); }
+.scene-task-ring__center { position: absolute; inset: 18px; display: grid; place-content: center; border-radius: 50%; background: radial-gradient(circle, #0a3552 0, #05243c 68%, #061f35 100%); box-shadow: inset 0 0 16px #30dfe82b; text-align: center; pointer-events: none; }
+.scene-task-ring b,.scene-task-ring span { display: block; }
+.scene-task-ring b { color: #69f0e5; text-shadow: 0 0 10px #39ead38f; font-size: 28px; line-height: 1; }
+.scene-task-ring span { margin-top: 6px; color: #8ec6d5; font-size: 11px; }
+.scene-task-legend { width: 100%; min-height: 0; overflow: auto; border-top: 1px solid #15506d; }
+.scene-task-legend button { width: 100%; display: grid; grid-template-columns: 9px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px 5px; color: #cbeef6; border: 0; border-bottom: 1px solid #13455f; background: transparent; text-align: left; cursor: pointer; transition: background .18s ease; }
+.scene-task-legend button:hover { background: #0a466581; }
+.scene-task-legend button:focus-visible { outline: 1px solid #54e8f4; outline-offset: -2px; }
+.scene-task-legend i { width: 8px; height: 8px; border-radius: 50%; }
+.scene-task-legend span { overflow: hidden; color: #bde4ed; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.scene-task-legend strong { min-width: 24px; color: #effeff; text-align: right; font-size: 14px; }
 .recognition-types { margin-top: 15px; }
 .recognition-types > div:not(.float-empty) { display: grid; grid-template-columns: minmax(0,1fr) 1.3fr 28px; align-items: center; gap: 8px; margin: 9px 0; color: #91bdca; font-size: 10px; }
 .recognition-types i { height: 5px; overflow: hidden; border-radius: 3px; background: #15425c; }
@@ -736,6 +803,9 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
   .overview-float-panel > header { margin: -10px -10px 10px; }
   .metric-ring { width: 74px; height: 74px; flex-basis: 74px; }
   .metric-ring b { font-size: 21px; }
+  .scene-task-ring { width: 104px; height: 104px; flex-basis: 104px; margin: 35px 0 8px; }
+  .scene-task-ring b { font-size: 24px; }
+  .scene-task-legend button { padding: 7px 3px; }
   .summary-highlight { grid-template-columns: 40px minmax(0, 1fr); padding: 7px; }
   .summary-highlight > i { width: 36px; height: 36px; }
   .summary-highlight b { font-size: 16px; }
