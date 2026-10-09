@@ -1,8 +1,9 @@
 import { getGovernanceTaskDetail, getGovernanceTaskPage, getMyTodoTaskPage, type GovernanceTask } from './governance-task'
-import { getTaskWorkflow, getWorkflowTodos, workflowSteps, type TaskWorkflow, type WorkflowNode } from './task-workflow'
+import { getTaskWorkflow, getWorkflowTodos, type TaskWorkflow, type WorkflowNode } from './task-workflow'
 import { collectPages } from './pagination'
-import { myTaskWorkState, workflowNodeDisplayName } from '@/utils/task-workflow-state'
+import { myTaskWorkState } from '@/utils/task-workflow-state'
 import { getBizSceneAssignees } from './scene'
+import { projectTaskListWorkflow } from '@/utils/task-list-workflow'
 
 export interface MyWorkflowTask extends GovernanceTask {
   myWorkState: 'pending' | 'handled' | 'scene'
@@ -56,8 +57,9 @@ export async function getMyWorkflowTasks(userId: string, deptId?: string): Promi
         if (flow?.currentNode?.assigneeId === userId && !myNodes.some(node => node.id === flow.currentNode?.id)) myNodes.push(flow.currentNode)
         const current = flow?.currentNode?.assigneeId === userId && flow.currentNode.status === 'PROCESSING'
           ? flow.currentNode : [...myNodes].reverse().find(node => node.status === 'PROCESSING')
-        const workflow = flow ? workflowSteps(flow).map((step, index) => ({ ...step, name: workflowNodeDisplayName(flow.timeline[index]!, task.sceneCode) })) : task.workflow
-        records.push({ ...task, name: taskName, flow, workflow, myNodes, myWorkState: state, myDeadline: current?.deadline || [...myNodes].reverse().find(node => node.status === 'COMPLETED')?.deadline })
+        const projected = projectTaskListWorkflow(task, flow)
+        const completed = [...myNodes].reverse().find(node => node.status === 'COMPLETED')
+        records.push({ ...projected, name: taskName, flow, myNodes, myWorkState: state, myDeadline: current ? current.deadline : completed?.deadline })
       } catch (reason) {
         warnings.push(`${task.taskNo}：${reason instanceof Error ? reason.message : '工作流读取失败'}`)
       }

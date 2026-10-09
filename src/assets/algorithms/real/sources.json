@@ -1,0 +1,58 @@
+{
+  "forest": {
+    "license": "CC BY-SA 4.0",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/55/Oil_Palm_clearing_aerial_Borneo.JPG/1280px-Oil_Palm_clearing_aerial_Borneo.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "title": "Oil Palm clearing aerial Borneo.JPG",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "author": "T. R. Shankar Raman",
+    "source": "https://commons.wikimedia.org/wiki/File:Oil_Palm_clearing_aerial_Borneo.JPG"
+  },
+  "building": {
+    "title": "Senedd construction site - aerial view April 2004.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Senedd_construction_site_-_aerial_view_April_2004.jpg",
+    "author": "National Assembly of Wales",
+    "license": "Attribution",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d7/Senedd_construction_site_-_aerial_view_April_2004.jpg",
+    "licenseUrl": "https://commons.wikimedia.org/wiki/File:Senedd_construction_site_-_aerial_view_April_2004.jpg"
+  },
+  "farmland": {
+    "title": "Rice fields Aerial.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Rice_fields_Aerial.jpg",
+    "author": "Wann Majaw",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3a/Rice_fields_Aerial.jpg/1280px-Rice_fields_Aerial.jpg"
+  },
+  "road": {
+    "license": "Public domain",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/de/Construction_of_Balikpapan-Samarinda_Toll_Expressway_%28aerial%29.jpg/1280px-Construction_of_Balikpapan-Samarinda_Toll_Expressway_%28aerial%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "title": "Construction of Balikpapan-Samarinda Toll Expressway (aerial).jpg",
+    "licenseUrl": "https://commons.wikimedia.org/wiki/File:Construction_of_Balikpapan-Samarinda_Toll_Expressway_(aerial).jpg",
+    "author": "Government of Indonesia",
+    "source": "https://commons.wikimedia.org/wiki/File:Construction_of_Balikpapan-Samarinda_Toll_Expressway_(aerial).jpg"
+  },
+  "water": {
+    "title": "River is dying.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:River_is_dying.jpg",
+    "author": "Asker Ibne Firoz",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "imageUrl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/05/River_is_dying.jpg/1280px-River_is_dying.jpg"
+  },
+  "change_before": {
+    "title": "Senedd construction site - Aerial view 08-06-01.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Senedd_construction_site_-_Aerial_view_08-06-01.jpg",
+    "author": "National Assembly of Wales",
+    "license": "Attribution",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/b/bf/Senedd_construction_site_-_Aerial_view_08-06-01.jpg",
+    "licenseUrl": "https://commons.wikimedia.org/wiki/File:Senedd_construction_site_-_Aerial_view_08-06-01.jpg"
+  },
+  "change_after": {
+    "title": "Senedd construction site - aerial view April 2004.jpg",
+    "source": "https://commons.wikimedia.org/wiki/File:Senedd_construction_site_-_aerial_view_April_2004.jpg",
+    "author": "National Assembly of Wales",
+    "license": "Attribution",
+    "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d7/Senedd_construction_site_-_aerial_view_April_2004.jpg",
+    "licenseUrl": "https://commons.wikimedia.org/wiki/File:Senedd_construction_site_-_aerial_view_April_2004.jpg"
+  }
+}

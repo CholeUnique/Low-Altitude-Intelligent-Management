@@ -52,7 +52,7 @@ const steps = computed(() => getTaskWorkflowSteps(props.task))
   <div
     class="workflow-progress"
     :class="{ compact, 'is-non-grain': isNonGrainTask(task) }"
-    :style="{ gridTemplateColumns: `repeat(${steps.length}, minmax(56px, 1fr))` }"
+    :style="{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }"
     :aria-label="`${task.name}流程进度`"
   >
     <span v-for="(node, index) in steps" :key="`${node.key}-${index}`" class="workflow-step" :class="node.status">
@@ -63,7 +63,7 @@ const steps = computed(() => getTaskWorkflowSteps(props.task))
 </template>
 
 <style scoped>
-.workflow-progress { min-width: 0; display: grid; align-items: start; overflow-x: auto; padding: 3px 0; scrollbar-width: thin; }
+.workflow-progress { min-width: 0; display: grid; align-items: start; overflow: hidden; padding: 3px 0; }
 .workflow-step { position: relative; min-width: 0; display: grid; grid-template-rows: 18px auto; justify-items: center; color: #98a5b3; }
 .workflow-step:not(:first-child)::before { content: ""; position: absolute; top: 7px; right: calc(50% + 7px); width: calc(100% - 14px); height: 2px; background: #d9e0e7; }
 .workflow-step.done::before { background: #43b88b; }

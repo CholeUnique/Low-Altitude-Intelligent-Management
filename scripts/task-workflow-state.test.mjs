@@ -75,9 +75,24 @@ assert.deepEqual(advanced.workflow.map(step => step.name), ['待执行', '科室
 assert.equal(advanced.taskStatusDesc, '部门确认处理中')
 const looped = listState.projectTaskListWorkflow(waitingTask, { ...reviewFlow, timeline: [{ ...realReview, id: 'old', status: 'COMPLETED' }, realReview], currentNode: realReview })
 assert.equal(looped.workflow.length, 3, '循环节点保留不同实例，只去重当前节点与时间线的同一实例')
+const transferredProgress = listState.projectTaskListWorkflow(waitingTask, transferFlow)
+assert.equal(transferredProgress.workflow.filter(step => step.name === '无人机复核').length, 1, '改派旧实例不重复绘制为已完成节点')
 assert.equal(listState.projectTaskListWorkflow({ ...waitingTask, taskStatus: 4, taskStatusDesc: '已取消' }, reviewFlow).taskStatus, 4)
 assert.equal(listState.projectTaskListWorkflow(waitingTask, { ...reviewFlow, status: 'FINISHED', timeline: [{ ...realReview, status: 'COMPLETED' }], currentNode: undefined }).taskStatus, 5)
 console.log('PASS: list status, workflow history, next node, loops, filtering status and source immutability')
+
+const sortTask = (id, state, priority, createTime, myDeadline) => ({ id, myWorkState: state, priority, createTime, myDeadline })
+const sortingTasks = [
+  sortTask('handled', 'handled', 0, '2026-10-10', '2026-10-11'),
+  sortTask('high', 'pending', 2, '2026-10-10', '2026-10-12'),
+  sortTask('low-old', 'pending', 0, '2026-10-08', undefined),
+  sortTask('low-new', 'pending', 0, '2026-10-09', '2026-10-15'),
+  sortTask('medium', 'pending', 1, '2026-10-10', '2026-10-13'),
+]
+assert.deepEqual([...sortingTasks].sort(todoState.compareTodoTasks).map(t => t.id), ['low-new', 'low-old', 'medium', 'high', 'handled'])
+assert.deepEqual([...sortingTasks].sort((a,b) => todoState.compareTodoTasks(a,b,'asc')).map(t => t.id), ['handled', 'high', 'medium', 'low-new', 'low-old'])
+assert.deepEqual([...sortingTasks].sort((a,b) => todoState.compareTodoTasks(a,b,'desc')).map(t => t.id), ['low-new', 'medium', 'high', 'handled', 'low-old'])
+console.log('PASS: default pending/priority/creation sort and explicit own-node deadline sorts')
 
 const ownerReview = { ...realReview, nodeKey: 'REVIEW_OWNER', nodeName: '场景负责人审核', bizTaskId: '900' }
 assert.equal(state.nonGrainNodeKey(ownerReview), 'section-preliminary-review', '任务900最新后端首节点映射为科室初核')
@@ -108,13 +123,15 @@ const myTasks = load('src/api/my-workflow-tasks.ts', {
   './task-workflow': { getTaskWorkflow: async () => forwardedFlow, getWorkflowTodos: async () => [county], workflowSteps: f => f.timeline.map(n => ({ key: n.nodeKey, name: n.nodeName, status: n.status })) },
   './pagination': pagination,
   '@/utils/task-workflow-state': state,
+  '@/utils/task-list-workflow': listState,
 })
 const recipientTodos = await myTasks.getMyWorkflowTasks('694', '1')
 assert.equal(recipientTodos.records.length, 1, '业务负责人接口没有任务时，仍从真实工作流待办补全接收人的任务')
 assert.equal(recipientTodos.records[0].myWorkState, 'pending')
 assert.equal(recipientTodos.records[0].myNodes[0].nodeKey, 'REVIEW_COUNTY')
-assert.equal(recipientTodos.records[0].workflow[1].name, '部门确认')
+assert.equal(recipientTodos.records[0].workflow.at(-1).name, '部门确认')
 assert.equal((await myTasks.getMyWorkflowTasks('692', '1')).records[0].myWorkState, 'handled')
+let namedFlow = forwardedFlow
 const namedTodos = load('src/api/my-workflow-tasks.ts', {
   './scene': { getBizSceneAssignees: async () => [] },
   './governance-task': {
@@ -122,11 +139,20 @@ const namedTodos = load('src/api/my-workflow-tasks.ts', {
     getGovernanceTaskPage: async () => ({ records: [{ ...waitingTask, name: '列表名称' }] }),
     getGovernanceTaskDetail: async () => ({ task: { ...waitingTask, name: '用户最新填写的任务名称' } }),
   },
-  './task-workflow': { getTaskWorkflow: async () => forwardedFlow, getWorkflowTodos: async () => [county], workflowSteps: f => f.timeline.map(n => ({ key: n.nodeKey, name: n.nodeName, status: n.status })) },
+  './task-workflow': { getTaskWorkflow: async () => namedFlow, getWorkflowTodos: async () => [county] },
   './pagination': pagination,
   '@/utils/task-workflow-state': state,
+  '@/utils/task-list-workflow': listState,
 })
 assert.equal((await namedTodos.getMyWorkflowTasks('694', '1')).records[0].name, '用户最新填写的任务名称', '待办使用当前业务任务名称，不被旧待办记录覆盖')
+const oldOwnedNode = { ...county, id: 'old-owned', status: 'COMPLETED', deadline: '2026-10-01T12:00:00' }
+namedFlow = { ...forwardedFlow, timeline: [completedCity, oldOwnedNode, county] }
+assert.equal((await namedTodos.getMyWorkflowTasks('694', '1')).records[0].myDeadline, undefined, '当前本人节点未设截止时间，不能沿用上一轮的截止时间')
+const datedCounty = { ...county, deadline: '2026-11-05T18:00:00' }
+namedFlow = { ...forwardedFlow, timeline: [completedCity, datedCounty], currentNode: datedCounty }
+assert.equal((await namedTodos.getMyWorkflowTasks('694', '1')).records[0].myDeadline, datedCounty.deadline, '截止日期使用本人节点，而非任务日期')
+namedFlow = { ...forwardedFlow, timeline: [{ ...completedCity, deadline: '2026-10-09T18:00:00' }, datedCounty], currentNode: datedCounty }
+assert.equal((await namedTodos.getMyWorkflowTasks('692', '1')).records[0].myDeadline, '2026-10-09T18:00:00', '已处理任务仍显示本人的历史办理截止时间')
 const restoredSceneTasks = load('src/api/my-workflow-tasks.ts', {
   './scene': { getBizSceneAssignees: async () => [{ sceneCode: waitingTask.sceneCode, deptId: 1, assigneeId: 773 }] },
   './governance-task': {
@@ -137,6 +163,7 @@ const restoredSceneTasks = load('src/api/my-workflow-tasks.ts', {
   './task-workflow': { getTaskWorkflow: async id => id === 'not-started' ? undefined : forwardedFlow, getWorkflowTodos: async () => [], workflowSteps: f => f.timeline.map(n => ({ key: n.nodeKey, name: n.nodeName, status: n.status })) },
   './pagination': pagination,
   '@/utils/task-workflow-state': state,
+  '@/utils/task-list-workflow': listState,
 })
 const restoredHistory = await restoredSceneTasks.getMyWorkflowTasks('773', '1')
 assert.equal(restoredHistory.records.length, 2, '现任场景负责人可查看旧账号关联任务和未启动任务，排除其他场景')
@@ -231,6 +258,19 @@ assert.equal(selectorPage.records[0].id, '744')
 assert.equal(selectorPage.pageSize, 100)
 assert.equal(selectorPage.pageNum, 2)
 console.log('PASS: dept selection endpoint, page size limit and slim user ID normalization')
+const queriedDepartments = []
+const workbenchUsers = load('src/api/workbench-users.ts', {
+  './account-management': {
+    getDepartmentList: async () => { throw new Error('不应读取不相关部门目录') },
+    getDeptUserPage: async query => { queriedDepartments.push(query.deptId); return { records: [{ id: '744', username: 'ntjsg' }] } },
+  },
+  './pagination': pagination,
+})
+const allowedUsers = await workbenchUsers.getWorkbenchUsers('other-dept', { id: '773', username: 'nyncKZ', deptList: [{ deptId: '1', deptName: '农业农村局' }] }, '1')
+assert.deepEqual(queriedDepartments, ['1'], '只请求本人有权限的部门，不读取任务所属的无权部门')
+assert.deepEqual(allowedUsers.users.map(person => person.id), ['744', '773'], '仍可选择真实部门用户和本人')
+assert.deepEqual(allowedUsers.warnings, [])
+console.log('PASS: workbench picker authorized departments and self assignment')
 const inspectionFiles = load('src/utils/inspection-files.ts')
 for (const name of ['现场.PNG', 'boundary.svg', 'photo.jpeg', 'photo.webp', 'photo.HEIC']) {
   assert.equal(inspectionFiles.inspectionFileError([{ name, size: 1024 }], true), '')

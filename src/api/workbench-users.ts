@@ -12,22 +12,32 @@ export function prioritizeWorkbenchUsers(users: WorkbenchUser[], preference: Use
 export async function getWorkbenchUsers(deptId?: string, self?: CurrentUser | null, activeDeptId?: string) {
   let departments: Array<{ id: string; name?: string }> = []
   const warnings: string[] = []
-  try {
-    type Department = { id: string | number; name?: string; children?: Department[] }
-    const append = (items: Department[]) => {
-      for (const item of items) {
-        const id = String(item.id)
-        if (!departments.some(dept => dept.id === id)) departments.push({ id, name: item.name })
-        if (item.children?.length) append(item.children)
-      }
+  if (self) {
+    // 以登录资料中的部门范围为准，不向无权访问的部门请求选人数据。
+    for (const dept of self.deptList || []) {
+      if (!departments.some(item => item.id === String(dept.deptId))) departments.push({ id: String(dept.deptId), name: dept.deptName })
     }
-    append(await getDepartmentList({ status: 1 }))
+    const ownId = self.deptId || self.defaultDeptId
+    if (ownId && !departments.some(item => item.id === String(ownId))) departments.push({ id: String(ownId), name: self.deptName })
+    if (!departments.length && activeDeptId) departments.push({ id: activeDeptId })
+  } else {
+    try {
+      type Department = { id: string | number; name?: string; children?: Department[] }
+      const append = (items: Department[]) => {
+        for (const item of items) {
+          const id = String(item.id)
+          if (!departments.some(dept => dept.id === id)) departments.push({ id, name: item.name })
+          if (item.children?.length) append(item.children)
+        }
+      }
+      append(await getDepartmentList({ status: 1 }))
+    }
+    catch {
+      if (!deptId) throw new Error('无法读取部门列表，且任务未提供所属部门。')
+      warnings.push('部门列表读取失败，当前仅查询任务所属部门用户。')
+    }
+    if (deptId && !departments.some(item => item.id === deptId)) departments.unshift({ id: deptId })
   }
-  catch {
-    if (!deptId) throw new Error('无法读取部门列表，且任务未提供所属部门。')
-    warnings.push('部门列表读取失败，当前仅查询任务所属部门用户。')
-  }
-  if (deptId && !departments.some(item => item.id === deptId)) departments.unshift({ id: deptId })
   // 当前任务部门优先，保证多部门成员的默认关联仍与当前任务一致。
   departments.sort((a, b) => Number(b.id === deptId) - Number(a.id === deptId))
   const users: WorkbenchUser[] = []
@@ -35,7 +45,10 @@ export async function getWorkbenchUsers(deptId?: string, self?: CurrentUser | nu
     try {
       const records = await collectPages((pageNum, pageSize) => getDeptUserPage({ deptId: dept.id, includeChild: false, pageNum, pageSize }))
       for (const person of records) if (!users.some(item => item.id === person.id)) users.push({ ...person, deptId: dept.id, deptName: dept.name })
-    } catch (error) { warnings.push(`${dept.name || '部门 #' + dept.id}：${error instanceof Error ? error.message : '用户读取失败'}`) }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '用户读取失败'
+      if (!/无权限|无权访问|403|forbidden/i.test(message)) warnings.push(`${dept.name || '部门 #' + dept.id}：${message}`)
+    }
   }
   // 部门选人接口可能省略本人，使用真实登录资料补全，不虚构用户或部门。
   if (self && !users.some(person => person.id === String(self.id))) {

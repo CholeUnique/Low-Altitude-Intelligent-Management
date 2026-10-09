@@ -12,11 +12,11 @@ export interface ReviewImagery {
   boundary?: TaskGeometryFeatureCollection
   boundaryFileId?: string
 }
-export const reviewImageryAccept = '.tif,.tiff,image/tiff,image/geotiff'
+export const reviewImageryAccept = '.jpg,.jpeg,.png,.tif,.tiff,image/jpeg,image/png,image/tiff,image/geotiff'
 export function reviewImageryFileError(files: File[]) {
-  if (files.length !== 1) return '每次请选择一幅 GeoTIFF 复核影像。'
-  if (!/\.tiff?$/i.test(files[0]!.name)) return '请上传带有坐标信息的 GeoTIFF（TIF/TIFF），普通图片无法进行地理同步对比。'
-  if (files[0]!.size > 100 * 1024 * 1024) return 'GeoTIFF 单个文件不能超过 100MB。'
+  if (files.length !== 1) return '每次请选择一幅复核影像。'
+  if (!/\.(tiff?|jpe?g|png)$/i.test(files[0]!.name)) return '请上传 JPG / PNG 图片进行地理配准，或上传已有坐标的 GeoTIFF。'
+  if (files[0]!.size > 100 * 1024 * 1024) return '复核影像单个文件不能超过 100MB。'
   return ''
 }
 export async function readReviewGeoTiff(file: File): Promise<ReviewImagery> {
@@ -37,7 +37,7 @@ export async function readReviewGeoTiff(file: File): Promise<ReviewImagery> {
   const width = image.getWidth(), height = image.getHeight()
   const ratio = Math.min(1, 1024 / Math.max(width, height))
   const w = Math.max(1, Math.round(width * ratio)), h = Math.max(1, Math.round(height * ratio))
-  const raster = await image.readRGB({ width: w, height: h, interleave: true })
+  const raster = await image.readRGB({ width: w, height: h, interleave: true, enableAlpha: true })
   const channels = raster.length / (w * h)
   const origin = image.getOrigin(), resolution = image.getResolution()
   const lower = proj4('EPSG:4326', 'EPSG:3857', [bounds[0], bounds[1]])
@@ -55,7 +55,7 @@ export async function readReviewGeoTiff(file: File): Promise<ReviewImagery> {
     if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue
     const input = (sy * w + sx) * channels, output = (y * w + x) * 4
     for (let c = 0; c < 3; c++) pixels.data[output + c] = Number(raster[input + c]) * scale
-    pixels.data[output + 3] = 255
+    pixels.data[output + 3] = channels === 4 ? Number(raster[input + 3]) * scale : 255
   }
   context.putImageData(pixels, 0, 0)
   return { previewDataUrl: canvas.toDataURL('image/webp', .85), bounds, epsg, width, height }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElTooltip } from 'element-plus'
+import photoSources from '@/assets/algorithms/real/sources.json'
 
 type AlgorithmFamily = 'ai' | 'spatial'
 type ViewMode = 'grid' | 'list'
@@ -18,6 +19,11 @@ const viewMode = ref<ViewMode>('grid')
 const currentPage = ref(1)
 const pageSize = ref(6)
 const selected = ref<MockAlgorithm>()
+const selectedPhotos = computed(() => {
+  if (selected.value?.family !== 'ai') return []
+  const keys = selected.value.visual === 'change' ? ['change_before', 'change_after'] : [selected.value.visual]
+  return keys.map(key => photoSources[key as keyof typeof photoSources]).filter(Boolean)
+})
 const notice = ref('')
 let noticeTimer: number | undefined
 
@@ -101,11 +107,11 @@ watch(pageCount, () => setPage(currentPage.value))
 
       <section v-if="pageModels.length" class="algorithm-results" :class="`view-${viewMode}`">
         <article v-for="model in pageModels" :key="model.id" class="algorithm-card" tabindex="0" @click="selected=model" @keydown.enter="selected=model">
-          <div class="card-visual" :class="`visual-${model.visual}`" aria-label="算法演示示意图">
+          <div class="card-visual" :class="`visual-${model.visual}`" :aria-label="`${model.name}实景示例`">
             <span class="version">{{ model.version }}</span>
             <span class="status" :class="{testing:model.status==='测试中'}"><i></i>{{ model.status }}</span>
-            <span class="visual-demo">模拟示意</span>
-            <div v-if="model.visual==='change'" class="compare-line"><b>2023-03</b><em>›</em><b>2024-03</b></div>
+            <span class="visual-demo">{{ model.family === 'ai' ? '实景示例' : '模拟示意' }}</span>
+            <div v-if="model.visual==='change'" class="compare-line"><b>2001-06</b><em>›</em><b>2004-04</b></div>
             <svg v-else-if="family==='spatial'" class="spatial-overlay" viewBox="0 0 600 320" preserveAspectRatio="none" aria-hidden="true">
               <g v-if="model.visual==='overlay'">
                 <path class="overlay-blue" d="M125 83 258 66 301 146 270 237 154 221 103 151Z" />
@@ -141,7 +147,7 @@ watch(pageCount, () => setPage(currentPage.value))
     </main>
 
     <transition name="notice"><div v-if="notice" class="mock-notice">{{ notice }}</div></transition>
-    <div v-if="selected" class="detail-mask" @click.self="selected=undefined"><section class="detail-dialog"><header><div><small>{{ selected.version }} · {{ selected.status }}</small><h2>{{ selected.name }}</h2></div><button @click="selected=undefined">×</button></header><p>{{ selected.description }}</p><dl><div><dt>算法类型</dt><dd>{{ selected.category }}</dd></div><div><dt>应用场景</dt><dd>{{ selected.scene }}</dd></div><div><dt>能力标签</dt><dd>{{ selected.tags.join('、') }}</dd></div><div><dt>维护单位</dt><dd>{{ selected.owner }}</dd></div><div><dt>更新时间</dt><dd>{{ selected.updatedAt }}</dd></div></dl><footer><button @click="selected=undefined">关闭</button><ElTooltip trigger="click" placement="top-end" effect="light" :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }"><template #content><div class="algorithm-pending-tip" role="status"><strong>该功能待后端接入</strong></div></template><button type="button" class="primary">配置算法</button></ElTooltip></footer></section></div>
+    <div v-if="selected" class="detail-mask" @click.self="selected=undefined"><section class="detail-dialog"><header><div><small>{{ selected.version }} · {{ selected.status }}</small><h2>{{ selected.name }}</h2></div><button @click="selected=undefined">×</button></header><p>{{ selected.description }}</p><dl><div><dt>算法类型</dt><dd>{{ selected.category }}</dd></div><div><dt>应用场景</dt><dd>{{ selected.scene }}</dd></div><div><dt>能力标签</dt><dd>{{ selected.tags.join('、') }}</dd></div><div><dt>维护单位</dt><dd>{{ selected.owner }}</dd></div><div><dt>更新时间</dt><dd>{{ selected.updatedAt }}</dd></div></dl><div v-if="selectedPhotos.length" class="photo-credits"><p>实拍影像，识别框仅为用途示意。</p><div v-for="photo in selectedPhotos" :key="photo.source"><a :href="photo.source" target="_blank" rel="noopener noreferrer">图片来源</a> · {{ photo.author }} · <a :href="photo.licenseUrl || photo.source" target="_blank" rel="noopener noreferrer">{{ photo.license }}</a></div></div><footer><button @click="selected=undefined">关闭</button><ElTooltip trigger="click" placement="top-end" effect="light" :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }"><template #content><div class="algorithm-pending-tip" role="status"><strong>该功能待后端接入</strong></div></template><button type="button" class="primary">配置算法</button></ElTooltip></footer></section></div>
   </div>
 </template>
 
@@ -158,19 +164,19 @@ watch(pageCount, () => setPage(currentPage.value))
 .algorithm-pending-tip strong{display:block;color:#c43b4d;font-size:12px;line-height:1.4;white-space:nowrap}
 /* Local demonstration imagery: generated aerial thumbnails and a shared GIS basemap. */
 .card-visual{background-position:center;background-size:cover}
-.visual-forest{background-image:url('../assets/algorithms/forest.jpg')}
-.visual-building{background-image:url('../assets/algorithms/building.jpg')}
-.visual-farmland{background-image:url('../assets/algorithms/farmland.jpg')}
-.visual-change{background-image:url('../assets/algorithms/change_before.jpg')}
-.visual-change::before{position:absolute;z-index:1;inset:0;background:url('../assets/algorithms/change_after.jpg') center/cover;clip-path:inset(0 0 0 36%);content:""}
-.visual-change::after{position:absolute;z-index:2;top:0;bottom:0;left:36%;width:2px;background:#fff;box-shadow:0 0 0 1px #17324b55;content:""}
-.visual-road{background-image:url('../assets/algorithms/road.jpg')}
-.visual-water{background-image:url('../assets/algorithms/water.jpg')}
+.visual-forest{background-image:url('../assets/algorithms/real/forest.jpg')}
+.visual-building{background-image:url('../assets/algorithms/real/building.jpg')}
+.visual-farmland{background-image:url('../assets/algorithms/real/farmland.jpg')}
+.visual-change{background-image:url('../assets/algorithms/real/change_before.jpg');background-size:50% 100%;background-repeat:no-repeat;background-position:left center}
+.visual-change::before{position:absolute;z-index:1;inset:0 0 0 50%;background:url('../assets/algorithms/real/change_after.jpg') center/100% 100%;content:""}
+.visual-change::after{position:absolute;z-index:2;top:0;bottom:0;left:50%;width:2px;background:#fff;box-shadow:0 0 0 1px #17324b55;content:""}
+.visual-road{background-image:url('../assets/algorithms/real/road.jpg')}
+.visual-water{background-image:url('../assets/algorithms/real/water.jpg')}
 .visual-overlay,.visual-buffer,.visual-distance,.visual-range,.visual-clip,.visual-nearby{background-image:url('../assets/algorithms/spatial_map.jpg');background-size:135% auto}
 .visual-overlay{background-position:32% 42%}.visual-buffer{background-position:62% 50%}.visual-distance{background-position:47% 59%}.visual-range{background-position:20% 66%}.visual-clip{background-position:78% 45%}.visual-nearby{background-position:54% 32%}
 .visual-demo{position:absolute;z-index:4;right:10px;bottom:9px;padding:3px 7px;border:1px solid #ffffff80;border-radius:4px;color:#fff;background:#102b3cb5;font-size:10px;letter-spacing:.5px;pointer-events:none}
 .visual-change .visual-demo{bottom:45px}
-.compare-line{z-index:3}.compare-line em{z-index:2}.visual-change .compare-line em{position:absolute;left:36%;transform:translateX(-50%)}
+.compare-line{z-index:3}.compare-line em{z-index:2}.visual-change .compare-line em{position:absolute;left:50%;transform:translateX(-50%)}
 .detect{z-index:2;border:2px solid #ff555d;background:#ff555d21;box-shadow:0 0 0 1px #fff8,0 0 7px #fa313b99}
 .visual-forest .detect-a{left:37%;top:22%;width:35%;height:52%}.visual-forest .detect-b{left:22%;top:39%;width:16%;height:26%}
 .visual-building .detect-a{left:37%;top:26%;width:29%;height:40%}.visual-building .detect-b{left:62%;top:18%;width:17%;height:24%}
@@ -185,4 +191,6 @@ watch(pageCount, () => setPage(currentPage.value))
 .clip-arrow{fill:none;stroke:#294967;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
 .nearby-zone circle{fill:#397cff12;stroke:#397cff;stroke-width:2;stroke-dasharray:8 7}.nearby-zone .nearby-center{fill:#fb5964;stroke:#fff;stroke-width:3;stroke-dasharray:none}.nearby-zone .nearby-point{fill:#397cff;stroke:#fff;stroke-width:3;stroke-dasharray:none}
 /* Keep this style block versioned with the light algorithm-management layout. */
+.visual-forest .detect-a{left:7%;top:66%;width:45%;height:23%}.visual-forest .detect-b{display:none}
+.photo-credits{padding:0 22px 18px;color:#70809a;font-size:12px;line-height:1.6}.photo-credits p{margin:0 0 5px}.photo-credits a{color:#3276c6}
 </style>

@@ -7,11 +7,10 @@ import 'element-plus/es/components/option/style/css'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
 import TaskWorkflowProgress from '@/components/task-center/TaskWorkflowProgress.vue'
 import { getMyWorkflowTasks, type MyWorkflowTask } from '@/api/my-workflow-tasks'
-import { todoTaskStatus, todoTaskStatusLabel, type TodoTaskStatus } from '@/utils/task-todo-state'
+import { compareTodoTasks, todoTaskStatus, todoTaskStatusLabel, type TodoTaskStatus, type TodoDeadlineSort } from '@/utils/task-todo-state'
 import { useUserStore } from '@/stores/user'
 import { workflowNodeDisplayName } from '@/utils/task-workflow-state'
 
-type DeadlineSort = 'asc' | 'desc'
 
 const user = useUserStore()
 const router = useRouter()
@@ -23,7 +22,7 @@ const keyword = ref('')
 const selectedScene = ref('')
 const sceneOptions = computed(() => [...new Map(tasks.value.filter(task => task.sceneName).map(task => [task.sceneCode || task.sceneName, { code: task.sceneCode || task.sceneName, name: task.sceneName }])).values()])
 const processType = ref<TodoTaskStatus | ''>('')
-const deadlineSort = ref<DeadlineSort>('asc')
+const deadlineSort = ref<TodoDeadlineSort>('default')
 let requestVersion = 0
 
 const currentUserId = computed(() => String(user.currentUser?.id || ''))
@@ -34,12 +33,6 @@ function myNodeName(task: MyWorkflowTask) {
   const node = [...task.myNodes].reverse().find(node => node.status === (task.myWorkState === 'pending' ? 'PROCESSING' : 'COMPLETED'))
   return node ? workflowNodeDisplayName(node, task.sceneCode) : '—'
 }
-function sceneProgress(task: MyWorkflowTask) {
-  if (task.flow?.currentNode) return workflowNodeDisplayName(task.flow.currentNode, task.sceneCode)
-  if (task.flow?.status === 'FINISHED' || task.flow?.status === 'COMPLETED') return '已结案'
-  return task.flow ? '流程已结束' : '未启动'
-}
-
 const myWorkTasks = computed(() => displayTasks.value.filter(task => !selectedScene.value || (task.sceneCode || task.sceneName) === selectedScene.value))
 
 function deadlineTime(task: MyWorkflowTask) {
@@ -51,7 +44,7 @@ function deadlineTime(task: MyWorkflowTask) {
 function isDueSoon(task: MyWorkflowTask) {
   const deadline = deadlineTime(task)
   const remaining = deadline - Date.now()
-  return remaining >= 0 && remaining <= 3 * 24 * 60 * 60 * 1000
+  return remaining >= 0 && remaining < 3 * 24 * 60 * 60 * 1000
 }
 
 function isOverdue(task: MyWorkflowTask) {
@@ -66,14 +59,7 @@ const visibleTasks = computed(() => {
       return !normalizedKeyword
         || `${task.name} ${task.taskNo} ${task.sceneName} ${task.deptName}`.toLocaleLowerCase().includes(normalizedKeyword)
     })
-    .sort((left, right) => {
-      const leftTime = deadlineTime(left)
-      const rightTime = deadlineTime(right)
-      if (!Number.isFinite(leftTime) && !Number.isFinite(rightTime)) return 0
-      if (!Number.isFinite(leftTime)) return 1
-      if (!Number.isFinite(rightTime)) return -1
-      return deadlineSort.value === 'asc' ? leftTime - rightTime : rightTime - leftTime
-    })
+    .sort((left, right) => compareTodoTasks(left, right, deadlineSort.value))
 })
 
 const workload = computed(() => ({
@@ -146,7 +132,7 @@ onBeforeUnmount(() => {
           <label class="search-control">搜索任务<div><span>⌕</span><input v-model="keyword" placeholder="任务名称、编号、场景或部门" /></div></label>
           <label>业务场景<ElSelect v-model="selectedScene" aria-label="按待办场景筛选" popper-class="todo-filter-options"><ElOption label="全部场景" value="" /><ElOption v-for="scene in sceneOptions" :key="scene.code" :value="scene.code" :label="scene.name" /></ElSelect></label>
           <label>处理类型<ElSelect v-model="processType" aria-label="处理类型" popper-class="todo-filter-options"><ElOption label="全部类型" value="" /><ElOption label="已处理" value="handled" /><ElOption label="待处理" value="pending" /><ElOption label="已结案" value="archived" /></ElSelect></label>
-          <label>截止时间<ElSelect v-model="deadlineSort" aria-label="截止时间排序" popper-class="todo-filter-options"><ElOption label="由近到远" value="asc" /><ElOption label="由远到近" value="desc" /></ElSelect></label>
+          <label>排序方式<ElSelect v-model="deadlineSort" aria-label="待办排序方式" popper-class="todo-filter-options"><ElOption label="默认排序" value="default" /><ElOption label="截止时间由近到远" value="asc" /><ElOption label="截止时间由远到近" value="desc" /></ElSelect></label>
         </section>
 
         <p v-if="error" class="todo-warning">真实待办加载失败：{{ error }}。请重试。</p>
@@ -159,8 +145,8 @@ onBeforeUnmount(() => {
                 <div><h2>{{ task.name }} <em class="work-state" :class="todoTaskStatus(task)">{{ todoTaskStatusLabel(task) }}</em></h2><p>{{ task.taskNo }} · {{ task.sceneName }}</p></div>
               </div>
               <div class="deadline" :class="{ overdue: isOverdue(task), soon: isDueSoon(task) }">
-                <span>{{ task.myWorkState === 'scene' ? '当前办理节点' : isOverdue(task) ? '已逾期' : isDueSoon(task) ? '即将到期' : '截止时间' }}</span>
-                <strong>{{ task.myWorkState === 'scene' ? sceneProgress(task) : formatTime(task.myDeadline) }}</strong>
+                <span>截止时间</span>
+                <strong>{{ formatTime(task.myDeadline) }}</strong>
               </div>
             </div>
             <div class="task-body">
@@ -197,7 +183,7 @@ onBeforeUnmount(() => {
 .refresh-button:disabled { opacity: .6; cursor: wait; }
 .todo-layout { display: grid; grid-template-columns: minmax(0, 1fr) 245px; gap: 14px; }
 .todo-main { min-width: 0; }
-.todo-filters { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) 120px 120px; gap: 12px; padding: 13px 15px; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; }
+.todo-filters { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) 120px 180px; gap: 12px; padding: 13px 15px; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; }
 .todo-filters label { min-width: 0; display: grid; gap: 6px; color: #65788b; font-size: 12px; }
 .todo-filters input, .todo-filters select, .search-control > div { height: 34px; color: #33495e; background: #fff; border: 1px solid #d8e0e7; border-radius: 4px; outline: 0; }
 .todo-filters select { padding: 0 9px; }
@@ -220,7 +206,7 @@ onBeforeUnmount(() => {
 .task-title p { margin-top: 5px; color: #97a4b1; font-size: 10px; }
 .priority { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; color: #738396; background: #edf1f4; border-radius: 50%; font-size: 10px; }
 .priority-2 { color: #c95353; background: #fff0ef; }.priority-1 { color: #bd7a2b; background: #fff5e7; }
-.deadline { text-align: right; }.deadline span, .deadline strong { display: block; }.deadline span { color: #9aa6b2; font-size: 10px; }.deadline strong { margin-top: 3px; color: #5f7184; font-size: 12px; }.deadline.soon strong { color: #d0842d; }.deadline.overdue strong { color: #c95454; }
+.deadline { text-align: right; }.deadline span, .deadline strong { display: block; }.deadline span { color: #9aa6b2; font-size: 10px; }.deadline strong { margin-top: 3px; color: #5f7184; font-size: 12px; }.deadline.soon strong { color: #c95454; }.deadline.overdue strong { color: #c95454; }
 .task-body { display: grid; grid-template-columns: minmax(270px, .9fr) minmax(370px, 1.45fr) 105px; align-items: center; gap: 18px; min-height: 74px; padding: 11px 16px; }
 .task-body dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
 .task-body dl div { min-width: 0; }.task-body dt { color: #a0abb6; font-size: 10px; }.task-body dd { margin: 5px 0 0; overflow: hidden; color: #596d80; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }

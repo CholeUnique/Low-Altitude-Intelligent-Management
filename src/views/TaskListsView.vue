@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
 import NewTaskDialog from '@/components/NewTaskDialog.vue'
@@ -34,8 +34,6 @@ const selectedIds = ref<string[]>([])
 const deleteConfirmVisible = ref(false)
 const deleteLoading = ref(false)
 const deleteError = ref('')
-const taskTable = ref<HTMLElement>()
-const maximumRows = ref(8)
 const currentPage = ref(1)
 const gotoPage = ref('1')
 const taskRows = ref<GovernanceTask[]>([])
@@ -63,7 +61,7 @@ const rootDepartments = computed(() => {
 const childDepartments = computed(() =>
   departments.value.filter((item) => item.parentId === parentDeptId.value))
 const selectedDeptId = computed(() => childDeptId.value || parentDeptId.value || user.activeDeptId)
-const requestPageSize = computed(() => Math.min(Math.max(maximumRows.value, 5), 50))
+const requestPageSize = computed(() => 7)
 const pageCount = computed(() => Math.max(1, Math.ceil(taskTotal.value / requestPageSize.value)))
 const paginationItems = computed<(number | 'ellipsis')[]>(() => {
   const total = pageCount.value
@@ -243,17 +241,6 @@ async function loadDepartments() {
   }
 }
 
-function updateMaximumRows() {
-  if (!taskTable.value) return
-  const header = taskTable.value.querySelector<HTMLElement>('.task-table-head')
-  const record = taskTable.value.querySelector<HTMLElement>('.task-table-row:not(.task-table-head)')
-  const rowHeight = record?.getBoundingClientRect().height || 72
-  const headerHeight = header?.getBoundingClientRect().height || 42
-  const paginationHeight = 64
-  const safeGap = 24
-  maximumRows.value = Math.max(5, Math.floor((window.innerHeight - taskTable.value.getBoundingClientRect().top - headerHeight - paginationHeight - safeGap) / rowHeight))
-}
-
 function handleCreated(task: { id: string; sceneCode?: string }) {
   if (task.sceneCode && ['CULTIVATED_LAND_USE_CONTROL', 'NON_GRAIN', 'NON_GRAIN_MONITORING'].includes(task.sceneCode)) {
     void router.push({ name: 'workspace', params: { sceneId: task.sceneCode, taskId: task.id } })
@@ -327,15 +314,11 @@ watch(pageCount, () => setPage(currentPage.value))
 onMounted(async () => {
   await Promise.all([loadSceneDictionary(), loadDepartments()])
   void loadTasks()
-  await nextTick()
-  updateMaximumRows()
-  window.addEventListener('resize', updateMaximumRows)
 })
-onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
 </script>
 
 <template>
-  <TaskCenterLayout title="任务列表" :subtitle="`${user.organization.name} · ${sceneFilter ? selectedScene?.name || '已选场景' : '全部场景'}`">
+  <TaskCenterLayout class="task-list-page" title="任务列表" :subtitle="`${user.organization.name} · ${sceneFilter ? selectedScene?.name || '已选场景' : '全部场景'}`">
     <template #actions>
       <div class="heading-actions">
         <button class="batch-delete" :disabled="!selectedIds.length || deleteLoading" @click="requestBatchDelete">
@@ -370,7 +353,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
     <p v-if="deleteError" class="scene-dictionary-error">{{ deleteError }}</p>
     <p v-if="workflowError" class="scene-dictionary-error" role="alert">{{ workflowError }}</p>
 
-    <section ref="taskTable" class="task-table">
+    <section class="task-table">
       <div class="task-table-row task-table-head">
         <span><input v-model="allSelected" type="checkbox" /></span><span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
       </div>
@@ -378,9 +361,9 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
         <span><input v-model="selectedIds" type="checkbox" :value="task.id" /></span>
         <span class="task-name"><b>{{ task.name }}</b><small>{{ task.taskNo }}</small></span>
         <span><em class="scene-tag">{{ task.sceneName }}</em></span>
-        <span><em class="status-tag" :class="taskStatusClass(task)">{{ task.taskStatusDesc }}</em></span>
+        <span><em class="status-tag" :class="taskStatusClass(task)" :title="task.taskStatusDesc">{{ task.taskStatusDesc }}</em></span>
         <span class="task-owner"><b>{{ task.deptName }}</b><small v-if="task.assigneeName || task.assigneeId">{{ task.assigneeName || `负责人 #${task.assigneeId}` }}</small></span>
-        <span class="task-created">{{ formatTime(task.createTime) }}</span>
+        <span class="task-created" :title="formatTime(task.createTime)">{{ formatTime(task.createTime) }}</span>
         <span class="task-range">
           <TaskRangeThumbnail v-if="taskRangeGeometries[task.id]" :geo-json="taskRangeGeometries[task.id]!" />
           <i v-else class="range-thumb range-thumb--empty" :title="taskRangePreviewLoading ? '正在读取真实任务范围' : '暂无任务范围'">{{ taskRangePreviewLoading ? '…' : '—' }}</i>
@@ -500,4 +483,23 @@ onBeforeUnmount(() => window.removeEventListener('resize', updateMaximumRows))
 @media (max-width: 1320px) {
   .task-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+</style>
+
+<style scoped>
+.task-list-page :deep(.task-center-content){display:flex;flex-direction:column;overflow:hidden}
+.task-list-page :deep(.content-heading){min-height:64px;flex:none;padding-inline:20px}
+.task-list-page :deep(.content-body){display:flex;flex:1;min-height:0;flex-direction:column;padding:12px 18px}
+.task-filters{flex:none;gap:8px;padding:10px 12px}
+.task-table{display:flex;flex-direction:column;flex:1;min-height:0;margin-top:10px;overflow:auto}
+.task-table-row{flex:1;min-height:48px;max-height:62px}
+.task-list-page .task-table-row>span{padding:2px 8px}
+.task-table-row{box-sizing:border-box}
+.task-list-page .task-table-row{grid-template-columns:26px 1.2fr .85fr .75fr .8fr .85fr 65px minmax(250px,2.5fr) 65px}
+.task-table-row>span{overflow:hidden}
+.task-owner small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status-tag{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-table-head{flex:none;min-height:36px;height:36px}
+.task-table-head>span{font-size:11px;line-height:1.2}
+.task-pagination{flex:none;padding:8px 0;gap:8px}
+@media(max-height:740px){.task-list-page :deep(.content-heading){min-height:54px}.task-list-page :deep(.content-body){padding-block:8px}.task-filters{padding-block:7px}.task-table-row:not(.task-table-head){min-height:43px}.task-pagination{padding-block:5px}}
 </style>

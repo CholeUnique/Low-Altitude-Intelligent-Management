@@ -8,7 +8,7 @@ export function projectTaskListWorkflow(task: GovernanceTask, flow?: TaskWorkflo
   if (!flow) return task
   const seen = new Set<string>()
   const nodes = [...flow.timeline, ...(flow.currentNode ? [flow.currentNode] : [])].filter(node => {
-    if (seen.has(node.id) || (node.status === 'PENDING' && node.id !== flow.currentNode?.id)) return false
+    if (seen.has(node.id) || node.status === 'TRANSFERRED' || (node.status === 'PENDING' && node.id !== flow.currentNode?.id)) return false
     seen.add(node.id)
     return true
   })
