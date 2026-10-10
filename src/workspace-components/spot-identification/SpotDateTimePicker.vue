@@ -4,7 +4,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 const props = withDefaults(defineProps<{
   modelValue?: string
   placeholder?: string
-}>(), { modelValue: '', placeholder: '请选择日期和时间' })
+  compact?: boolean
+}>(), { modelValue: '', placeholder: '请选择日期和时间', compact: false })
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const anchor = ref<HTMLElement>()
@@ -71,8 +72,9 @@ function setMinute(event: Event) {
 function locatePanel() {
   const rect = anchor.value?.getBoundingClientRect()
   if (!rect) return
-  const width = Math.min(446, window.innerWidth - 16)
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))
+  const container = props.compact ? anchor.value?.closest('.manual-spot-panel')?.getBoundingClientRect() : undefined
+  const width = Math.min(container?.width ?? 446, window.innerWidth - 16)
+  const left = Math.max(8, Math.min(container?.left ?? rect.left, window.innerWidth - width - 8))
   panelStyle.value = { top: `${rect.bottom + 6}px`, left: `${left}px`, width: `${width}px` }
 }
 async function showPanel() {
@@ -112,7 +114,7 @@ onBeforeUnmount(() => {
       <i v-if="displayValue" title="清除" @click="clearValue">×</i>
     </button>
     <Teleport to="body">
-      <section v-if="open" ref="panel" class="spot-datetime-panel" :style="panelStyle" @pointerdown.stop>
+      <section v-if="open" ref="panel" class="spot-datetime-panel" :class="{ compact: props.compact }" :style="panelStyle" @pointerdown.stop>
         <div class="spot-datetime-panel__body">
           <div class="spot-calendar">
             <header><button type="button" @click="changeMonth(-1)">‹</button><b>{{ monthLabel }}</b><button type="button" @click="changeMonth(1)">›</button></header>
@@ -134,9 +136,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
-.spot-datetime{width:100%;min-width:0}.spot-datetime__input{width:100%;height:35px;display:grid;grid-template-columns:18px minmax(0,1fr) 18px;align-items:center;gap:5px;padding:0 8px;color:#294b5d;background:#fff;border:1px solid #c4d7e0;border-radius:5px;text-align:left;cursor:pointer}.spot-datetime__input:hover,.spot-datetime__input.open{border-color:#1597bc;box-shadow:0 0 0 2px #1597bc1c}.spot-datetime__input.empty{color:#8299a4}.spot-datetime__clock{color:#4095ad;font-size:15px}.spot-datetime__input>span:nth-child(2){overflow:hidden;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.spot-datetime__input i{display:grid;width:18px;height:18px;place-items:center;color:#718a96;border-radius:50%;font-size:15px;font-style:normal}.spot-datetime__input i:hover{color:#fff;background:#8197a1}
+.spot-datetime{width:100%;min-width:0}.spot-datetime__input{width:100%;height:40px;display:grid;grid-template-columns:18px minmax(0,1fr) 18px;align-items:center;gap:7px;padding:0 11px;color:#294b5d;background:#fff;border:1px solid #c4d7e0;border-radius:5px;text-align:left;cursor:pointer}.spot-datetime__input:hover,.spot-datetime__input.open{border-color:#1597bc;box-shadow:0 0 0 2px #1597bc1c}.spot-datetime__input.empty{color:#8299a4}.spot-datetime__clock{color:#4095ad;font-size:16px}.spot-datetime__input>span:nth-child(2){overflow:hidden;font-size:14px;text-overflow:ellipsis;white-space:nowrap}.spot-datetime__input i{display:grid;width:18px;height:18px;place-items:center;color:#718a96;border-radius:50%;font-size:15px;font-style:normal}.spot-datetime__input i:hover{color:#fff;background:#8197a1}
 </style>
 
 <style lang="scss">
 .spot-datetime-panel{position:fixed;z-index:5000;box-sizing:border-box;overflow:hidden;color:#294b5d;background:#fff;border:2px solid #35a9c7;border-radius:8px;box-shadow:0 14px 38px #08364b47;font-family:"Microsoft YaHei",sans-serif}.spot-datetime-panel__body{display:grid;grid-template-columns:minmax(0,1fr) 128px}.spot-calendar{padding:10px 12px 8px;border-right:1px solid #d6e4ea}.spot-calendar header{height:30px;display:grid;grid-template-columns:30px 1fr 30px;align-items:center;text-align:center}.spot-calendar header b{font-size:13px}.spot-calendar header button,.spot-calendar__days button{border:0;background:transparent;cursor:pointer}.spot-calendar header button{color:#2b7188;font-size:22px}.spot-calendar__week,.spot-calendar__days{display:grid;grid-template-columns:repeat(7,1fr)}.spot-calendar__week span{height:25px;display:grid;place-items:center;color:#78909b;font-size:10px}.spot-calendar__days button{height:27px;color:#34596a;border-radius:4px;font-size:11px}.spot-calendar__days button:hover{color:#087d9c;background:#e5f4f8}.spot-calendar__days button.muted{color:#b0bec5}.spot-calendar__days button.today{color:#0787a7;font-weight:800}.spot-calendar__days button.selected{color:#fff;background:#1597b8;box-shadow:0 2px 6px #1597b84a}.spot-time{display:flex;flex-direction:column;gap:7px;padding:13px 12px;background:#f6fafb}.spot-time>b{margin-bottom:3px;color:#234b60;font-size:13px}.spot-time small{color:#718a96;font-size:10px}.spot-time select{width:100%;height:31px;padding:0 7px;color:#294b5d;background:#fff;border:1px solid #bfd4de;border-radius:4px;outline:none}.spot-time select:hover,.spot-time select:focus{color:#fff;background:#075273;border-color:#1599c1}.spot-time select option{color:#294b5d;background:#fff}.spot-time strong{margin-top:4px;padding:8px 2px;color:#087f9e;background:#e3f4f8;border-radius:4px;font-size:16px;text-align:center}.spot-datetime-panel footer{height:46px;display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 12px;background:#f3f8fa;border-top:1px solid #c8dae2}.spot-datetime-panel footer button{min-width:64px;height:31px;color:#537481;background:#fff;border:1px solid #bfd3dc;border-radius:4px;cursor:pointer}.spot-datetime-panel footer button.primary{color:#fff;background:#168fad;border-color:#168fad;font-weight:700}@media(max-width:520px){.spot-datetime-panel__body{grid-template-columns:1fr}.spot-calendar{border-right:0;border-bottom:1px solid #d6e4ea}.spot-time{display:grid;grid-template-columns:1fr 1fr}.spot-time>b,.spot-time strong{grid-column:1/-1}}
+.spot-datetime-panel.compact .spot-datetime-panel__body{grid-template-columns:minmax(0,1fr)}
+.spot-datetime-panel.compact .spot-calendar{border-right:0;border-bottom:1px solid #d6e4ea}
+.spot-datetime-panel.compact .spot-time{display:grid;grid-template-columns:26px minmax(0,1fr) 26px minmax(0,1fr);align-items:center;gap:7px;padding:10px 12px}
+.spot-datetime-panel.compact .spot-time>b,.spot-datetime-panel.compact .spot-time>strong{grid-column:1/-1;margin:0}
+.spot-datetime-panel.compact .spot-time>strong{padding:5px 2px;font-size:14px}
+@media(max-width:520px){.spot-datetime-panel.compact .spot-time{grid-template-columns:26px minmax(0,1fr) 26px minmax(0,1fr)}}
 </style>

@@ -367,20 +367,45 @@
 .right-submenu {
   position: absolute;
   top: auto;
-  bottom: calc(100% + 14px);
+  bottom: calc(100% + 12px);
   right: auto;
   left: 50%;
-  width: 138px;
-  padding: 6px;
+  box-sizing: border-box;
+  width: 100px;
+  padding: 4px;
   color: var(--map-text);
   background: rgba(3, 34, 55, .97);
   border: 1px solid rgba(100, 215, 240, .62);
-  border-radius: 11px;
-  box-shadow: 0 10px 22px rgba(0, 14, 28, .5);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 20, 34, .45);
   transform: translateX(-50%);
 }
-.right-submenu button { color: #d7f2f9; border-radius: 6px; }
-.right-submenu button:hover,.right-submenu button.active { color: #fff; background: #126e90; }
+.right-submenu::after {
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  background: rgba(3, 34, 55, .97);
+  border-right: 1px solid rgba(100, 215, 240, .62);
+  border-bottom: 1px solid rgba(100, 215, 240, .62);
+  content: '';
+  transform: translateX(-50%) rotate(45deg);
+}
+.right-submenu button {
+  min-height: 30px;
+  padding: 5px 6px;
+  color: #e9fbff;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+.right-submenu button + button { margin-top: 2px; }
+.right-submenu button:hover,
+.right-submenu button:focus-visible { color: #fff; background: rgba(255, 255, 255, .16); }
+.right-submenu button.active { color: #fff; background: rgba(255, 255, 255, .13); }
 
 .measure-result {
   bottom: 18px;
@@ -420,7 +445,6 @@
   bottom: auto;
   left: 50%;
   width: max-content;
-  min-width: min(300px, calc(100vw - 32px));
   max-width: min(520px, calc(100vw - 32px));
   box-sizing: border-box;
   display: flex;
@@ -509,7 +533,7 @@
   .map-tools .map-tool-icon { width: 27px; height: 27px; flex-basis: 27px; }
   .map-tools .map-tool-icon svg { width: 18px; height: 18px; }
   .map-tools span,.map-mode-switch span { display: block; font-size: 11px; }
-  .right-submenu { width: 112px; }
+  .right-submenu { width: 100px; }
   .map-search { right: 8px; top: 8px; }
   .map-search.expanded { width: 42cqw; }
 }
