@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css'
 import taizhouCityBoundary from '@/assets/geo/taizhou-city.json'
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { useUserStore } from '@/stores/user'
 import type { DashboardMapLayer, DronePatrolRoute } from '@/types'
 import {
   createMapServiceLayer,
@@ -108,6 +109,7 @@ const HAILING_DISTRICT = (taizhouDistrictBoundariesWgs84 as {
   features?: Array<{ properties?: { name?: string } }>
 }).features?.find((feature) => feature.properties?.name === '海陵区')
 const token = import.meta.env.VITE_TIANDITU_TOKEN
+const user = useUserStore()
 const showAdministrativeBoundaries = false
 const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
 const container = ref<HTMLElement>()
@@ -211,6 +213,7 @@ let focusedSceneLayerId = ''
 let overviewFocused = false
 const mapServiceLayers = new Map<string, MapServiceLayerHandle>()
 const loadingMapServiceIds = new Set<string>()
+let mapServiceRequestVersion = 0
 let measurePoints: L.LatLng[] = []
 
 function dismissToolMessage() {
@@ -256,11 +259,21 @@ function addBaseLayers(mode: 'vector' | 'image') {
 }
 
 async function loadMapServices() {
+  const requestVersion = ++mapServiceRequestVersion
+  // 部门切换时先撤掉旧图层，避免新列表返回前仍展示上一部门的服务。
+  mapServiceLayers.forEach((handle) => handle.layer.remove())
+  mapServiceLayers.clear()
+  loadingMapServiceIds.clear()
+  visibleMapServiceIds.value = []
+  vectorFilterPanels.value = []
+  expandedMapServiceGroupIds.value = []
+  mapServiceGroups.value = []
   mapServicesLoading.value = true
   mapServicesError.value = ''
   try {
-    const sourceServices = await listEnabledMapServices()
+    const sourceServices = await listEnabledMapServices(user.activeDeptId)
     const expandedServices = await Promise.all(sourceServices.map(expandMapServiceSublayers))
+    if (requestVersion !== mapServiceRequestVersion) return
     const groups = sourceServices.map((source, index) => ({
       id: String(source.id),
       name: source.name,
@@ -280,11 +293,12 @@ async function loadMapServices() {
     expandedMapServiceGroupIds.value = expandedMapServiceGroupIds.value.filter((id) => groupIds.has(id))
     mapServiceGroups.value = groups
   } catch (reason) {
+    if (requestVersion !== mapServiceRequestVersion) return
     mapServiceGroups.value = []
     expandedMapServiceGroupIds.value = []
     mapServicesError.value = reason instanceof Error ? reason.message : '地图服务列表加载失败'
   } finally {
-    mapServicesLoading.value = false
+    if (requestVersion === mapServiceRequestVersion) mapServicesLoading.value = false
   }
 }
 
@@ -300,8 +314,13 @@ async function toggleMapService(service: MapServiceItem) {
   }
   if (loadingMapServiceIds.has(id)) return
   loadingMapServiceIds.add(id)
+  const requestVersion = mapServiceRequestVersion
   try {
     const handle = existing || await createMapServiceLayer(service)
+    if (requestVersion !== mapServiceRequestVersion) {
+      handle.layer.remove()
+      return
+    }
     mapServiceLayers.set(id, handle)
     handle.layer.addTo(map)
     if (!visibleMapServiceIds.value.includes(id)) visibleMapServiceIds.value = [...visibleMapServiceIds.value, id]
@@ -326,9 +345,9 @@ async function toggleMapService(service: MapServiceItem) {
       showToolMessage(`${service.name} 未提供有效影像范围，已显示但无法自动定位`)
     }
   } catch (reason) {
-    showToolMessage(reason instanceof Error ? reason.message : `${service.name} 加载失败`, 5000)
+    if (requestVersion === mapServiceRequestVersion) showToolMessage(reason instanceof Error ? reason.message : `${service.name} 加载失败`, 5000)
   } finally {
-    loadingMapServiceIds.delete(id)
+    if (requestVersion === mapServiceRequestVersion) loadingMapServiceIds.delete(id)
   }
 }
 
@@ -938,6 +957,7 @@ function retryMap() {
 }
 
 onMounted(initMap)
+watch(() => user.activeDeptId, () => { if (map) void loadMapServices() })
 watch(() => props.layers, () => {
   if (!map) return
   // 旧业务场景只用于搜索和场景入口定位，不再作为地图图层自动绘制。
