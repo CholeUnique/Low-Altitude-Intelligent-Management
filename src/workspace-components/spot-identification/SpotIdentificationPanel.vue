@@ -42,8 +42,10 @@ const servicePickerVisible = ref(false)
 const servicePickerLoading = ref(false)
 const servicePickerError = ref('')
 const imageryMapServices = ref<MapServiceItem[]>([])
+let imageryServiceRequestVersion = 0
 const selectedMapServiceIds = ref<string[]>([])
 const scenes = ref<SceneDictionaryItem[]>([])
+let sceneRequestVersion = 0
 const spotDrawing = ref(false)
 const drawingPeriod = ref<number>()
 const draftCoordinates = ref<Array<[number, number]>>([])
@@ -217,14 +219,25 @@ function handleMapFullscreenKeydown(event: KeyboardEvent) {
   else if (mapFullscreen.value) mapFullscreen.value = false
 }
 async function loadImageryMapServices() {
-  const services = await listEnabledMapServices()
+  const requestVersion = ++imageryServiceRequestVersion
+  const services = await listEnabledMapServices(user.activeDeptId)
   const inspections = await Promise.allSettled(services.map((service) => inspectMapService(service)))
+  if (requestVersion !== imageryServiceRequestVersion) return
   imageryMapServices.value = services.filter((service, index) => {
     const inspection = inspections[index]
     if (inspection?.status === 'fulfilled') return inspection.value.isImagery
     const type = String(service.type || '').toUpperCase()
     return /IMAGE_SERVER|IMAGESERVER|WMTS|WMS|XYZ|TMS/.test(type)
   })
+}
+async function loadSceneOptions() {
+  const requestVersion = ++sceneRequestVersion
+  try {
+    const items = await getSceneDictionary(user.organization.scenes, user.activeDeptId)
+    if (requestVersion === sceneRequestVersion) scenes.value = items.filter((scene) => scene.enabled)
+  } catch {
+    if (requestVersion === sceneRequestVersion) scenes.value = []
+  }
 }
 function clearManualImagery() {
   manualImageryBySpot.value = {}
@@ -377,9 +390,19 @@ onMounted(() => {
   void loadImageryMapServices().catch((error) => {
     servicePickerError.value = error instanceof Error ? error.message : '参考影像地图服务加载失败。'
   })
-  void getSceneDictionary(user.organization.scenes, user.activeDeptId)
-    .then((items) => { scenes.value = items.filter((scene) => scene.enabled) })
-    .catch(() => { scenes.value = [] })
+  void loadSceneOptions()
+})
+watch(() => user.activeDeptId, () => {
+  imageryServiceRequestVersion += 1
+  imageryMapServices.value = []
+  scenes.value = []
+  selectedMapServiceIds.value = []
+  servicePickerVisible.value = false
+  clearManualImagery()
+  void loadImageryMapServices().catch((error) => {
+    servicePickerError.value = error instanceof Error ? error.message : '参考影像地图服务加载失败。'
+  })
+  void loadSceneOptions()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleMapFullscreenKeydown)

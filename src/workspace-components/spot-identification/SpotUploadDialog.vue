@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { inspectMapService } from '@/utils/map-service-layer'
@@ -18,6 +18,7 @@ const emit = defineEmits<{ close: []; uploaded: [result: RecognitionSpotCreateRe
 const user = useUserStore()
 const scenes = ref<SceneDictionaryItem[]>([])
 const imageryMapServices = ref<MapServiceItem[]>([])
+let optionsRequestVersion = 0
 const files = ref<File[]>([])
 const loading = ref(true)
 const previewing = ref(false)
@@ -46,26 +47,31 @@ const abnormalTypes: Array<{ value: RecognitionAbnormalType; label: string }> = 
   { value: 'OTHER', label: '其他' },
 ]
 
-onMounted(async () => {
+async function loadOptions() {
+  const requestVersion = ++optionsRequestVersion
+  loading.value = true
+  error.value = ''
   try {
     const [sceneList, services] = await Promise.all([
       getSceneDictionary(user.organization.scenes, user.activeDeptId),
-      listEnabledMapServices(),
+      listEnabledMapServices(user.activeDeptId),
     ])
+    if (requestVersion !== optionsRequestVersion) return
     scenes.value = sceneList.filter((scene) => scene.enabled)
     form.sceneCode = scenes.value[0]?.code || ''
     const inspections = await Promise.allSettled(services.map((service) => inspectMapService(service)))
+    if (requestVersion !== optionsRequestVersion) return
     imageryMapServices.value = services.filter((service, index) => {
       const inspection = inspections[index]
       if (inspection?.status === 'fulfilled') return inspection.value.isImagery
       return /IMAGE_SERVER|IMAGESERVER|WMTS|WMS|XYZ|TMS/.test(String(service.type || '').toUpperCase())
     })
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '上传所需字典读取失败。'
+    if (requestVersion === optionsRequestVersion) error.value = reason instanceof Error ? reason.message : '上传所需字典读取失败。'
   } finally {
-    loading.value = false
+    if (requestVersion === optionsRequestVersion) loading.value = false
   }
-})
+}
 
 function chooseFiles(event: Event) {
   files.value = Array.from((event.target as HTMLInputElement).files || [])
@@ -78,7 +84,14 @@ function invalidatePreview() {
   typeMappings.value = Object.create(null)
 }
 watch(() => form.sceneCode, invalidatePreview)
-watch(() => user.activeDeptId, invalidatePreview)
+watch(() => user.activeDeptId, () => {
+  invalidatePreview()
+  scenes.value = []
+  imageryMapServices.value = []
+  form.sceneCode = ''
+  form.mapServiceIds = []
+  void loadOptions()
+}, { immediate: true })
 watch(typeField, () => { typeMappings.value = Object.create(null) })
 
 function validatePreview() {

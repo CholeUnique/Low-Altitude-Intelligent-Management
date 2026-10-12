@@ -87,6 +87,7 @@ interface ServiceRemarkConfig {
 }
 
 let jsonpSequence = 0
+const tileMapMetadataCache = new Map<string, Promise<ServiceRemarkConfig>>()
 
 function serviceRoot(serviceUrl: string) {
   return serviceUrl.trim().replace(/\/+$/, '')
@@ -183,6 +184,18 @@ function extentBounds(extent?: ArcGisExtent) {
   }
 }
 
+function arcGisBounds(
+  metadata: ArcGisMapServiceMetadata,
+  config: ServiceRemarkConfig,
+  preferCachedMapExtent = true,
+) {
+  const serviceBounds = extentBounds(metadata.fullExtent) || extentBounds(metadata.initialExtent)
+  // 缓存型 MapServer 的真实瓦片可能大于人工备注范围，不能用备注裁掉有效瓦片。
+  return preferCachedMapExtent && metadata.singleFusedMapCache
+    ? serviceBounds || config.bounds
+    : config.bounds || serviceBounds
+}
+
 function finiteNumber(value: unknown) {
   const number = Number(value)
   return Number.isFinite(number) ? number : undefined
@@ -232,6 +245,88 @@ function parseServiceRemark(remark?: string): ServiceRemarkConfig {
     }
   } catch {
     return {}
+  }
+}
+
+function tileMapMetadataUrl(template: string) {
+  const metadataUrl = template.replace(
+    /\/\{z\}\/\{x\}\/\{-?y\}(?:\.[^/?]+)?(?=\?|$)/i,
+    '/tilemapresource.xml',
+  )
+  return metadataUrl === template ? undefined : metadataUrl
+}
+
+async function loadTileMapMetadata(template: string): Promise<ServiceRemarkConfig> {
+  const metadataUrl = tileMapMetadataUrl(template)
+  if (!metadataUrl) return {}
+  const cached = tileMapMetadataCache.get(metadataUrl)
+  if (cached) return cached
+
+  const request = (async () => {
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), 5000)
+    try {
+      const response = await fetch(metadataUrl, { signal: controller.signal })
+      if (!response.ok) throw new Error(`TMS 元数据请求失败：${response.status}`)
+      const xml = new DOMParser().parseFromString(await response.text(), 'application/xml')
+      if (xml.querySelector('parsererror')) throw new Error('TMS 元数据格式错误')
+
+      const boundingBox = xml.querySelector('BoundingBox')
+      const coordinate = (name: string) => {
+        const value = boundingBox?.getAttribute(name)
+        return value === null || value === undefined || !value.trim() ? undefined : finiteNumber(value)
+      }
+      const west = coordinate('minx')
+      const south = coordinate('miny')
+      const east = coordinate('maxx')
+      const north = coordinate('maxy')
+      let bounds: L.LatLngBounds | undefined
+      if (west !== undefined && south !== undefined && east !== undefined && north !== undefined
+        && west < east && south < north) {
+        // 有些 TMS 声明 EPSG:3857，却在 BoundingBox 中填写经纬度；优先识别实际数值范围。
+        if (Math.abs(west) <= 180 && Math.abs(east) <= 180 && Math.abs(south) <= 90 && Math.abs(north) <= 90) {
+          bounds = L.latLngBounds([south, west], [north, east])
+        } else {
+          const wkid = Number(xml.querySelector('SRS')?.textContent?.match(/EPSG:(\d+)/i)?.[1])
+          bounds = extentBounds({
+            xmin: west, ymin: south, xmax: east, ymax: north,
+            spatialReference: { wkid },
+          })
+        }
+      }
+
+      const levels = [...xml.querySelectorAll('TileSet')]
+        .map((tileSet) => {
+          const order = tileSet.getAttribute('order')
+          return order === null || !order.trim() ? undefined : finiteNumber(order)
+        })
+        .filter((level): level is number => level !== undefined && level >= 0)
+      return {
+        bounds: bounds?.isValid() ? bounds : undefined,
+        minZoom: levels.length ? Math.min(...levels) : undefined,
+        maxZoom: levels.length ? Math.max(...levels) : undefined,
+      }
+    } finally {
+      window.clearTimeout(timeoutId)
+    }
+  })()
+  tileMapMetadataCache.set(metadataUrl, request)
+  request.catch(() => tileMapMetadataCache.delete(metadataUrl))
+  return request
+}
+
+async function tmsConfig(template: string, configured: ServiceRemarkConfig): Promise<ServiceRemarkConfig> {
+  try {
+    const metadata = await loadTileMapMetadata(template)
+    return {
+      // 备注由人工填写，可能只覆盖附近区域；TMS 自带范围和层级才与实际瓦片对应。
+      bounds: metadata.bounds || configured.bounds,
+      minZoom: metadata.minZoom ?? configured.minZoom,
+      maxZoom: metadata.maxZoom ?? configured.maxZoom,
+    }
+  } catch {
+    // 元数据不存在或不允许跨域读取时，仍保留原有备注配置与瓦片显示能力。
+    return configured
   }
 }
 
@@ -802,7 +897,7 @@ async function createArcGisLayer(
   selectedGeometryType?: string,
 ): Promise<MapServiceLayerHandle> {
   const metadata = await loadArcGisMetadata(url)
-  const bounds = config.bounds || extentBounds(metadata.fullExtent || metadata.initialExtent)
+  const bounds = arcGisBounds(metadata, config, !imageServer)
   if (metadata.singleFusedMapCache) {
     const levels = (metadata.tileInfo?.lods || []).map((lod) => Number(lod.level)).filter(Number.isFinite)
     return {
@@ -840,7 +935,10 @@ export async function createMapServiceLayer(service: MapServiceItem): Promise<Ma
   const type = normalizedType(service.type)
   const config = parseServiceRemark(service.remark)
 
-  if (type.includes('TMS')) return { layer: createTemplateLayer(url, true, config), bounds: config.bounds }
+  if (type.includes('TMS')) {
+    const resolvedConfig = await tmsConfig(url, config)
+    return { layer: createTemplateLayer(url, true, resolvedConfig), bounds: resolvedConfig.bounds }
+  }
   if (type.includes('XYZ')) return { layer: createTemplateLayer(url, false, config), bounds: config.bounds }
   if (type.includes('WMTS')) return { layer: createTemplateLayer(leafletWmtsTemplate(url), false, config), bounds: config.bounds }
   if (type.includes('WMS')) return { layer: createWmsLayer(url, config), bounds: config.bounds }
@@ -906,7 +1004,7 @@ export async function inspectMapService(service: MapServiceItem): Promise<MapSer
 
   if (type.includes('ARCGIS_IMAGESERVER') || /\/ImageServer(?:\?|$)/i.test(url)) {
     const metadata = await loadArcGisMetadata(url)
-    return { isImagery: true, bounds: serializableBounds(config.bounds || extentBounds(metadata.fullExtent || metadata.initialExtent)) }
+    return { isImagery: true, bounds: serializableBounds(arcGisBounds(metadata, config, false)) }
   }
 
   if (type.includes('ARCGIS_MAPSERVER') || type === 'ARCGIS' || /\/MapServer(?:\?|$)/i.test(url)) {
@@ -914,17 +1012,22 @@ export async function inspectMapService(service: MapServiceItem): Promise<MapSer
     // 缓存切片 MapServer 在子图层元数据中也可能带 geometryType，但前端实际
     // 获取的是已经渲染好的影像瓦片，不能因此把它误判为矢量服务。
     if (metadata.singleFusedMapCache) {
-      return { isImagery: true, bounds: serializableBounds(config.bounds || extentBounds(metadata.fullExtent || metadata.initialExtent)) }
+      return { isImagery: true, bounds: serializableBounds(arcGisBounds(metadata, config)) }
     }
     for (const definition of (metadata.layers || []).slice(0, 12)) {
       if (!Number.isFinite(Number(definition.id))) continue
       const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${Number(definition.id)}`)
       if (layerMetadata.geometryType) return { isImagery: false }
     }
-    return { isImagery: true, bounds: serializableBounds(config.bounds || extentBounds(metadata.fullExtent || metadata.initialExtent)) }
+    return { isImagery: true, bounds: serializableBounds(arcGisBounds(metadata, config)) }
   }
 
-  if (type.includes('TMS') || type.includes('XYZ') || type.includes('WMTS') || type.includes('WMS')) {
+  if (type.includes('TMS')) {
+    const resolvedConfig = await tmsConfig(url, config)
+    return { isImagery: true, bounds: serializableBounds(resolvedConfig.bounds) }
+  }
+
+  if (type.includes('XYZ') || type.includes('WMTS') || type.includes('WMS')) {
     return { isImagery: true, bounds: serializableBounds(config.bounds) }
   }
 
