@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import DashboardRing from '@/components/DashboardRing.vue'
+import DashboardSymbol from '@/components/DashboardSymbol.vue'
+import { Timer, Position } from '@element-plus/icons-vue'
 import DashboardMap from '@/components/DashboardMap.vue'
-import PrimaryHeader from '@/components/PrimaryHeader.vue'
 import { useUserStore } from '@/stores/user'
 import { getGovernanceTaskGeometry, getGovernanceTaskPage, getTaskAbnormalPage, type GovernanceTask, type TaskGeometryFeatureCollection } from '@/api/governance-task'
 import { getScene } from '@/mocks/portal'
@@ -91,7 +93,6 @@ const mapLayers = computed<DashboardMapLayer[]>(() => {
 })
 // 无人机航线尚未接入真实后端接口，图层保留但当前不展示伪造航线。
 const patrolRoutes = computed(() => [])
-const scopeTitle = computed(() => activeScene.value?.name ?? `${organization.value.shortName}全部场景`)
 // 汇总接口可能包含归属其他单位场景的历史任务；首页任务统计统一基于完成
 // 部门与场景归属过滤后的任务明细计算，确保总数与场景圆环、任务列表一致。
 const unitTaskSummary = computed(() => currentUnitTasks.value.reduce((summary, task) => {
@@ -146,10 +147,15 @@ function percentage(numerator: number | undefined, denominator: number | undefin
   return Math.round(Math.min(Math.max(numerator / denominator * 100, 0), 100))
 }
 
-function ringStyle(rate: number | undefined): Record<string, string> {
-  return { '--ring-progress': `${rate ?? 0}%` }
-}
-
+const taskStatusLegend = computed(() => [
+  { name: '执行中', count: unitTaskSummary.value.executing, color: '#35c8f2' },
+  { name: '已完成', count: unitTaskSummary.value.finished, color: '#55e5cf' },
+  { name: '待执行', count: unitTaskSummary.value.pending, color: '#7389ef' },
+  { name: '待核查', count: unitTaskSummary.value.pendingVerify, color: '#e8be6c' },
+  { name: '已失败', count: unitTaskSummary.value.failed, color: '#ec8298' },
+  { name: '已取消', count: unitTaskSummary.value.canceled, color: '#64879b' },
+].filter((item, index) => index < 3 || item.count > 0))
+const mediaPhotoRate = computed(() => percentage(classifiedMediaCounts.value?.photoCount, classifiedMediaCounts.value?.totalCount))
 const fleetAvailabilityRate = computed(() => percentage(
   uavDeviceSummary.value?.onlineCount,
   uavDeviceSummary.value?.totalCount,
@@ -164,7 +170,7 @@ const recognitionHandledRate = computed(() => {
   if (typeof total !== 'number' || typeof pending !== 'number') return undefined
   return percentage(Math.max(total - pending, 0), total)
 })
-const recognitionItems = computed(() => statistics.value?.abnormalSummary.typeCounts.slice(0, 4) || [])
+const recognitionItems = computed(() => statistics.value?.abnormalSummary.typeCounts || [])
 const sceneTaskRingColors = ['#37ead7', '#45a8ff', '#a17cff', '#ffbd4a', '#ff738d', '#57d68d']
 const sceneTaskTotal = computed(() => sceneBusinessStats.value.reduce((total, item) => total + Math.max(item.taskCount, 0), 0))
 const hoveredSceneTaskId = ref('')
@@ -566,8 +572,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
 </script>
 
 <template>
-  <div class="cockpit">
-    <PrimaryHeader />
+  <div class="cockpit cockpit--glass">
 
     <main class="cockpit-body cockpit-body--map-only">
       <section class="cockpit-primary">
@@ -576,66 +581,44 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
             <section class="overview-float-panel resource-panel">
               <header>
                 <h2>无人机机组资源</h2>
-                <button v-if="user.hasPermission('live-monitoring')" class="overview-header-link" type="button" aria-label="进入实时作业" @click="openLiveOperations">实时作业 <span aria-hidden="true">›</span></button>
+                <button v-if="user.hasPermission('live-monitoring')" class="overview-header-link" type="button" aria-label="进入实时作业" @click="openLiveOperations">实时作业 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <div class="resource-summary">
-                <div
-                  class="metric-ring"
-                  :class="{ 'is-empty': fleetAvailabilityRate === undefined }"
-                  :style="ringStyle(fleetAvailabilityRate)"
-                  :title="fleetAvailabilityRate === undefined ? '暂无机组总数，无法计算可用率' : `机组可用率 ${fleetAvailabilityRate}%`"
-                ><b>{{ onlineUavCount ?? '—' }}</b><span>在线机组</span></div>
-                <div><b>机组可用态势</b><p>{{ livePreviewLoading ? '正在获取设备状态…' : '设备状态实时刷新' }}</p><small>已接入 {{ livePreviews.length }} 路直播画面</small></div>
+                <DashboardRing :value="onlineUavCount ?? '—'" label="在线机组" :rate="fleetAvailabilityRate" :title="fleetAvailabilityRate === undefined ? '暂无机组总数' : `机组可用率 ${fleetAvailabilityRate}%`"><DashboardSymbol name="drone" /></DashboardRing>
+                <div class="resource-states"><span><i class="online"></i>直播中 <b>{{ livePreviews.filter(item => item.status === 'ONLINE').length }}</b></span><span><i class="starting"></i>连接中 <b>{{ livePreviews.filter(item => item.status === 'STARTING').length }}</b></span><span><i class="offline"></i>离线 <b>{{ formatCount(uavDeviceSummary?.offlineCount) }}</b></span></div>
               </div>
-              <div class="resource-states"><span><i class="online"></i>直播中 <b>{{ livePreviews.filter((item) => item.status === 'ONLINE').length }}</b></span><span><i class="starting"></i>连接中 <b>{{ livePreviews.filter((item) => item.status === 'STARTING').length }}</b></span></div>
+              <p class="summary-foot">{{ livePreviewLoading ? '正在获取设备状态…' : '设备状态实时刷新' }}<span>已接入 {{ livePreviews.length }} 路直播画面</span></p>
             </section>
 
             <section class="overview-float-panel operation-panel">
               <header>
                 <h2>飞行作业统计</h2>
-                <button v-if="user.hasPermission('fleet-overview')" class="overview-header-link" type="button" aria-label="进入机队总览" @click="openFleetOverview">机队总览 <span aria-hidden="true">›</span></button>
+                <button v-if="user.hasPermission('fleet-overview')" class="overview-header-link" type="button" aria-label="进入机队总览" @click="openFleetOverview">机队总览 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="summary-highlight">
-                <i>航</i>
-                <div><span>累计飞行时长</span><b>{{ formatFlightTime(uavFlightSummary?.flightTime) }}</b></div>
-              </div>
-              <div class="summary-metrics">
-                <div><span>飞行架次</span><b>{{ formatCount(uavFlightSummary?.flightCount) }}</b></div>
-                <div><span>飞行里程</span><b>{{ formatDistance(uavFlightSummary?.flightDistance) }}</b></div>
-                <div><span>已完成任务</span><b>{{ formatCount(uavFlightSummary?.completedTaskCount) }}</b></div>
-                <div><span>未执行任务</span><b>{{ formatCount(uavFlightSummary?.notStartedTaskCount) }}</b></div>
-              </div>
+              <p class="panel-context">累计作业数据</p>
+              <div class="flight-kpis"><div><i><Timer /></i><span>累计飞行时长</span><b><span class="kpi-value">{{ formatFlightTime(uavFlightSummary?.flightTime).split(' ')[0] }}</span><small>{{ formatFlightTime(uavFlightSummary?.flightTime).split(' ').slice(1).join(' ') }}</small></b></div><div><i><Position /></i><span>飞行里程</span><b><span class="kpi-value">{{ formatDistance(uavFlightSummary?.flightDistance).split(' ')[0] }}</span><small>{{ formatDistance(uavFlightSummary?.flightDistance).split(' ').slice(1).join(' ') }}</small></b></div></div>
+              <div class="flight-metrics"><div><span>飞行架次</span><b>{{ formatCount(uavFlightSummary?.flightCount) }}</b></div><div><span>已完成任务</span><b>{{ formatCount(uavFlightSummary?.completedTaskCount) }}</b></div><div><span>未执行任务</span><b>{{ formatCount(uavFlightSummary?.notStartedTaskCount) }}</b></div></div>
             </section>
 
             <section class="overview-float-panel media-panel">
               <header>
                 <h2>航拍素材成果</h2>
-                <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入采集数据" @click="openDataManagement">采集数据 <span aria-hidden="true">›</span></button>
+                <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入采集数据" @click="openDataManagement">采集数据 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="summary-highlight">
-                <i>影</i>
-                <div><span>素材总数</span><b>{{ formatCount(classifiedMediaCounts?.totalCount) }}<small v-if="typeof classifiedMediaCounts?.totalCount === 'number'"> 项</small></b></div>
-              </div>
-              <div class="summary-metrics">
-                <div><span>照片</span><b>{{ formatCount(classifiedMediaCounts?.photoCount) }}</b></div>
-                <div><span>视频</span><b>{{ formatCount(classifiedMediaCounts?.videoCount) }}</b></div>
-                <div><span>已下载</span><b>{{ formatCount(uavMediaSummary?.downloadedCount) }}</b></div>
-                <div><span>素材容量</span><b>{{ formatFileSize(uavMediaSummary?.totalFileSize) }}</b></div>
-              </div>
+              <div class="media-summary"><DashboardRing :value="formatCount(classifiedMediaCounts?.totalCount)" label="素材总数" tone="blue" :rate="mediaPhotoRate" title="圆环展示照片在素材总数中的占比" /><dl class="metric-legend"><div><dt><i class="legend-blue"></i>照片</dt><dd>{{ formatCount(classifiedMediaCounts?.photoCount) }}</dd></div><div><dt><i class="legend-mint"></i>视频</dt><dd>{{ formatCount(classifiedMediaCounts?.videoCount) }}</dd></div><div><dt><i class="legend-violet"></i>已下载</dt><dd>{{ formatCount(uavMediaSummary?.downloadedCount) }}</dd></div><div><dt><i class="legend-muted"></i>素材容量</dt><dd>{{ formatFileSize(uavMediaSummary?.totalFileSize) }}</dd></div></dl></div>
               <p class="summary-foot"><span>下载失败 {{ formatCount(uavMediaSummary?.downloadFailedCount) }}</span><span>已清理 {{ formatCount(uavMediaSummary?.cleanedCount) }}</span></p>
             </section>
           </aside>
 
           <article class="cockpit-panel map-overview">
-            <div class="cockpit-panel__title"><h2>{{ scopeTitle }}综合监管一张图</h2></div>
-            <DashboardMap :key="activeScene?.id || organization.id" :layers="mapLayers" :routes="patrolRoutes" :focus-layer-id="activeScene?.id" />
+            <DashboardMap :key="activeScene?.id || organization.id" :layers="mapLayers" :routes="patrolRoutes" :focus-layer-id="activeScene?.id" floating-controls />
           </article>
 
           <aside class="overview-side overview-side--right">
             <section class="overview-float-panel scene-count-panel">
               <header>
                 <h2>各场景任务数</h2>
-                <button v-if="user.hasPermission('task-overview')" class="overview-header-link" type="button" aria-label="进入任务总览" @click="openTaskOverview">任务总览 <span aria-hidden="true">›</span></button>
+                <button v-if="user.hasPermission('task-overview')" class="overview-header-link" type="button" aria-label="进入任务总览" @click="openTaskOverview">任务总览 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <div v-if="sceneTaskChartItems.length" class="scene-task-chart">
                 <div class="scene-task-hover-card" :class="{ 'is-visible': hoveredSceneTask }" role="status">
@@ -643,7 +626,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                   <span>{{ hoveredSceneTask?.name }}</span>
                   <strong v-if="hoveredSceneTask">{{ hoveredSceneTask.taskCount }} 项</strong>
                 </div>
-                <div class="scene-task-ring" :aria-label="`各场景共 ${sceneTaskTotal} 项任务`" role="img">
+                <div class="scene-task-main"><div class="scene-task-ring" :aria-label="`各场景共 ${sceneTaskTotal} 项任务`" role="img">
                   <svg viewBox="0 0 100 100" aria-hidden="true">
                     <circle class="scene-task-ring__track" cx="50" cy="50" r="42" pathLength="100" />
                     <circle
@@ -665,6 +648,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                   </svg>
                   <div class="scene-task-ring__center"><b>{{ sceneTaskTotal }}</b><span>任务总数</span></div>
                 </div>
+                <dl class="metric-legend task-state-legend"><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd>{{ item.count }}</dd></div></dl></div>
                 <div class="scene-task-legend" aria-label="场景任务数图例">
                   <button
                     v-for="item in sceneTaskChartItems"
@@ -685,18 +669,18 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
             <section class="overview-float-panel governance-panel">
               <header>
                 <h2>治理闭环成效</h2>
-                <button v-if="user.hasPermission('task-list')" class="overview-header-link" type="button" aria-label="进入任务列表" @click="openTaskList">任务列表 <span aria-hidden="true">›</span></button>
+                <button v-if="user.hasPermission('task-list')" class="overview-header-link" type="button" aria-label="进入任务列表" @click="openTaskList">任务列表 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="governance-summary"><div class="metric-ring" :class="{ 'is-empty': governanceCompletionRate === undefined }" :style="ringStyle(governanceCompletionRate)" :title="governanceCompletionRate === undefined ? '暂无任务总数，无法计算完成率' : `任务完成率 ${governanceCompletionRate}%`"><b>{{ governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%` }}</b><span>完成率</span></div><dl><div><dt>任务总数</dt><dd>{{ unitTaskSummary?.total ?? '—' }}</dd></div><div><dt>已完成</dt><dd>{{ unitTaskSummary?.finished ?? '—' }}</dd></div><div><dt>执行中</dt><dd>{{ unitTaskSummary?.executing ?? '—' }}</dd></div><div><dt>待核查</dt><dd>{{ unitTaskSummary?.pendingVerify ?? '—' }}</dd></div></dl></div>
-              <p class="governance-flow-copy">发现 → 核查 → 整改 → 复核 → 归档</p>
+              <div class="governance-summary"><DashboardRing :value="governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%`" label="完成率" tone="mint" :rate="governanceCompletionRate" /><dl><div><dt>任务总数</dt><dd>{{ unitTaskSummary?.total ?? '—' }}</dd></div><div><dt>已完成</dt><dd>{{ unitTaskSummary?.finished ?? '—' }}</dd></div><div><dt>执行中</dt><dd>{{ unitTaskSummary?.executing ?? '—' }}</dd></div><div><dt>待核查</dt><dd>{{ unitTaskSummary?.pendingVerify ?? '—' }}</dd></div></dl></div>
+              <div class="governance-flow" role="img" aria-label="治理流程说明：发现、核查、整改、复核、归档"><span v-for="step in ['发现','核查','整改','复核','归档']" :key="step"><i></i><b>{{ step }}</b></span></div>
             </section>
 
             <section class="overview-float-panel recognition-panel">
               <header>
                 <h2>智能识别成果</h2>
-                <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true">›</span></button>
+                <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="recognition-summary"><div class="metric-ring" :class="{ 'is-empty': recognitionHandledRate === undefined }" :style="ringStyle(recognitionHandledRate)" :title="recognitionHandledRate === undefined ? '暂无图斑总数，无法计算处置率' : `图斑处置率 ${recognitionHandledRate}%`"><b>{{ statistics?.abnormalSummary.total ?? '—' }}</b><span>识别图斑</span></div><dl><div><dt>待核查图斑</dt><dd>{{ statistics?.overview.abnormalPendingCount ?? '—' }}</dd></div><div><dt>涉及面积</dt><dd>{{ formatNumber(statistics?.abnormalSummary.areaTotal) }}㎡</dd></div><div><dt>成果批次</dt><dd>{{ statistics?.overview.resultCount ?? '—' }}</dd></div></dl></div>
+              <div class="recognition-summary"><DashboardRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :rate="recognitionHandledRate" :title="recognitionHandledRate === undefined ? '暂无图斑处置率' : `图斑处置率 ${recognitionHandledRate}%`" /><dl><div><dt>待核查图斑</dt><dd>{{ statistics?.overview.abnormalPendingCount ?? '—' }}</dd></div><div><dt>涉及面积</dt><dd>{{ formatNumber(statistics?.abnormalSummary.areaTotal) }}㎡</dd></div><div><dt>成果批次</dt><dd>{{ statistics?.overview.resultCount ?? '—' }}</dd></div></dl></div>
               <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%` }"></u></i><b>{{ item.count }}</b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
             </section>
           </aside>
@@ -707,107 +691,4 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
 </template>
 
 <style scoped src="@/styles/dashboard.scss" lang="scss"></style>
-<style scoped lang="scss">
-.linkish { padding: 0; border: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
-.linkish:hover { color: #5eeaff; }
-.linkish:focus-visible { outline: 1px solid #42dff1; outline-offset: 3px; }
-.live-entry { cursor: pointer; }
-.live-entry:focus-visible { outline: 2px solid #33d4e8; outline-offset: 2px; }
-.cockpit-body--map-only { display: block; padding: 7px; }
-.cockpit-body--map-only .cockpit-primary,
-.map-overview { height: 100%; min-height: 0; }
-.overview-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: clamp(238px, 15.2vw, 292px) minmax(0, 1fr) clamp(238px, 15.2vw, 292px); gap: 7px; }
-.map-overview { position: relative; grid-template-rows: minmax(0, 1fr); }
-.map-overview > .cockpit-panel__title { width: min(500px, 52%); background: linear-gradient(90deg, #08273cf2 0%, #08273cdb 72%, transparent 100%); }
-.map-overview > .cockpit-panel__title h2 { overflow: hidden; color: #eac100; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 6px #001722; }
-.overview-side { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 7px; }
-.overview-float-panel { min-height: 0; overflow: hidden; padding: 14px; color: #c9f4ff; border: 1px solid #1789b8; border-radius: 5px; background: linear-gradient(145deg, #062b48, #031a32); box-shadow: 0 0 16px #00b9ee1f, inset 0 0 20px #0d6f9d1c; }
-.overview-float-panel > header { display: flex; align-items: center; justify-content: space-between; min-height: 36px; margin: -14px -14px 13px; padding: 0 13px; border-bottom: 1px solid #1676a0; background: linear-gradient(90deg, #07537fc7, #04243cc7); }
-.overview-float-panel h2 { margin: 0; color: #e9fbff; font-size: clamp(14px, .9vw, 18px); }
-.overview-float-panel header span { color: #75bfd2; font-size: 11px; }
-.overview-header-link { display: inline-flex; align-items: center; gap: 5px; padding: 3px 1px; border: 0; color: #57dcea; background: transparent; text-shadow: 0 0 8px #32d9ec73; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .4px; cursor: pointer; }
-.overview-header-link span { color: inherit !important; font-size: 16px !important; line-height: 1; transition: transform .18s ease; }
-.overview-header-link:hover { color: #e8fdff; text-shadow: 0 0 10px #5cecff; }
-.overview-header-link:hover span { transform: translateX(2px); }
-.overview-header-link:focus-visible { outline: 1px solid #54e8f4; outline-offset: 3px; border-radius: 2px; }
-.resource-summary,.governance-summary,.recognition-summary { display: flex; align-items: center; gap: 13px; }
-.metric-ring { position: relative; isolation: isolate; width: 94px; height: 94px; flex: 0 0 94px; display: grid; place-content: center; border-radius: 50%; text-align: center; background: conic-gradient(from -90deg, #42e6da var(--ring-progress), #175478 0); box-shadow: 0 0 10px #20d8e620; }
-.metric-ring::before { content: ''; position: absolute; z-index: -1; inset: 7px; border-radius: 50%; background: #05233c; box-shadow: inset 0 0 15px #20d8e628; }
-.metric-ring.is-empty { background: #175478; }
-.metric-ring b,.metric-ring span { display: block; }
-.metric-ring b { color: #56f0df; font-size: 26px; }
-.metric-ring span { margin-top: 2px; color: #8ec5d5; font-size: 10px; }
-.resource-summary > div:last-child { min-width: 0; }
-.resource-summary > div:last-child b { display: block; color: #e8fbff; font-size: 14px; }
-.resource-summary p,.resource-summary small { margin: 6px 0 0; color: #8bb7c6; font-size: 11px; line-height: 1.45; }
-.resource-summary small { display: block; color: #5fa0b6; }
-.resource-states { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-top: 16px; }
-.resource-states span { display: flex; align-items: center; gap: 6px; padding: 10px; color: #8fc5d5; border: 1px solid #145679; background: #072943a8; font-size: 11px; }
-.resource-states span b { margin-left: auto; color: #e8fbff; font-size: 16px; }
-.resource-states i { width: 7px; height: 7px; border-radius: 50%; background: #7f98a2; }
-.resource-states i.online { background: #38e7ae; box-shadow: 0 0 7px #38e7ae; }
-.resource-states i.starting { background: #ffd05b; box-shadow: 0 0 7px #ffd05b; }
-.governance-summary dl,.recognition-summary dl { min-width: 0; flex: 1; margin: 0; }
-.governance-summary dl > div,.recognition-summary dl > div { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid #15506d; font-size: 11px; }
-.governance-summary dt,.recognition-summary dt { color: #78adbd; }
-.governance-summary dd,.recognition-summary dd { margin: 0; color: #e6faff; font-weight: 700; }
-.governance-flow-copy { margin: 17px 0 0; padding: 10px 6px; color: #63ddec; border: 1px solid #16789a; background: #0634519c; text-align: center; font-size: 11px; letter-spacing: 1px; }
-.scene-count-panel { display: flex; flex-direction: column; }
-.scene-task-chart { position: relative; min-height: 0; display: flex; flex: 1; flex-direction: column; align-items: center; }
-.scene-task-hover-card { position: absolute; z-index: 3; top: 0; left: 50%; width: max-content; max-width: calc(100% - 8px); min-height: 30px; display: grid; grid-template-columns: 8px minmax(0,1fr) auto; align-items: center; gap: 7px; padding: 6px 10px; color: #bfeaf2; border: 1px solid #247897; border-radius: 4px; background: #062c46ed; box-shadow: 0 7px 18px #00131da6, inset 0 0 12px #2bdce317; opacity: 0; pointer-events: none; transform: translate(-50%, -5px); transition: opacity .16s ease, transform .16s ease; }
-.scene-task-hover-card.is-visible { opacity: 1; transform: translate(-50%, 0); }
-.scene-task-hover-card i { width: 7px; height: 7px; border-radius: 50%; }
-.scene-task-hover-card span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.scene-task-hover-card strong { color: #effeff; white-space: nowrap; font-size: 12px; }
-.scene-task-ring { position: relative; width: 126px; height: 126px; flex: 0 0 126px; margin: 38px 0 12px; filter: drop-shadow(0 0 7px #2adbe02b); }
-.scene-task-ring svg { width: 100%; height: 100%; overflow: visible; transform: rotate(-90deg); }
-.scene-task-ring circle { fill: none; }
-.scene-task-ring__track { stroke: #164761; stroke-width: 9; }
-.scene-task-ring__segment { stroke-width: 9; cursor: pointer; pointer-events: stroke; transform-box: fill-box; transform-origin: center; transition: stroke-width .18s ease, filter .18s ease, transform .18s ease; }
-.scene-task-ring__segment.is-hovered { stroke-width: 12; filter: drop-shadow(0 0 5px var(--scene-ring-color)); transform: scale(1.035); }
-.scene-task-ring__center { position: absolute; inset: 18px; display: grid; place-content: center; border-radius: 50%; background: radial-gradient(circle, #0a3552 0, #05243c 68%, #061f35 100%); box-shadow: inset 0 0 16px #30dfe82b; text-align: center; pointer-events: none; }
-.scene-task-ring b,.scene-task-ring span { display: block; }
-.scene-task-ring b { color: #69f0e5; text-shadow: 0 0 10px #39ead38f; font-size: 28px; line-height: 1; }
-.scene-task-ring span { margin-top: 6px; color: #8ec6d5; font-size: 11px; }
-.scene-task-legend { width: 100%; min-height: 0; overflow: auto; border-top: 1px solid #15506d; }
-.scene-task-legend button { width: 100%; display: grid; grid-template-columns: 9px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 9px 5px; color: #cbeef6; border: 0; border-bottom: 1px solid #13455f; background: transparent; text-align: left; cursor: pointer; transition: background .18s ease; }
-.scene-task-legend button:hover { background: #0a466581; }
-.scene-task-legend button:focus-visible { outline: 1px solid #54e8f4; outline-offset: -2px; }
-.scene-task-legend i { width: 8px; height: 8px; border-radius: 50%; }
-.scene-task-legend span { overflow: hidden; color: #bde4ed; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.scene-task-legend strong { min-width: 24px; color: #effeff; text-align: right; font-size: 14px; }
-.recognition-types { margin-top: 15px; }
-.recognition-types > div:not(.float-empty) { display: grid; grid-template-columns: minmax(0,1fr) 1.3fr 28px; align-items: center; gap: 8px; margin: 9px 0; color: #91bdca; font-size: 10px; }
-.recognition-types i { height: 5px; overflow: hidden; border-radius: 3px; background: #15425c; }
-.recognition-types u { display: block; height: 100%; background: linear-gradient(90deg, #7d7bff, #42dae5); }
-.recognition-types b { color: #e8fbff; text-align: right; }
-.summary-highlight { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 11px; padding: 10px; border: 1px solid #155b78; background: linear-gradient(120deg, #0a3c59c7, #062842a8); }
-.summary-highlight > i { width: 44px; height: 44px; display: grid; place-items: center; color: #5ff2e5; border: 1px solid #1da4bb; border-radius: 50%; background: #0a4963; box-shadow: inset 0 0 13px #32e0e428; font-size: 16px; font-style: normal; font-weight: 700; }
-.media-panel .summary-highlight > i { color: #b6aaff; border-color: #756fe0; background: #2b356b; box-shadow: inset 0 0 13px #8d82ff35; }
-.summary-highlight span,.summary-highlight b { display: block; min-width: 0; }
-.summary-highlight span { color: #83b8c7; font-size: 11px; }
-.summary-highlight b { margin-top: 3px; overflow: hidden; color: #58eee2; text-overflow: ellipsis; white-space: nowrap; font-size: 19px; }
-.media-panel .summary-highlight b { color: #aeb4ff; }
-.summary-highlight small { font-size: 11px; font-weight: 500; }
-.summary-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 9px; }
-.summary-metrics > div { min-width: 0; padding: 7px 8px; border: 1px solid #124b67; background: #062943a8; }
-.summary-metrics span,.summary-metrics b { display: block; min-width: 0; }
-.summary-metrics span { color: #78adbd; font-size: 10px; }
-.summary-metrics b { margin-top: 3px; overflow: hidden; color: #e6faff; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.summary-warning { margin: 7px 0 0; padding: 5px 7px; color: #ffd582; border: 1px solid #7d622d; background: #4c391f73; font-size: 10px; text-align: center; }
-.summary-foot { display: flex; justify-content: space-between; gap: 8px; margin: 8px 0 0; color: #769faf; font-size: 10px; }
-.float-empty { flex: 1; display: grid; place-content: center; color: #6f9aab; text-align: center; font-size: 12px; }
-@media (max-width: 1280px) {
-  .overview-layout { grid-template-columns: 220px minmax(0,1fr) 220px; }
-  .overview-float-panel { padding: 10px; }
-  .overview-float-panel > header { margin: -10px -10px 10px; }
-  .metric-ring { width: 74px; height: 74px; flex-basis: 74px; }
-  .metric-ring b { font-size: 21px; }
-  .scene-task-ring { width: 104px; height: 104px; flex-basis: 104px; margin: 35px 0 8px; }
-  .scene-task-ring b { font-size: 24px; }
-  .scene-task-legend button { padding: 7px 3px; }
-  .summary-highlight { grid-template-columns: 40px minmax(0, 1fr); padding: 7px; }
-  .summary-highlight > i { width: 36px; height: 36px; }
-  .summary-highlight b { font-size: 16px; }
-}
-</style>
+<style scoped src="@/styles/dashboard-cockpit.scss" lang="scss"></style>

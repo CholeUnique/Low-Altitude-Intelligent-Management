@@ -172,7 +172,7 @@ onMounted(() => void loadTaskContext())
 
 <template>
   <div v-if="taskLoading" class="workspace workspace-empty">
-    <header class="workspace-header"><div class="workspace-brand"><span class="brand-mark">翼</span><div><b>场景作业工作台</b><small>正在加载真实任务</small></div></div></header>
+    <section class="workspace-context" aria-label="工作台操作"><div class="workspace-brand"><div><b>场景作业工作台</b><small>正在加载真实任务</small></div></div></section>
     <main class="empty-body"><div class="empty-card"><h2>正在加载任务工作台…</h2></div></main>
   </div>
 
@@ -190,16 +190,16 @@ onMounted(() => void loadTaskContext())
   <div v-else-if="taskError" class="workspace workspace-empty"><main class="empty-body"><div class="empty-card"><h2>任务读取失败</h2><p>{{ taskError }}</p><button @click="loadTaskContext">重试</button></div></main></div>
 
   <div v-else-if="!workspaceConfig" class="workspace workspace-empty">
-    <header class="workspace-header">
+    <section class="workspace-context" aria-label="工作台操作">
       <div class="workspace-brand" @click="$router.push('/dashboard')">
-        <span class="brand-mark">翼</span>
+
         <div>
           <b :title="`${currentScene?.name || '场景作业'}工作台`">{{ currentScene?.shortName || currentScene?.name || '场景作业' }}工作台</b>
           <small>{{ taskError || sceneId || '未指定场景' }}</small>
         </div>
       </div>
-      <div class="workspace-user"><span>{{ user.name }}</span></div>
-    </header>
+
+    </section>
     <main class="empty-body">
       <div class="empty-card">
         <h2>该场景工作台正在建设</h2>
@@ -210,13 +210,13 @@ onMounted(() => void loadTaskContext())
   </div>
 
   <div v-else v-workbench-validation class="workspace">
-    <header class="workspace-header">
+    <section class="workspace-context" aria-label="工作台操作">
       <div class="workspace-return">
         <el-button class="workspace-return-button" @click="$router.push('/tasks/todo')">‹ 返回任务</el-button>
       </div>
 
       <div class="workspace-brand workspace-brand--moved" @click="$router.push('/dashboard')">
-        <span class="brand-mark">翼</span>
+
         <div>
           <b :title="`${workspaceConfig.name}工作台`">{{ currentScene?.shortName || workspaceConfig.name }}工作台</b>
           <small>{{ task?.name || route.params.taskId || '综合工作台' }}</small>
@@ -257,11 +257,8 @@ onMounted(() => void loadTaskContext())
         </div>
       </div>
 
-      <div class="workspace-user">
 
-        <span>{{ user.name }}</span>
-      </div>
-    </header>
+    </section>
 
     <main class="workspace-body">
       <TaskAcceptancePanel v-if="activeKey === 'task-acceptance'" :task-id="backendTask?.id" />
@@ -293,7 +290,7 @@ onMounted(() => void loadTaskContext())
   flex-direction: column;
   background: #eef3f6;
 }
-.workspace-header {
+.workspace-context {
   position: relative;
   flex: 0 0 78px;
   display: grid;
@@ -486,13 +483,13 @@ onMounted(() => void loadTaskContext())
 }
 
 @media (max-width: 1450px) {
-  .workspace-header { grid-template-columns: 220px 1fr 180px; }
+  .workspace-context { grid-template-columns: 220px 1fr 180px; }
   .workspace-brand--moved { left: 120px; }
   .module-nodes button { min-width: 76px; }
 }
 @media (max-width: 1120px) {
-  .workspace-header { grid-template-columns: 205px minmax(0, 1fr) 150px; padding-inline: 10px; }
+  .workspace-context { grid-template-columns: 205px minmax(0, 1fr) 150px; padding-inline: 10px; }
   .workspace-brand--moved { left: 105px; }.module-label { display: none; }.module-nodes button { min-width: 64px; }.module-nodes span { font-size: 10px; }.workspace-user { gap: 7px; font-size: 11px; }
 }
-@media (max-height: 700px) { .workspace-header { flex-basis: 62px; } }
+@media (max-height: 700px) { .workspace-context { flex-basis: 62px; } }
 </style>

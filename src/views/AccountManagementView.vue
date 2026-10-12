@@ -488,7 +488,7 @@ onMounted(loadProfile)
 
 <template>
   <main class="management-shell">
-    <header class="management-header">
+    <section class="management-context" aria-label="后台管理操作">
       <button class="back-button" type="button" @click="returnToSystem">← 返回系统</button>
       <div class="management-title">
         <h1>后台管理</h1>
@@ -498,7 +498,7 @@ onMounted(loadProfile)
         <span>{{ userStore.name }}</span>
         <b>{{ isAdmin ? '管理员' : '普通用户' }}</b>
       </div>
-    </header>
+    </section>
 
     <div class="management-body">
       <aside class="management-sidebar">
@@ -717,13 +717,13 @@ onMounted(loadProfile)
 </template>
 
 <style scoped>
-.management-shell { min-height: 100vh; color: #dceef5; background: radial-gradient(circle at 18% 0, #12394d 0, transparent 32%), #071a28; font-family: "Microsoft YaHei", sans-serif; }
-.management-header { position: relative; height: 70px; padding: 0 24px; display: grid; grid-template-columns: 220px 1fr auto; align-items: center; border-bottom: 1px solid #1d6886; background: #08263aee; box-shadow: 0 3px 18px #00131e88; }
-.management-header h1,.management-header p,.page-heading h2,.page-heading p,.panel h3,.modal-card h2,.modal-card p { margin: 0; }.management-header h1 { color: #f4fbff; font-size: 21px; letter-spacing: 2px; }.management-header p { margin-top: 3px; color: #6fa7bb; font-size: 12px; }
+.management-shell { height:100%;min-height:0;overflow:auto;color: #dceef5; background: radial-gradient(circle at 18% 0, #12394d 0, transparent 32%), #071a28; font-family: "Microsoft YaHei", sans-serif; }
+.management-context { position: relative; height: 56px; padding: 0 24px; display: grid; grid-template-columns: 220px 1fr auto; align-items: center; border-bottom: 1px solid #1d6886; background: #08263aee; box-shadow: 0 3px 18px #00131e88; }
+.management-context h1,.management-context p,.page-heading h2,.page-heading p,.panel h3,.modal-card h2,.modal-card p { margin: 0; }.management-context h1 { color: #f4fbff; font-size: 21px; letter-spacing: 2px; }.management-context p { margin-top: 3px; color: #6fa7bb; font-size: 12px; }
 .management-title { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; }
 .back-button { justify-self: start; min-height: 38px; padding: 0 16px; color: #bdefff; background: #0b4665; border: 1px solid #2587a8; border-radius: 4px; cursor: pointer; }.back-button:hover { color: #fff; background: #0f668b; }
 .account-summary { position: absolute; right: 24px; display: flex; align-items: center; gap: 9px; color: #d7edf5; font-size: 13px; }.account-summary__avatar { width: 32px; height: 32px; display: grid; place-items: center; color: #eafdff; background: linear-gradient(135deg,#1783aa,#13b8c9); border-radius: 50%; }.account-summary b { padding: 3px 7px; color: #67d4f5; background: #0b4b68; border-radius: 3px; font-size: 11px; }
-.management-body { min-height: calc(100vh - 70px); display: grid; grid-template-columns: 220px minmax(0,1fr); }.management-sidebar { position: relative; padding: 23px 13px; background: #0a202f; border-right: 1px solid #174b62; }.sidebar-caption { margin: 0 12px 14px; color: #5f93a7; font-size: 12px; }.management-sidebar > button { width: 100%; min-height: 48px; padding: 0 14px; display: flex; align-items: center; gap: 12px; color: #a9c8d4; background: transparent; border: 0; border-left: 3px solid transparent; border-radius: 3px; cursor: pointer; }.management-sidebar > button:hover { color: #eafaff; background: #0c3045; }.management-sidebar > button.active { color: #fff; background: linear-gradient(90deg,#165b7a,#0d364b); border-left-color: #41d1ff; }.management-sidebar > button span { width: 22px; color: #4ed6ff; font-style: normal; font-size: 19px; }.management-sidebar > button i { font-style: normal; font-size: 15px; }
+.management-body { min-height: calc(100% - 56px); display: grid; grid-template-columns: 220px minmax(0,1fr); }.management-sidebar { position: relative; padding: 23px 13px; background: #0a202f; border-right: 1px solid #174b62; }.sidebar-caption { margin: 0 12px 14px; color: #5f93a7; font-size: 12px; }.management-sidebar > button { width: 100%; min-height: 48px; padding: 0 14px; display: flex; align-items: center; gap: 12px; color: #a9c8d4; background: transparent; border: 0; border-left: 3px solid transparent; border-radius: 3px; cursor: pointer; }.management-sidebar > button:hover { color: #eafaff; background: #0c3045; }.management-sidebar > button.active { color: #fff; background: linear-gradient(90deg,#165b7a,#0d364b); border-left-color: #41d1ff; }.management-sidebar > button span { width: 22px; color: #4ed6ff; font-style: normal; font-size: 19px; }.management-sidebar > button i { font-style: normal; font-size: 15px; }
 .sidebar-caption--resource { margin-top:18px; margin-bottom:6px; padding-top:14px; border-top:1px solid #153e50; }
 .management-content { min-width: 0; padding: 27px 30px 40px; }.page-heading { min-height: 54px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }.page-heading h2 { color: #fff; font-size: 22px; }.page-heading p { margin-top: 6px; color: #75a2b4; font-size: 13px; }.panel { background: #0b2638e8; border: 1px solid #1b536b; border-radius: 6px; box-shadow: 0 12px 30px #00121d44; }.panel h3 { margin-bottom: 19px; color: #eaf9ff; font-size: 16px; }.profile-grid { display: grid; grid-template-columns: 270px minmax(420px,1fr); gap: 18px; align-items: start; }.profile-card { grid-row: span 2; padding: 30px 24px; text-align: center; }.profile-avatar { width: 88px; height: 88px; margin: 0 auto 16px; overflow: hidden; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg,#1685a9,#17b6c8); border: 3px solid #2d8baa; border-radius: 50%; font-size: 32px; box-shadow: 0 0 20px #1ec7ef44; }.profile-avatar img { width: 100%; height: 100%; object-fit: cover; }.profile-card > h3 { margin: 0; font-size: 19px; }.profile-card > p { margin: 6px 0 26px; color: #6f9bae; font-size: 13px; }.profile-card dl { margin: 0; text-align: left; }.profile-card dl div { padding: 13px 0; display: flex; justify-content: space-between; gap: 15px; border-top: 1px solid #174257; }.profile-card dt { color: #7299a9; font-size: 12px; }.profile-card dd { margin: 0; overflow: hidden; color: #dcecf3; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.form-panel { padding: 24px; }.panel-hint { margin: -10px 0 18px; color: #7299a9; font-size: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }.form-grid label { min-width: 0; }.form-grid label > span { margin-bottom: 7px; display: block; color: #85aab8; font-size: 12px; }.form-grid input,.form-grid select,.form-grid textarea,.filter-bar input,.filter-bar select { width: 100%; min-height: 38px; padding: 0 11px; color: #e9f8fc; background: #071d2b; border: 1px solid #20546a; border-radius: 3px; outline: none; box-sizing: border-box; }.form-grid textarea { min-height: 72px; padding-top: 9px; resize: vertical; }.form-grid select[multiple] { min-height: 92px; padding: 6px; }.form-grid input:focus,.form-grid select:focus,.form-grid textarea:focus,.filter-bar input:focus,.filter-bar select:focus { border-color: #37b7df; box-shadow: 0 0 0 2px #1683aa22; }.form-grid input:disabled,.form-grid select:disabled,.form-grid textarea:disabled { color: #7995a1; background: #102530; cursor: not-allowed; }.form-grid__wide { grid-column: 1/-1; }.form-actions { display: flex; justify-content: flex-end; align-items: end; gap: 10px; }
@@ -736,7 +736,7 @@ onMounted(loadProfile)
 
 /* 大屏后台页的基础字号与表单密度。 */
 .management-shell { font-size: 15px; }
-.management-header h1 { font-size: 24px; }
+.management-context h1 { font-size: 24px; }
 .back-button { min-height: 40px; font-size: 14px; }
 .account-summary { font-size: 14px; }
 .sidebar-caption { font-size: 13px; }
@@ -750,6 +750,6 @@ onMounted(loadProfile)
 .password-panel { width: min(680px, 100%); }.password-form { width: min(520px, 100%); }
 .table-wrap table { font-size: 13px; }.table-wrap th { font-size: 13px; }.table-wrap td small { font-size: 11px; }.row-actions button { font-size: 12px; }
 .modal-card > header h2 { font-size: 20px; }.modal-card > header p { font-size: 13px; }
-@media (max-width: 1100px) { .management-header { grid-template-columns: 180px 1fr auto; }.management-body { grid-template-columns: 180px minmax(0,1fr); }.profile-grid { grid-template-columns: 1fr; }.profile-card { grid-row: auto; }.filter-bar { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-@media (max-width: 720px) { .management-header { height: auto; min-height: 70px; padding: 12px; grid-template-columns: auto 1fr; gap: 12px; }.management-title { font-size: 18px; }.account-summary { right: 12px; }.account-summary > span:not(.account-summary__avatar),.account-summary b { display: none; }.management-body { display: block; }.management-sidebar { position: static; padding: 8px; display: flex; gap: 5px; border-right: 0; border-bottom: 1px solid #174b62; }.sidebar-caption { display: none; }.management-sidebar > button { min-height: 40px; justify-content: center; }.management-sidebar > button span { width: auto; }.management-content { padding: 18px 12px; }.profile-grid,.form-grid,.filter-bar { grid-template-columns: 1fr; }.form-grid__wide { grid-column: auto; }.modal-mask { padding: 10px; } }
+@media (max-width: 1100px) { .management-context { grid-template-columns: 180px 1fr auto; }.management-body { grid-template-columns: 180px minmax(0,1fr); }.profile-grid { grid-template-columns: 1fr; }.profile-card { grid-row: auto; }.filter-bar { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 720px) { .management-context { height: auto; min-height: 70px; padding: 12px; grid-template-columns: auto 1fr; gap: 12px; }.management-title { font-size: 18px; }.account-summary { right: 12px; }.account-summary > span:not(.account-summary__avatar),.account-summary b { display: none; }.management-body { display: block; }.management-sidebar { position: static; padding: 8px; display: flex; gap: 5px; border-right: 0; border-bottom: 1px solid #174b62; }.sidebar-caption { display: none; }.management-sidebar > button { min-height: 40px; justify-content: center; }.management-sidebar > button span { width: auto; }.management-content { padding: 18px 12px; }.profile-grid,.form-grid,.filter-bar { grid-template-columns: 1fr; }.form-grid__wide { grid-column: auto; }.modal-mask { padding: 10px; } }
 </style>

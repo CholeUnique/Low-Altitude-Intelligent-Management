@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { getDepartmentOptions, getMyDepartments, switchDepartment, type DepartmentOption } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
 import type { OrganizationId } from '@/types'
@@ -9,6 +9,8 @@ import { firstAccessiblePath } from '@/utils/access-control'
 const user = useUserStore()
 const router = useRouter()
 const open = ref(false)
+const route = useRoute()
+watch(() => route.fullPath, () => { open.value = false })
 const loadingDepartments = ref(false)
 const switchingOrganizationId = ref<OrganizationId | ''>('')
 const switchError = ref('')
