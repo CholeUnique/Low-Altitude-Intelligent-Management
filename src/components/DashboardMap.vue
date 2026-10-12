@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { Aim, Compass, Delete, EditPen, InfoFilled, Location, MapLocation, Picture, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
 import L from 'leaflet'
 import type { GeoJsonObject } from 'geojson'
@@ -21,6 +21,8 @@ import {
 const props = defineProps<{
   layers: DashboardMapLayer[]
   routes: DronePatrolRoute[]
+  /** 首页全幅地图的悬浮控件样式，不改变地图事件。 */
+  floatingControls?: boolean
   /** 从场景入口进入时，自动聚焦该场景实际任务范围。 */
   focusLayerId?: string
 }>()
@@ -125,7 +127,8 @@ interface MapServiceGroup {
 const mapServiceGroups = ref<MapServiceGroup[]>([])
 const mapServicesLoading = ref(false)
 const mapServicesError = ref('')
-const layerPanelCollapsed = ref(false)
+const layerPanelCollapsed = ref(Boolean(props.floatingControls))
+const layerPanelId = `dashboard-layers-${useId().replace(/:/g, '')}`
 const visibleMapServiceIds = ref<string[]>([])
 const expandedMapServiceGroupIds = ref<string[]>([])
 interface VectorFilterPanel {
@@ -187,7 +190,7 @@ const parcelSearchResults = computed<ParcelSearchResult[]>(() => {
     .filter((item) => `${item.label}${item.serviceName}${item.fieldLabel}`.toLowerCase().includes(keyword))
     .slice(0, 12)
 })
-const showSearchSuggestions = computed(() => searchExpanded.value && Boolean(searchKeyword.value.trim()))
+const showSearchSuggestions = computed(() => (props.floatingControls || searchExpanded.value) && Boolean(searchKeyword.value.trim()))
 
 let map: L.Map | undefined
 let resizeObserver: ResizeObserver | undefined
@@ -349,6 +352,12 @@ async function toggleMapService(service: MapServiceItem) {
   } finally {
     if (requestVersion === mapServiceRequestVersion) loadingMapServiceIds.delete(id)
   }
+}
+
+function layerIconKind(service: MapServiceItem) {
+  if (service.arcGisGeometryType) return 'vector'
+  if (/image|raster|wmts/i.test(service.type) || /ImageServer/i.test(service.serviceUrl) || /影像|正射/.test(service.name)) return 'imagery'
+  return 'layer'
 }
 
 function isMapServiceGroupActive(group: MapServiceGroup) {
@@ -1000,42 +1009,48 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="dashboard-map" :class="{ 'dashboard-map--measuring': activeTool === 'distance' || activeTool === 'area' || activeTool === 'marker' }">
+  <div class="dashboard-map" :class="{ 'dashboard-map--floating': floatingControls, 'dashboard-map--has-measure-result': Boolean(measureResult), 'dashboard-map--measuring': activeTool === 'distance' || activeTool === 'area' || activeTool === 'marker' }">
     <div ref="container" class="dashboard-map__canvas"></div>
     <div v-if="mapError" class="dashboard-map__empty"><span>{{ mapError }}</span><button @click="retryMap">重新加载</button></div>
     <div v-else-if="!mapReady" class="dashboard-map__loading">正在加载江苏泰州天地图…</div>
 
     <div class="left-map-rail">
     <div class="layer-panel-stack" :class="{ 'is-collapsed': layerPanelCollapsed }">
-      <button
+      <button v-if="floatingControls" class="layer-panel-toggle" type="button" :aria-label="layerPanelCollapsed ? '展开图层管理' : '收起图层管理'" :aria-controls="layerPanelId" :aria-expanded="!layerPanelCollapsed" @click="layerPanelCollapsed = !layerPanelCollapsed">
+        <svg class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg>
+        <span>图层管理</span><b class="layer-panel-count">{{ mapServicesLoading ? '…' : mapServiceGroups.length }}</b><svg class="layer-panel-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+      </button>
+      <button v-else
         class="layer-panel-handle"
         type="button"
         :aria-label="layerPanelCollapsed ? '展开图层管理' : '收起图层管理'"
         :aria-expanded="!layerPanelCollapsed"
         title="点击收起或展开图层管理"
         @click="layerPanelCollapsed = !layerPanelCollapsed"
-      >{{ layerPanelCollapsed ? '▶' : '◀' }}</button>
-      <aside class="layer-manager" :inert="layerPanelCollapsed" :aria-hidden="layerPanelCollapsed">
-        <div class="tool-title"><b>图层管理</b><span class="tool-title-state">显示</span></div>
+      >{{ layerPanelCollapsed ? '图层管理 ⌄' : '⌃' }}</button>
+      <div class="layer-panel-reveal">
+      <aside :id="layerPanelId" class="layer-manager" :inert="layerPanelCollapsed" :aria-hidden="layerPanelCollapsed">
+        <div v-if="!floatingControls" class="tool-title"><b><svg class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg>图层管理</b><span class="tool-title-state">{{ mapServiceGroups.length }} 项服务</span></div>
+        <div v-if="floatingControls" :id="`${layerPanelId}-search`" class="layer-manager-search"></div>
         <div class="layer-manager-list">
           <div v-if="mapServicesLoading" class="layer-panel-message">正在读取地图服务…</div>
           <div v-else-if="mapServicesError" class="layer-panel-message error">{{ mapServicesError }}</div>
           <div v-else-if="!mapServiceGroups.length" class="layer-panel-message">暂无已启用的地图服务</div>
           <template v-else>
             <div v-for="group in mapServiceGroups" :key="group.id" class="map-service-group">
-              <button class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group) }" :title="group.name" @click="toggleMapServiceGroup(group)">
-                <span><b>{{ group.name }}</b></span><em>{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
+              <button class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group) }" :title="group.name" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : undefined" @click="toggleMapServiceGroup(group)">
+                <i class="layer-kind"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em :class="{ 'layer-expander': group.layers.length > 1 }">{{ group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '⌃' : '⌄') : (isMapServiceGroupActive(group) ? '●' : '○') }}</em>
               </button>
               <div v-if="isMapServiceGroupExpanded(group)" class="map-service-sublayers">
-                <button v-for="service in group.layers" :key="service.id" class="layer-row map-service-row map-service-sublayer" :class="{ active: visibleMapServiceIds.includes(String(service.id)) }" :title="service.name" @click="toggleMapService(service)">
-                  <span><b>{{ service.name }}</b></span><em>{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
+                <button v-for="service in group.layers" :key="service.id" class="layer-row map-service-row map-service-sublayer" :class="{ active: visibleMapServiceIds.includes(String(service.id)) }" :title="service.name" role="switch" :aria-checked="visibleMapServiceIds.includes(String(service.id))" @click="toggleMapService(service)">
+                  <i class="layer-kind"><MapLocation v-if="service.arcGisGeometryType" /><Picture v-else /></i><span><b>{{ service.name }}</b></span><em>{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
                 </button>
               </div>
             </div>
           </template>
         </div>
       </aside>
-
+      </div>
     </div>
 
     <aside class="map-tools">
@@ -1057,12 +1072,17 @@ onBeforeUnmount(() => {
       <button type="button" aria-label="清除标注" @click="clearAnnotations"><i class="map-tool-icon"><Delete /></i><span>清除标注</span></button>
       <button type="button" aria-label="放大地图" @click="map?.zoomIn()"><i class="map-tool-icon"><ZoomIn /></i><span>放大地图</span></button>
       <button type="button" aria-label="缩小地图" @click="map?.zoomOut()"><i class="map-tool-icon"><ZoomOut /></i><span>缩小地图</span></button>
+      <div v-if="measureResult" class="measure-result" role="status">
+        <span class="measure-result__icon" aria-hidden="true"><EditPen /></span>
+        <span>{{ measureResult }}</span>
+      </div>
     </aside>
     </div>
 
-    <div class="map-search" :class="{ expanded: searchExpanded }">
-      <input v-if="searchExpanded" ref="searchInput" v-model="searchKeyword" placeholder="搜索地块类型、名称或地点" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="toggleSearch" />
-      <button class="map-search-toggle" type="button" :aria-label="searchExpanded ? '收起地图搜索' : '展开地图搜索'" :title="searchExpanded ? '收起搜索' : '搜索地块或地点'" @click="toggleSearch">
+    <Teleport :to="`#${layerPanelId}-search`" :disabled="!floatingControls" defer>
+    <div class="map-search" :class="{ expanded: searchExpanded || floatingControls }">
+      <input v-if="searchExpanded || floatingControls" ref="searchInput" aria-label="搜索地块或地点" v-model="searchKeyword" placeholder="搜索地块类型、名称或地点" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="floatingControls ? searchKeyword = '' : toggleSearch()" />
+      <button class="map-search-toggle" type="button" :aria-label="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起地图搜索' : '展开地图搜索')" :title="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起搜索' : '搜索地块或地点')" @click="floatingControls ? focusFirstSearchResult() : toggleSearch()">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/></svg>
       </button>
       <div v-if="showSearchSuggestions" class="search-results" aria-live="polite">
@@ -1079,6 +1099,8 @@ onBeforeUnmount(() => {
         <p v-else-if="!parcelSearchResults.length && !placeSearchResults.length">未找到相关地块或地点</p>
       </div>
     </div>
+
+    </Teleport>
 
     <aside v-if="vectorFilterPanels.length" class="parcel-type-panel">
       <div class="tool-title"><b>地块类型</b></div>
@@ -1100,10 +1122,6 @@ onBeforeUnmount(() => {
       </section>
     </aside>
 
-    <div v-if="measureResult" class="measure-result" role="status">
-      <span class="measure-result__icon" aria-hidden="true"><EditPen /></span>
-      <span>{{ measureResult }}</span>
-    </div>
     <Teleport to="body">
       <Transition name="tool-message">
         <div v-if="toolMessage" class="tool-message" role="status" aria-live="polite">
@@ -1169,3 +1187,5 @@ onBeforeUnmount(() => {
 :deep(.leaflet-administrative-boundaries-pane .hailing-boundary-glow) { filter: drop-shadow(0 0 2px #b8f1ff) drop-shadow(0 0 6px #27bfff) drop-shadow(0 0 12px #078de0cc); }
 </style>
 <style scoped src="./DashboardMapTheme.scss" lang="scss"></style>
+
+<style scoped src="./DashboardMapFloating.scss" lang="scss"></style>

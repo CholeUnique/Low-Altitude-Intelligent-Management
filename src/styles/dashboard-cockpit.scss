@@ -1,0 +1,90 @@
+.cockpit--glass {
+  --cockpit-bg: #061625;
+  --cockpit-panel: radial-gradient(ellipse at 12% 0%,rgba(107,183,215,.10),transparent 62%),linear-gradient(135deg,rgba(8,37,58,.71),rgba(5,24,41,.49));
+  --cockpit-border: rgba(105,182,217,.20);
+  --cockpit-text: #f0f8ff;
+  --cockpit-muted: #a4bdd0;
+  --cockpit-subtle: #64879b;
+  --cockpit-cyan: #24dceb;
+  --cockpit-blue: #299cff;
+  --cockpit-mint: #55e5cf;
+  --cockpit-radius: 12px;
+  --cockpit-edge: clamp(16px,1.1vw,22px);
+  --cockpit-side-width: clamp(270px,20vw,390px);
+  --cockpit-ring-size: clamp(110px,7.5vw,148px);
+  --cockpit-shadow: 0 12px 36px #00101d55,0 2px 6px #00111e26,inset 0 1px 0 #c2ebff18;
+  --cockpit-label-size:12px;
+  --cockpit-value-size:15px;
+  --cockpit-row-height:28px;
+  min-height: 0;
+  background: var(--cockpit-bg);
+  color: var(--cockpit-text);
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-variant-numeric: tabular-nums;
+  line-height:1.5;
+}
+.cockpit-body--map-only { position:relative;display:block;flex:1;min-height:0;padding:0;overflow:hidden; }
+.cockpit-primary,.overview-layout { position:relative;width:100%;height:100%;min-height:0;display:block; }
+.map-overview { position:absolute;inset:0;z-index:0;width:100%;height:100%;display:block;border:0;border-radius:0;background:transparent;box-shadow:none; }
+.overview-side { position:absolute;top:var(--cockpit-edge);bottom:var(--cockpit-edge);z-index:800;width:var(--cockpit-side-width);display:grid;grid-template-rows:1fr 1.1fr 1fr;gap:14px;min-height:0;pointer-events:none; }
+.overview-side--left { left:var(--cockpit-edge); }
+.overview-side--right { right:var(--cockpit-edge);grid-template-rows:.95fr .95fr 1.15fr; }
+.overview-float-panel { position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;gap:16px;padding:16px 18px;overflow:hidden;pointer-events:auto;border:1px solid var(--cockpit-border);border-radius:var(--cockpit-radius);background:var(--cockpit-panel);box-shadow:var(--cockpit-shadow);backdrop-filter:blur(14px) saturate(1.08);-webkit-backdrop-filter:blur(14px) saturate(1.08);transition:border-color .20s ease,box-shadow .20s ease; }
+.overview-float-panel::before { position:absolute;top:0;left:18px;right:18px;height:1px;background:linear-gradient(90deg,transparent,#c4f4ff70 25%,#56bed736 70%,transparent);pointer-events:none;content:''; }
+.overview-float-panel:hover { border-color:#7dc8e53d;box-shadow:0 14px 40px #00101d60,inset 0 1px 0 #ddf8ff20; }
+.overview-float-panel::after { position:absolute;right:0;bottom:0;left:0;height:32px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 360 36'%3E%3Cg fill='none' stroke='%2324dceb' stroke-opacity='.2'%3E%3Cpath d='M0 35Q60 0 120 26T240 22T360 30M0 30Q60 -5 120 21T240 17T360 25M0 25Q60 -10 120 16T240 12T360 20'/%3E%3C/g%3E%3C/svg%3E") center bottom/100% auto no-repeat;opacity:.27;pointer-events:none;content:''; }
+.overview-float-panel > header { flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px;margin:0;padding:0 0 12px;border-bottom:1px solid #77cef21c;background:transparent; }
+.overview-float-panel h2 { position:relative;margin:0;padding-left:13px;color:var(--cockpit-text);font-size:clamp(15px,1vw,18px);font-weight:600;line-height:24px;letter-spacing:.3px;white-space:nowrap; }
+.overview-float-panel h2::before { position:absolute;top:3px;bottom:3px;left:0;width:3px;border-radius:4px;background:linear-gradient(#c6fbff,#24dceb);box-shadow:0 0 7px #24dceb88;content:''; }
+.overview-header-link { display:inline-flex;align-items:center;gap:6px;padding:3px 0;border:0;background:transparent;color:var(--cockpit-cyan);font:inherit;font-size:11px;line-height:20px;white-space:nowrap;cursor:pointer; }
+.overview-header-link span { display:grid;place-items:center;width:20px;height:20px;flex:0 0 20px;box-sizing:border-box;border:1px solid #62cdea35;border-radius:50%;line-height:1;transition:background .18s ease,border-color .18s ease; }
+.overview-header-link svg { display:block;width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round; }
+.overview-header-link:hover { color:#e0fcff; }.overview-header-link:hover span { background:#1b91c044; }
+.resource-summary,.media-summary,.governance-summary,.recognition-summary { display:flex;align-items:center;justify-content:space-between;gap:14px;min-width:0; }
+.resource-summary,.media-summary { margin-block:auto; }
+.overview-float-panel.resource-panel,.overview-float-panel.operation-panel,.overview-float-panel.governance-panel,.overview-float-panel.recognition-panel { gap:10px; }
+.overview-float-panel.media-panel { gap:7px; }
+.overview-float-panel.governance-panel { gap:8px; }
+.governance-summary { --cockpit-ring-size:clamp(104px,6.7vw,134px); margin-block:auto; }
+
+.recognition-summary { --cockpit-ring-size:clamp(104px,6.8vw,132px); }
+.resource-states { display:flex;flex:1;flex-direction:column;gap:8px;min-width:0; }
+.resource-states span { display:grid;grid-template-columns:8px minmax(0,1fr) 36px;align-items:baseline;gap:9px;min-height:var(--cockpit-row-height);color:var(--cockpit-muted);font-size:var(--cockpit-label-size);line-height:20px; }
+.resource-states b { margin:0;color:var(--cockpit-text);font-size:18px;line-height:20px;font-weight:500;text-align:right; }
+.resource-states i { width:8px;height:8px;align-self:center;flex-shrink:0;border-radius:50%;background:var(--cockpit-subtle); }
+.resource-states i.online { background:#3fdfcb;box-shadow:0 0 0 5px #3fdfcb12; }.resource-states i.starting { background:#e5c365;box-shadow:0 0 0 5px #e5c36512; }
+.summary-foot { position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;color:var(--cockpit-subtle);font-size:10px;line-height:16px; }
+.panel-context { margin:0;color:var(--cockpit-muted);font-size:12px;letter-spacing:.5px; }
+.flight-kpis { display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:auto 0; }
+.flight-kpis > div { min-width:0;display:grid;grid-template-columns:36px minmax(0,1fr);grid-template-rows:20px 30px;align-items:center;column-gap:9px;row-gap:2px; }
+.flight-kpis > div + div { padding-left:12px;border-left:1px solid #84c5e425; }
+.flight-kpis i { grid-row:span 2;display:grid;place-items:center;width:36px;height:36px;box-sizing:border-box;border:1px solid #51bde24d;border-radius:50%;background:radial-gradient(circle at 30% 20%,#147b9e55,#0c3e5c33);color:#7ce8fa; }
+.flight-kpis svg { display:block;width:20px;height:20px; }.flight-kpis span { color:var(--cockpit-muted);font-size:11px;line-height:20px; }.flight-kpis b { color:var(--cockpit-text);font-size:clamp(17px,1.25vw,25px);display:flex;align-items:baseline;gap:5px;font-weight:500;line-height:30px;white-space:nowrap;letter-spacing:-.5px; }
+.flight-kpis .kpi-value { color:inherit;font:inherit;line-height:30px; }.flight-kpis small { color:#a9c7d8;font-size:11px;line-height:20px;letter-spacing:0; }
+.flight-metrics { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding-block:16px;border-block:1px solid #71c6e41c; }
+.flight-metrics div { min-width:0;display:grid;grid-template-rows:20px 28px;row-gap:4px; }.flight-metrics div + div { padding-left:10px;border-left:1px solid #71c6e41c; }.flight-metrics span { color:var(--cockpit-muted);font-size:11px;line-height:20px; }.flight-metrics b { color:var(--cockpit-text);font-size:22px;line-height:28px;font-weight:500; }
+
+.metric-legend,.governance-summary dl,.recognition-summary dl { flex:1;min-width:0;margin:0; }
+.metric-legend > div,.governance-summary dl > div,.recognition-summary dl > div { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:10px;min-height:var(--cockpit-row-height);box-sizing:border-box;padding:4px 0;color:var(--cockpit-muted);font-size:var(--cockpit-label-size);line-height:20px; }
+.governance-summary dl > div { padding:4px 0; }
+dt { min-width:0; }dd { flex-shrink:0;margin:0;color:var(--cockpit-text);font-size:var(--cockpit-value-size);line-height:20px;font-weight:500;text-align:right; }
+.metric-legend dt { display:grid;grid-template-columns:7px minmax(0,1fr);align-items:center;gap:8px;line-height:20px; }.metric-legend i { width:7px;height:7px;flex:0 0 7px;border-radius:2px; }.legend-blue{background:#299cff}.legend-mint{background:#55e5cf}.legend-violet{background:#87a9fa}.legend-muted{background:#64879b}
+.scene-task-chart { position:relative;flex:1;display:flex;flex-direction:column;min-height:0;gap:14px; }
+.scene-task-main { display:flex;align-items:center;justify-content:space-between;gap:16px;flex:1;min-height:0; }
+.scene-task-ring { position:relative;flex-shrink:0;width:var(--cockpit-ring-size);height:var(--cockpit-ring-size);margin:0; }
+.scene-task-ring svg { width:100%;height:100%;overflow:visible;transform:rotate(-90deg); }.scene-task-ring circle { fill:none; }.scene-task-ring__track { stroke:#32647d40;stroke-width:7.5; }.scene-task-ring__segment { stroke-width:7.5;pointer-events:stroke;cursor:pointer;transition:stroke-width .18s ease; }.scene-task-ring__segment.is-hovered { stroke-width:10;filter:drop-shadow(0 0 3px var(--scene-ring-color)); }
+.scene-task-ring__center { position:absolute;inset:17%;display:grid;grid-template-rows:18px minmax(0,1fr) 18px;align-items:center;justify-items:center;gap:3px;border-radius:50%;background:radial-gradient(circle,#07587922,transparent 70%);text-align:center;pointer-events:none; }.scene-task-ring__center::before { content:'';width:100%;height:18px; }
+.scene-task-ring__center b { color:#65e9ed;font-size:clamp(24px,1.7vw,34px);font-weight:600;line-height:1; }.scene-task-ring__center span { color:var(--cockpit-muted);font-size:11px;line-height:18px; }
+.scene-task-hover-card { position:absolute;z-index:5;top:-8px;left:0;display:flex;align-items:center;gap:8px;max-width:100%;padding:8px 12px;border:1px solid #4bbeef44;border-radius:6px;background:#092a42f5;color:var(--cockpit-text);font-size:12px;box-shadow:0 6px 16px #00111e40;opacity:0;pointer-events:none;transition:opacity .18s ease; }.scene-task-hover-card.is-visible { opacity:1; }.scene-task-hover-card i { width:7px;height:7px;border-radius:50%; }.scene-task-hover-card span { max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }.scene-task-hover-card strong { white-space:nowrap; }
+.scene-task-legend { flex:0 1 auto;max-height:68px;min-height:0;overflow:auto;padding-top:4px;border-top:1px solid #77cef21c;scrollbar-width:thin;scrollbar-color:#3c779b transparent; }.scene-task-legend button { display:grid;grid-template-columns:7px minmax(0,1fr) 26px;align-items:center;gap:9px;width:100%;padding:6px 0;line-height:20px;color:var(--cockpit-muted);border:0;border-radius:4px;background:transparent;text-align:left;cursor:pointer; }.scene-task-legend button:hover { background:#3ca5db16; }.scene-task-legend span { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px; }.scene-task-legend i { width:7px;height:7px;border-radius:50%; }.scene-task-legend strong { color:var(--cockpit-text);font-size:14px;line-height:20px;text-align:right; }
+.governance-flow { display:flex;flex:0 0 auto;justify-content:space-between;align-items:start;gap:0;margin:0;padding:4px 0 0;border:0;background:transparent;box-shadow:none; }
+.governance-flow span { position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:6px; }.governance-flow span:not(:last-child)::after { position:absolute;top:3px;left:calc(50% + 4px);width:calc(100% - 8px);height:1px;background:#398ca67a;content:''; }.governance-flow i { width:6px;height:6px;border-radius:50%;background:#51b6c9; }.governance-flow b { color:#86adc2;font-size:11px;font-weight:400; }
+.recognition-summary { flex:0 0 auto; }.recognition-summary dl > div { align-items:flex-start; }.recognition-summary dd { max-width:90px;white-space:normal;overflow-wrap:anywhere; }
+.recognition-types { flex:1;min-height:0;overflow:auto;padding-right:3px;scrollbar-width:thin;scrollbar-color:#3c779b transparent; }
+.recognition-types > div:not(.float-empty) { display:grid;grid-template-columns:minmax(72px,1fr) 1fr 24px;align-items:center;gap:12px;margin:9px 0;color:var(--cockpit-muted);font-size:11px; }.recognition-types span { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }.recognition-types i { height:4px;overflow:hidden;border-radius:4px;background:#37718e4a; }.recognition-types u { display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#3783dd,#28cddd,#91eade);transition:width .24s ease; }.recognition-types b { color:var(--cockpit-text);font-weight:500;text-align:right; }
+.float-empty { min-height:50px;display:grid;place-items:center;color:var(--cockpit-subtle);font-size:12px; }
+button:focus-visible { outline:2px solid #68d8f0;outline-offset:2px; }
+@media(max-width:1500px) { .overview-float-panel { padding:14px;gap:14px; }.flight-kpis { gap:8px; }.flight-kpis > div { grid-template-columns:30px minmax(0,1fr);gap:5px; }.flight-kpis i { width:28px;height:28px; }.flight-kpis > div + div { padding-left:8px; }.metric-legend > div,.governance-summary dl > div,.recognition-summary dl > div { font-size:11px;gap:6px; }dd { font-size:13px; }.resource-states span { font-size:12px;gap:7px; }.resource-states b { font-size:18px; } }
+@media(max-width:1200px) { .cockpit--glass { --cockpit-side-width:245px;--cockpit-ring-size:100px;--cockpit-edge:12px; }.overview-float-panel { gap:12px;padding:12px; }.overview-float-panel h2 { font-size:14px; }.overview-header-link { font-size:10px; }.flight-kpis { grid-template-columns:1fr; }.flight-kpis > div + div { padding:0;border:0; }.flight-kpis b { font-size:18px; }.resource-summary,.scene-task-main,.media-summary,.governance-summary,.recognition-summary { gap:10px; } }
+@media(max-height:780px) { .overview-side { gap:10px; }.overview-float-panel { padding:10px 14px;gap:10px; }.overview-float-panel > header { min-height:26px;padding-bottom:8px; }.cockpit--glass { --cockpit-ring-size:104px; }.resource-states { gap:10px; }.summary-foot { font-size:9px; }.flight-metrics { padding-block:10px; }.scene-task-legend { max-height:38px; }.metric-legend > div,.governance-summary dl > div,.recognition-summary dl > div { padding:6px 0; } }
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; } }

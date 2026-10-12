@@ -2,13 +2,12 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
-import NewTaskDialog from '@/components/NewTaskDialog.vue'
 import TaskRangeThumbnail from '@/components/TaskRangeThumbnail.vue'
 import TaskWorkflowProgress from '@/components/task-center/TaskWorkflowProgress.vue'
 import { collectPages } from '@/api/pagination'
 import { getTaskWorkflow } from '@/api/task-workflow'
 import { projectTaskListWorkflow } from '@/utils/task-list-workflow'
-import { deleteGovernanceTask, getGovernanceTaskGeometry, getGovernanceTaskPage } from '@/api/governance-task'
+import { getGovernanceTaskGeometry, getGovernanceTaskPage } from '@/api/governance-task'
 import { getDepartmentList, type DepartmentInfo } from '@/api/account-management'
 import { getSceneDictionary } from '@/api/scene'
 import { useUserStore } from '@/stores/user'
@@ -29,11 +28,6 @@ const departmentLoading = ref(false)
 const departmentError = ref('')
 const sceneFilter = ref(typeof route.query.sceneId === 'string' ? route.query.sceneId : '')
 const initialSceneCode = typeof route.query.sceneCode === 'string' ? route.query.sceneCode : ''
-const newTaskVisible = ref(false)
-const selectedIds = ref<string[]>([])
-const deleteConfirmVisible = ref(false)
-const deleteLoading = ref(false)
-const deleteError = ref('')
 const currentPage = ref(1)
 const gotoPage = ref('1')
 const taskRows = ref<GovernanceTask[]>([])
@@ -70,19 +64,6 @@ const paginationItems = computed<(number | 'ellipsis')[]>(() => {
   const pages = [...numbers].filter((page) => page > 0 && page <= total).sort((a, b) => a - b)
   return pages.flatMap((page, index) => index && page - pages[index - 1]! > 1 ? ['ellipsis', page] : [page]) as (number | 'ellipsis')[]
 })
-const allSelected = computed({
-  get: () => {
-    const selectableTasks = taskRows.value
-    return Boolean(selectableTasks.length) && selectableTasks.every((task) => selectedIds.value.includes(task.id))
-  },
-  set: (value: boolean) => {
-    const pageIds = taskRows.value.map((task) => task.id)
-    selectedIds.value = value ? [...new Set([...selectedIds.value, ...pageIds])] : selectedIds.value.filter((id) => !pageIds.includes(id))
-  },
-})
-const selectedTaskNames = computed(() => taskRows.value
-  .filter((task) => selectedIds.value.includes(task.id))
-  .map((task) => task.name))
 
 function setPage(page: number) {
   currentPage.value = Math.min(Math.max(1, page), pageCount.value)
@@ -145,7 +126,6 @@ function applyTaskRecords(records: GovernanceTask[], requestId: number) {
   taskTotal.value = visibleRecords.length
   const start = (currentPage.value - 1) * requestPageSize.value
   taskRows.value = visibleRecords.slice(start, start + requestPageSize.value)
-  selectedIds.value = []
   void loadTaskRangePreviews(taskRows.value, requestId)
   if (currentPage.value > Math.max(1, Math.ceil(visibleRecords.length / requestPageSize.value))) setPage(1)
 }
@@ -241,54 +221,8 @@ async function loadDepartments() {
   }
 }
 
-function handleCreated(task: { id: string; sceneCode?: string }) {
-  if (task.sceneCode && ['CULTIVATED_LAND_USE_CONTROL', 'NON_GRAIN', 'NON_GRAIN_MONITORING'].includes(task.sceneCode)) {
-    void router.push({ name: 'workspace', params: { sceneId: task.sceneCode, taskId: task.id } })
-  } else {
-    void router.push(`/tasks/${task.id}`)
-  }
-}
-
 function openTask(task: GovernanceTask) {
   router.push(`/tasks/${task.id}`)
-}
-
-function requestBatchDelete() {
-  deleteError.value = ''
-  if (!selectedIds.value.length) {
-    deleteError.value = '请先勾选至少一个任务。'
-    return
-  }
-  deleteConfirmVisible.value = true
-}
-
-async function confirmBatchDelete() {
-  const taskIds = [...selectedIds.value]
-  if (!taskIds.length || deleteLoading.value) return
-  deleteLoading.value = true
-  deleteError.value = ''
-  const failed: string[] = []
-  try {
-
-      for (const taskId of taskIds) {
-        try {
-          await deleteGovernanceTask(taskId, user.activeDeptId)
-        } catch {
-          failed.push(taskId)
-        }
-      }
-    selectedIds.value = []
-    await loadTasks()
-    if (failed.length) {
-      deleteError.value = `${failed.length} 个任务删除失败，其余任务已删除。请确认任务状态和当前部门权限后重试。`
-      return
-    }
-    deleteConfirmVisible.value = false
-  } catch (error) {
-    deleteError.value = error instanceof Error ? error.message : '批量删除失败，请稍后重试。'
-  } finally {
-    deleteLoading.value = false
-  }
 }
 
 watch([keyword, status, priority, sceneFilter, parentDeptId, childDeptId], () => {
@@ -319,14 +253,6 @@ onMounted(async () => {
 
 <template>
   <TaskCenterLayout class="task-list-page" title="任务列表" :subtitle="`${user.organization.name} · ${sceneFilter ? selectedScene?.name || '已选场景' : '全部场景'}`">
-    <template #actions>
-      <div class="heading-actions">
-        <button class="batch-delete" :disabled="!selectedIds.length || deleteLoading" @click="requestBatchDelete">
-          批量删除<span v-if="selectedIds.length">（{{ selectedIds.length }}）</span>
-        </button>
-        <button v-if="user.currentUser?.role === 'ADMIN'" class="primary-action" @click="newTaskVisible = true">＋ 新增任务</button>
-      </div>
-    </template>
     <section class="task-filters">
       <label class="search-filter">
         <span>搜索任务</span>
@@ -350,15 +276,13 @@ onMounted(async () => {
     </section>
     <p v-if="sceneError" class="scene-dictionary-error">场景字典加载失败：{{ sceneError }}。请检查登录状态与网络后刷新页面。</p>
     <p v-if="departmentError" class="scene-dictionary-error">部门列表加载失败：{{ departmentError }}。筛选将使用当前登录部门。</p>
-    <p v-if="deleteError" class="scene-dictionary-error">{{ deleteError }}</p>
     <p v-if="workflowError" class="scene-dictionary-error" role="alert">{{ workflowError }}</p>
 
     <section class="task-table">
       <div class="task-table-row task-table-head">
-        <span><input v-model="allSelected" type="checkbox" /></span><span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
+        <span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
       </div>
       <div v-for="task in taskRows" :key="task.id" class="task-table-row">
-        <span><input v-model="selectedIds" type="checkbox" :value="task.id" /></span>
         <span class="task-name"><b>{{ task.name }}</b><small>{{ task.taskNo }}</small></span>
         <span><em class="scene-tag">{{ task.sceneName }}</em></span>
         <span><em class="status-tag" :class="taskStatusClass(task)" :title="task.taskStatusDesc">{{ task.taskStatusDesc }}</em></span>
@@ -376,33 +300,23 @@ onMounted(async () => {
       <div v-else-if="!taskRows.length" class="empty-tasks">当前筛选条件下暂无任务</div>
     </section>
     <footer class="task-pagination"><span>共 <b>{{ taskTotal }}</b> 条记录　每页显示 <b>{{ requestPageSize }}</b> 条</span><div class="page-controls"><button :disabled="currentPage === 1" @click="setPage(currentPage - 1)">‹</button><template v-for="(item, index) in paginationItems" :key="`${item}-${index}`"><span v-if="item === 'ellipsis'">…</span><button v-else :class="{ active: currentPage === item }" @click="setPage(item)">{{ item }}</button></template><button :disabled="currentPage === pageCount" @click="setPage(currentPage + 1)">›</button><label>前往 <input v-model="gotoPage" inputmode="numeric" @keyup.enter="applyGoToPage" @blur="applyGoToPage" /> 页</label></div></footer>
-    <NewTaskDialog v-model="newTaskVisible" :scene-id="sceneFilter || undefined" :scenes="sceneOptions" @created="handleCreated" />
-    <div v-if="deleteConfirmVisible" class="delete-confirm-mask" @click.self="!deleteLoading && (deleteConfirmVisible = false)">
-      <section class="delete-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-confirm-title">
-        <h3 id="delete-confirm-title">确认批量删除</h3>
-        <p>将永久删除已勾选的 <b>{{ selectedIds.length }}</b> 个任务及其关联范围、影像关联信息。此操作无法恢复。</p>
-        <ul><li v-for="name in selectedTaskNames.slice(0, 5)" :key="name">{{ name }}</li><li v-if="selectedTaskNames.length > 5">另有 {{ selectedTaskNames.length - 5 }} 个任务</li></ul>
-        <p v-if="deleteError" class="dialog-delete-error">{{ deleteError }}</p>
-        <footer><button :disabled="deleteLoading" @click="deleteConfirmVisible = false">取消</button><button class="confirm-danger" :disabled="deleteLoading" @click="confirmBatchDelete">{{ deleteLoading ? '正在删除…' : '确认删除' }}</button></footer>
-      </section>
-    </div>
   </TaskCenterLayout>
 </template>
 
 <style scoped lang="scss">
-.primary-action { padding: 9px 18px; color: white; background: #087fe7; border: 1px solid #2fa9ff; box-shadow: 0 0 10px #138deb66; cursor: pointer; }
+
 .task-filters { height: 58px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; gap: 10px; align-items: end; padding: 7px 10px; background: linear-gradient(90deg,#04233d,#031a30); border: 1px solid #0c5278; }.task-filters label { display: grid; gap: 4px; color: #7fa7b7; font-size: 14px; }.task-filters select,.task-filters input { height: 29px; padding: 0 8px; color: #bfe3ed; background: #03182d; border: 1px solid #124e70; outline: 0; font-size: 14px; }.search-box { height: 29px; display: flex; align-items: center; gap: 7px; padding: 0 9px; color: #5bd9eb; background: #03182d; border: 1px solid #155a7e; }.search-box input { flex: 1; border: 0; padding: 0; }.filter-action { align-self: end; height: 29px; white-space: nowrap; }
-.task-table { margin-top: 6px; border: 1px solid #0b5278; background: #031a30; }.task-table-row { min-height: 61px; display: grid; grid-template-columns: 30px 1.45fr .85fr .65fr 1fr .7fr .9fr 1.35fr 1.05fr; align-items: center; border-bottom: 1px solid #0a405e; }.task-table-row>span { min-width: 0; padding: 6px 8px; color: #8eb4c2; font-size: 14px; }.task-table-head { min-height: 34px; color: #a9cfdb; background: #074166; }.task-name b,.task-name small,.task-owner b,.task-owner small,.task-table-row>span>small { display: block; }.task-name b,.task-owner b { overflow: hidden; color: #d0edf4; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }.task-name small,.task-owner small,.task-table-row>span>small { margin-top: 4px; color: #557f91; font-size: 12px; }.scene-tag,.status-tag { padding: 4px 6px; color: #70e4f1; background: #07516c; border: 1px solid #0b718c; font-style: normal; font-size: 12px; }.status-tag.done { color: #51eab8; border-color: #16795f; background: #075643; }.status-tag.pending { color: #ffd06c; border-color: #93691b; background: #63470d; }.range-thumb { width: 42px; height: 29px; float: left; margin-right: 5px; background: linear-gradient(145deg,#156c78,#173c4d); border: 1px solid #167492; }.range-thumb--empty { display: grid; place-items: center; color: #5e8ca1; font-style: normal; font-size: 16px; }.workflow-mini { display: flex; align-items: center; gap: 5px; }.workflow-mini i { width: 10px; height: 10px; border: 1px solid #38647a; border-radius: 50%; }.workflow-mini i.done { background: #20d8b0; border-color: #20d8b0; }.workflow-mini i.active { background: #168ff0; border-color: #58baff; box-shadow: 0 0 6px #168ff0; }.task-actions { display: flex; gap: 5px; }.task-actions button { padding: 5px 8px; color: #bdeeff; background: #087dd4; border: 1px solid #259ef0; font-size: 12px; cursor: pointer; }.task-actions button+button { background: #063354; }.empty-tasks { padding: 60px; color: #628ca0; text-align: center; }
+.task-table { margin-top: 6px; border: 1px solid #0b5278; background: #031a30; }.task-table-row { min-height: 61px; display: grid; grid-template-columns: 1.45fr .85fr .65fr 1fr .7fr .9fr 1.35fr 1.05fr; align-items: center; border-bottom: 1px solid #0a405e; }.task-table-row>span { min-width: 0; padding: 6px 8px; color: #8eb4c2; font-size: 14px; }.task-table-head { min-height: 34px; color: #a9cfdb; background: #074166; }.task-name b,.task-name small,.task-owner b,.task-owner small,.task-table-row>span>small { display: block; }.task-name b,.task-owner b { overflow: hidden; color: #d0edf4; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }.task-name small,.task-owner small,.task-table-row>span>small { margin-top: 4px; color: #557f91; font-size: 12px; }.scene-tag,.status-tag { padding: 4px 6px; color: #70e4f1; background: #07516c; border: 1px solid #0b718c; font-style: normal; font-size: 12px; }.status-tag.done { color: #51eab8; border-color: #16795f; background: #075643; }.status-tag.pending { color: #ffd06c; border-color: #93691b; background: #63470d; }.range-thumb { width: 42px; height: 29px; float: left; margin-right: 5px; background: linear-gradient(145deg,#156c78,#173c4d); border: 1px solid #167492; }.range-thumb--empty { display: grid; place-items: center; color: #5e8ca1; font-style: normal; font-size: 16px; }.workflow-mini { display: flex; align-items: center; gap: 5px; }.workflow-mini i { width: 10px; height: 10px; border: 1px solid #38647a; border-radius: 50%; }.workflow-mini i.done { background: #20d8b0; border-color: #20d8b0; }.workflow-mini i.active { background: #168ff0; border-color: #58baff; box-shadow: 0 0 6px #168ff0; }.task-actions { display: flex; gap: 5px; }.task-actions button { padding: 5px 8px; color: #bdeeff; background: #087dd4; border: 1px solid #259ef0; font-size: 12px; cursor: pointer; }.task-actions button+button { background: #063354; }.empty-tasks { padding: 60px; color: #628ca0; text-align: center; }
 .task-pagination { display: flex; justify-content: space-between; align-items: center; padding: 12px 8px; color: #7199aa; font-size: 14px; }.task-pagination button { width: 24px; height: 24px; margin-left: 4px; color: #74a7bb; background: #04213b; border: 1px solid #145170; }.task-pagination button.active { color: white; background: #087ee0; border-color: #25a1f0; }
 
 /* Repository-inspired controls, card rhythm, and readable task records. */
-.primary-action { height: 42px; padding: 0 22px; border-radius: 4px; font-size: 16px; font-weight: 700; background: linear-gradient(135deg, #526aff, #00a6fc); box-shadow: 0 0 13px #008dff88; }.task-filters { height: 84px; grid-template-columns: repeat(3, minmax(0, 1fr)) 220px minmax(0, 1fr) auto; gap: 14px; align-items: end; padding: 14px 18px; border-color: #0d79b9; border-radius: 5px; background: #071d3de0; box-shadow: inset 0 0 24px #0563aa20; }.task-filters label { gap: 6px; color: #b3d5ef; font-size: 15px; }.task-filters select,.task-filters label>input,.search-box { height: 36px; border-color: #238dd1; border-radius: 4px; font-size: 15px; }.task-filters select,.task-filters label>input { padding-inline: 10px; }.search-box { gap: 9px; padding-inline: 12px; }.search-box input { height: 100%; padding: 0; border: 0; background: transparent; }.task-filters .filter-action { height: 36px; padding-inline: 18px; font-size: 15px; }
-.task-table { margin-top: 12px; overflow: hidden; border-color: #1477b2; border-radius: 5px; background: #071d3de0; }.task-table-row { min-height: 72px; grid-template-columns: 30px 1.35fr 1.1fr .65fr .8fr .75fr .75fr 2.05fr 1.1fr; }.task-table-row>span { padding: 8px 10px; color: #b6d4e4; font-size: 15px; }.task-table-head { min-height: 42px; color: #d8efff; background: linear-gradient(90deg, #074b78, #06365f); font-size: 16px; }.task-name b,.task-owner b { font-size: 16px; }.task-name small,.task-owner small,.task-table-row>span>small { font-size: 13px; }.task-created { white-space: nowrap; }.task-range { display: flex; align-items: center; gap: 7px; }.task-range .range-thumb { float: none; flex: 0 0 auto; margin: 0; }.task-range small { margin-top: 0; }.scene-tag,.status-tag { padding: 5px 8px; border-radius: 3px; font-size: 13px; }.scene-tag { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }.flight-association { display: inline-block; white-space: nowrap; }.range-thumb { width: 45px; height: 31px; }.task-actions { gap: 7px; }.task-actions button { padding: 7px 9px; border-radius: 3px; font-size: 13px; }
+.task-filters { height: 84px; grid-template-columns: repeat(3, minmax(0, 1fr)) 220px minmax(0, 1fr) auto; gap: 14px; align-items: end; padding: 14px 18px; border-color: #0d79b9; border-radius: 5px; background: #071d3de0; box-shadow: inset 0 0 24px #0563aa20; }.task-filters label { gap: 6px; color: #b3d5ef; font-size: 15px; }.task-filters select,.task-filters label>input,.search-box { height: 36px; border-color: #238dd1; border-radius: 4px; font-size: 15px; }.task-filters select,.task-filters label>input { padding-inline: 10px; }.search-box { gap: 9px; padding-inline: 12px; }.search-box input { height: 100%; padding: 0; border: 0; background: transparent; }.task-filters .filter-action { height: 36px; padding-inline: 18px; font-size: 15px; }
+.task-table { margin-top: 12px; overflow: hidden; border-color: #1477b2; border-radius: 5px; background: #071d3de0; }.task-table-row { min-height: 72px; grid-template-columns: 1.35fr 1.1fr .65fr .8fr .75fr .75fr 2.05fr 1.1fr; }.task-table-row>span { padding: 8px 10px; color: #b6d4e4; font-size: 15px; }.task-table-head { min-height: 42px; color: #d8efff; background: linear-gradient(90deg, #074b78, #06365f); font-size: 16px; }.task-name b,.task-owner b { font-size: 16px; }.task-name small,.task-owner small,.task-table-row>span>small { font-size: 13px; }.task-created { white-space: nowrap; }.task-range { display: flex; align-items: center; gap: 7px; }.task-range .range-thumb { float: none; flex: 0 0 auto; margin: 0; }.task-range small { margin-top: 0; }.scene-tag,.status-tag { padding: 5px 8px; border-radius: 3px; font-size: 13px; }.scene-tag { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }.flight-association { display: inline-block; white-space: nowrap; }.range-thumb { width: 45px; height: 31px; }.task-actions { gap: 7px; }.task-actions button { padding: 7px 9px; border-radius: 3px; font-size: 13px; }
 .workflow-mini { position: relative; min-width: 0; display: grid; align-items: start; gap: 0; padding-top: 2px; }.workflow-step { position: relative; min-width: 0; display: grid; grid-template-rows: 19px auto; justify-items: center; color: #7598ad; }.workflow-step:not(:first-child)::before { content: ""; position: absolute; z-index: 0; top: 8px; right: calc(50% + 8.5px); width: calc(100% - 17px); height: 2px; background: #3c6680; }.workflow-step.done::before { background: #20d8b0; box-shadow: 0 0 5px #20d8b088; }.workflow-step.active::before { background: linear-gradient(90deg, #20d8b0, #239eff); }.workflow-step i { position: relative; z-index: 1; width: 17px; height: 17px; display: grid; place-items: center; border: 2px solid #6589a2; border-radius: 50%; color: #fff; background: #09233d; font-size: 10px; font-style: normal; line-height: 1; }.workflow-step.done i { border-color: #21dbb1; background: #21dbb1; box-shadow: 0 0 7px #21dbb188; }.workflow-step.active i { border-color: #5bc9ff; background: #168ff0; box-shadow: 0 0 8px #168ff0; }.workflow-step small { width: calc(100% - 2px); margin-top: 4px; overflow: hidden; color: inherit; font-size: 11px; line-height: 1.15; text-align: center; text-overflow: ellipsis; white-space: nowrap; }.workflow-step.done small,.workflow-step.active small { color: #d3f3ff; }
 .task-pagination { padding: 16px 4px; color: #a9c6db; font-size: 15px; }.task-pagination button { width: 31px; height: 31px; border-radius: 4px; font-size: 14px; }
 .task-pagination b { color: #37cbff; }.task-pagination select { min-height: 31px; margin: 0 5px; padding: 0 26px 0 9px; border: 1px solid #28587f; border-radius: 4px; color: #e7f7ff; background: #0b294a; font-size: 14px; }.task-pagination button:disabled { opacity: .4; cursor: not-allowed; }.page-controls { display: flex; align-items: center; }.page-controls label { margin-left: 18px; }.page-controls input { width: 38px; height: 29px; margin: 0 4px; border: 1px solid #2d6693; border-radius: 3px; color: white; background: #0a2949; font-size: 14px; text-align: center; }
 .scene-dictionary-error { margin: 8px 2px 0; color: #ffb3a7; font-size: 13px; }
-.batch-box { position: relative; }.batch-box button:disabled { opacity: .55; cursor: wait; }.batch-error { position: absolute; top: calc(100% + 5px); right: 0; z-index: 4; width: max-content; max-width: 270px; padding: 5px 7px; color: #ffd0d4; background: #4a1523; border: 1px solid #a34859; font-size: 11px; line-height: 1.4; }.delete-confirm-mask { position: fixed; z-index: 2100; inset: 0; display: grid; place-items: center; background: #000a16aa; backdrop-filter: blur(2px); }.delete-confirm-dialog { width: min(440px, calc(100vw - 32px)); padding: 0; overflow: hidden; color: #ccecf5; background: #052540; border: 1px solid #168bbc; border-radius: 5px; box-shadow: 0 12px 36px #000b1fe0, 0 0 20px #078ac44d; }.delete-confirm-dialog h3 { margin: 0; padding: 15px 19px; color: #effbff; background: linear-gradient(90deg, #124e78, #07385e); border-bottom: 1px solid #176f98; font-size: 17px; }.delete-confirm-dialog p,.delete-confirm-dialog ul { margin: 14px 19px; color: #9fc6d4; font-size: 14px; line-height: 1.7; }.delete-confirm-dialog p b { color: #ff8d9b; }.delete-confirm-dialog ul { max-height: 116px; padding-left: 20px; overflow-y: auto; color: #d0ebf3; }.delete-confirm-dialog li+li { margin-top: 4px; }.delete-confirm-dialog footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 19px; border-top: 1px solid #115672; }.delete-confirm-dialog footer button { min-width: 86px; padding: 8px 14px; color: #b9dce8; background: #062943; border: 1px solid #196181; cursor: pointer; }.delete-confirm-dialog footer .confirm-danger { color: #fff; background: #b7344a; border-color: #f16276; box-shadow: 0 0 9px #d63c5366; }.delete-confirm-dialog footer button:disabled { opacity: .6; cursor: wait; }.dialog-delete-error { color: #ffadb7!important; background: #4a1523; border-left: 2px solid #ec5266; }
+
 .task-date-filter { width: 220px !important; min-width: 220px; }.task-date-filter.el-date-editor { height: 36px; background: transparent; border: 0; border-radius: 4px; box-shadow: none; }.task-date-filter .el-input__wrapper { min-height: 36px; padding: 0 10px; background: #03182d; border: 1px solid #238dd1; border-radius: 4px; box-shadow: inset 0 0 12px #086ba51c; }.task-date-filter.el-date-editor:hover .el-input__wrapper,.task-date-filter.el-date-editor.is-focus .el-input__wrapper { border-color: #41b7f0; box-shadow: 0 0 0 1px #41b7f044, inset 0 0 12px #086ba51c; }.task-date-filter .el-input__inner,.task-date-filter .el-input__prefix,.task-date-filter .el-input__suffix,.task-date-filter .el-input__icon { color: #bfe3ed; }.task-date-filter .el-input__inner::placeholder { color: #7496a8; }.task-date-filter .el-input__clear { color: #6fa9c0; }.task-date-filter .el-input__clear:hover { color: #63e0f1; }
 :global(.task-date-popper.el-picker__popper) { color: #c8ecf7; background: #052540; border: 1px solid #168bbd; border-radius: 5px; box-shadow: 0 10px 30px #00111ee0, inset 0 0 24px #0878b21f; }
 :global(.task-date-popper .el-picker-panel) { color: #c8ecf7; background: transparent; }
@@ -431,10 +345,10 @@ onMounted(async () => {
 }
 
 /* TaskCenterLayout light, compact list treatment. */
-.heading-actions { display: flex; align-items: center; gap: 10px; }
-.primary-action { height: 34px; padding: 0 15px; border: 1px solid #1880c8; border-radius: 4px; background: #2389d3; box-shadow: none; font-size: 13px; }
-.batch-delete { height: 34px; padding: 0 14px; color: #b65454; background: #fff; border: 1px solid #e2b8b8; border-radius: 4px; cursor: pointer; }
-.batch-delete:disabled { opacity: .45; cursor: not-allowed; }
+
+
+
+
 .task-filters { height: auto; grid-template-columns: 1.35fr repeat(4, minmax(150px, 1fr)); gap: 12px; padding: 14px 16px; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; box-shadow: 0 2px 10px #2449690a; }
 .task-filters label { color: #65788b; font-size: 12px; }
 .task-filters select, .task-filters input, .search-box { height: 34px; color: #32485e; background: #fff; border-color: #d8e0e7; border-radius: 4px; font-size: 12px; }
@@ -475,14 +389,15 @@ onMounted(async () => {
 .page-controls input { color: #344a60; background: #fff; border-color: #d6dfe7; }
 .empty-tasks { color: #95a2af; }
 .scene-dictionary-error { color: #b75a5a; }
-.delete-confirm-dialog { color: #53677a; background: #fff; border-color: #d9e2e9; box-shadow: 0 14px 40px #253c5030; }
-.delete-confirm-dialog h3 { color: #2e4358; background: #f5f8fa; border-bottom-color: #e1e8ee; }
-.delete-confirm-dialog p, .delete-confirm-dialog ul { color: #65788b; }
-.delete-confirm-dialog footer { border-top-color: #e7edf2; }
-.delete-confirm-dialog footer button { color: #607386; background: #fff; border-color: #d5dfe7; }
+
+
+
+
+
 @media (max-width: 1320px) {
   .task-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+.task-list-page .search-box{min-width:0;overflow:hidden;height:34px;border:1px solid #d8e0e7;background:#fff;align-items:center}.task-list-page .search-box input{height:100%;min-width:0;flex:1;align-self:stretch;background:transparent;border:0;border-radius:0;padding:0;box-shadow:none}
 </style>
 
 <style scoped>
@@ -494,7 +409,7 @@ onMounted(async () => {
 .task-table-row{flex:1;min-height:48px;max-height:62px}
 .task-list-page .task-table-row>span{padding:2px 8px}
 .task-table-row{box-sizing:border-box}
-.task-list-page .task-table-row{grid-template-columns:26px 1.2fr .85fr .75fr .8fr .85fr 65px minmax(250px,2.5fr) 65px}
+.task-list-page .task-table-row{grid-template-columns:1.2fr .85fr .75fr .8fr .85fr 65px minmax(250px,2.5fr) 65px}
 .task-table-row>span{overflow:hidden}
 .task-owner small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .status-tag{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -502,4 +417,5 @@ onMounted(async () => {
 .task-table-head>span{font-size:11px;line-height:1.2}
 .task-pagination{flex:none;padding:8px 0;gap:8px}
 @media(max-height:740px){.task-list-page :deep(.content-heading){min-height:54px}.task-list-page :deep(.content-body){padding-block:8px}.task-filters{padding-block:7px}.task-table-row:not(.task-table-head){min-height:43px}.task-pagination{padding-block:5px}}
+.task-list-page .search-box{min-width:0;overflow:hidden;height:34px;border:1px solid #d8e0e7;background:#fff;align-items:center}.task-list-page .search-box input{height:100%;min-width:0;flex:1;align-self:stretch;background:transparent;border:0;border-radius:0;padding:0;box-shadow:none}
 </style>

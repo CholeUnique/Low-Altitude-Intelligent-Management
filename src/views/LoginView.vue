@@ -90,7 +90,7 @@ async function submitReal() {
 <template>
   <div class="login-page">
     <div class="login-visual">
-      <div class="login-brand"><span class="brand-mark">翼</span><b>低空智慧服务</b></div>
+      <div class="login-brand"><span class="brand-mark">翼</span><b>海陵区自然资源综合监管平台</b></div>
       <div class="radar radar-one"></div><div class="radar radar-two"></div>
       <div class="login-copy">
         <span class="eyebrow">LOW-ALTITUDE GOVERNANCE</span>

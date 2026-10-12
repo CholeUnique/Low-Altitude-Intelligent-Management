@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     BusinessTrendChart: typeof import('./src/components/BusinessTrendChart.vue')['default']
     DashboardMap: typeof import('./src/components/DashboardMap.vue')['default']
+    DashboardRing: typeof import('./src/components/DashboardRing.vue')['default']
     DashboardSymbol: typeof import('./src/components/DashboardSymbol.vue')['default']
     DomainProgressChart: typeof import('./src/components/DomainProgressChart.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']

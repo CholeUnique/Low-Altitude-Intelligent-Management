@@ -36,6 +36,7 @@ export interface WorkflowNode {
 
 export interface TaskWorkflow {
   flowInstanceId: string
+  flowKey?: string
   flowName?: string
   status: string
   currentNode?: WorkflowNode

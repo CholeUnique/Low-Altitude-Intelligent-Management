@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { logoutFromServer } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
@@ -9,6 +9,8 @@ withDefaults(defineProps<{ iconOnly?: boolean }>(), { iconOnly: false })
 const user = useUserStore()
 const router = useRouter()
 const open = ref(false)
+const route = useRoute()
+watch(() => route.fullPath, () => { open.value = false })
 const loggingOut = ref(false)
 
 async function openAccountManagement() {

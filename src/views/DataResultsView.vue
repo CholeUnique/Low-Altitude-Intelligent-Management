@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import PrimaryHeader from '@/components/PrimaryHeader.vue'
 import { getFlightTaskMedia, getUavFlightTaskOptions, type UavFlightTaskOption } from '@/api/patrol'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
 
@@ -302,7 +301,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="results-page" :class="{ embedded: props.embedded }">
-    <PrimaryHeader v-if="!props.embedded" />
+
     <main>
       <section v-if="props.activeTab === 'collection'" class="collection-page">
         <header class="collection-heading">

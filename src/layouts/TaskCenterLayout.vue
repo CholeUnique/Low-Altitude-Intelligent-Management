@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import PrimaryHeader from '@/components/PrimaryHeader.vue'
 import { useUserStore } from '@/stores/user'
 
 defineProps<{
@@ -22,7 +21,6 @@ const activeEntry = computed(() => entries.value.find((entry) => entry.name === 
 
 <template>
   <div class="task-center-layout">
-    <PrimaryHeader />
     <div class="task-center-shell">
       <aside class="task-center-sidebar">
         <nav aria-label="任务中心导航">

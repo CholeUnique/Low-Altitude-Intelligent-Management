@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { getTaskWorkflow, type TaskWorkflow } from '@/api/task-workflow'
+import { isDefaultWorkflow } from '@/utils/default-workflow'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { WorkspaceNodeConfig } from '@/types'
@@ -37,6 +39,8 @@ const workspaceConfig = computed(() => {
   const config = getSharedWorkspaceConfig()
   return { ...config, nodes: [{ key: 'task-acceptance', name: '任务受理', shortName: '任务受理', order: 0, module: 'governance' as const, component: 'TaskAcceptance' }, ...config.nodes] }
 })
+const contextFlow = ref<TaskWorkflow>()
+const useDefaultTemplate = computed(() => !isNonGrainWorkspace.value && isDefaultWorkflow(contextFlow.value))
 const backendTask = ref<import('@/api/governance-task').GovernanceTask>()
 const currentScene = computed(() => getScene(user.organization, workspaceSceneId.value))
 let taskRequestVersion = 0
@@ -46,13 +50,15 @@ async function loadTaskContext() {
   const taskId = typeof route.params.taskId === 'string' ? route.params.taskId : ''
   task.value = undefined
   backendTask.value = undefined
+  contextFlow.value = undefined
   taskError.value = ''
   taskLoading.value = false
   if (!taskId) return
   taskLoading.value = true
   try {
-    const detail = await getGovernanceTaskDetail(taskId)
+    const [detail, workflow] = await Promise.all([getGovernanceTaskDetail(taskId), getTaskWorkflow(taskId)])
     if (version !== taskRequestVersion) return
+    contextFlow.value = workflow
     backendTask.value = detail?.task
     task.value = detail ? toPatrolTask(detail.task) : undefined
     if (!task.value) taskError.value = '未找到该真实业务任务，或当前账号没有查看权限。'
@@ -146,7 +152,7 @@ watch(
   [() => workspaceConfig.value?.sceneId, defaultNodeKey, () => route.query.node, () => task.value?.id],
   () => {
     // 非粮化工作台由其自身七节点路由守卫维护，不能复用共享工作台的节点改写逻辑。
-    if (isNonGrainWorkspace.value) return
+    if (isNonGrainWorkspace.value || useDefaultTemplate.value) return
     if (!workspaceConfig.value) return
     const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
     const queryNode = workspaceConfig.value.nodes.find((item) => item.key === queryKey)
@@ -166,33 +172,34 @@ onMounted(() => void loadTaskContext())
 
 <template>
   <div v-if="taskLoading" class="workspace workspace-empty">
-    <header class="workspace-header"><div class="workspace-brand"><span class="brand-mark">翼</span><div><b>场景作业工作台</b><small>正在加载真实任务</small></div></div></header>
+    <section class="workspace-context" aria-label="工作台操作"><div class="workspace-brand"><div><b>场景作业工作台</b><small>正在加载真实任务</small></div></div></section>
     <main class="empty-body"><div class="empty-card"><h2>正在加载任务工作台…</h2></div></main>
   </div>
 
   <NonGrainWorkspace
     v-workbench-validation
-    v-else-if="!taskError && task && workspaceSceneId === 'non-grain-monitoring'"
+    v-else-if="!taskError && task && (workspaceSceneId === 'non-grain-monitoring' || useDefaultTemplate)"
     :key="task?.id || String(route.params.taskId || '')"
     :task-id="task?.id || String(route.params.taskId || '')"
     :task-name="task?.name"
     :task-no="backendTask?.taskNo"
     :task-status="task?.status"
+    :default-template="useDefaultTemplate"
   />
 
   <div v-else-if="taskError" class="workspace workspace-empty"><main class="empty-body"><div class="empty-card"><h2>任务读取失败</h2><p>{{ taskError }}</p><button @click="loadTaskContext">重试</button></div></main></div>
 
   <div v-else-if="!workspaceConfig" class="workspace workspace-empty">
-    <header class="workspace-header">
+    <section class="workspace-context" aria-label="工作台操作">
       <div class="workspace-brand" @click="$router.push('/dashboard')">
-        <span class="brand-mark">翼</span>
+
         <div>
           <b :title="`${currentScene?.name || '场景作业'}工作台`">{{ currentScene?.shortName || currentScene?.name || '场景作业' }}工作台</b>
           <small>{{ taskError || sceneId || '未指定场景' }}</small>
         </div>
       </div>
-      <div class="workspace-user"><span>{{ user.name }}</span></div>
-    </header>
+
+    </section>
     <main class="empty-body">
       <div class="empty-card">
         <h2>该场景工作台正在建设</h2>
@@ -203,13 +210,13 @@ onMounted(() => void loadTaskContext())
   </div>
 
   <div v-else v-workbench-validation class="workspace">
-    <header class="workspace-header">
+    <section class="workspace-context" aria-label="工作台操作">
       <div class="workspace-return">
         <el-button class="workspace-return-button" @click="$router.push('/tasks/todo')">‹ 返回任务</el-button>
       </div>
 
       <div class="workspace-brand workspace-brand--moved" @click="$router.push('/dashboard')">
-        <span class="brand-mark">翼</span>
+
         <div>
           <b :title="`${workspaceConfig.name}工作台`">{{ currentScene?.shortName || workspaceConfig.name }}工作台</b>
           <small>{{ task?.name || route.params.taskId || '综合工作台' }}</small>
@@ -250,11 +257,8 @@ onMounted(() => void loadTaskContext())
         </div>
       </div>
 
-      <div class="workspace-user">
 
-        <span>{{ user.name }}</span>
-      </div>
-    </header>
+    </section>
 
     <main class="workspace-body">
       <TaskAcceptancePanel v-if="activeKey === 'task-acceptance'" :task-id="backendTask?.id" />
@@ -286,7 +290,7 @@ onMounted(() => void loadTaskContext())
   flex-direction: column;
   background: #eef3f6;
 }
-.workspace-header {
+.workspace-context {
   position: relative;
   flex: 0 0 78px;
   display: grid;
@@ -479,13 +483,13 @@ onMounted(() => void loadTaskContext())
 }
 
 @media (max-width: 1450px) {
-  .workspace-header { grid-template-columns: 220px 1fr 180px; }
+  .workspace-context { grid-template-columns: 220px 1fr 180px; }
   .workspace-brand--moved { left: 120px; }
   .module-nodes button { min-width: 76px; }
 }
 @media (max-width: 1120px) {
-  .workspace-header { grid-template-columns: 205px minmax(0, 1fr) 150px; padding-inline: 10px; }
+  .workspace-context { grid-template-columns: 205px minmax(0, 1fr) 150px; padding-inline: 10px; }
   .workspace-brand--moved { left: 105px; }.module-label { display: none; }.module-nodes button { min-width: 64px; }.module-nodes span { font-size: 10px; }.workspace-user { gap: 7px; font-size: 11px; }
 }
-@media (max-height: 700px) { .workspace-header { flex-basis: 62px; } }
+@media (max-height: 700px) { .workspace-context { flex-basis: 62px; } }
 </style>

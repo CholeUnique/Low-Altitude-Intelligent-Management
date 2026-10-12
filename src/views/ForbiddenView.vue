@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import PrimaryHeader from '@/components/PrimaryHeader.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -10,7 +9,6 @@ const blockedPath = computed(() => typeof route.query.from === 'string' ? route.
 
 <template>
   <div class="forbidden-page">
-    <PrimaryHeader />
     <main>
       <div class="forbidden-symbol">!</div>
       <h1>无权限访问</h1>
