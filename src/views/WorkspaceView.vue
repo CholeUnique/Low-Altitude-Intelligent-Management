@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { getTaskWorkflow, type TaskWorkflow } from '@/api/task-workflow'
+import { isDefaultWorkflow } from '@/utils/default-workflow'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { WorkspaceNodeConfig } from '@/types'
@@ -37,6 +39,8 @@ const workspaceConfig = computed(() => {
   const config = getSharedWorkspaceConfig()
   return { ...config, nodes: [{ key: 'task-acceptance', name: '任务受理', shortName: '任务受理', order: 0, module: 'governance' as const, component: 'TaskAcceptance' }, ...config.nodes] }
 })
+const contextFlow = ref<TaskWorkflow>()
+const useDefaultTemplate = computed(() => !isNonGrainWorkspace.value && isDefaultWorkflow(contextFlow.value))
 const backendTask = ref<import('@/api/governance-task').GovernanceTask>()
 const currentScene = computed(() => getScene(user.organization, workspaceSceneId.value))
 let taskRequestVersion = 0
@@ -46,13 +50,15 @@ async function loadTaskContext() {
   const taskId = typeof route.params.taskId === 'string' ? route.params.taskId : ''
   task.value = undefined
   backendTask.value = undefined
+  contextFlow.value = undefined
   taskError.value = ''
   taskLoading.value = false
   if (!taskId) return
   taskLoading.value = true
   try {
-    const detail = await getGovernanceTaskDetail(taskId)
+    const [detail, workflow] = await Promise.all([getGovernanceTaskDetail(taskId), getTaskWorkflow(taskId)])
     if (version !== taskRequestVersion) return
+    contextFlow.value = workflow
     backendTask.value = detail?.task
     task.value = detail ? toPatrolTask(detail.task) : undefined
     if (!task.value) taskError.value = '未找到该真实业务任务，或当前账号没有查看权限。'
@@ -146,7 +152,7 @@ watch(
   [() => workspaceConfig.value?.sceneId, defaultNodeKey, () => route.query.node, () => task.value?.id],
   () => {
     // 非粮化工作台由其自身七节点路由守卫维护，不能复用共享工作台的节点改写逻辑。
-    if (isNonGrainWorkspace.value) return
+    if (isNonGrainWorkspace.value || useDefaultTemplate.value) return
     if (!workspaceConfig.value) return
     const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
     const queryNode = workspaceConfig.value.nodes.find((item) => item.key === queryKey)
@@ -172,12 +178,13 @@ onMounted(() => void loadTaskContext())
 
   <NonGrainWorkspace
     v-workbench-validation
-    v-else-if="!taskError && task && workspaceSceneId === 'non-grain-monitoring'"
+    v-else-if="!taskError && task && (workspaceSceneId === 'non-grain-monitoring' || useDefaultTemplate)"
     :key="task?.id || String(route.params.taskId || '')"
     :task-id="task?.id || String(route.params.taskId || '')"
     :task-name="task?.name"
     :task-no="backendTask?.taskNo"
     :task-status="task?.status"
+    :default-template="useDefaultTemplate"
   />
 
   <div v-else-if="taskError" class="workspace workspace-empty"><main class="empty-body"><div class="empty-card"><h2>任务读取失败</h2><p>{{ taskError }}</p><button @click="loadTaskContext">重试</button></div></main></div>

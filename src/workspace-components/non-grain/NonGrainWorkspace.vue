@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { defaultWorkflow } from '@/utils/default-workflow'
+import DefaultWorkflowPanel from '@/workspace-components/shared/DefaultWorkflowPanel.vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { nonGrainWorkflow, nonGrainNodeKey, isNodeMine, canOperateWorkflowNode } from '@/utils/task-workflow-state'
@@ -16,7 +18,7 @@ import NonGrainDroneReviewPanel from './NonGrainDroneReviewPanel.vue'
 import WorkbenchReadonlyHint from '@/workspace-components/shared/WorkbenchReadonlyHint.vue'
 import logoUrl from '@/assets/非粮工作台logo.png'
 
-const props = defineProps<{ taskId?: string; taskName?: string; taskNo?: string; taskStatus?: string }>()
+const props = defineProps<{ taskId?: string; taskName?: string; taskNo?: string; taskStatus?: string; defaultTemplate?: boolean }>()
 const route = useRoute()
 const router = useRouter()
 const user = useUserStore()
@@ -26,10 +28,10 @@ const noticeError = ref('')
 const flowError = ref('')
 let version = 0
 const flowLoading = ref(true)
-const workflow = computed(() => nonGrainWorkflow(flow.value, Boolean(props.taskId)))
+const workflow = computed(() => props.defaultTemplate ? defaultWorkflow(flow.value) : nonGrainWorkflow(flow.value, Boolean(props.taskId)))
 const currentKey = computed(() => {
   const current = flow.value?.currentNode || flow.value?.timeline.find(node => node.status === 'PROCESSING')
-  const key = current ? nonGrainNodeKey(current) : undefined
+  const key = current ? (props.defaultTemplate ? workflow.value.find(node => node.instance?.id === current.id)?.key : nonGrainNodeKey(current)) : undefined
   return workflow.value.find(node => node.key === key && node.viewable)?.key || [...workflow.value].reverse().find(node => node.viewable)?.key
 })
 const selectedKey = computed(() => {
@@ -87,7 +89,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
         <button class="ng-back" @click="router.push('/tasks/todo')">‹ 返回任务</button>
         <img :src="logoUrl" alt="耕地用途监管 Logo">
         <div class="ng-brand-text">
-          <b>耕地用途监管工作台</b>
+          <b>{{ defaultTemplate ? '业务办理工作台' : '耕地用途监管工作台' }}</b>
           <small :title="taskName">{{ taskName }}</small>
         </div>
       </div>
@@ -132,7 +134,8 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
 
     <WorkbenchReadonlyHint :root="workbenchBody" :message="readonlyControlHint" :page-key="selectedKey" />
     <main ref="workbenchBody" class="ng-workspace-body">
-      <TaskAcceptancePanel v-if="selectedKey === 'task-acceptance'" :task-id="taskId" />
+      <DefaultWorkflowPanel v-if="defaultTemplate" :task-id="taskId" :node-key="selectedNode?.instance?.nodeKey || 'REVIEW_OWNER'" :readonly="!canOperate" @submitted="inspectionSubmitted" />
+      <TaskAcceptancePanel v-else-if="selectedKey === 'task-acceptance'" :task-id="taskId" />
       <NonGrainPreliminaryReviewPanel v-else-if="selectedKey === 'section-preliminary-review'" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="loadHeader" />
       <NonGrainPreliminaryReviewPanel v-else-if="selectedKey === 'department-confirmation'" stage="department" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="loadHeader" />
       <NonGrainInspectionPanel v-else-if="selectedKey === 'on-site-verification'" :task-id="taskId" :flow-error="flowError" :readonly="!canOperate" @submitted="inspectionSubmitted" />
