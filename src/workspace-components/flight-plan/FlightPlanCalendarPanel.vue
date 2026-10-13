@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { getFlightPlans } from '@/api/patrol'
+import { computed, onMounted, ref, watch } from 'vue'
+import { getFlightPlans, getFlightTaskPage } from '@/api/patrol'
+import { isMockMode } from '@/api/client'
 import { useUserStore } from '@/stores/user'
 import type { FlightPlanItem } from '@/mocks/route-planning'
+import { toFlightCalendarItems } from '@/utils/flight-calendar'
+import type { FlightCalendarItem, FlightTaskRecord } from '@/utils/flight-calendar'
 
 const user = useUserStore()
-const plans = ref<FlightPlanItem[]>([])
+const plans = ref<FlightCalendarItem[]>([])
 const loading = ref(false)
 const error = ref('')
+const warning = ref('')
+let loadSequence = 0
 const keyword = ref('')
 const statusFilter = ref<number | ''>('')
 const deviceFilter = ref('')
@@ -27,14 +32,14 @@ const statusMeta: Record<number, { label: string; tone: string }> = {
 function dateKey(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
 }
-function statusLabel(status?: number) {
-  if (status === undefined) return '状态未返回'
+function statusLabel(status?: number, fallback?: string) {
+  if (status === undefined) return fallback || '状态未返回'
   return statusMeta[status]?.label || `状态 ${status}`
 }
 function statusTone(status?: number) {
   return status === undefined ? 'unknown' : statusMeta[status]?.tone || 'unknown'
 }
-function planTime(plan: FlightPlanItem) {
+function planTime(plan: FlightCalendarItem) {
   return plan.start && plan.start !== '--:--' ? plan.start : '时间未定'
 }
 
@@ -89,33 +94,83 @@ function selectDay(key: string) {
   selectedDate.value = key
 }
 
+async function loadAllPlans(deptId?: string): Promise<FlightPlanItem[]> {
+  const first = await getFlightPlans({ pageNum: 1, pageSize: 200, deptId })
+  const all = [...first.list]
+  for (let pageNum = 2; pageNum <= Math.ceil(first.total / 200); pageNum += 4) {
+    const pages = await Promise.all(Array.from(
+      { length: Math.min(4, Math.ceil(first.total / 200) - pageNum + 1) },
+      (_, index) => getFlightPlans({ pageNum: pageNum + index, pageSize: 200, deptId }),
+    ))
+    all.push(...pages.flatMap((page) => page.list))
+  }
+  return all
+}
+
+function taskPage(payload: unknown): { records: FlightTaskRecord[]; total: number; pageSize: number } {
+  if (!payload || typeof payload !== 'object') throw new Error('飞行任务接口未返回分页数据')
+  const page = payload as Record<string, unknown>
+  if (!Array.isArray(page.records)) throw new Error('飞行任务接口未返回任务列表')
+  const total = Number(page.total ?? page.records.length)
+  const pageSize = Number(page.pageSize ?? 200)
+  return {
+    records: page.records as FlightTaskRecord[],
+    total: Number.isFinite(total) ? total : page.records.length,
+    pageSize: Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 200,
+  }
+}
+
+async function loadAllTasks(deptId?: string): Promise<FlightTaskRecord[]> {
+  const first = taskPage(await getFlightTaskPage({ pageNum: 1, pageSize: 200, deptId }))
+  const all = [...first.records]
+  const pageCount = Math.ceil(first.total / first.pageSize)
+  for (let pageNum = 2; pageNum <= pageCount; pageNum += 4) {
+    const pages = await Promise.all(Array.from(
+      { length: Math.min(4, pageCount - pageNum + 1) },
+      (_, index) => getFlightTaskPage({ pageNum: pageNum + index, pageSize: first.pageSize, deptId }).then(taskPage),
+    ))
+    all.push(...pages.flatMap((page) => page.records))
+  }
+  return all
+}
+
 async function loadPlans() {
+  const sequence = ++loadSequence
   loading.value = true
   error.value = ''
+  warning.value = ''
   try {
-    const first = await getFlightPlans({ pageNum: 1, pageSize: 200, deptId: user.activeDeptId })
-    const all = [...first.list]
-    const pageCount = Math.ceil(first.total / 200)
-    for (let pageNum = 2; pageNum <= pageCount; pageNum += 1) {
-      const page = await getFlightPlans({ pageNum, pageSize: 200, deptId: user.activeDeptId })
-      all.push(...page.list)
+    const mock = isMockMode()
+    const [planResult, taskResult] = await Promise.allSettled([
+      loadAllPlans(user.activeDeptId),
+      mock ? Promise.resolve([] as FlightTaskRecord[]) : loadAllTasks(user.activeDeptId),
+    ])
+    if (sequence !== loadSequence) return
+    if (planResult.status === 'rejected' && taskResult.status === 'rejected') {
+      throw planResult.reason instanceof Error ? planResult.reason : new Error('飞行排期读取失败')
     }
-    plans.value = all
+    const planList = planResult.status === 'fulfilled' ? planResult.value : []
+    const taskList = taskResult.status === 'fulfilled' ? taskResult.value : []
+    plans.value = toFlightCalendarItems(planList, taskList)
+    if (planResult.status === 'rejected') warning.value = '飞行计划读取失败，当前仅显示飞行任务。'
+    else if (taskResult.status === 'rejected') warning.value = '飞行任务读取失败，当前仅显示计划排期。'
   } catch (reason) {
+    if (sequence !== loadSequence) return
     plans.value = []
-    error.value = reason instanceof Error ? reason.message : '飞行计划读取失败。'
+    error.value = reason instanceof Error ? reason.message : '飞行排期读取失败。'
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
 onMounted(() => void loadPlans())
+watch(() => user.activeDeptId, () => void loadPlans())
 </script>
 
 <template>
   <div class="flight-plan-calendar">
     <section class="metric-grid">
-      <article><span>本月计划</span><b>{{ monthlyStats.total }}<small>架次</small></b><em>来自飞行计划接口</em></article>
+      <article><span>本月排期</span><b>{{ monthlyStats.total }}<small>架次</small></b><em>任务优先，保留未生成任务的计划</em></article>
       <article><span>待执行</span><b>{{ monthlyStats.pending }}<small>架次</small></b><em>等待计划起飞</em></article>
       <article><span>执行中</span><b>{{ monthlyStats.running }}<small>架次</small></b><em>当前执行计划</em></article>
       <article><span>已完成</span><b>{{ monthlyStats.done }}<small>架次</small></b><em>本月完成计划</em></article>
@@ -126,7 +181,8 @@ onMounted(() => void loadPlans())
       <div class="filters"><input v-model="keyword" placeholder="搜索计划、航线或设备" /><label>执行状态<select v-model="statusFilter"><option value="">全部状态</option><option v-for="status in availableStatuses" :key="status" :value="status">{{ statusLabel(status) }}</option></select></label><label>执行设备<select v-model="deviceFilter"><option value="">全部设备</option><option v-for="device in availableDevices" :key="device" :value="device">{{ device }}</option></select></label><div class="mode-switch"><button :class="{ active: displayMode === 'calendar' }" @click="displayMode = 'calendar'">日历</button><button :class="{ active: displayMode === 'list' }" @click="displayMode = 'list'">列表</button></div></div>
     </section>
 
-    <div v-if="loading" class="state-layer">正在读取真实飞行计划…</div>
+    <div v-if="warning" class="data-warning" role="status">{{ warning }}</div>
+    <div v-if="loading" class="state-layer">正在读取真实飞行排期…</div>
     <div v-else-if="error" class="state-layer error"><span>{{ error }}</span><button @click="loadPlans">重新读取</button></div>
     <section v-else-if="displayMode === 'calendar'" class="calendar-layout">
       <div class="calendar-panel">
@@ -135,14 +191,14 @@ onMounted(() => void loadPlans())
           <button v-for="day in calendarDays" :key="day.key" class="day-cell" :class="{ muted: !day.currentMonth, selected: selectedDate === day.key, today: day.today }" @click="selectDay(day.key)">
             <span>{{ day.day }}</span>
             <i v-for="plan in day.plans.slice(0,3)" :key="plan.id" :class="statusTone(plan.status)"><em>{{ planTime(plan) }}</em>{{ plan.title }}</i>
-            <small v-if="day.plans.length > 3">另有 {{ day.plans.length - 3 }} 项计划</small>
+            <small v-if="day.plans.length > 3">另有 {{ day.plans.length - 3 }} 架次</small>
           </button>
         </div>
       </div>
-      <aside class="daily-panel"><header><div><b>{{ selectedDate.replace(/-/g, ' / ') }}</b><span>当日计划</span></div><em>{{ selectedPlans.length }} 项</em></header><div class="daily-list"><article v-for="plan in selectedPlans" :key="plan.id"><time>{{ planTime(plan) }}</time><i :class="statusTone(plan.status)"></i><div><b>{{ plan.title }}</b><span>{{ plan.area }}</span><small>{{ plan.sn || '未返回设备 SN' }}<template v-if="plan.deviceType"> · {{ plan.deviceType }}</template></small></div><em :class="statusTone(plan.status)">{{ statusLabel(plan.status) }}</em></article><div v-if="!selectedPlans.length" class="empty">当日暂无飞行计划</div></div><footer>未解析到执行日期的计划：{{ unscheduledCount }} 项</footer></aside>
+      <aside class="daily-panel"><header><div><b>{{ selectedDate.replace(/-/g, ' / ') }}</b><span>当日飞行</span></div><em>{{ selectedPlans.length }} 架次</em></header><div class="daily-list"><article v-for="plan in selectedPlans" :key="plan.id"><time>{{ planTime(plan) }}</time><i :class="statusTone(plan.status)"></i><div><b>{{ plan.title }}</b><span>{{ plan.area }}</span><small>{{ plan.sn || '未返回设备 SN' }}<template v-if="plan.deviceType"> · {{ plan.deviceType }}</template></small></div><em :class="statusTone(plan.status)">{{ statusLabel(plan.status, plan.statusText) }}</em></article><div v-if="!selectedPlans.length" class="empty">当日暂无飞行排期</div></div><footer>未解析到执行日期的记录：{{ unscheduledCount }} 项</footer></aside>
     </section>
 
-    <section v-else class="plan-list-panel"><header><span>计划名称</span><span>执行时间</span><span>航线</span><span>设备</span><span>状态</span></header><div><article v-for="plan in filteredPlans" :key="plan.id"><span><b>{{ plan.title }}</b><small>ID：{{ plan.id }}</small></span><span>{{ plan.date || '日期未返回' }} {{ planTime(plan) }}</span><span>{{ plan.area }}</span><span>{{ plan.sn || '-' }}<small>{{ plan.deviceType || '' }}</small></span><span><em :class="statusTone(plan.status)">{{ statusLabel(plan.status) }}</em></span></article><div v-if="!filteredPlans.length" class="empty">暂无符合条件的飞行计划</div></div></section>
+    <section v-else class="plan-list-panel"><header><span>计划名称</span><span>执行时间</span><span>航线</span><span>设备</span><span>状态</span></header><div><article v-for="plan in filteredPlans" :key="plan.id"><span><b>{{ plan.title }}</b><small>{{ plan.taskId ? `任务 ID：${plan.taskId}` : `计划 ID：${plan.planId}` }}</small></span><span>{{ plan.date || '日期未返回' }} {{ planTime(plan) }}</span><span>{{ plan.area }}</span><span>{{ plan.sn || '-' }}<small>{{ plan.deviceType || '' }}</small></span><span><em :class="statusTone(plan.status)">{{ statusLabel(plan.status, plan.statusText) }}</em></span></article><div v-if="!filteredPlans.length" class="empty">暂无符合条件的飞行排期</div></div></section>
   </div>
 </template>
 
@@ -151,4 +207,5 @@ onMounted(() => void loadPlans())
 .filters>input:focus::placeholder{color:transparent}
 .filters select:hover,.filters select:focus{color:#fff;background-color:#315f91;border-color:#315f91}
 .filters select option{color:#3f6171;background:#fff}
+.data-warning{padding:8px 12px;color:#856a27;background:#fff7df;border:1px solid #efd791;border-radius:6px;font-size:12px}
 </style>

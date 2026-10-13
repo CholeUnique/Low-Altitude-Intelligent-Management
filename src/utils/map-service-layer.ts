@@ -455,6 +455,8 @@ class ArcGisExportLayer extends L.GridLayer {
 
   createFilteredCopy(expression: string) {
     const layer = new ArcGisExportLayer(this.url, this.imageServer, this.vectorLayerId, this.vectorGeometryType)
+    // 仪表盘允许按服务调整叠放顺序；筛选时的无闪烁替换层必须沿用原服务 pane。
+    layer.options.pane = this.options.pane
     layer.definitionExpression = expression
     layer.filterRevision = this.filterRevision + 1
     return layer

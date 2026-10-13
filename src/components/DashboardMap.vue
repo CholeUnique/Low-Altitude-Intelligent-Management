@@ -6,7 +6,8 @@ import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 import taizhouCityBoundary from '@/assets/geo/taizhou-city.json'
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
-import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { listEnabledMapServices, listMapServicesForDepartments, updateMapService, type MapServiceItem } from '@/api/map-service'
+import { getDepartmentList } from '@/api/account-management'
 import { useUserStore } from '@/stores/user'
 import type { DashboardMapLayer, DronePatrolRoute } from '@/types'
 import {
@@ -23,9 +24,12 @@ const props = defineProps<{
   routes: DronePatrolRoute[]
   /** 首页全幅地图的悬浮控件样式，不改变地图事件。 */
   floatingControls?: boolean
+  /** 仅隐藏首页地图上的悬浮面板，保留地图和底部工具栏。 */
+  screenCleared?: boolean
   /** 从场景入口进入时，自动聚焦该场景实际任务范围。 */
   focusLayerId?: string
 }>()
+const emit = defineEmits<{ 'toggle-clear-screen': [] }>()
 
 type BoundaryFeature = {
   geometry?: { coordinates?: unknown }
@@ -127,6 +131,9 @@ interface MapServiceGroup {
 const mapServiceGroups = ref<MapServiceGroup[]>([])
 const mapServicesLoading = ref(false)
 const mapServicesError = ref('')
+const mapServiceOrderSaving = ref(false)
+const draggingGroupId = ref('')
+const dragGhost = ref<{ name: string; x: number; y: number; width: number; height: number }>()
 const layerPanelCollapsed = ref(Boolean(props.floatingControls))
 const layerPanelId = `dashboard-layers-${useId().replace(/:/g, '')}`
 const visibleMapServiceIds = ref<string[]>([])
@@ -215,8 +222,21 @@ let searchPlaceMarker: L.CircleMarker | undefined
 let focusedSceneLayerId = ''
 let overviewFocused = false
 const mapServiceLayers = new Map<string, MapServiceLayerHandle>()
+const mapServicePaneNames = new Map<string, string>()
 const loadingMapServiceIds = new Set<string>()
 let mapServiceRequestVersion = 0
+let mapServicePaneSerial = 0
+let dragPressTimer: ReturnType<typeof window.setTimeout> | undefined
+let dragPointerId: number | undefined
+let dragStartX = 0
+let dragStartY = 0
+let dragRowX = 0
+let dragRowY = 0
+let dragGroupId = ''
+let dragOriginalOrder: string[] = []
+let dragActive = false
+let suppressGroupClick = false
+let previousUserSelect = ''
 let measurePoints: L.LatLng[] = []
 
 function dismissToolMessage() {
@@ -261,7 +281,195 @@ function addBaseLayers(mode: 'vector' | 'image') {
   labelLayer.addTo(map)
 }
 
+function paneForMapService(service: MapServiceItem) {
+  if (!map) return MAP_SERVICE_IMAGERY_PANE
+  const groupId = String(service.sourceServiceId ?? service.id)
+  let paneName = mapServicePaneNames.get(groupId)
+  if (!paneName) {
+    paneName = `dashboard-service-${++mapServicePaneSerial}`
+    const pane = map.createPane(paneName)
+    pane.style.zIndex = '235'
+    pane.style.pointerEvents = 'none'
+    mapServicePaneNames.set(groupId, paneName)
+  }
+  return paneName
+}
+
+function assignMapServicePane(layer: L.Layer, paneName: string) {
+  if (layer instanceof L.LayerGroup) {
+    layer.eachLayer((child) => assignMapServicePane(child, paneName))
+    return
+  }
+  layer.options.pane = paneName
+}
+
+function syncMapServiceStack() {
+  // 同一 z-index 的 pane 按 DOM 顺序绘制；列表首项最后放入，因而始终位于最上方。
+  [...mapServiceGroups.value].reverse().forEach((group) => {
+    const pane = map?.getPane(mapServicePaneNames.get(group.id) || '')
+    if (pane?.parentElement) pane.parentElement.appendChild(pane)
+  })
+}
+
+function stopMapServiceDrag() {
+  if (dragPressTimer) window.clearTimeout(dragPressTimer)
+  dragPressTimer = undefined
+  window.removeEventListener('pointermove', onMapServicePointerMove)
+  window.removeEventListener('pointerup', onMapServicePointerUp)
+  window.removeEventListener('pointercancel', onMapServicePointerCancel)
+  window.removeEventListener('blur', onMapServicePointerCancel)
+  if (dragActive) document.body.style.userSelect = previousUserSelect
+  dragPointerId = undefined
+  dragGroupId = ''
+  dragActive = false
+  draggingGroupId.value = ''
+  dragGhost.value = undefined
+}
+
+function onMapServicePointerDown(event: PointerEvent, group: MapServiceGroup) {
+  if (event.button !== 0 || mapServiceOrderSaving.value || mapServicesLoading.value) return
+  stopMapServiceDrag()
+  dragPointerId = event.pointerId
+  dragStartX = event.clientX
+  dragStartY = event.clientY
+  dragGroupId = group.id
+  const row = event.currentTarget as HTMLElement
+  const rect = row.getBoundingClientRect()
+  dragRowX = rect.left
+  dragRowY = rect.top
+  dragOriginalOrder = mapServiceGroups.value.map((item) => item.id)
+  window.addEventListener('pointermove', onMapServicePointerMove)
+  window.addEventListener('pointerup', onMapServicePointerUp)
+  window.addEventListener('pointercancel', onMapServicePointerCancel)
+  window.addEventListener('blur', onMapServicePointerCancel)
+  dragPressTimer = window.setTimeout(() => {
+    dragPressTimer = undefined
+    dragActive = true
+    draggingGroupId.value = group.id
+    previousUserSelect = document.body.style.userSelect
+    document.body.style.userSelect = 'none'
+    dragGhost.value = { name: group.name, x: rect.left, y: rect.top, width: rect.width, height: rect.height }
+  }, 240)
+}
+
+function onMapServicePointerMove(event: PointerEvent) {
+  if (event.pointerId !== dragPointerId) return
+  if (!dragActive) {
+    if (Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY) > 6) stopMapServiceDrag()
+    return
+  }
+  event.preventDefault()
+  if (dragGhost.value) {
+    dragGhost.value = { ...dragGhost.value, x: dragRowX + event.clientX - dragStartX, y: dragRowY + event.clientY - dragStartY }
+  }
+  const list = document.getElementById(layerPanelId)?.querySelector<HTMLElement>('.map-service-sort-list')
+  if (!list) return
+  const scroller = list.parentElement
+  if (scroller) {
+    const bounds = scroller.getBoundingClientRect()
+    if (event.clientY < bounds.top + 28) scroller.scrollTop -= 12
+    else if (event.clientY > bounds.bottom - 28) scroller.scrollTop += 12
+  }
+  const siblings = [...list.querySelectorAll<HTMLElement>('.map-service-group')]
+    .filter((element) => element.dataset.groupId !== dragGroupId)
+  const insertAt = siblings.findIndex((element) => event.clientY < element.getBoundingClientRect().top + element.getBoundingClientRect().height / 2)
+  const targetIndex = insertAt < 0 ? siblings.length : insertAt
+  const currentIndex = mapServiceGroups.value.findIndex((item) => item.id === dragGroupId)
+  if (currentIndex < 0 || currentIndex === targetIndex) return
+  const reordered = [...mapServiceGroups.value]
+  const [moved] = reordered.splice(currentIndex, 1)
+  if (!moved) return
+  reordered.splice(targetIndex, 0, moved)
+  mapServiceGroups.value = reordered
+  syncMapServiceStack()
+}
+
+async function persistMapServiceOrder(previousOrder: string[], requestVersion: number) {
+  mapServiceOrderSaving.value = true
+  try {
+    const departments = await getDepartmentList()
+    const departmentIds = departments.map((department) => String(department.id))
+    if (!departmentIds.length) throw new Error('无法获取部门列表，排序未保存')
+    const allServices = await listMapServicesForDepartments(departmentIds)
+    if (requestVersion !== mapServiceRequestVersion) return
+    const visibleOrder = mapServiceGroups.value.map((group) => group.id)
+    const visibleIds = new Set(visibleOrder)
+    if (visibleOrder.some((id) => !allServices.some((service) => String(service.id) === id))) {
+      throw new Error('部分地图服务未能从后台读到，排序未保存')
+    }
+    const orderedVisible = new Map(mapServiceGroups.value.map((group) => [group.id, group.source]))
+    let visibleIndex = 0
+    const reordered = allServices.map((service) => visibleIds.has(String(service.id))
+      ? orderedVisible.get(visibleOrder[visibleIndex++]!) || service
+      : service)
+    const changes = reordered.map((service, index) => ({ service, sort: index + 1, oldSort: Number(service.sort) || 0 }))
+      .filter(({ service, sort }) => Number(service.sort) !== sort)
+    const updateSort = (service: MapServiceItem, sort: number) => updateMapService({
+      id: service.id,
+      name: service.name,
+      serviceUrl: service.serviceUrl,
+      ...(service.type ? { type: service.type } : {}),
+      sort,
+      remark: service.remark,
+      deptIds: service.deptIds || [],
+    })
+    const results = await Promise.allSettled(changes.map(({ service, sort }) => updateSort(service, sort)))
+    if (results.some((result) => result.status === 'rejected')) {
+      await Promise.allSettled(changes.map(({ service, oldSort }) => updateSort(service, oldSort)))
+      throw new Error('后台排序保存失败，已尝试恢复原顺序')
+    }
+    if (requestVersion === mapServiceRequestVersion) {
+      mapServiceGroups.value.forEach((group) => {
+        group.source.sort = reordered.findIndex((service) => String(service.id) === group.id) + 1
+      })
+      showToolMessage('图层顺序已保存，所有用户将共用此排序')
+    }
+  } catch (reason) {
+    if (requestVersion === mapServiceRequestVersion) {
+      const byId = new Map(mapServiceGroups.value.map((group) => [group.id, group]))
+      mapServiceGroups.value = previousOrder.map((id) => byId.get(id)).filter((group): group is MapServiceGroup => Boolean(group))
+      syncMapServiceStack()
+      showToolMessage(reason instanceof Error ? reason.message : '排序保存失败', 5000)
+    }
+  } finally {
+    mapServiceOrderSaving.value = false
+  }
+}
+
+function onMapServicePointerUp(event: PointerEvent) {
+  if (event.pointerId !== dragPointerId) return
+  const wasDragging = dragActive
+  const previousOrder = dragOriginalOrder
+  const requestVersion = mapServiceRequestVersion
+  stopMapServiceDrag()
+  if (!wasDragging) return
+  suppressGroupClick = true
+  window.setTimeout(() => { suppressGroupClick = false }, 100)
+  if (previousOrder.some((id, index) => id !== mapServiceGroups.value[index]?.id)) {
+    if (user.currentUser?.role === 'ADMIN') void persistMapServiceOrder(previousOrder, requestVersion)
+    else showToolMessage('图层顺序仅在当前页面生效；管理员可保存为所有用户共用的顺序')
+  }
+}
+
+function onMapServicePointerCancel() {
+  if (dragActive) {
+    const byId = new Map(mapServiceGroups.value.map((group) => [group.id, group]))
+    mapServiceGroups.value = dragOriginalOrder.map((id) => byId.get(id)).filter((group): group is MapServiceGroup => Boolean(group))
+    syncMapServiceStack()
+  }
+  stopMapServiceDrag()
+}
+
+function onMapServiceGroupClick(group: MapServiceGroup) {
+  if (suppressGroupClick) {
+    suppressGroupClick = false
+    return
+  }
+  void toggleMapServiceGroup(group)
+}
+
 async function loadMapServices() {
+  stopMapServiceDrag()
   const requestVersion = ++mapServiceRequestVersion
   // 部门切换时先撤掉旧图层，避免新列表返回前仍展示上一部门的服务。
   mapServiceLayers.forEach((handle) => handle.layer.remove())
@@ -295,6 +503,7 @@ async function loadMapServices() {
     const groupIds = new Set(groups.filter((group) => group.layers.length > 1).map((group) => group.id))
     expandedMapServiceGroupIds.value = expandedMapServiceGroupIds.value.filter((id) => groupIds.has(id))
     mapServiceGroups.value = groups
+    syncMapServiceStack()
   } catch (reason) {
     if (requestVersion !== mapServiceRequestVersion) return
     mapServiceGroups.value = []
@@ -325,7 +534,9 @@ async function toggleMapService(service: MapServiceItem) {
       return
     }
     mapServiceLayers.set(id, handle)
+    assignMapServicePane(handle.layer, paneForMapService(service))
     handle.layer.addTo(map)
+    syncMapServiceStack()
     if (!visibleMapServiceIds.value.includes(id)) visibleMapServiceIds.value = [...visibleMapServiceIds.value, id]
     if (handle.categoryFilter && !vectorFilterPanels.value.some((panel) => panel.serviceId === id)) {
       vectorFilterPanels.value = [...vectorFilterPanels.value, {
@@ -897,6 +1108,7 @@ async function initMap() {
   }
   try {
     await nextTick()
+    mapServicePaneNames.clear()
     map = L.map(container.value, {
       center: TAIZHOU_CENTER,
       zoom: TAIZHOU_ZOOM,
@@ -994,6 +1206,7 @@ watch(searchKeyword, (value) => {
   }, 260)
 })
 onBeforeUnmount(() => {
+  stopMapServiceDrag()
   if (toolMessageTimer) window.clearTimeout(toolMessageTimer)
   if (markerHintTimer) window.clearTimeout(markerHintTimer)
   if (sceneFocusTimer) window.clearTimeout(sceneFocusTimer)
@@ -1009,7 +1222,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="dashboard-map" :class="{ 'dashboard-map--floating': floatingControls, 'dashboard-map--has-measure-result': Boolean(measureResult), 'dashboard-map--measuring': activeTool === 'distance' || activeTool === 'area' || activeTool === 'marker' }">
+  <div class="dashboard-map" :class="{ 'dashboard-map--floating': floatingControls, 'dashboard-map--clear-screen': screenCleared, 'dashboard-map--has-measure-result': Boolean(measureResult), 'dashboard-map--measuring': activeTool === 'distance' || activeTool === 'area' || activeTool === 'marker' }">
     <div ref="container" class="dashboard-map__canvas"></div>
     <div v-if="mapError" class="dashboard-map__empty"><span>{{ mapError }}</span><button @click="retryMap">重新加载</button></div>
     <div v-else-if="!mapReady" class="dashboard-map__loading">正在加载江苏泰州天地图…</div>
@@ -1032,22 +1245,23 @@ onBeforeUnmount(() => {
       <aside :id="layerPanelId" class="layer-manager" :inert="layerPanelCollapsed" :aria-hidden="layerPanelCollapsed">
         <div v-if="!floatingControls" class="tool-title"><b><svg class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg>图层管理</b><span class="tool-title-state">{{ mapServiceGroups.length }} 项服务</span></div>
         <div v-if="floatingControls" :id="`${layerPanelId}-search`" class="layer-manager-search"></div>
-        <div class="layer-manager-list">
+        <div class="layer-manager-list" :aria-busy="mapServiceOrderSaving">
+          <div v-if="mapServiceOrderSaving" class="layer-order-save-status" role="status">正在保存共享排序…</div>
           <div v-if="mapServicesLoading" class="layer-panel-message">正在读取地图服务…</div>
           <div v-else-if="mapServicesError" class="layer-panel-message error">{{ mapServicesError }}</div>
           <div v-else-if="!mapServiceGroups.length" class="layer-panel-message">暂无已启用的地图服务</div>
-          <template v-else>
-            <div v-for="group in mapServiceGroups" :key="group.id" class="map-service-group">
-              <button class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group) }" :title="group.name" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : undefined" @click="toggleMapServiceGroup(group)">
-                <i class="layer-kind"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em :class="{ 'layer-expander': group.layers.length > 1 }">{{ group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '⌃' : '⌄') : (isMapServiceGroupActive(group) ? '●' : '○') }}</em>
+          <TransitionGroup v-else tag="div" name="map-service-sort" class="map-service-sort-list">
+            <div v-for="group in mapServiceGroups" :key="group.id" class="map-service-group" :class="{ 'is-dragging': draggingGroupId === group.id }" :data-group-id="group.id">
+              <button class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group) }" :title="`${group.name}(长按可拖动排序)`" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : undefined" @pointerdown="onMapServicePointerDown($event, group)" @click="onMapServiceGroupClick(group)">
+                <i class="layer-kind"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em :class="{ 'layer-expander': group.layers.length > 1 }" :title="group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '收起' : '展开') : (isMapServiceGroupActive(group) ? '隐藏' : '显示')">{{ group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '⌃' : '⌄') : (isMapServiceGroupActive(group) ? '●' : '○') }}</em>
               </button>
               <div v-if="isMapServiceGroupExpanded(group)" class="map-service-sublayers">
                 <button v-for="service in group.layers" :key="service.id" class="layer-row map-service-row map-service-sublayer" :class="{ active: visibleMapServiceIds.includes(String(service.id)) }" :title="service.name" role="switch" :aria-checked="visibleMapServiceIds.includes(String(service.id))" @click="toggleMapService(service)">
-                  <i class="layer-kind"><MapLocation v-if="service.arcGisGeometryType" /><Picture v-else /></i><span><b>{{ service.name }}</b></span><em>{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
+                  <i class="layer-kind"><MapLocation v-if="service.arcGisGeometryType" /><Picture v-else /></i><span><b>{{ service.name }}</b></span><em :title="visibleMapServiceIds.includes(String(service.id)) ? '隐藏' : '显示'">{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
                 </button>
               </div>
             </div>
-          </template>
+          </TransitionGroup>
         </div>
       </aside>
       </div>
@@ -1070,6 +1284,7 @@ onBeforeUnmount(() => {
       </div>
       <button type="button" :class="{ active: activeTool === 'marker' }" aria-label="添加标注" :aria-pressed="activeTool === 'marker'" @click="startTool('marker')"><i class="map-tool-icon"><Location /></i><span>添加标注</span></button>
       <button type="button" aria-label="清除标注" @click="clearAnnotations"><i class="map-tool-icon"><Delete /></i><span>清除标注</span></button>
+      <button v-if="floatingControls" type="button" :class="{ active: screenCleared }" :aria-label="screenCleared ? '恢复地图面板' : '地图窗口清屏'" :aria-pressed="Boolean(screenCleared)" :title="screenCleared ? '恢复地图面板' : '地图窗口清屏'" @click="emit('toggle-clear-screen')"><i class="map-tool-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H5v4m10-4h4v4M9 19H5v-4m10 4h4v-4"/><path d="M9 12H5m0 0 2-2m-2 2 2 2m8-2h4m0 0-2-2m2 2-2 2"/></svg></i><span>{{ screenCleared ? '恢复面板' : '地图清屏' }}</span></button>
       <button type="button" aria-label="放大地图" @click="map?.zoomIn()"><i class="map-tool-icon"><ZoomIn /></i><span>放大地图</span></button>
       <button type="button" aria-label="缩小地图" @click="map?.zoomOut()"><i class="map-tool-icon"><ZoomOut /></i><span>缩小地图</span></button>
       <div v-if="measureResult" class="measure-result" role="status">
@@ -1123,6 +1338,9 @@ onBeforeUnmount(() => {
     </aside>
 
     <Teleport to="body">
+      <Transition name="map-layer-ghost">
+        <div v-if="dragGhost" class="map-layer-drag-ghost" :style="{ left: `${dragGhost.x}px`, top: `${dragGhost.y}px`, width: `${dragGhost.width}px`, height: `${dragGhost.height}px` }">{{ dragGhost.name }}</div>
+      </Transition>
       <Transition name="tool-message">
         <div v-if="toolMessage" class="tool-message" role="status" aria-live="polite">
           <span class="tool-message__icon" aria-hidden="true"><InfoFilled /></span>
@@ -1154,8 +1372,15 @@ onBeforeUnmount(() => {
 .layer-manager .layer-row b { overflow: visible; white-space: normal; line-height: 1.35; text-overflow: clip; overflow-wrap: anywhere; }
 .layer-manager .map-service-row { grid-template-columns: minmax(0,1fr) auto; }
 .layer-manager .map-service-group { border-bottom: 1px solid #0d5278; }
+.layer-order-save-status { padding: 7px 12px; color: #b9edf6; background: #075070b5; border-bottom: 1px solid #2ea3bc; font-size: 12px; }
 .layer-manager .map-service-group:last-child { border-bottom: 0; }
 .layer-manager .map-service-group>.map-service-row { border-bottom: 0; }
+.layer-manager .map-service-group.is-dragging { opacity: .32; background: #14799a30; outline: 1px dashed #69ddee; outline-offset: -2px; }
+.layer-manager .map-service-row { touch-action: pan-y; }
+.map-service-sort-move { transition: transform .25s cubic-bezier(.2,.8,.2,1); }
+.map-layer-drag-ghost { position: fixed; z-index: 20000; display: flex; align-items: center; box-sizing: border-box; padding: 8px 16px; overflow: hidden; color: #e7fbff; background: linear-gradient(110deg,#135a7fe8,#063451f2); border: 1px solid #5bdaed; border-radius: 9px; box-shadow: 0 12px 28px #001a2b88,0 0 20px #39ddef55; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; transform: scale(1.025); }
+.map-layer-ghost-enter-active,.map-layer-ghost-leave-active { transition: opacity .16s ease, transform .16s ease; }
+.map-layer-ghost-enter-from,.map-layer-ghost-leave-to { opacity: 0; transform: scale(.96); }
 .layer-manager .map-service-sublayers { position: relative; padding-left: 16px; border-top: 1px solid #0b4668; background: #02172dcc; }
 .layer-manager .map-service-sublayers::before { position: absolute; top: 0; bottom: 0; left: 17px; width: 1px; background: #1785aa80; content: ''; }
 .layer-manager .map-service-sublayer { position: relative; min-height: 38px; padding: 7px 16px 7px 24px; border-bottom: 1px dashed #0b4668; background: #04253ebf; }

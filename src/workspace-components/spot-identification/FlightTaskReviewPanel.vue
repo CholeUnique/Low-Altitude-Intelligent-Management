@@ -6,6 +6,7 @@ import { isMockMode } from '@/api/client'
 import type { RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import {
   getFlightReviewMedia,
+  getFlightReviewMediaFile,
   getFlightReviewPlans,
   getFlightReviewTasks,
   type FlightReviewMedia,
@@ -56,7 +57,10 @@ const mediaFullscreen = ref(false)
 const previewState = ref<'loading' | 'ready' | 'error'>('loading')
 const previewFailure = ref<'missing' | 'unsupported' | 'timeout' | 'image' | 'video'>('missing')
 const previewImageUrl = ref('')
+const previewImageSource = ref<'local' | 'original' | 'thumbnail' | ''>('')
 const imageFallbackUsed = ref(false)
+const downloadBusy = ref(false)
+const downloadError = ref('')
 const mediaPreviewStatus = ref<Record<string, 'ready' | 'error'>>({})
 const uploadVisible = ref(false)
 const uploadMessage = ref('')
@@ -64,6 +68,11 @@ const aiNoticePlanId = ref('')
 let aiNoticeTimer: ReturnType<typeof setTimeout> | undefined
 let videoLoadTimer: ReturnType<typeof setTimeout> | undefined
 let loadVersion = 0
+let previewRequestVersion = 0
+let previewAbortController: AbortController | undefined
+let previewObjectUrl = ''
+let previewFileBlob: Blob | undefined
+let previewFileKey = ''
 
 function showAiPendingNotice(planId: string) {
   if (aiNoticeTimer) clearTimeout(aiNoticeTimer)
@@ -88,7 +97,8 @@ function mediaKind(media: FlightReviewMedia): 'image' | 'video' | 'other' {
 
 function mediaKey(media: FlightReviewMedia) { return `${media.taskId}:${media.id}` }
 function mediaRank(media: FlightReviewMedia) {
-  if (mediaKind(media) === 'other' || !(media.originalUrl || (mediaKind(media) === 'image' && media.thumbnailUrl))) return 3
+  const kind = mediaKind(media)
+  if (kind === 'other' || !(media.originalUrl || (kind === 'image' && (media.localFileUrl || media.thumbnailUrl)))) return 3
   const status = mediaPreviewStatus.value[mediaKey(media)]
   return status === 'ready' ? 0 : status === 'error' ? 2 : 1
 }
@@ -110,29 +120,76 @@ function markPreviewFailed(reason: 'missing' | 'unsupported' | 'timeout' | 'imag
   const media = previewMedia.value
   if (media) mediaPreviewStatus.value = { ...mediaPreviewStatus.value, [mediaKey(media)]: 'error' }
 }
+function releasePreviewFile() {
+  if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl)
+  previewObjectUrl = ''
+  previewFileBlob = undefined
+  previewFileKey = ''
+}
+function useRemoteImage(media: FlightReviewMedia) {
+  if (media.originalUrl) {
+    previewImageSource.value = 'original'
+    previewImageUrl.value = media.originalUrl
+  } else if (media.thumbnailUrl) {
+    previewImageSource.value = 'thumbnail'
+    imageFallbackUsed.value = true
+    previewImageUrl.value = media.thumbnailUrl
+  } else {
+    markPreviewFailed(media.localFileUrl ? 'image' : 'missing')
+  }
+}
 function handlePreviewImageError() {
   const media = previewMedia.value
-  if (media && !imageFallbackUsed.value && media.thumbnailUrl && previewImageUrl.value !== media.thumbnailUrl) {
+  if (!media) return
+  if (previewImageSource.value === 'local') {
+    releasePreviewFile()
+    useRemoteImage(media)
+    return
+  }
+  if (previewImageSource.value === 'original' && media.thumbnailUrl) {
+    previewImageSource.value = 'thumbnail'
     imageFallbackUsed.value = true
     previewImageUrl.value = media.thumbnailUrl
     return
   }
   markPreviewFailed('image')
 }
-function initializePreview() {
+async function initializePreview() {
+  const version = ++previewRequestVersion
+  previewAbortController?.abort()
+  previewAbortController = undefined
+  releasePreviewFile()
   clearVideoTimer()
   const media = previewMedia.value
   previewState.value = 'loading'
   previewFailure.value = 'missing'
   previewImageUrl.value = ''
+  previewImageSource.value = ''
   imageFallbackUsed.value = false
+  downloadError.value = ''
   if (!media) return
   const kind = mediaKind(media)
   if (kind === 'other') { markPreviewFailed('unsupported'); return }
   if (kind === 'image') {
-    previewImageUrl.value = media.originalUrl || media.thumbnailUrl
-    imageFallbackUsed.value = !media.originalUrl && Boolean(media.thumbnailUrl)
-    if (!previewImageUrl.value) markPreviewFailed('missing')
+    if (media.localFileUrl) {
+      const controller = new AbortController()
+      previewAbortController = controller
+      try {
+        const file = await getFlightReviewMediaFile(media.localFileUrl, controller.signal)
+        if (version !== previewRequestVersion) return
+        previewFileBlob = file
+        previewFileKey = mediaKey(media)
+        previewObjectUrl = URL.createObjectURL(file)
+        previewImageSource.value = 'local'
+        previewImageUrl.value = previewObjectUrl
+      } catch {
+        if (version === previewRequestVersion) useRemoteImage(media)
+      } finally {
+        if (version === previewRequestVersion) previewAbortController = undefined
+      }
+    } else {
+      useRemoteImage(media)
+    }
     return
   }
   if (!media.originalUrl) { markPreviewFailed('missing'); return }
@@ -151,7 +208,32 @@ function previewErrorDescription() {
   if (previewFailure.value === 'unsupported') return '该文件不是浏览器可直接显示的图片或视频格式，请下载原文件查看。'
   if (previewFailure.value === 'timeout') return '浏览器在 20 秒内未取得可播放数据，可能与视频分段读取、服务响应或编码有关。'
   if (previewFailure.value === 'video') return '可能由 HEVC/H.265 编码、跨域限制或服务端响应格式异常导致，可下载原视频后使用本地播放器打开。'
-  return '原图及可用缩略图均未能读取，可能是文件地址失效、跨域限制或图片格式不受浏览器支持。'
+  return previewMedia.value?.localFileUrl
+    ? '后端文件地址、原图及缩略图均未能读取，请检查文件接口权限、地址和图片格式。'
+    : '原图及可用缩略图均未能读取，可能是文件地址失效、跨域限制或图片格式不受浏览器支持。'
+}
+async function downloadPreviewMedia() {
+  const media = previewMedia.value
+  if (!media?.localFileUrl || downloadBusy.value) return
+  downloadBusy.value = true
+  downloadError.value = ''
+  try {
+    const file = previewFileKey === mediaKey(media) && previewFileBlob
+      ? previewFileBlob
+      : await getFlightReviewMediaFile(media.localFileUrl)
+    const url = URL.createObjectURL(file)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = media.fileName || '飞行成果文件'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch {
+    downloadError.value = '后端文件下载失败，请检查文件接口权限或稍后重试。'
+  } finally {
+    downloadBusy.value = false
+  }
 }
 function enterMediaFullscreen() {
   if (previewState.value === 'ready') mediaFullscreen.value = true
@@ -171,10 +253,14 @@ function handleDetailKeydown(event: KeyboardEvent) {
   event.preventDefault()
 }
 function closeDetail() {
+  previewRequestVersion += 1
   mediaFullscreen.value = false
   detailPlanId.value = ''
   previewMediaId.value = ''
   clearVideoTimer()
+  previewAbortController?.abort()
+  previewAbortController = undefined
+  releasePreviewFile()
 }
 
 function display(value: string | undefined) { return value?.trim() || '--' }
@@ -374,14 +460,17 @@ const detailRow = computed(() => rows.value.find((row) => row.plan.id === detail
 const detailMedia = computed(() => [...(detailRow.value?.media || [])].sort((left, right) => mediaRank(left) - mediaRank(right)))
 const previewMedia = computed(() => detailMedia.value.find((item) => mediaKey(item) === previewMediaId.value) || detailMedia.value[0])
 const previewOrdinal = computed(() => previewMedia.value ? detailMedia.value.findIndex((item) => mediaKey(item) === mediaKey(previewMedia.value!)) + 1 : 0)
-watch(() => previewMedia.value ? `${mediaKey(previewMedia.value)}|${previewMedia.value.originalUrl}|${previewMedia.value.thumbnailUrl}` : '', initializePreview)
+watch(() => previewMedia.value ? `${mediaKey(previewMedia.value)}|${previewMedia.value.localFileUrl}|${previewMedia.value.originalUrl}|${previewMedia.value.thumbnailUrl}` : '', () => { void initializePreview() })
 watch([planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, startDate, endDate, resultTypeFilter, pageSize], () => { currentPage.value = 1 })
 watch(() => user.activeDeptId, () => { void loadData() }, { immediate: true })
 onMounted(() => window.addEventListener('keydown', handleDetailKeydown))
 onBeforeUnmount(() => {
   loadVersion += 1
+  previewRequestVersion += 1
   if (aiNoticeTimer) clearTimeout(aiNoticeTimer)
   clearVideoTimer()
+  previewAbortController?.abort()
+  releasePreviewFile()
   window.removeEventListener('keydown', handleDetailKeydown)
 })
 
@@ -492,19 +581,19 @@ function exportList() {
             <template v-if="previewMedia">
               <div class="media-stage" :class="{ 'can-expand': previewState === 'ready' && mediaKind(previewMedia) === 'image' }">
                 <video v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" :key="mediaKey(previewMedia)" :src="previewMedia.originalUrl" controls playsinline preload="auto" @loadeddata="markPreviewReady" @canplay="markPreviewReady" @playing="markPreviewReady" @error="markPreviewFailed('video')" @click="enterMediaFullscreen" />
-                <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error'" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" @load="markPreviewReady" @error="handlePreviewImageError" @click="enterMediaFullscreen" />
+                <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error' && previewImageUrl" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" @load="markPreviewReady" @error="handlePreviewImageError" @click="enterMediaFullscreen" />
                 <div v-if="previewState === 'loading'" class="preview-loading" role="status">正在读取{{ mediaKind(previewMedia) === 'video' ? '视频' : '图片' }}…</div>
                 <section v-if="previewState === 'error'" class="preview-unavailable" role="status">
                   <span class="preview-unavailable__icon">!</span>
                   <h3>{{ previewErrorTitle() }}</h3><p>{{ previewErrorDescription() }}</p>
-                  <div><button type="button" @click="initializePreview">重新尝试</button><a v-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></div>
-                  <small v-if="!previewMedia.originalUrl">后端未提供原文件地址，暂无法下载。</small>
+                  <div><button type="button" @click="initializePreview">重新尝试</button><button v-if="previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></div>
+                  <small v-if="downloadError" class="download-error">{{ downloadError }}</small><small v-else-if="!previewMedia.localFileUrl && !previewMedia.originalUrl">后端未提供原文件地址，暂无法下载。</small>
                 </section>
                 <button v-if="previewState === 'ready' && !mediaFullscreen" type="button" class="expand-preview" @click="enterMediaFullscreen">⛶ 全屏查看</button>
                 <button v-if="mediaFullscreen && detailMedia.length > 1" type="button" class="fullscreen-nav previous" aria-label="上一个文件" title="上一项（← / ↑）" @click="switchDetailMedia(-1)">‹</button>
                 <button v-if="mediaFullscreen && detailMedia.length > 1" type="button" class="fullscreen-nav next" aria-label="下一个文件" title="下一项（→ / ↓）" @click="switchDetailMedia(1)">›</button>
               </div>
-              <footer><span :title="previewMedia.fileName">{{ display(previewMedia.fileName) }}<small v-if="mediaFullscreen">　{{ previewOrdinal }} / {{ detailMedia.length }} · 方向键切换 · Esc 退出</small><small v-else-if="imageFallbackUsed && previewState === 'ready'">　未提供原图或原图无法加载，当前显示缩略图</small></span><a v-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></footer>
+              <footer><span :title="previewMedia.fileName">{{ display(previewMedia.fileName) }}<small v-if="mediaFullscreen">　{{ previewOrdinal }} / {{ detailMedia.length }} · 方向键切换 · Esc 退出</small><small v-else-if="imageFallbackUsed && previewState === 'ready'">　未提供原图或原图无法加载，当前显示缩略图</small><small v-if="downloadError" class="download-error">　{{ downloadError }}</small></span><button v-if="previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></footer>
             </template>
             <div v-else class="preview-empty">该飞行计划暂无可浏览成果</div>
           </main>
@@ -597,12 +686,18 @@ function exportList() {
 .preview-unavailable div { display: flex; justify-content: center; flex-wrap: wrap; gap: 9px; }
 .preview-unavailable button,.preview-unavailable a { min-height: 34px; box-sizing: border-box; display: inline-grid; place-items: center; padding: 0 13px; border: 1px solid #9bcbd9; border-radius: 5px; color: #157d9c; background: #ecf8fb; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; }
 .preview-unavailable a { border-color: #168eae; color: #fff; background: #168eae; }
+.preview-unavailable button.preview-download { border-color: #168eae; color: #fff; background: #168eae; }
+.preview-unavailable button.preview-download:disabled { opacity: .65; cursor: wait; }
 .preview-unavailable small { display: block; margin-top: 12px; color: #8499a4; font-size: 11px; }
+.preview-unavailable small.download-error { color: #b04747; }
 .expand-preview { position: absolute; z-index: 2; top: 14px; right: 14px; padding: 8px 12px; border: 1px solid #e6f4f9aa; border-radius: 5px; color: #fff; background: #0c344bc7; font-size: 12px; font-weight: 700; cursor: pointer; }
 .expand-preview:hover { background: #147c9d; }
 .detail-body main footer { margin-top: 0; }
 .detail-body main footer small { color: #8199a5; font-size: 11px; }
 .detail-body main footer a { font-weight: 700; white-space: nowrap; }
+.detail-body main footer .preview-download { flex: none; padding: 0; border: 0; color: #168eae; background: transparent; font: inherit; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.detail-body main footer .preview-download:disabled { opacity: .6; cursor: wait; }
+.detail-body main footer .download-error { color: #b04747; }
 .detail-backdrop.is-fullscreen { padding: 0; background: #07131deb; }
 .detail-dialog.is-fullscreen { width: 100vw; height: 100dvh; max-width: none; border-radius: 0; background: #081822; }
 .detail-dialog.is-fullscreen > header,.detail-dialog.is-fullscreen .detail-body aside { display: none; }

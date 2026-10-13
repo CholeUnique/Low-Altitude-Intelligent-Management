@@ -9,9 +9,13 @@ import {
 } from '@/api/governance-task'
 import {
   getRecognitionSpotPage,
+  ignoreRecognitionSpots,
+  reviewRecognitionSpots,
+  revokeRecognitionSpots,
   type RecognitionAbnormalType,
   type RecognitionSpotItem,
 } from '@/api/recognition-spot'
+import { ApiBusinessError } from '@/api/client'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { assignNonGrainReview, getNonGrainReviewerId, isNonGrainScene } from '@/api/non-grain-assignment'
 import type { MapServiceItem } from '@/api/map-service'
@@ -21,6 +25,7 @@ import type { ComparisonPeriod, SynchronizedMapView } from './SpotDistributionMa
 
 const user = useUserStore()
 interface ReviewSpot extends RecognitionSpotItem {
+  fromRecognitionApi?: boolean
   sourceTaskId?: string
   sourceTaskName?: string
   sourceDeptName?: string
@@ -34,7 +39,7 @@ const mapFullscreen = ref(false)
 const records = ref<ReviewSpot[]>([])
 const keyword = ref('')
 const typeFilter = ref('')
-const statusFilter = ref<number | ''>('')
+const statusFilter = ref<number | ''>(-1)
 
 function toggleMapFullscreen() {
   mapFullscreen.value = !mapFullscreen.value
@@ -52,6 +57,12 @@ const taskPriority = ref(1)
 const taskCreateError = ref('')
 const operationMessage = ref('')
 const operationError = ref('')
+type SpotAction = 'review' | 'ignore' | 'revoke'
+type PendingSpotAction = { kind: SpotAction; id: string; spotNo: string; title: string; deptId: string; handleStatus: number }
+const pendingSpotAction = ref<PendingSpotAction>()
+const spotActionBusy = ref(false)
+const spotActionError = ref('')
+const revokeAcknowledged = ref(false)
 const scenes = ref<SceneDictionaryItem[]>([])
 const synchronizedMapView = ref<SynchronizedMapView>()
 const periods = ref(2)
@@ -71,7 +82,15 @@ const statuses = [
   { value: 2, label: '已处置' },
   { value: 3, label: '已销号' },
   { value: -1, label: '待人工审核' },
+  { value: 4, label: '已忽略' },
 ]
+
+const spotActionCopy: Record<SpotAction, { title: string; description: string; confirm: string }> = {
+  review: { title: '审核通过', description: '审核通过后，图斑将由“待人工审核”转为“待核查”，可以继续创建核查任务。', confirm: '确认通过' },
+  ignore: { title: '忽略图斑', description: '忽略后图斑记录仍可查询，但不再参与派单，也不能用于创建核查任务。', confirm: '确认忽略' },
+  revoke: { title: '撤销图斑', description: '撤销后图斑将从列表中移除，业务边界及参考影像关联会被清理；此操作不可恢复。', confirm: '确认撤销' },
+}
+const pendingSpotActionCopy = computed(() => pendingSpotAction.value ? spotActionCopy[pendingSpotAction.value.kind] : undefined)
 
 const filtered = computed(() => records.value.filter((item) => {
   const text = `${item.spotNo} ${item.title} ${item.description} ${item.abnormalTypeDesc}`.toLowerCase()
@@ -164,6 +183,68 @@ function canSelect(item: ReviewSpot) {
   return !first || selectedIds.value.includes(item.id)
     || (first.sceneCode === item.sceneCode && first.deptId === item.deptId)
 }
+function canOperateSpot(item: ReviewSpot | undefined, kind: SpotAction) {
+  if (!item?.fromRecognitionApi || item.derivedTaskId) return false
+  return kind === 'review' ? item.handleStatus === -1 : item.handleStatus === -1 || item.handleStatus === 0
+}
+function openSpotAction(kind: SpotAction) {
+  const spot = active.value
+  if (!spot || !canOperateSpot(spot, kind)) return
+  const deptId = spot.deptId || user.activeDeptId
+  if (!deptId) {
+    operationError.value = '当前图斑没有处理部门，无法提交操作。'
+    return
+  }
+  operationError.value = ''
+  operationMessage.value = ''
+  spotActionError.value = ''
+  revokeAcknowledged.value = false
+  pendingSpotAction.value = { kind, id: spot.id, spotNo: spot.spotNo, title: spot.title, deptId, handleStatus: spot.handleStatus }
+}
+function closeSpotAction() {
+  if (spotActionBusy.value) return
+  pendingSpotAction.value = undefined
+  spotActionError.value = ''
+}
+
+async function submitSpotAction() {
+  const pending = pendingSpotAction.value
+  if (!pending || spotActionBusy.value || (pending.kind === 'revoke' && !revokeAcknowledged.value)) return
+  const current = records.value.find((item) => item.id === pending.id)
+  if (!current || (current.deptId || user.activeDeptId) !== pending.deptId || current.handleStatus !== pending.handleStatus || !canOperateSpot(current, pending.kind)) {
+    spotActionError.value = '图斑信息已变化，请关闭弹窗后重新选择。'
+    return
+  }
+  spotActionBusy.value = true
+  spotActionError.value = ''
+  const submittingDeptId = user.activeDeptId
+  try {
+    const input = { deptId: pending.deptId, ids: [pending.id] }
+    const result = pending.kind === 'review'
+      ? await reviewRecognitionSpots(input)
+      : pending.kind === 'ignore'
+        ? await ignoreRecognitionSpots(input)
+        : await revokeRecognitionSpots(input)
+    if (user.activeDeptId !== submittingDeptId) return
+    pendingSpotAction.value = undefined
+    await loadSpots(pending.spotNo)
+    if (Number(result.count) > 0) operationMessage.value = `图斑“${pending.title}”已${spotActionCopy[pending.kind].title}。`
+    else operationError.value = '后台未处理该图斑，列表已刷新，请确认最新状态。'
+  } catch (error) {
+    if (user.activeDeptId !== submittingDeptId) return
+    if (error instanceof ApiBusinessError && ['10220', '10201'].includes(error.code)) {
+      pendingSpotAction.value = undefined
+      await loadSpots(pending.spotNo)
+      operationError.value = error.code === '10220' ? '图斑状态已变化，列表已刷新，请按最新状态操作。' : '图斑已不存在，列表已刷新。'
+    } else {
+      spotActionError.value = error instanceof ApiBusinessError && error.code === '10107'
+        ? '当前账号无权处理该图斑，请联系管理员。'
+        : error instanceof Error ? error.message : '图斑处理失败，请稍后重试。'
+    }
+  } finally {
+    spotActionBusy.value = false
+  }
+}
 function toggleSelection(item: ReviewSpot) {
   operationError.value = ''
   if (selectedIds.value.includes(item.id)) {
@@ -187,23 +268,23 @@ function taskMapServices(task: GovernanceTask) {
   return mergeMapServices((task.comparisonImages || []).flatMap((image) => image.mapService ? [image.mapService] : []))
 }
 
-async function loadAllRecognitionSpots() {
-  const first = await getRecognitionSpotPage({ deptId: user.activeDeptId, pageNum: 1, pageSize: 200 })
+async function loadAllRecognitionSpots(deptId?: string) {
+  const first = await getRecognitionSpotPage({ deptId, pageNum: 1, pageSize: 200 })
   const all = [...first.records]
-  const pageCount = Math.ceil(first.total / Math.max(first.pageSize || 200, 1))
+  const pageCount = Math.ceil(first.total / Math.max(first.records.length || first.pageSize || 200, 1))
   for (let pageNum = 2; pageNum <= pageCount; pageNum += 1) {
-    const page = await getRecognitionSpotPage({ deptId: user.activeDeptId, pageNum, pageSize: 200 })
+    const page = await getRecognitionSpotPage({ deptId, pageNum, pageSize: 200 })
     all.push(...page.records)
   }
   return all
 }
 
-async function loadAllTasks() {
-  const first = await getGovernanceTaskPage({ deptId: user.activeDeptId, pageNum: 1, pageSize: 100 })
+async function loadAllTasks(deptId?: string) {
+  const first = await getGovernanceTaskPage({ deptId, pageNum: 1, pageSize: 100 })
   const all = [...first.records]
   const pageCount = Math.ceil(first.total / Math.max(first.pageSize || 100, 1))
   for (let pageNum = 2; pageNum <= pageCount; pageNum += 1) {
-    const page = await getGovernanceTaskPage({ deptId: user.activeDeptId, pageNum, pageSize: 100 })
+    const page = await getGovernanceTaskPage({ deptId, pageNum, pageSize: 100 })
     all.push(...page.records)
   }
   return all
@@ -244,17 +325,22 @@ async function loadTaskSpots(task: GovernanceTask): Promise<ReviewSpot[]> {
   }))
 }
 
+let spotLoadVersion = 0
 async function loadSpots(preferredSpotNo?: string) {
+  const version = ++spotLoadVersion
+  const deptId = user.activeDeptId
   loading.value = true
   loadError.value = ''
   try {
     const [recognitionSpots, tasks, sceneList] = await Promise.all([
-      loadAllRecognitionSpots(),
-      loadAllTasks(),
-      getSceneDictionary(user.organization.scenes, user.activeDeptId),
+      loadAllRecognitionSpots(deptId),
+      loadAllTasks(deptId),
+      getSceneDictionary(user.organization.scenes, deptId),
     ])
+    if (version !== spotLoadVersion) return
     scenes.value = sceneList.filter((scene) => scene.enabled)
     const taskSpotResults = await Promise.allSettled(tasks.map(loadTaskSpots))
+    if (version !== spotLoadVersion) return
     const taskSpots = taskSpotResults.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
     const recognitionById = new Map(recognitionSpots.map((item) => [item.id, item]))
     const merged = new Map<string, ReviewSpot>()
@@ -268,6 +354,7 @@ async function loadSpots(preferredSpotNo?: string) {
       merged.set(item.id, {
         ...existing,
         ...item,
+        fromRecognitionApi: true,
         mapServices: mergeMapServices(existing?.mapServices || [], item.mapServices),
         sourceTaskId: existing?.sourceTaskId,
         sourceTaskName: existing?.sourceTaskName,
@@ -280,12 +367,13 @@ async function loadSpots(preferredSpotNo?: string) {
     records.value = all
     activeId.value = all.find((item) => item.spotNo === preferredSpotNo)?.id
       || (all.some((item) => item.id === activeId.value) ? activeId.value : all[0]?.id || '')
-    selectedIds.value = selectedIds.value.filter((id) => all.some((item) => item.id === id))
+    selectedIds.value = selectedIds.value.filter((id) => all.some((item) => item.id === id && item.handleStatus === 0 && !item.derivedTaskId))
   } catch (error) {
+    if (version !== spotLoadVersion) return
     records.value = []
     loadError.value = error instanceof Error ? error.message : '疑似异常图斑加载失败。'
   } finally {
-    loading.value = false
+    if (version === spotLoadVersion) loading.value = false
   }
 }
 
@@ -359,8 +447,14 @@ watch(() => displayableImagery.value.length, (count) => {
 }, { immediate: true })
 onMounted(() => {
   window.addEventListener('keydown', handleMapFullscreenKeydown)
-  void loadSpots()
 })
+watch(() => user.activeDeptId, () => {
+  selectedIds.value = []
+  pendingSpotAction.value = undefined
+  operationMessage.value = ''
+  operationError.value = ''
+  void loadSpots()
+}, { immediate: true })
 onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenKeydown))
 </script>
 
@@ -415,6 +509,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
       </div>
 
       <aside class="right-column">
+        <section class="spot-action-card panel" aria-label="图斑审核与处置">
+          <header><b>图斑操作</b><span v-if="active">{{ statusLabel(active.handleStatus) }}</span></header>
+          <div class="spot-action-card__body">
+            <div v-if="active && (canOperateSpot(active, 'review') || canOperateSpot(active, 'ignore'))" class="spot-action-card__buttons">
+              <button v-if="canOperateSpot(active, 'review')" class="spot-action-button spot-action-button--review" type="button" @click="openSpotAction('review')">审核通过</button>
+              <button class="spot-action-button spot-action-button--ignore" type="button" @click="openSpotAction('ignore')">忽略图斑</button>
+              <button class="spot-action-button spot-action-button--revoke" type="button" @click="openSpotAction('revoke')">撤销图斑</button>
+            </div>
+            <p v-else-if="active?.derivedTaskId" class="spot-action-card__hint">已关联核查任务，请在任务流程中处理</p>
+            <p v-else-if="active?.handleStatus === 4" class="spot-action-card__hint">已忽略 · 记录保留，不再派单</p>
+            <p v-else-if="active && !active.fromRecognitionApi" class="spot-action-card__hint">该图斑未纳入识别图斑审核流程</p>
+            <p v-else-if="active" class="spot-action-card__hint">当前状态无需审核或处置</p>
+            <p v-else class="spot-action-card__hint">请选择左侧图斑</p>
+          </div>
+        </section>
         <section class="spot-detail panel">
           <header><b>异常图斑详细信息</b></header>
           <template v-if="active"><dl><div><dt>图斑编号</dt><dd>{{ active.spotNo }}</dd></div><div><dt>异常类型</dt><dd>{{ active.abnormalTypeDesc }}</dd></div><div><dt>处置状态</dt><dd>{{ statusLabel(active.handleStatus) }}</dd></div><div><dt>所属场景</dt><dd>{{ activeSceneName }}</dd></div><div><dt>面积</dt><dd>{{ active.area === undefined ? '-' : `${active.area} ㎡` }}</dd></div><div><dt>发现时间</dt><dd>{{ formatTime(active.foundTime) }}</dd></div><div><dt>关联影像</dt><dd>{{ displayableImagery.length }} 期</dd></div><div><dt>来源任务</dt><dd>{{ active.sourceTaskName || '通用识别图斑' }}</dd></div></dl><p>{{ active.description || '暂无异常图斑描述。' }}</p></template>
@@ -454,6 +563,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
       </section>
     </div>
 
+    <div v-if="pendingSpotAction && pendingSpotActionCopy" class="dialog-mask" @click.self="closeSpotAction">
+      <section class="spot-action-dialog" :class="`spot-action-dialog--${pendingSpotAction.kind}`" role="alertdialog" aria-modal="true" aria-labelledby="spot-action-title">
+        <header>
+          <span class="spot-action-dialog__marker">{{ pendingSpotAction.kind === 'review' ? '✓' : pendingSpotAction.kind === 'ignore' ? '–' : '!' }}</span>
+          <div><small>图斑审核与处置</small><h2 id="spot-action-title">{{ pendingSpotActionCopy.title }}</h2></div>
+          <button type="button" aria-label="关闭" :disabled="spotActionBusy" @click="closeSpotAction">×</button>
+        </header>
+        <div class="spot-action-dialog__body">
+          <p>{{ pendingSpotActionCopy.description }}</p>
+          <dl>
+            <div><dt>图斑</dt><dd>{{ pendingSpotAction.title }}</dd></div>
+            <div><dt>编号</dt><dd>{{ pendingSpotAction.spotNo }}</dd></div>
+            <div><dt>当前状态</dt><dd>{{ statusLabel(pendingSpotAction.handleStatus) }}</dd></div>
+          </dl>
+          <label v-if="pendingSpotAction.kind === 'revoke'" class="spot-action-dialog__acknowledge"><input v-model="revokeAcknowledged" type="checkbox" :disabled="spotActionBusy" /><span>我已了解：撤销会清理图斑边界与影像关联，且不可恢复。</span></label>
+          <p v-if="spotActionError" class="spot-action-dialog__error" role="alert">{{ spotActionError }}</p>
+        </div>
+        <footer><button type="button" class="spot-action-dialog__cancel" :disabled="spotActionBusy" @click="closeSpotAction">返回</button><button type="button" class="spot-action-dialog__confirm" :disabled="spotActionBusy || (pendingSpotAction.kind === 'revoke' && !revokeAcknowledged)" @click="submitSpotAction">{{ spotActionBusy ? '正在处理…' : pendingSpotActionCopy.confirm }}</button></footer>
+      </section>
+    </div>
+
   </div>
 </template>
 
@@ -484,7 +614,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
   grid-row: 2;
 }
 
-.right-column .spot-detail {
+.right-column {
   grid-column: 3;
   grid-row: 1;
 }
@@ -505,10 +635,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 @media (max-width: 1050px) {
   .review-layout {
     grid-template-columns: 300px minmax(0, 1fr);
+    grid-template-rows: minmax(280px, 1fr) 215px auto;
   }
 
   .analysis {
     grid-column: 2;
+  }
+
+  .right-column {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+
+  .right-column .spot-detail {
+    display: none;
   }
 }
 
@@ -543,12 +683,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 .stat-grid .heading-actions {
   align-self: stretch;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   padding-left: 4px;
 }
 
 .stat-grid .heading-actions button {
-  height: 36px;
+  min-height: 72px;
+  height: auto;
+  box-sizing: border-box;
   padding-inline: 13px;
   white-space: nowrap;
 }
@@ -556,7 +698,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 .right-column {
   min-width: 0;
   min-height: 0;
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .right-column > .panel {
@@ -564,7 +708,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 }
 
 .right-column .spot-detail {
-  height: 100%;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
 }
@@ -883,4 +1027,89 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 .task-create-dialog > footer { flex: 0 0 auto; }
 .task-create-dialog footer button { height: 40px; font-size: 14px; }
 .task-create-dialog .dialog-error { font-size: 13px; line-height: 1.5; }
+
+.spot-action-card {
+  flex: 0 0 auto;
+  min-width: 0;
+  border-color: #c8e1e9;
+  background: linear-gradient(130deg, #f6fcfe 0%, #fff 72%);
+}
+.spot-action-card > header {
+  height: 37px;
+  padding-inline: 11px;
+  border-bottom-color: #e2edf1;
+}
+.spot-action-card > header b { color: #31566a; font-size: 13px; }
+.spot-action-card > header span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #8c651b;
+  background: #fff2d3;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.spot-action-card__body { padding: 9px 10px; }
+.spot-action-card__buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
+  gap: 6px;
+}
+.spot-action-card__hint { margin: 2px 0; color: #758c99; font-size: 11px; line-height: 1.45; }
+.spot-action-button {
+  min-width: 0;
+  height: 33px;
+  padding: 0 5px;
+  border: 1px solid #b9d2dc;
+  border-radius: 5px;
+  background: #fff;
+  color: #3b6779;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .18s, border-color .18s, box-shadow .18s, transform .18s;
+}
+.spot-action-button:hover { transform: translateY(-1px); box-shadow: 0 3px 9px #18465b1c; }
+.spot-action-button:focus-visible { outline: 2px solid #63c4db; outline-offset: 2px; }
+.spot-action-button--review { color: #fff; background: #168dad; border-color: #168dad; }
+.spot-action-button--review:hover { background: #0f7899; border-color: #0f7899; }
+.spot-action-button--ignore:hover { color: #176f87; background: #edf8fa; border-color: #85bfce; }
+.spot-action-button--revoke { color: #b06052; border-color: #ebc9c1; }
+.spot-action-button--revoke:hover { color: #9d4239; background: #fff3f0; border-color: #d99a8f; }
+.spot-row em.status-4 { color: #657d88; background: #eaf0f3; }
+
+.spot-action-dialog {
+  width: min(460px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid #c4dce5;
+  border-radius: 11px;
+  color: #25495c;
+  background: #fff;
+  box-shadow: 0 24px 70px #071c2b66;
+}
+.spot-action-dialog > header { display: flex; align-items: center; gap: 12px; padding: 18px 20px; background: linear-gradient(115deg, #f0f9fc, #fff); border-bottom: 1px solid #e0edf1; }
+.spot-action-dialog__marker { width: 36px; height: 36px; display: grid; flex: none; place-items: center; border-radius: 9px; color: #fff; background: #168dad; font-size: 20px; font-weight: 800; }
+.spot-action-dialog--ignore .spot-action-dialog__marker { background: #718d9a; }
+.spot-action-dialog--revoke .spot-action-dialog__marker { background: #be6a55; }
+.spot-action-dialog > header > div { flex: 1; min-width: 0; }
+.spot-action-dialog > header small { color: #6f93a2; font-size: 11px; }
+.spot-action-dialog h2 { margin: 2px 0 0; color: #21485a; font-size: 18px; }
+.spot-action-dialog > header button { width: 30px; height: 30px; flex: none; border: 0; border-radius: 5px; color: #7892a0; background: #eaf2f5; font-size: 21px; cursor: pointer; }
+.spot-action-dialog__body { padding: 18px 20px 20px; }
+.spot-action-dialog__body > p:first-child { margin: 0 0 16px; color: #5b7684; font-size: 13px; line-height: 1.65; }
+.spot-action-dialog dl { display: grid; gap: 8px; margin: 0; padding: 12px 14px; border: 1px solid #e3edf1; border-radius: 7px; background: #f8fbfc; }
+.spot-action-dialog dl div { display: flex; justify-content: space-between; gap: 14px; font-size: 12px; }
+.spot-action-dialog dt { flex: none; color: #8199a5; }
+.spot-action-dialog dd { min-width: 0; overflow-wrap: anywhere; margin: 0; color: #335568; font-weight: 700; text-align: right; }
+.spot-action-dialog__acknowledge { display: flex; align-items: flex-start; gap: 8px; margin-top: 16px; color: #9c5449; font-size: 12px; line-height: 1.5; cursor: pointer; }
+.spot-action-dialog__acknowledge input { margin: 2px 0 0; accent-color: #b96555; }
+.spot-action-dialog__error { margin: 13px 0 0; padding: 9px 10px; border-radius: 5px; color: #a84545; background: #fff0ef; font-size: 12px; line-height: 1.5; }
+.spot-action-dialog > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 20px; border-top: 1px solid #e1ecf0; background: #fbfdfe; }
+.spot-action-dialog > footer button { min-width: 84px; height: 35px; padding: 0 13px; border: 1px solid #bdd3dc; border-radius: 5px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.spot-action-dialog__cancel { color: #527485; background: #fff; }
+.spot-action-dialog > footer .spot-action-dialog__confirm { color: #fff; border-color: #168dad; background: #168dad; }
+.spot-action-dialog--ignore > footer .spot-action-dialog__confirm { border-color: #607e8b; background: #607e8b; }
+.spot-action-dialog--revoke > footer .spot-action-dialog__confirm { border-color: #b96051; background: #b96051; }
+.spot-action-dialog > footer button:disabled { opacity: .48; cursor: not-allowed; }
+
 </style>

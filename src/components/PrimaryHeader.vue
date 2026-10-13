@@ -18,6 +18,9 @@ const clock = window.setInterval(() => { now.value = new Date() }, 1000)
 const todoRefreshClock = window.setInterval(() => void loadTodoCount(), 60_000)
 const dateText = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' }).format(now.value))
 const timeText = computed(() => now.value.toLocaleTimeString('zh-CN', { hour12: false }))
+const platformBrand = computed(() => user.organizationId === 'agriculture-rural'
+  ? { title: '耕地数字化监管平台', subtitle: 'CULTIVATED LAND · DIGITAL SUPERVISION' }
+  : { title: '海陵区自然资源综合监管平台', subtitle: 'COMPREHENSIVE SUPERVISION · GIS COMMAND CENTER' })
 onBeforeUnmount(() => {
   window.removeEventListener('workflow-todos-changed', refreshWorkflowTodos)
   window.clearInterval(clock)
@@ -79,7 +82,7 @@ onMounted(() => {
   <header class="primary-header">
     <button class="primary-brand" type="button" @click="router.push(homePath)">
       <span class="primary-logo"><DashboardSymbol name="brand" /></span>
-      <div class="primary-title"><h1>海陵区自然资源综合监管平台</h1><small>COMPREHENSIVE SUPERVISION · GIS COMMAND CENTER</small></div>
+      <div class="primary-title"><h1>{{ platformBrand.title }}</h1><small>{{ platformBrand.subtitle }}</small></div>
     </button>
     <nav class="primary-nav" aria-label="一级导航">
       <button v-for="entry in entries" :key="entry.path" type="button" :class="{ active: entry.match.includes(String(route.name)) }" :aria-current="entry.match.includes(String(route.name)) ? 'page' : undefined" @click="router.push(entry.path)">{{ entry.label }}</button>

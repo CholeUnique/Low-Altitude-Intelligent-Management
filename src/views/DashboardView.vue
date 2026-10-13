@@ -47,6 +47,7 @@ const uavDeviceSummary = ref<UavDeviceSummary>()
 const uavFlightSummary = ref<UavFlightSummary>()
 const uavMediaSummary = ref<UavMediaSummary>()
 const classifiedMediaCounts = ref<{ totalCount: number; photoCount: number; videoCount: number }>()
+const isMapClearScreen = ref(false)
 let statisticsRequestVersion = 0
 let geometryRequestVersion = 0
 let abnormalCountRequestVersion = 0
@@ -170,7 +171,17 @@ const recognitionHandledRate = computed(() => {
   if (typeof total !== 'number' || typeof pending !== 'number') return undefined
   return percentage(Math.max(total - pending, 0), total)
 })
-const recognitionItems = computed(() => statistics.value?.abnormalSummary.typeCounts || [])
+const abnormalTypeLabels: Record<string, string> = {
+  OTHER: '其他',
+  ILLEGAL_OCCUPY: '违法占用',
+  ABANDONED: '撂荒',
+  FOREST_DAMAGE: '林地破坏',
+  NON_GRAIN: '非粮化',
+  ILLEGAL_BUILD: '违法建设',
+}
+const recognitionItems = computed(() => (statistics.value?.abnormalSummary.typeCounts || [])
+  .map((item) => ({ ...item, name: abnormalTypeLabels[item.key] || abnormalTypeLabels[item.name] || item.name }))
+  .sort((a, b) => b.count - a.count))
 const sceneTaskRingColors = ['#37ead7', '#45a8ff', '#a17cff', '#ffbd4a', '#ff738d', '#57d68d']
 const sceneTaskTotal = computed(() => sceneBusinessStats.value.reduce((total, item) => total + Math.max(item.taskCount, 0), 0))
 const hoveredSceneTaskId = ref('')
@@ -572,12 +583,12 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
 </script>
 
 <template>
-  <div class="cockpit cockpit--glass">
+  <div class="cockpit cockpit--glass" :class="{ 'cockpit--clear-screen': isMapClearScreen }">
 
     <main class="cockpit-body cockpit-body--map-only">
       <section class="cockpit-primary">
         <div class="overview-layout">
-          <aside class="overview-side overview-side--left">
+          <aside class="overview-side overview-side--left" :inert="isMapClearScreen" :aria-hidden="isMapClearScreen">
             <section class="overview-float-panel resource-panel">
               <header>
                 <h2>无人机机组资源</h2>
@@ -605,16 +616,15 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <h2>航拍素材成果</h2>
                 <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入采集数据" @click="openDataManagement">采集数据 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="media-summary"><DashboardRing :value="formatCount(classifiedMediaCounts?.totalCount)" label="素材总数" tone="blue" :rate="mediaPhotoRate" title="圆环展示照片在素材总数中的占比" /><dl class="metric-legend"><div><dt><i class="legend-blue"></i>照片</dt><dd>{{ formatCount(classifiedMediaCounts?.photoCount) }}</dd></div><div><dt><i class="legend-mint"></i>视频</dt><dd>{{ formatCount(classifiedMediaCounts?.videoCount) }}</dd></div><div><dt><i class="legend-violet"></i>已下载</dt><dd>{{ formatCount(uavMediaSummary?.downloadedCount) }}</dd></div><div><dt><i class="legend-muted"></i>素材容量</dt><dd>{{ formatFileSize(uavMediaSummary?.totalFileSize) }}</dd></div></dl></div>
-              <p class="summary-foot"><span>下载失败 {{ formatCount(uavMediaSummary?.downloadFailedCount) }}</span><span>已清理 {{ formatCount(uavMediaSummary?.cleanedCount) }}</span></p>
+              <div class="media-summary"><DashboardRing :value="formatCount(classifiedMediaCounts?.totalCount)" label="素材总数" tone="blue" :rate="mediaPhotoRate" title="圆环展示照片在素材总数中的占比" /><dl class="metric-legend"><div><dt><i class="legend-blue"></i>照片</dt><dd>{{ formatCount(classifiedMediaCounts?.photoCount) }}</dd></div><div><dt><i class="legend-mint"></i>视频</dt><dd>{{ formatCount(classifiedMediaCounts?.videoCount) }}</dd></div><div><dt><i class="legend-muted"></i>素材容量</dt><dd>{{ formatFileSize(uavMediaSummary?.totalFileSize) }}</dd></div></dl></div>
             </section>
           </aside>
 
           <article class="cockpit-panel map-overview">
-            <DashboardMap :key="activeScene?.id || organization.id" :layers="mapLayers" :routes="patrolRoutes" :focus-layer-id="activeScene?.id" floating-controls />
+            <DashboardMap :key="activeScene?.id || organization.id" :layers="mapLayers" :routes="patrolRoutes" :focus-layer-id="activeScene?.id" :screen-cleared="isMapClearScreen" floating-controls @toggle-clear-screen="isMapClearScreen = !isMapClearScreen" />
           </article>
 
-          <aside class="overview-side overview-side--right">
+          <aside class="overview-side overview-side--right" :inert="isMapClearScreen" :aria-hidden="isMapClearScreen">
             <section class="overview-float-panel scene-count-panel">
               <header>
                 <h2>各场景任务数</h2>
