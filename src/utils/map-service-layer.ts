@@ -42,6 +42,7 @@ interface ArcGisLayerMetadata {
 
 interface ArcGisQueryResponse {
   features?: Array<{ attributes?: Record<string, unknown>; geometry?: MapServiceSearchGeometry }>
+  fieldAliases?: Record<string, string>
   objectIds?: Array<number | string>
   extent?: ArcGisExtent
 }
@@ -60,9 +61,16 @@ export interface MapServiceCategoryLocation {
   geometries: MapServiceSearchGeometry[]
 }
 
+export interface MapServiceCategoryValue {
+  value: string
+  label: string
+  /** 与所属图层同色相、按分类数量拉开的深浅色。 */
+  color: string
+}
+
 export interface MapServiceCategoryFilter {
   fieldLabel: string
-  values: Array<{ value: string; label: string }>
+  values: MapServiceCategoryValue[]
   setVisibleValues: (values: string[]) => void
   locateValue: (value: string) => Promise<MapServiceCategoryLocation>
 }
@@ -71,6 +79,108 @@ export interface MapServiceLayerHandle {
   layer: L.Layer
   bounds?: L.LatLngBounds
   categoryFilter?: MapServiceCategoryFilter
+  /** 矢量图层当前描边色；影像图层没有这项。 */
+  color?: string
+  /** 改基准色后返回与分类顺序一致的深浅色；没有分类时返回空数组。 */
+  setColor?: (color: string) => string[]
+  definitionExpression?: () => string
+}
+
+export interface MapFeatureAttributeRow {
+  label: string
+  value: string
+}
+
+export interface IdentifiedMapFeature {
+  serviceId: string
+  serviceName: string
+  title: string
+  /** 命中的字段中文名，搜索结果用来说明匹配来源。 */
+  matchLabel?: string
+  rows: MapFeatureAttributeRow[]
+  location: MapServiceCategoryLocation
+}
+
+export const VECTOR_LAYER_PALETTE = [
+  '#ff4d4f', '#1890ff', '#faad14', '#13c2c2', '#722ed1', '#eb2f96',
+  '#52c41a', '#fa541c', '#2f54eb', '#f759ab', '#36cfc9', '#a0d911',
+]
+
+const assignedVectorColors = new Map<string, string>()
+
+/** 按图层稳定分配互不重复的颜色；用尽调色板后才循环。 */
+export function vectorLayerColor(key: string) {
+  const existing = assignedVectorColors.get(key)
+  if (existing) return existing
+  const used = new Set(assignedVectorColors.values())
+  const color = VECTOR_LAYER_PALETTE.find((item) => !used.has(item))
+    || VECTOR_LAYER_PALETTE[assignedVectorColors.size % VECTOR_LAYER_PALETTE.length]
+    || '#ff4d4f'
+  assignedVectorColors.set(key, color)
+  return color
+}
+
+export function rememberVectorLayerColor(key: string, color: string) {
+  assignedVectorColors.set(key, color)
+}
+
+function hexChannels(color: string): [number, number, number] {
+  const normalized = color.trim().replace('#', '')
+  const hex = normalized.length === 3 ? normalized.split('').map((char) => char + char).join('') : normalized
+  const value = Number.parseInt(hex, 16)
+  if (!Number.isFinite(value) || hex.length !== 6) return [255, 59, 48]
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+}
+
+function hexToHsl(color: string) {
+  const [red, green, blue] = hexChannels(color).map((channel) => channel / 255) as [number, number, number]
+  const max = Math.max(red, green, blue)
+  const min = Math.min(red, green, blue)
+  const lightness = (max + min) / 2
+  if (max === min) return { h: 0, s: 0, l: lightness * 100 }
+  const delta = max - min
+  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min)
+  const hue = max === red
+    ? ((green - blue) / delta + (green < blue ? 6 : 0)) / 6
+    : max === green
+      ? ((blue - red) / delta + 2) / 6
+      : ((red - green) / delta + 4) / 6
+  return { h: hue * 360, s: saturation * 100, l: lightness * 100 }
+}
+
+function hslToHex(hue: number, saturation: number, lightness: number) {
+  const sat = saturation / 100
+  const lig = lightness / 100
+  const chroma = (1 - Math.abs(2 * lig - 1)) * sat
+  const segment = hue / 60
+  const x = chroma * (1 - Math.abs(segment % 2 - 1))
+  const [red, green, blue] = segment < 1 ? [chroma, x, 0]
+    : segment < 2 ? [x, chroma, 0]
+      : segment < 3 ? [0, chroma, x]
+        : segment < 4 ? [0, x, chroma]
+          : segment < 5 ? [x, 0, chroma]
+            : [chroma, 0, x]
+  const match = lig - chroma / 2
+  const channel = (value: number) => Math.round(Math.min(255, Math.max(0, (value + match) * 255))).toString(16).padStart(2, '0')
+  return `#${channel(red)}${channel(green)}${channel(blue)}`
+}
+
+/** 同一色相下按分类数量均分明度。分类越多，相邻两档的差值越小。 */
+export function categoryShadeColors(baseColor: string, count: number) {
+  if (count <= 0) return []
+  if (count === 1) return [baseColor]
+  const { h, s } = hexToHsl(baseColor)
+  const minLightness = 32
+  const maxLightness = 72
+  return Array.from({ length: count }, (_, index) => {
+    const lightness = minLightness + (maxLightness - minLightness) * (index / (count - 1))
+    return hslToHex(h, s, lightness)
+  })
+}
+
+function darkerShade(color: string) {
+  const { h, s, l } = hexToHsl(color)
+  return hslToHex(h, s, Math.max(16, l - 16))
 }
 
 export interface MapServiceInspection {
@@ -334,12 +444,19 @@ class ArcGisExportLayer extends L.GridLayer {
   private definitionExpression = '1=1'
   private filterRevision = 0
   private zooming = false
+  private strokeColor: [number, number, number, number] = [255, 59, 48, 255]
+  private fillColor: [number, number, number, number] = [255, 59, 48, 64]
+  private categoryFieldName = ''
+  private categoryEntries: Array<{ value: string; color: string }> = []
+  private uniqueValueProven = false
+  private uniqueValueErrorCount = 0
 
   constructor(
     private readonly url: string,
     private readonly imageServer = false,
     private readonly vectorLayerId?: number,
     private readonly vectorGeometryType = 'esriGeometryPolygon',
+    color?: string,
   ) {
     super({
       pane: vectorLayerId === undefined ? MAP_SERVICE_IMAGERY_PANE : MAP_SERVICE_VECTOR_PANE,
@@ -350,6 +467,83 @@ class ArcGisExportLayer extends L.GridLayer {
       // Transparent vector tiles from two zoom levels must not be painted together.
       updateWhenZooming: vectorLayerId === undefined,
     })
+    if (color) this.applyColor(color)
+  }
+
+  setDisplayColor(color: string) {
+    this.applyColor(color)
+    if (this.categoryEntries.length) {
+      const shades = categoryShadeColors(color, this.categoryEntries.length)
+      this.categoryEntries = this.categoryEntries.map((entry, index) => ({
+        value: entry.value,
+        color: shades[index] || color,
+      }))
+    }
+    this.filterRevision += 1
+    if (this._map) this.redraw()
+    return this.categoryEntries.map((entry) => entry.color)
+  }
+
+  setCategories(fieldName: string, values: string[], color: string) {
+    this.categoryFieldName = fieldName
+    const shades = categoryShadeColors(color, values.length)
+    this.categoryEntries = values.map((value, index) => ({
+      value,
+      color: shades[index] || color,
+    }))
+  }
+
+  private applyColor(color: string) {
+    const [red, green, blue] = hexChannels(color)
+    this.strokeColor = [red, green, blue, 255]
+    this.fillColor = [red, green, blue, this.vectorGeometryType === 'esriGeometryPoint' ? 230 : 64]
+  }
+
+  private symbolColors(color: string) {
+    const [red, green, blue] = hexChannels(color)
+    const [outlineRed, outlineGreen, outlineBlue] = hexChannels(darkerShade(color))
+    const fillAlpha = this.vectorGeometryType === 'esriGeometryPoint' ? 230 : 120
+    return {
+      fill: [red, green, blue, fillAlpha] as [number, number, number, number],
+      stroke: [outlineRed, outlineGreen, outlineBlue, 255] as [number, number, number, number],
+    }
+  }
+
+  private vectorSymbol(
+    fill = this.fillColor,
+    stroke = this.strokeColor,
+  ) {
+    if (this.vectorGeometryType === 'esriGeometryPoint') {
+      return {
+        type: 'esriSMS', style: 'esriSMSCircle', color: fill, size: 9,
+        outline: { type: 'esriSLS', style: 'esriSLSSolid', color: stroke, width: 1.5 },
+      }
+    }
+    if (this.vectorGeometryType === 'esriGeometryPolyline') {
+      return { type: 'esriSLS', style: 'esriSLSSolid', color: stroke, width: 2.5 }
+    }
+    return {
+      type: 'esriSFS', style: 'esriSFSSolid', color: fill,
+      outline: { type: 'esriSLS', style: 'esriSLSSolid', color: stroke, width: 2 },
+    }
+  }
+
+  private vectorRenderer() {
+    const classified = this.categoryEntries.filter((entry) => entry.value !== EMPTY_CATEGORY_VALUE)
+    if (!this.categoryFieldName || !classified.length) {
+      return { type: 'simple', symbol: this.vectorSymbol() }
+    }
+    const empty = this.categoryEntries.find((entry) => entry.value === EMPTY_CATEGORY_VALUE)
+    const fallback = empty ? this.symbolColors(empty.color) : { fill: this.fillColor, stroke: this.strokeColor }
+    return {
+      type: 'uniqueValue',
+      field1: this.categoryFieldName,
+      defaultSymbol: this.vectorSymbol(fallback.fill, fallback.stroke),
+      uniqueValueInfos: classified.map((entry) => {
+        const colors = this.symbolColors(entry.color)
+        return { value: entry.value, symbol: this.vectorSymbol(colors.fill, colors.stroke) }
+      }),
+    }
   }
 
   override onAdd(map: L.Map) {
@@ -410,17 +604,6 @@ class ArcGisExportLayer extends L.GridLayer {
       f: 'image',
     })
     if (this.vectorLayerId !== undefined) {
-      const symbol = this.vectorGeometryType === 'esriGeometryPoint'
-        ? {
-            type: 'esriSMS', style: 'esriSMSCircle', color: [255, 208, 0, 230], size: 9,
-            outline: { type: 'esriSLS', style: 'esriSLSSolid', color: [255, 0, 0, 255], width: 1.5 },
-          }
-        : this.vectorGeometryType === 'esriGeometryPolyline'
-          ? { type: 'esriSLS', style: 'esriSLSSolid', color: [255, 0, 0, 255], width: 2.5 }
-          : {
-              type: 'esriSFS', style: 'esriSFSSolid', color: [255, 0, 0, 51],
-              outline: { type: 'esriSLS', style: 'esriSLSSolid', color: [255, 0, 0, 255], width: 2 },
-            }
       parameters.set('_filterRevision', String(this.filterRevision))
       parameters.set('layers', `show:${this.vectorLayerId}`)
       parameters.set('layerDefs', JSON.stringify({ [this.vectorLayerId]: this.definitionExpression }))
@@ -432,17 +615,28 @@ class ArcGisExportLayer extends L.GridLayer {
         definitionExpression: this.definitionExpression,
         drawingInfo: {
           showLabels: false,
-          renderer: {
-            type: 'simple',
-            symbol,
-          },
+          renderer: this.vectorRenderer(),
         },
       }]))
     }
     tile.alt = ''
     tile.setAttribute('role', 'presentation')
-    tile.onload = () => done(undefined, tile)
-    tile.onerror = () => done(new Error('地图服务影像加载失败'), tile)
+    tile.onload = () => {
+      if (this.categoryEntries.length) this.uniqueValueProven = true
+      done(undefined, tile)
+    }
+    tile.onerror = () => {
+      // 连续失败且从未成功时，认为旧服务不接受唯一值渲染器，退回整层单色。
+      if (this.categoryEntries.length && !this.uniqueValueProven) {
+        this.uniqueValueErrorCount += 1
+        if (this.uniqueValueErrorCount >= 4) {
+          this.categoryEntries = []
+          this.filterRevision += 1
+          if (this._map) this.redraw()
+        }
+      }
+      done(new Error('地图服务影像加载失败'), tile)
+    }
     tile.src = `${this.url}/${this.imageServer ? 'exportImage' : 'export'}?${parameters.toString()}`
     return tile
   }
@@ -458,6 +652,11 @@ class ArcGisExportLayer extends L.GridLayer {
     // 仪表盘允许按服务调整叠放顺序；筛选时的无闪烁替换层必须沿用原服务 pane。
     layer.options.pane = this.options.pane
     layer.definitionExpression = expression
+    layer.strokeColor = [...this.strokeColor]
+    layer.fillColor = [...this.fillColor]
+    layer.categoryFieldName = this.categoryFieldName
+    layer.categoryEntries = this.categoryEntries.map((entry) => ({ ...entry }))
+    layer.uniqueValueProven = this.uniqueValueProven
     layer.filterRevision = this.filterRevision + 1
     return layer
   }
@@ -472,7 +671,7 @@ function categoryField(metadata: ArcGisLayerMetadata) {
     项目范围: ['XMMC'],
     耕地细化: ['JYZTMC_1'],
   }
-  const candidates = [...(layerCandidates[layerName] || []), 'DLMC', '地类名称', '变化类']
+  const candidates = [...(layerCandidates[layerName] || []), 'DLMC', '地类名称', '变化类', 'DKLX', 'DKLXMC', '地块类型']
   return candidates.flatMap((candidate) => (metadata.fields || []).filter((field) =>
     field.name?.toUpperCase() === candidate.toUpperCase() || field.alias?.toUpperCase() === candidate.toUpperCase()))[0]
 }
@@ -498,19 +697,80 @@ function fieldLabel(field?: { name?: string; alias?: string }) {
   return labels[name] || field?.alias || name || '名称'
 }
 
+const hoverSlots = new Map<string, { generation: number; label: string; value: string }>()
+let hoverGeneration = 0
+let lastHoverStamp = -1
+let sharedHoverTooltip: L.Tooltip | undefined
+let sharedHoverLatLng: L.LatLng | undefined
+let sharedHoverMap: L.Map | undefined
+
+function hoverGenerationFor(event: L.LeafletMouseEvent) {
+  const stamp = event.originalEvent.timeStamp
+  if (stamp !== lastHoverStamp) {
+    lastHoverStamp = stamp
+    hoverGeneration += 1
+    sharedHoverLatLng = event.latlng
+    hoverSlots.clear()
+    if (sharedHoverTooltip && sharedHoverMap) sharedHoverMap.closeTooltip(sharedHoverTooltip)
+  }
+  return hoverGeneration
+}
+
+function renderSharedHover(map: L.Map) {
+  sharedHoverMap = map
+  for (const [key, slot] of hoverSlots) {
+    if (slot.generation !== hoverGeneration) hoverSlots.delete(key)
+  }
+  if (!hoverSlots.size || !sharedHoverLatLng) {
+    if (sharedHoverTooltip) map.closeTooltip(sharedHoverTooltip)
+    return
+  }
+  if (!sharedHoverTooltip) {
+    sharedHoverTooltip = L.tooltip({
+      direction: 'top',
+      offset: [0, -12],
+      opacity: 1,
+      className: 'jiulong-feature-tooltip',
+    })
+  }
+  const content = document.createElement('div')
+  content.className = 'hover-stack'
+  hoverSlots.forEach((row) => {
+    const line = document.createElement('div')
+    const label = document.createElement('span')
+    const value = document.createElement('strong')
+    label.textContent = `${row.label}：`
+    value.textContent = row.value
+    line.append(label, value)
+    content.append(line)
+  })
+  sharedHoverTooltip.setLatLng(sharedHoverLatLng).setContent(content)
+  map.openTooltip(sharedHoverTooltip)
+}
+
+function publishHover(key: string, generation: number, map: L.Map, label: string | null, value: string | null) {
+  if (generation !== hoverGeneration) return
+  if (label && value) hoverSlots.set(key, { generation, label, value })
+  else hoverSlots.delete(key)
+  renderSharedHover(map)
+}
+
+function clearHoverSlot(key: string, map?: L.Map) {
+  hoverSlots.delete(key)
+  if (map) renderSharedHover(map)
+}
+
 class ArcGisVectorLayer extends L.LayerGroup {
   private hoverTimer?: number
   private requestSequence = 0
   private filterSwapSequence = 0
   private pendingImageLayer?: ArcGisExportLayer
-  private readonly tooltip = L.tooltip({
-    direction: 'top',
-    offset: [0, -12],
-    opacity: 1,
-    className: 'jiulong-feature-tooltip',
-  })
   private definitionExpression = '1=1'
   private imageLayer: L.Layer
+
+  private get hoverKey() {
+    return `${this.serviceUrl}/${this.layerId}`
+  }
 
   constructor(
     imageLayer: L.Layer,
@@ -546,12 +806,13 @@ class ArcGisVectorLayer extends L.LayerGroup {
     this.requestSequence += 1
     if (this.hoverTimer !== undefined) window.clearTimeout(this.hoverTimer)
     this.hoverTimer = undefined
-    this._map?.closeTooltip(this.tooltip)
+    clearHoverSlot(this.hoverKey, this._map)
   }
 
   private handleMouseMove(event: L.LeafletMouseEvent) {
     if (!this.fieldName) return
     const fieldName = this.fieldName
+    const generation = hoverGenerationFor(event)
     if (this.hoverTimer !== undefined) window.clearTimeout(this.hoverTimer)
     const sequence = ++this.requestSequence
     this.hoverTimer = window.setTimeout(async () => {
@@ -589,21 +850,28 @@ class ArcGisVectorLayer extends L.LayerGroup {
           tooltipLabel = this.fallbackFieldLabel
         }
         if (rawValue == null || String(rawValue).trim() === '') {
-          this._map?.closeTooltip(this.tooltip)
+          publishHover(this.hoverKey, generation, map, null, null)
           return
         }
-        const content = document.createElement('div')
-        const label = document.createElement('span')
-        const value = document.createElement('strong')
-        label.textContent = `${tooltipLabel}：`
-        value.textContent = String(rawValue)
-        content.append(label, value)
-        this.tooltip.setLatLng(event.latlng).setContent(content)
-        this._map?.openTooltip(this.tooltip)
+        publishHover(this.hoverKey, generation, map, tooltipLabel, String(rawValue))
       } catch {
-        if (sequence === this.requestSequence) this._map?.closeTooltip(this.tooltip)
+        if (sequence === this.requestSequence && this._map) publishHover(this.hoverKey, generation, this._map, null, null)
       }
     }, 140)
+  }
+
+  setDisplayColor(color: string) {
+    const colors = this.imageLayer instanceof ArcGisExportLayer ? this.imageLayer.setDisplayColor(color) : []
+    this.pendingImageLayer?.setDisplayColor(color)
+    return colors
+  }
+
+  setCategories(fieldName: string, values: string[], color: string) {
+    if (this.imageLayer instanceof ArcGisExportLayer) this.imageLayer.setCategories(fieldName, values, color)
+  }
+
+  currentDefinitionExpression() {
+    return this.definitionExpression
   }
 
   setDefinitionExpression(expression: string) {
@@ -835,6 +1103,7 @@ async function createArcGisVectorHandle(
   layerId: number,
   layerMetadata: ArcGisLayerMetadata,
   bounds?: L.LatLngBounds,
+  color = vectorLayerColor(`${url}/${layerId}`),
 ): Promise<MapServiceLayerHandle> {
   const tooltipField = hoverField(layerMetadata)
   const tooltipLabel = fieldLabel(tooltipField)
@@ -847,7 +1116,7 @@ async function createArcGisVectorHandle(
   const filterField = categoryField(layerMetadata)
   const filterLabel = fieldLabel(filterField)
   const objectIdFieldName = layerMetadata.fields?.find((field) => field.type === 'esriFieldTypeOID')?.name || 'OBJECTID'
-  const imageLayer = new ArcGisExportLayer(url, false, layerId, layerMetadata.geometryType)
+  const imageLayer = new ArcGisExportLayer(url, false, layerId, layerMetadata.geometryType, color)
   const vectorLayer = new ArcGisVectorLayer(
     imageLayer,
     url,
@@ -866,11 +1135,14 @@ async function createArcGisVectorHandle(
         ...(categoryValues.hasEmptyValue ? [EMPTY_CATEGORY_VALUE] : []),
       ]
       if (values.length) {
+        vectorLayer.setCategories(filterField.name, values, color)
+        const shades = categoryShadeColors(color, values.length)
         categoryFilter = {
           fieldLabel: filterLabel,
-          values: values.map((value) => ({
+          values: values.map((value, index) => ({
             value,
             label: value === EMPTY_CATEGORY_VALUE ? '其他' : value,
+            color: shades[index] || color,
           })),
           setVisibleValues: (visibleValues) => vectorLayer.setDefinitionExpression(
             categoryExpression(filterField.name!, values, visibleValues),
@@ -888,7 +1160,21 @@ async function createArcGisVectorHandle(
       // 分类查询失败不影响矢量图层本身显示。
     }
   }
-  return { layer: vectorLayer, bounds, categoryFilter }
+  return {
+    layer: vectorLayer,
+    bounds,
+    categoryFilter,
+    color,
+    setColor: (next) => {
+      const shades = vectorLayer.setDisplayColor(next)
+      categoryFilter?.values.forEach((item, index) => {
+        const shade = shades[index]
+        if (shade) item.color = shade
+      })
+      return shades
+    },
+    definitionExpression: () => vectorLayer.currentDefinitionExpression(),
+  }
 }
 
 async function createArcGisLayer(
@@ -897,6 +1183,7 @@ async function createArcGisLayer(
   config: ServiceRemarkConfig,
   selectedLayerId?: number,
   selectedGeometryType?: string,
+  color?: string,
 ): Promise<MapServiceLayerHandle> {
   const metadata = await loadArcGisMetadata(url)
   const bounds = arcGisBounds(metadata, config, !imageServer)
@@ -919,20 +1206,20 @@ async function createArcGisLayer(
     if (selectedLayerId !== undefined) {
       const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${selectedLayerId}`)
       if (selectedGeometryType && !layerMetadata.geometryType) layerMetadata.geometryType = selectedGeometryType
-      if (layerMetadata.geometryType) return createArcGisVectorHandle(url, selectedLayerId, layerMetadata, bounds)
+      if (layerMetadata.geometryType) return createArcGisVectorHandle(url, selectedLayerId, layerMetadata, bounds, color)
     }
     for (const definition of (metadata.layers || []).slice(0, 12)) {
       if (!Number.isFinite(Number(definition.id))) continue
       const layerId = Number(definition.id)
       const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${layerId}`)
       if (layerMetadata.geometryType !== 'esriGeometryPolygon') continue
-      return createArcGisVectorHandle(url, layerId, layerMetadata, bounds)
+      return createArcGisVectorHandle(url, layerId, layerMetadata, bounds, color)
     }
   }
   return { layer: new ArcGisExportLayer(url, imageServer), bounds }
 }
 
-export async function createMapServiceLayer(service: MapServiceItem): Promise<MapServiceLayerHandle> {
+export async function createMapServiceLayer(service: MapServiceItem, color?: string): Promise<MapServiceLayerHandle> {
   const url = serviceRoot(service.serviceUrl)
   const type = normalizedType(service.type)
   const config = parseServiceRemark(service.remark)
@@ -948,7 +1235,7 @@ export async function createMapServiceLayer(service: MapServiceItem): Promise<Ma
     return createArcGisLayer(url, true, config)
   }
   if (type.includes('ARCGIS_MAPSERVER') || type === 'ARCGIS' || /\/MapServer(?:\?|$)/i.test(url)) {
-    return createArcGisLayer(url, false, config, service.arcGisLayerId, service.arcGisGeometryType)
+    return createArcGisLayer(url, false, config, service.arcGisLayerId, service.arcGisGeometryType, color)
   }
   throw new Error(`暂不支持地图服务类型：${service.type || '未知'}`)
 }
@@ -1034,4 +1321,140 @@ export async function inspectMapService(service: MapServiceItem): Promise<MapSer
   }
 
   return { isImagery: false }
+}
+
+const HIDDEN_ATTRIBUTE = /^(shape|shape_length|shape_area|st_area\(.+\)|st_length\(.+\))$/i
+const layerFieldCache = new Map<string, Promise<ArcGisLayerMetadata>>()
+
+function cachedLayerMetadata(url: string, layerId: number) {
+  const key = `${url}/${layerId}`
+  const cached = layerFieldCache.get(key)
+  if (cached) return cached
+  const request = loadArcGisJson<ArcGisLayerMetadata>(`${url}/${layerId}`)
+  layerFieldCache.set(key, request)
+  request.catch(() => layerFieldCache.delete(key))
+  return request
+}
+
+function extendFeatureBounds(bounds: L.LatLngBounds, geometry?: MapServiceSearchGeometry) {
+  const visit = (pair?: number[]) => {
+    if (!pair || pair.length < 2) return
+    const [longitude, latitude] = pair
+    if (Number.isFinite(longitude) && Number.isFinite(latitude)) bounds.extend([latitude!, longitude!])
+  }
+  geometry?.rings?.forEach((ring) => ring.forEach(visit))
+  geometry?.paths?.forEach((path) => path.forEach(visit))
+  geometry?.points?.forEach(visit)
+  if (Number.isFinite(geometry?.x) && Number.isFinite(geometry?.y)) bounds.extend([geometry!.y!, geometry!.x!])
+}
+
+function attributeRows(attributes?: Record<string, unknown>, aliases?: Record<string, string>): MapFeatureAttributeRow[] {
+  return Object.entries(attributes || {})
+    .filter(([name]) => !HIDDEN_ATTRIBUTE.test(name))
+    .map(([name, value]) => ({
+      label: fieldLabel({ name, alias: aliases?.[name] }),
+      value: value == null || String(value).trim() === '' ? '—' : String(value),
+    }))
+}
+
+function featureLocation(feature: { geometry?: MapServiceSearchGeometry }, geometryType?: string): MapServiceCategoryLocation {
+  const bounds = L.latLngBounds([])
+  extendFeatureBounds(bounds, feature.geometry)
+  return {
+    bounds: bounds.isValid() ? bounds : undefined,
+    geometryType,
+    geometries: feature.geometry ? [feature.geometry] : [],
+  }
+}
+
+/** 点击地图时，向可见的矢量 MapServer 查询光标处的要素及全部属性。 */
+export async function identifyVectorFeature(
+  service: MapServiceItem,
+  envelope: { west: number; south: number; east: number; north: number },
+  definitionExpression = '1=1',
+): Promise<IdentifiedMapFeature | null> {
+  if (!Number.isFinite(Number(service.arcGisLayerId))) return null
+  const url = serviceRoot(service.serviceUrl)
+  const layerId = Number(service.arcGisLayerId)
+  const parameters = new URLSearchParams({
+    where: definitionExpression || '1=1',
+    geometry: JSON.stringify({
+      xmin: envelope.west,
+      ymin: envelope.south,
+      xmax: envelope.east,
+      ymax: envelope.north,
+      spatialReference: { wkid: 4326 },
+    }),
+    geometryType: 'esriGeometryEnvelope',
+    inSR: '4326',
+    spatialRel: 'esriSpatialRelIntersects',
+    outFields: '*',
+    returnGeometry: 'true',
+    outSR: '4326',
+    resultRecordCount: '1',
+  })
+  const response = await loadArcGisJson<ArcGisQueryResponse>(`${url}/${layerId}/query?${parameters.toString()}`)
+  const feature = response.features?.[0]
+  if (!feature) return null
+  const rows = attributeRows(feature.attributes, response.fieldAliases)
+  const title = rows.find((row) => row.value !== '—')?.value || service.name
+  return {
+    serviceId: String(service.id),
+    serviceName: service.name,
+    title,
+    rows,
+    location: featureLocation(feature, service.arcGisGeometryType),
+  }
+}
+
+function searchableFieldNames(metadata: ArcGisLayerMetadata) {
+  const preferred = ['GCMC', 'XMMC', 'JYZTMC_1', 'DLMC', 'DKLX', 'DKLXMC', 'DKMC', 'DKBM', 'DCBH', '地类名称', '地块名称', '地块类型', '变化类']
+  const fields = (metadata.fields || []).filter((field) => {
+    const name = field.name || ''
+    if (!name || HIDDEN_ATTRIBUTE.test(name) || field.type === 'esriFieldTypeOID' || field.type === 'esriFieldTypeGeometry') return false
+    if (field.type && field.type !== 'esriFieldTypeString' && field.type !== 'esriFieldTypeGUID') return false
+    return /^[\w\u4e00-\u9fff]+$/.test(name)
+  })
+  const seen = new Set<string>()
+  return [...preferred.flatMap((name) => fields.filter((field) => field.name?.toUpperCase() === name.toUpperCase())), ...fields]
+    .filter((field) => {
+      const name = field.name || ''
+      if (seen.has(name)) return false
+      seen.add(name)
+      return true
+    })
+    .slice(0, 8)
+}
+
+/** 在矢量图层的文本字段里查找人名、地块名、类型名等属性内容。 */
+export async function searchVectorLayerText(service: MapServiceItem, keyword: string): Promise<IdentifiedMapFeature[]> {
+  const text = keyword.trim()
+  if (text.length < 1 || !Number.isFinite(Number(service.arcGisLayerId))) return []
+  const url = serviceRoot(service.serviceUrl)
+  const layerId = Number(service.arcGisLayerId)
+  const metadata = await cachedLayerMetadata(url, layerId)
+  const fields = searchableFieldNames(metadata)
+  if (!fields.length) return []
+  const escaped = text.replace(/'/g, "''")
+  const parameters = new URLSearchParams({
+    where: `(${fields.map((field) => `${field.name} LIKE '%${escaped}%'`).join(' OR ')})`,
+    outFields: '*',
+    returnGeometry: 'true',
+    outSR: '4326',
+    resultRecordCount: '4',
+  })
+  const response = await loadArcGisJson<ArcGisQueryResponse>(`${url}/${layerId}/query?${parameters.toString()}`)
+  return (response.features || []).flatMap((feature) => {
+    const rows = attributeRows(feature.attributes, response.fieldAliases)
+    const matched = rows.find((row) => row.value.toLowerCase().includes(text.toLowerCase()))
+    if (!matched) return []
+    return [{
+      serviceId: String(service.id),
+      serviceName: service.name,
+      title: matched.value,
+      matchLabel: matched.label,
+      rows,
+      location: featureLocation(feature, service.arcGisGeometryType || metadata.geometryType),
+    }]
+  })
 }

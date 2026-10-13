@@ -6,6 +6,7 @@ import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 import taizhouCityBoundary from '@/assets/geo/taizhou-city.json'
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
+import { getCustomDepartmentStatistics, type CustomStatGroup } from '@/api/business-statistics'
 import { listEnabledMapServices, listMapServicesForDepartments, updateMapService, type MapServiceItem } from '@/api/map-service'
 import { getDepartmentList } from '@/api/account-management'
 import { useUserStore } from '@/stores/user'
@@ -13,8 +14,13 @@ import type { DashboardMapLayer, DronePatrolRoute } from '@/types'
 import {
   createMapServiceLayer,
   expandMapServiceSublayers,
+  identifyVectorFeature,
   MAP_SERVICE_IMAGERY_PANE,
   MAP_SERVICE_VECTOR_PANE,
+  rememberVectorLayerColor,
+  searchVectorLayerText,
+  vectorLayerColor,
+  type IdentifiedMapFeature,
   type MapServiceCategoryLocation,
   type MapServiceLayerHandle,
 } from '@/utils/map-service-layer'
@@ -134,19 +140,31 @@ const mapServicesError = ref('')
 const mapServiceOrderSaving = ref(false)
 const draggingGroupId = ref('')
 const dragGhost = ref<{ name: string; x: number; y: number; width: number; height: number }>()
+const jiulongBoundaryVisible = ref(false)
 const layerPanelCollapsed = ref(Boolean(props.floatingControls))
 const layerPanelId = `dashboard-layers-${useId().replace(/:/g, '')}`
 const visibleMapServiceIds = ref<string[]>([])
 const expandedMapServiceGroupIds = ref<string[]>([])
+const expandedCategoryIds = ref<string[]>([])
 interface VectorFilterPanel {
   serviceId: string
   serviceName: string
   fieldLabel: string
-  items: Array<{ value: string; label: string; checked: boolean }>
+  items: Array<{ value: string; label: string; color: string; checked: boolean }>
   apply: (values: string[]) => void
   locateValue: (value: string) => Promise<MapServiceCategoryLocation>
 }
 const vectorFilterPanels = ref<VectorFilterPanel[]>([])
+const vectorLayerColors = ref<Record<string, string>>({})
+const layerContextMenu = ref<{ x: number; y: number; serviceId: string }>()
+const layerColorPicker = ref<{ x: number; y: number; serviceId: string; color: string; hue: number; saturation: number; value: number }>()
+const colorWheelCanvas = ref<HTMLCanvasElement>()
+const COLOR_WHEEL_SIZE = 168
+const attributeSearchResults = ref<IdentifiedMapFeature[]>([])
+const attributeSearchLoading = ref(false)
+const farmlandStatGroups = ref<CustomStatGroup[]>([])
+const farmlandStatLoading = ref(false)
+const farmlandStatError = ref('')
 const searchExpanded = ref(false)
 const searchKeyword = ref('')
 const searchInput = ref<HTMLInputElement>()
@@ -208,8 +226,14 @@ let measureGroup: L.LayerGroup | undefined
 let annotationGroup: L.LayerGroup | undefined
 let locationGroup: L.LayerGroup | undefined
 let searchHighlightGroup: L.LayerGroup | undefined
+let selectionHighlightGroup: L.LayerGroup | undefined
+let selectionPopup: L.Popup | undefined
 let administrativeBoundaryGroup: L.LayerGroup | undefined
 let hailingBoundaryGroup: L.LayerGroup | undefined
+let jiulongAdminHandle: MapServiceLayerHandle | undefined
+let jiulongAdminRequest = 0
+let jiulongAdminPendingFit = false
+const jiulongAdminService = ref<MapServiceItem>()
 let toolMessageTimer: ReturnType<typeof window.setTimeout> | undefined
 let markerHintTimer: ReturnType<typeof window.setTimeout> | undefined
 let sceneFocusTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -218,6 +242,8 @@ let searchFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 let searchHighlightTimer: ReturnType<typeof window.setInterval> | undefined
 let searchHighlightClearTimer: ReturnType<typeof window.setTimeout> | undefined
 let placeSearchRequestVersion = 0
+let attributeSearchRequestVersion = 0
+let farmlandStatRequestVersion = 0
 let searchPlaceMarker: L.CircleMarker | undefined
 let focusedSceneLayerId = ''
 let overviewFocused = false
@@ -471,12 +497,17 @@ function onMapServiceGroupClick(group: MapServiceGroup) {
 async function loadMapServices() {
   stopMapServiceDrag()
   const requestVersion = ++mapServiceRequestVersion
+  jiulongAdminRequest += 1
+  jiulongAdminHandle?.layer.remove()
+  jiulongAdminHandle = undefined
+  jiulongAdminService.value = undefined
   // 部门切换时先撤掉旧图层，避免新列表返回前仍展示上一部门的服务。
   mapServiceLayers.forEach((handle) => handle.layer.remove())
   mapServiceLayers.clear()
   loadingMapServiceIds.clear()
   visibleMapServiceIds.value = []
   vectorFilterPanels.value = []
+  expandedCategoryIds.value = []
   expandedMapServiceGroupIds.value = []
   mapServiceGroups.value = []
   mapServicesLoading.value = true
@@ -485,11 +516,12 @@ async function loadMapServices() {
     const sourceServices = await listEnabledMapServices(user.activeDeptId)
     const expandedServices = await Promise.all(sourceServices.map(expandMapServiceSublayers))
     if (requestVersion !== mapServiceRequestVersion) return
+    jiulongAdminService.value = undefined
     const groups = sourceServices.map((source, index) => ({
       id: String(source.id),
       name: source.name,
       source,
-      layers: expandedServices[index] || [source],
+      layers: detachJiulongAdminLayer(source, expandedServices[index] || [source]),
     }))
     const services = groups.flatMap((group) => group.layers)
     const activeIds = new Set(services.map((service) => String(service.id)))
@@ -503,6 +535,7 @@ async function loadMapServices() {
     const groupIds = new Set(groups.filter((group) => group.layers.length > 1).map((group) => group.id))
     expandedMapServiceGroupIds.value = expandedMapServiceGroupIds.value.filter((id) => groupIds.has(id))
     mapServiceGroups.value = groups
+    assignVectorColors(groups)
     syncMapServiceStack()
   } catch (reason) {
     if (requestVersion !== mapServiceRequestVersion) return
@@ -510,7 +543,10 @@ async function loadMapServices() {
     expandedMapServiceGroupIds.value = []
     mapServicesError.value = reason instanceof Error ? reason.message : '地图服务列表加载失败'
   } finally {
-    if (requestVersion === mapServiceRequestVersion) mapServicesLoading.value = false
+    if (requestVersion === mapServiceRequestVersion) {
+      mapServicesLoading.value = false
+      if (jiulongBoundaryVisible.value) void renderJiulongBoundary(false)
+    }
   }
 }
 
@@ -522,13 +558,16 @@ async function toggleMapService(service: MapServiceItem) {
     existing.layer.remove()
     visibleMapServiceIds.value = visibleMapServiceIds.value.filter((layerId) => layerId !== id)
     vectorFilterPanels.value = vectorFilterPanels.value.filter((panel) => panel.serviceId !== id)
+    expandedCategoryIds.value = expandedCategoryIds.value.filter((layerId) => layerId !== id)
     return
   }
   if (loadingMapServiceIds.has(id)) return
   loadingMapServiceIds.add(id)
   const requestVersion = mapServiceRequestVersion
   try {
-    const handle = existing || await createMapServiceLayer(service)
+    const color = service.arcGisGeometryType ? vectorLayerColors.value[id] || vectorLayerColor(id) : undefined
+    const handle = existing || await createMapServiceLayer(service, color)
+    if (existing && color) existing.setColor?.(color)
     if (requestVersion !== mapServiceRequestVersion) {
       handle.layer.remove()
       return
@@ -547,6 +586,7 @@ async function toggleMapService(service: MapServiceItem) {
         apply: handle.categoryFilter.setVisibleValues,
         locateValue: handle.categoryFilter.locateValue,
       }]
+      if (!expandedCategoryIds.value.includes(id)) expandedCategoryIds.value = [...expandedCategoryIds.value, id]
     }
     if (handle.bounds?.isValid()) {
       // 用户当前视窗已完全位于新图层覆盖范围内时保持原视角，避免每次勾选
@@ -571,6 +611,199 @@ function layerIconKind(service: MapServiceItem) {
   return 'layer'
 }
 
+function assignVectorColors(groups: MapServiceGroup[]) {
+  const next = { ...vectorLayerColors.value }
+  groups.forEach((group) => {
+    group.layers.forEach((service) => {
+      if (!service.arcGisGeometryType) return
+      const id = String(service.id)
+      next[id] = next[id] || vectorLayerColor(id)
+    })
+  })
+  vectorLayerColors.value = next
+}
+
+function vectorRowColor(service: MapServiceItem) {
+  if (!service.arcGisGeometryType) return undefined
+  return vectorLayerColors.value[String(service.id)]
+}
+
+function closeLayerMenus(event?: Event) {
+  const target = event?.target
+  if (target instanceof Element && target.closest('.layer-context-menu, .layer-color-picker')) return
+  layerContextMenu.value = undefined
+  layerColorPicker.value = undefined
+}
+
+function onLayerContextMenu(event: MouseEvent, service: MapServiceItem) {
+  if (!service.arcGisGeometryType) return
+  event.preventDefault()
+  layerColorPicker.value = undefined
+  layerContextMenu.value = { x: event.clientX, y: event.clientY, serviceId: String(service.id) }
+}
+
+function onGroupContextMenu(event: MouseEvent, group: MapServiceGroup) {
+  const service = singleVectorService(group)
+  if (service) onLayerContextMenu(event, service)
+}
+
+function onSublayerContextMenu(event: MouseEvent, service: MapServiceItem) {
+  onLayerContextMenu(event, service)
+}
+
+function groupIconColor(group: MapServiceGroup) {
+  const color = singleVectorService(group) ? vectorRowColor(singleVectorService(group)!) : undefined
+  return color ? { color } : undefined
+}
+
+function hexToHsv(hex: string) {
+  const red = parseInt(hex.slice(1, 3), 16) / 255
+  const green = parseInt(hex.slice(3, 5), 16) / 255
+  const blue = parseInt(hex.slice(5, 7), 16) / 255
+  const max = Math.max(red, green, blue)
+  const min = Math.min(red, green, blue)
+  const delta = max - min
+  let hue = 0
+  if (delta) {
+    if (max === red) hue = ((green - blue) / delta) % 6
+    else if (max === green) hue = (blue - red) / delta + 2
+    else hue = (red - green) / delta + 4
+    hue *= 60
+    if (hue < 0) hue += 360
+  }
+  return { hue, saturation: max === 0 ? 0 : delta / max, value: max }
+}
+
+function hsvToHex(hue: number, saturation: number, value: number) {
+  const chroma = value * saturation
+  const secondary = chroma * (1 - Math.abs(((hue / 60) % 2) - 1))
+  const match = value - chroma
+  const sector = Math.floor(hue / 60) % 6
+  const rows = [
+    [chroma, secondary, 0],
+    [secondary, chroma, 0],
+    [0, chroma, secondary],
+    [0, secondary, chroma],
+    [secondary, 0, chroma],
+    [chroma, 0, secondary],
+  ]
+  const [red, green, blue] = rows[sector] ?? [0, 0, 0]
+  const channel = (amount: number) => Math.round((amount + match) * 255).toString(16).padStart(2, '0')
+  return `#${channel(red ?? 0)}${channel(green ?? 0)}${channel(blue ?? 0)}`
+}
+
+function drawColorWheel() {
+  const canvas = colorWheelCanvas.value
+  const context = canvas?.getContext('2d')
+  if (!canvas || !context) return
+  const size = canvas.width
+  const center = size / 2
+  const radius = center - 1
+  const image = context.createImageData(size, size)
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const dx = x + 0.5 - center
+      const dy = y + 0.5 - center
+      const distance = Math.hypot(dx, dy)
+      const index = (y * size + x) * 4
+      if (distance > radius) continue
+      const hue = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360
+      const hex = hsvToHex(hue, Math.min(1, distance / radius), 1)
+      image.data[index] = parseInt(hex.slice(1, 3), 16)
+      image.data[index + 1] = parseInt(hex.slice(3, 5), 16)
+      image.data[index + 2] = parseInt(hex.slice(5, 7), 16)
+      image.data[index + 3] = 255
+    }
+  }
+  context.putImageData(image, 0, 0)
+}
+
+function openLayerColorPicker() {
+  const menu = layerContextMenu.value
+  if (!menu) return
+  const color = vectorLayerColors.value[menu.serviceId] || vectorLayerColor(menu.serviceId)
+  const hsv = hexToHsv(color)
+  layerColorPicker.value = { x: menu.x, y: menu.y, serviceId: menu.serviceId, color, ...hsv }
+  layerContextMenu.value = undefined
+  void nextTick(drawColorWheel)
+}
+
+const colorWheelCursorStyle = computed(() => {
+  const picker = layerColorPicker.value
+  if (!picker) return {}
+  const radius = (COLOR_WHEEL_SIZE / 2 - 1) * picker.saturation
+  const angle = (picker.hue * Math.PI) / 180
+  return {
+    left: `${COLOR_WHEEL_SIZE / 2 + Math.cos(angle) * radius}px`,
+    top: `${COLOR_WHEEL_SIZE / 2 + Math.sin(angle) * radius}px`,
+  }
+})
+
+const colorValueTrack = computed(() => {
+  const picker = layerColorPicker.value
+  if (!picker) return '#000'
+  return `linear-gradient(90deg, #000, ${hsvToHex(picker.hue, picker.saturation, 1)})`
+})
+
+function onColorWheelPointer(event: PointerEvent) {
+  const canvas = colorWheelCanvas.value
+  const picker = layerColorPicker.value
+  if (!canvas || !picker) return
+  canvas.setPointerCapture(event.pointerId)
+  const pick = (pointer: PointerEvent) => {
+    const current = layerColorPicker.value
+    if (!current) return
+    const rect = canvas.getBoundingClientRect()
+    const x = ((pointer.clientX - rect.left) / rect.width) * canvas.width
+    const y = ((pointer.clientY - rect.top) / rect.height) * canvas.height
+    const center = canvas.width / 2
+    const radius = center - 1
+    const dx = x - center
+    const dy = y - center
+    const distance = Math.min(Math.hypot(dx, dy), radius)
+    const hue = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360
+    const saturation = distance / radius
+    layerColorPicker.value = { ...current, hue, saturation }
+    applyLayerColor(hsvToHex(hue, saturation, current.value))
+  }
+  pick(event)
+  const stop = () => {
+    canvas.removeEventListener('pointermove', pick)
+    canvas.removeEventListener('pointerup', stop)
+    canvas.removeEventListener('pointercancel', stop)
+  }
+  canvas.addEventListener('pointermove', pick)
+  canvas.addEventListener('pointerup', stop)
+  canvas.addEventListener('pointercancel', stop)
+}
+
+function onColorValueInput(event: Event) {
+  const picker = layerColorPicker.value
+  if (!picker) return
+  const value = Number((event.target as HTMLInputElement).value) / 100
+  layerColorPicker.value = { ...picker, value }
+  applyLayerColor(hsvToHex(picker.hue, picker.saturation, value))
+}
+
+function applyLayerColor(color: string) {
+  const picker = layerColorPicker.value
+  if (!picker || !/^#[0-9a-fA-F]{6}$/.test(color)) return
+  layerColorPicker.value = { ...picker, color }
+  vectorLayerColors.value = { ...vectorLayerColors.value, [picker.serviceId]: color }
+  rememberVectorLayerColor(picker.serviceId, color)
+  const shades = mapServiceLayers.get(picker.serviceId)?.setColor?.(color) || []
+  const panel = vectorFilterPanels.value.find((item) => item.serviceId === picker.serviceId)
+  panel?.items.forEach((item, index) => {
+    const shade = shades[index]
+    if (shade) item.color = shade
+  })
+}
+
+function singleVectorService(group: MapServiceGroup) {
+  const service = group.layers.length === 1 ? group.layers[0] : undefined
+  return service?.arcGisGeometryType ? service : undefined
+}
+
 function isMapServiceGroupActive(group: MapServiceGroup) {
   if (group.layers.length > 1) return expandedMapServiceGroupIds.value.includes(group.id)
   return group.layers.some((service) => visibleMapServiceIds.value.includes(String(service.id)))
@@ -578,6 +811,22 @@ function isMapServiceGroupActive(group: MapServiceGroup) {
 
 function isMapServiceGroupExpanded(group: MapServiceGroup) {
   return group.layers.length > 1 && expandedMapServiceGroupIds.value.includes(group.id)
+}
+
+function categoryPanelFor(service: MapServiceItem) {
+  if (!visibleMapServiceIds.value.includes(String(service.id))) return
+  return vectorFilterPanels.value.find((panel) => panel.serviceId === String(service.id))
+}
+
+function isCategoryExpanded(service: MapServiceItem) {
+  return expandedCategoryIds.value.includes(String(service.id))
+}
+
+function toggleCategoryFolder(service: MapServiceItem) {
+  const id = String(service.id)
+  expandedCategoryIds.value = expandedCategoryIds.value.includes(id)
+    ? expandedCategoryIds.value.filter((item) => item !== id)
+    : [...expandedCategoryIds.value, id]
 }
 
 async function toggleMapServiceGroup(group: MapServiceGroup) {
@@ -729,6 +978,100 @@ function flashSearchLocation(location: MapServiceCategoryLocation) {
   searchHighlightClearTimer = window.setTimeout(clearSearchHighlight, 2200)
 }
 
+function clearSelectionHighlight() {
+  selectionHighlightGroup?.clearLayers()
+  selectionPopup?.remove()
+  selectionPopup = undefined
+}
+
+function pinFeatureHighlight(feature: IdentifiedMapFeature, anchor?: L.LatLng) {
+  if (!map || !selectionHighlightGroup) return
+  clearSearchHighlight()
+  clearSelectionHighlight()
+  const outlines: L.LatLngExpression[][] = []
+  const polygons: L.LatLngExpression[][] = []
+  const points: L.LatLngExpression[] = []
+  const toLatLngs = (coordinates?: number[][]) => (coordinates || []).flatMap((coordinate) => {
+    const [longitude, latitude] = coordinate
+    return Number.isFinite(longitude) && Number.isFinite(latitude) ? [[latitude!, longitude!] as L.LatLngTuple] : []
+  })
+  for (const geometry of feature.location.geometries) {
+    for (const ring of geometry.rings || []) {
+      const latLngs = toLatLngs(ring)
+      if (latLngs.length > 2) polygons.push(latLngs)
+    }
+    for (const path of geometry.paths || []) {
+      const latLngs = toLatLngs(path)
+      if (latLngs.length > 1) outlines.push(latLngs)
+    }
+    for (const point of geometry.points || []) {
+      const latLngs = toLatLngs([point])
+      if (latLngs[0]) points.push(latLngs[0])
+    }
+    if (Number.isFinite(geometry.x) && Number.isFinite(geometry.y)) points.push([geometry.y!, geometry.x!])
+  }
+  polygons.forEach((ring) => L.polygon(ring, {
+    pane: 'search-highlight',
+    interactive: false,
+    color: '#ffe14a',
+    weight: 3,
+    fillColor: '#ffe14a',
+    fillOpacity: .28,
+  }).addTo(selectionHighlightGroup!))
+  if (outlines.length) {
+    L.polyline(outlines, {
+      pane: 'search-highlight',
+      interactive: false,
+      color: '#ffe14a',
+      weight: 4,
+    }).addTo(selectionHighlightGroup)
+  }
+  points.forEach((point) => L.circleMarker(point, {
+    pane: 'search-highlight',
+    interactive: false,
+    radius: 9,
+    color: '#ffe14a',
+    weight: 3,
+    fillColor: '#fff4a8',
+    fillOpacity: .85,
+  }).addTo(selectionHighlightGroup!))
+
+  const content = document.createElement('div')
+  content.className = 'feature-attribute-card'
+  const title = document.createElement('strong')
+  title.textContent = feature.serviceName
+  content.appendChild(title)
+  const list = document.createElement('dl')
+  feature.rows.forEach((row) => {
+    const item = document.createElement('div')
+    const label = document.createElement('dt')
+    const value = document.createElement('dd')
+    label.textContent = row.label
+    value.textContent = row.value
+    item.append(label, value)
+    list.appendChild(item)
+  })
+  if (!feature.rows.length) {
+    const empty = document.createElement('p')
+    empty.textContent = '该要素没有可显示的属性'
+    content.appendChild(empty)
+  } else {
+    content.appendChild(list)
+  }
+  const popupAnchor = anchor
+    || feature.location.bounds?.getCenter()
+    || (points[0] ? L.latLng(points[0] as L.LatLngTuple) : map.getCenter())
+  selectionPopup = L.popup({
+    className: 'feature-attribute-popup',
+    maxWidth: 320,
+    autoPan: true,
+    closeButton: true,
+  }).setLatLng(popupAnchor).setContent(content).openOn(map)
+  selectionPopup.on('remove', () => {
+    selectionHighlightGroup?.clearLayers()
+  })
+}
+
 async function focusParcelSearchResult(result: ParcelSearchResult) {
   if (!map) return
   try {
@@ -772,6 +1115,106 @@ function placeResult(item: Record<string, unknown>, index: number): PlaceSearchR
     latitude: point.latitude,
     bounds,
     level: Number.isFinite(Number(item.level)) ? Number(item.level) : undefined,
+  }
+}
+
+async function searchLayerAttributes(keyword: string) {
+  const requestVersion = ++attributeSearchRequestVersion
+  const text = keyword.trim()
+  if (text.length < 1) {
+    attributeSearchResults.value = []
+    attributeSearchLoading.value = false
+    return
+  }
+  const services = mapServiceGroups.value.flatMap((group) => group.layers)
+    .filter((service) => Number.isFinite(Number(service.arcGisLayerId)))
+  if (!services.length) {
+    attributeSearchResults.value = []
+    return
+  }
+  attributeSearchLoading.value = true
+  try {
+    const batches = await Promise.all(services.slice(0, 8).map(async (service) => {
+      try {
+        return await searchVectorLayerText(service, text)
+      } catch {
+        return []
+      }
+    }))
+    if (requestVersion !== attributeSearchRequestVersion) return
+    const seen = new Set<string>()
+    attributeSearchResults.value = batches.flat().filter((feature) => {
+      const identity = `${feature.serviceId}:${feature.matchLabel}:${feature.title}`
+      if (seen.has(identity)) return false
+      seen.add(identity)
+      return true
+    }).slice(0, 8)
+  } finally {
+    if (requestVersion === attributeSearchRequestVersion) attributeSearchLoading.value = false
+  }
+}
+
+async function focusAttributeResult(feature: IdentifiedMapFeature) {
+  if (!map) return
+  const service = mapServiceGroups.value.flatMap((group) => group.layers)
+    .find((item) => String(item.id) === feature.serviceId)
+  if (service && !visibleMapServiceIds.value.includes(feature.serviceId)) await toggleMapService(service)
+  const bounds = feature.location.bounds
+  if (bounds?.isValid()) {
+    map.invalidateSize({ pan: false })
+    map.fitBounds(bounds, { padding: [70, 70], maxZoom: 18, animate: true })
+  }
+  pinFeatureHighlight(feature)
+  searchKeyword.value = ''
+}
+
+async function identifyClickedFeature(event: L.LeafletMouseEvent) {
+  if (!map || activeTool.value) return
+  const pixel = map.latLngToContainerPoint(event.latlng)
+  const northWest = map.containerPointToLatLng(pixel.subtract([8, 8]))
+  const southEast = map.containerPointToLatLng(pixel.add([8, 8]))
+  const envelope = {
+    west: Math.min(northWest.lng, southEast.lng),
+    south: Math.min(northWest.lat, southEast.lat),
+    east: Math.max(northWest.lng, southEast.lng),
+    north: Math.max(northWest.lat, southEast.lat),
+  }
+  const services = mapServiceGroups.value.flatMap((group) => group.layers)
+    .filter((service) => visibleMapServiceIds.value.includes(String(service.id)) && Number.isFinite(Number(service.arcGisLayerId)))
+  for (const service of services) {
+    try {
+      const expression = mapServiceLayers.get(String(service.id))?.definitionExpression?.() || '1=1'
+      const feature = await identifyVectorFeature(service, envelope, expression)
+      if (!feature) continue
+      pinFeatureHighlight(feature, event.latlng)
+      return
+    } catch {
+      // 单个图层点选失败时继续查询叠在下面的图层。
+    }
+  }
+  clearSelectionHighlight()
+}
+
+const farmlandStatVisible = computed(() => mapServiceGroups.value.some((group) => {
+  const opened = group.layers.some((service) => visibleMapServiceIds.value.includes(String(service.id)))
+  if (!opened) return false
+  return /九龙镇高标/.test(group.name) || /九龙镇高标/.test(group.source.name)
+}))
+
+async function loadFarmlandStats() {
+  const requestVersion = ++farmlandStatRequestVersion
+  farmlandStatLoading.value = true
+  farmlandStatError.value = ''
+  try {
+    const groups = await getCustomDepartmentStatistics(user.activeDeptId)
+    if (requestVersion !== farmlandStatRequestVersion) return
+    farmlandStatGroups.value = groups
+  } catch (reason) {
+    if (requestVersion !== farmlandStatRequestVersion) return
+    farmlandStatGroups.value = []
+    farmlandStatError.value = reason instanceof Error ? reason.message : '定制统计加载失败'
+  } finally {
+    if (requestVersion === farmlandStatRequestVersion) farmlandStatLoading.value = false
   }
 }
 
@@ -864,6 +1307,11 @@ async function toggleSearch() {
 }
 
 function focusFirstSearchResult() {
+  const attribute = attributeSearchResults.value[0]
+  if (attribute) {
+    void focusAttributeResult(attribute)
+    return
+  }
   const parcel = parcelSearchResults.value[0]
   if (parcel) void focusParcelSearchResult(parcel)
   else if (placeSearchResults.value[0]) focusPlaceResult(placeSearchResults.value[0])
@@ -1051,7 +1499,8 @@ function renderAdministrativeBoundaries() {
 function renderHailingBoundary() {
   hailingBoundaryGroup?.remove()
   hailingBoundaryGroup = undefined
-  if (!map || props.focusLayerId || !HAILING_DISTRICT) return
+  // 九龙镇边界与默认行政区划互斥，同时只显示其中一套。
+  if (!map || props.focusLayerId || !HAILING_DISTRICT || jiulongBoundaryVisible.value) return
   hailingBoundaryGroup = L.layerGroup()
   // Leaflet uses Canvas here, so a second stroke provides a reliable 50% dark-blue halo.
   L.geoJSON(HAILING_DISTRICT as GeoJsonObject, {
@@ -1082,6 +1531,64 @@ function renderHailingBoundary() {
     },
   }).addTo(hailingBoundaryGroup)
   hailingBoundaryGroup.addTo(map)
+}
+
+function detachJiulongAdminLayer(source: MapServiceItem, layers: MapServiceItem[]) {
+  const admin = layers.find((layer) => /九龙镇行政区/.test(layer.name))
+  const rest = layers.filter((layer) => layer !== admin)
+  if (!admin || !rest.length) return layers
+  const fromFarmland = /永久基本农田/.test(source.name)
+  if (!fromFarmland && jiulongAdminService.value) return layers
+  jiulongAdminService.value = admin
+  return rest
+}
+
+async function renderJiulongBoundary(fit: boolean) {
+  const request = ++jiulongAdminRequest
+  jiulongAdminHandle?.layer.remove()
+  jiulongAdminHandle = undefined
+  if (!map || !jiulongBoundaryVisible.value) return
+  const service = jiulongAdminService.value
+  if (!service) {
+    if (mapServicesLoading.value) {
+      if (fit) jiulongAdminPendingFit = true
+      return
+    }
+    jiulongAdminPendingFit = false
+    jiulongBoundaryVisible.value = false
+    renderHailingBoundary()
+    if (fit) showToolMessage('未找到九龙镇行政区图层')
+    return
+  }
+  const shouldFit = fit || jiulongAdminPendingFit
+  jiulongAdminPendingFit = false
+  try {
+    const handle = await createMapServiceLayer(service, vectorLayerColor(`jiulong-admin-${service.id}`))
+    if (request !== jiulongAdminRequest || !map || !jiulongBoundaryVisible.value) {
+      handle.layer.remove()
+      return
+    }
+    jiulongAdminHandle = handle
+    handle.layer.addTo(map)
+    if (shouldFit && handle.bounds?.isValid()) {
+      map.fitBounds(handle.bounds, { padding: [48, 48], maxZoom: 15, animate: true })
+    }
+  } catch (reason) {
+    if (request !== jiulongAdminRequest) return
+    jiulongBoundaryVisible.value = false
+    renderHailingBoundary()
+    showToolMessage(reason instanceof Error ? reason.message : '九龙镇行政区加载失败')
+  }
+}
+
+function toggleJiulongBoundary() {
+  jiulongBoundaryVisible.value = !jiulongBoundaryVisible.value
+  void renderJiulongBoundary(jiulongBoundaryVisible.value)
+  renderHailingBoundary()
+  if (!map || jiulongBoundaryVisible.value || props.focusLayerId || !HAILING_DISTRICT) return
+  const bounds = L.geoJSON(HAILING_DISTRICT as GeoJsonObject).getBounds()
+  if (!bounds.isValid()) return
+  map.fitBounds(bounds, { padding: [36, 36], maxZoom: 13, animate: true })
 }
 
 function updateScale() {
@@ -1137,6 +1644,7 @@ async function initMap() {
     annotationGroup = L.layerGroup().addTo(map)
     locationGroup = L.layerGroup().addTo(map)
     searchHighlightGroup = L.layerGroup().addTo(map)
+    selectionHighlightGroup = L.layerGroup().addTo(map)
     addBaseLayers('image')
     if (showAdministrativeBoundaries) renderAdministrativeBoundaries()
     renderHailingBoundary()
@@ -1150,8 +1658,12 @@ async function initMap() {
       if (activeTool.value === 'distance' || activeTool.value === 'area') {
         measurePoints.push(event.latlng)
         redrawMeasurement()
+        return
       }
+      if (!activeTool.value) void identifyClickedFeature(event)
     })
+    window.removeEventListener('pointerdown', closeLayerMenus)
+    window.addEventListener('pointerdown', closeLayerMenus)
     map.on('mousemove', (event) => {
       if ((activeTool.value === 'distance' || activeTool.value === 'area') && measurePoints.length) redrawMeasurement(event.latlng)
     })
@@ -1191,18 +1703,29 @@ watch(() => props.focusLayerId, () => {
   if (props.focusLayerId) scheduleSceneFocus()
   else scheduleOverviewFocus()
 })
+watch(farmlandStatVisible, (visible) => {
+  if (visible) void loadFarmlandStats()
+})
+watch(() => user.activeDeptId, () => {
+  if (farmlandStatVisible.value) void loadFarmlandStats()
+})
 watch(searchKeyword, (value) => {
   if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
   const keyword = value.trim().toLowerCase()
   if (!keyword) {
     placeSearchRequestVersion += 1
+    attributeSearchRequestVersion += 1
     placeSearchResults.value = []
+    attributeSearchResults.value = []
     placeSearchLoading.value = false
+    attributeSearchLoading.value = false
     placeSearchError.value = ''
     return
   }
   searchFocusTimer = window.setTimeout(() => {
-    void searchPlaces(value.trim())
+    const keyword = value.trim()
+    void searchPlaces(keyword)
+    void searchLayerAttributes(keyword)
   }, 260)
 })
 onBeforeUnmount(() => {
@@ -1213,10 +1736,15 @@ onBeforeUnmount(() => {
   if (overviewFocusTimer) window.clearTimeout(overviewFocusTimer)
   if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
   clearSearchHighlight()
+  clearSelectionHighlight()
+  window.removeEventListener('pointerdown', closeLayerMenus)
   if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)
   resizeObserver?.disconnect()
   mapServiceLayers.forEach((handle) => handle.layer.remove())
   mapServiceLayers.clear()
+  jiulongAdminRequest += 1
+  jiulongAdminHandle?.layer.remove()
+  jiulongAdminHandle = undefined
   map?.remove()
 })
 </script>
@@ -1247,18 +1775,47 @@ onBeforeUnmount(() => {
         <div v-if="floatingControls" :id="`${layerPanelId}-search`" class="layer-manager-search"></div>
         <div class="layer-manager-list" :aria-busy="mapServiceOrderSaving">
           <div v-if="mapServiceOrderSaving" class="layer-order-save-status" role="status">正在保存共享排序…</div>
+          <div class="map-service-group administrative-boundary-group">
+            <button class="layer-row map-service-row" :class="{ active: jiulongBoundaryVisible }" type="button" title="九龙镇行政区划边界" role="switch" :aria-checked="jiulongBoundaryVisible" @click="toggleJiulongBoundary">
+              <i class="layer-kind"><MapLocation /></i><span><b>九龙镇行政区划边界</b></span><em :title="jiulongBoundaryVisible ? '隐藏' : '显示'">{{ jiulongBoundaryVisible ? '●' : '○' }}</em>
+            </button>
+          </div>
           <div v-if="mapServicesLoading" class="layer-panel-message">正在读取地图服务…</div>
           <div v-else-if="mapServicesError" class="layer-panel-message error">{{ mapServicesError }}</div>
           <div v-else-if="!mapServiceGroups.length" class="layer-panel-message">暂无已启用的地图服务</div>
           <TransitionGroup v-else tag="div" name="map-service-sort" class="map-service-sort-list">
             <div v-for="group in mapServiceGroups" :key="group.id" class="map-service-group" :class="{ 'is-dragging': draggingGroupId === group.id }" :data-group-id="group.id">
-              <button class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group) }" :title="`${group.name}(长按可拖动排序)`" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : undefined" @pointerdown="onMapServicePointerDown($event, group)" @click="onMapServiceGroupClick(group)">
-                <i class="layer-kind"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em :class="{ 'layer-expander': group.layers.length > 1 }" :title="group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '收起' : '展开') : (isMapServiceGroupActive(group) ? '隐藏' : '显示')">{{ group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '⌃' : '⌄') : (isMapServiceGroupActive(group) ? '●' : '○') }}</em>
+              <button class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="`${group.name}(长按可拖动排序)`" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @pointerdown="onMapServicePointerDown($event, group)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
+                <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em v-if="group.layers.length === 1 && categoryPanelFor(group.layers[0]!)" class="layer-expander" :title="isCategoryExpanded(group.layers[0]!) ? '收起分类' : '展开分类'" @pointerdown.stop @click.stop="toggleCategoryFolder(group.layers[0]!)">{{ isCategoryExpanded(group.layers[0]!) ? '⌃' : '⌄' }}</em><em :class="{ 'layer-expander': group.layers.length > 1 }" :title="group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '收起' : '展开') : (isMapServiceGroupActive(group) ? '隐藏' : '显示')">{{ group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '⌃' : '⌄') : (isMapServiceGroupActive(group) ? '●' : '○') }}</em>
               </button>
+              <div v-if="group.layers.length === 1 && categoryPanelFor(group.layers[0]!) && isCategoryExpanded(group.layers[0]!)" class="map-service-sublayers category-folder">
+                <div class="category-field-label">{{ categoryPanelFor(group.layers[0]!)!.fieldLabel }}</div>
+                <label class="layer-row map-service-row category-row">
+                  <i class="category-swatch category-swatch--all"></i><span><b>全部地块</b></span>
+                  <input type="checkbox" :checked="allVectorCategoriesChecked(categoryPanelFor(group.layers[0]!)!)" :indeterminate="someVectorCategoriesChecked(categoryPanelFor(group.layers[0]!)!)" @change="toggleAllVectorCategories(categoryPanelFor(group.layers[0]!)!, $event)" />
+                </label>
+                <label v-for="item in categoryPanelFor(group.layers[0]!)!.items" :key="item.value" class="layer-row map-service-row category-row">
+                  <i class="category-swatch" :style="{ background: item.color }"></i><span><b>{{ item.label }}</b></span>
+                  <input v-model="item.checked" type="checkbox" @change="applyVectorCategoryFilter(categoryPanelFor(group.layers[0]!)!)" />
+                </label>
+              </div>
               <div v-if="isMapServiceGroupExpanded(group)" class="map-service-sublayers">
-                <button v-for="service in group.layers" :key="service.id" class="layer-row map-service-row map-service-sublayer" :class="{ active: visibleMapServiceIds.includes(String(service.id)) }" :title="service.name" role="switch" :aria-checked="visibleMapServiceIds.includes(String(service.id))" @click="toggleMapService(service)">
-                  <i class="layer-kind"><MapLocation v-if="service.arcGisGeometryType" /><Picture v-else /></i><span><b>{{ service.name }}</b></span><em :title="visibleMapServiceIds.includes(String(service.id)) ? '隐藏' : '显示'">{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
-                </button>
+                <div v-for="service in group.layers" :key="service.id" class="map-service-leaf">
+                  <button class="layer-row map-service-row map-service-sublayer" :class="{ active: visibleMapServiceIds.includes(String(service.id)), 'has-categories': categoryPanelFor(service) }" :title="service.name" role="switch" :aria-checked="visibleMapServiceIds.includes(String(service.id))" :aria-expanded="categoryPanelFor(service) ? isCategoryExpanded(service) : undefined" @click="toggleMapService(service)" @contextmenu="onSublayerContextMenu($event, service)">
+                    <i class="layer-kind" :style="vectorRowColor(service) ? { color: vectorRowColor(service) } : undefined"><MapLocation v-if="service.arcGisGeometryType" /><Picture v-else /></i><span><b>{{ service.name }}</b></span><em v-if="categoryPanelFor(service)" class="layer-expander" :title="isCategoryExpanded(service) ? '收起分类' : '展开分类'" @click.stop="toggleCategoryFolder(service)">{{ isCategoryExpanded(service) ? '⌃' : '⌄' }}</em><em :title="visibleMapServiceIds.includes(String(service.id)) ? '隐藏' : '显示'">{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
+                  </button>
+                  <div v-if="categoryPanelFor(service) && isCategoryExpanded(service)" class="category-folder">
+                    <div class="category-field-label">{{ categoryPanelFor(service)!.fieldLabel }}</div>
+                    <label class="layer-row map-service-row category-row">
+                      <i class="category-swatch category-swatch--all"></i><span><b>全部地块</b></span>
+                      <input type="checkbox" :checked="allVectorCategoriesChecked(categoryPanelFor(service)!)" :indeterminate="someVectorCategoriesChecked(categoryPanelFor(service)!)" @change="toggleAllVectorCategories(categoryPanelFor(service)!, $event)" />
+                    </label>
+                    <label v-for="item in categoryPanelFor(service)!.items" :key="item.value" class="layer-row map-service-row category-row">
+                      <i class="category-swatch" :style="{ background: item.color }"></i><span><b>{{ item.label }}</b></span>
+                      <input v-model="item.checked" type="checkbox" @change="applyVectorCategoryFilter(categoryPanelFor(service)!)" />
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
           </TransitionGroup>
@@ -1296,48 +1853,60 @@ onBeforeUnmount(() => {
 
     <Teleport :to="`#${layerPanelId}-search`" :disabled="!floatingControls" defer>
     <div class="map-search" :class="{ expanded: searchExpanded || floatingControls }">
-      <input v-if="searchExpanded || floatingControls" ref="searchInput" aria-label="搜索地块或地点" v-model="searchKeyword" placeholder="搜索地块类型、名称或地点" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="floatingControls ? searchKeyword = '' : toggleSearch()" />
+      <input v-if="searchExpanded || floatingControls" ref="searchInput" aria-label="搜索地块、人名或地点" v-model="searchKeyword" placeholder="搜索人名、地块、类型或地点" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="floatingControls ? searchKeyword = '' : toggleSearch()" />
       <button class="map-search-toggle" type="button" :aria-label="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起地图搜索' : '展开地图搜索')" :title="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起搜索' : '搜索地块或地点')" @click="floatingControls ? focusFirstSearchResult() : toggleSearch()">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/></svg>
       </button>
       <div v-if="showSearchSuggestions" class="search-results" aria-live="polite">
+        <template v-if="attributeSearchResults.length">
+          <div class="search-result-title">图层字段</div>
+          <button v-for="feature in attributeSearchResults" :key="`${feature.serviceId}-${feature.matchLabel}-${feature.title}`" @click="focusAttributeResult(feature)"><b>{{ feature.title }}</b><small>{{ feature.serviceName }} · {{ feature.matchLabel }}</small></button>
+        </template>
         <template v-if="parcelSearchResults.length">
-          <div class="search-result-title">可能的地块类型或名称</div>
+          <div class="search-result-title" :class="{ separated: attributeSearchResults.length }">已打开图层的分类</div>
           <button v-for="item in parcelSearchResults" :key="item.id" @click="focusParcelSearchResult(item)"><b>{{ item.label }}</b><small>{{ item.serviceName }} · {{ item.fieldLabel }}</small></button>
         </template>
         <template v-if="placeSearchResults.length">
-          <div class="search-result-title" :class="{ separated: parcelSearchResults.length }">可能的地点</div>
+          <div class="search-result-title" :class="{ separated: parcelSearchResults.length || attributeSearchResults.length }">可能的地点</div>
           <button v-for="place in placeSearchResults" :key="place.id" @click="focusPlaceResult(place)"><b>{{ place.name }}</b><small>{{ place.address }}</small></button>
         </template>
-        <p v-if="placeSearchLoading">正在搜索地点…</p>
+        <p v-if="placeSearchLoading || attributeSearchLoading">正在搜索图层字段和地点…</p>
         <p v-else-if="placeSearchError">{{ placeSearchError }}</p>
-        <p v-else-if="!parcelSearchResults.length && !placeSearchResults.length">未找到相关地块或地点</p>
+        <p v-else-if="!parcelSearchResults.length && !placeSearchResults.length && !attributeSearchResults.length">未找到相关字段或地点</p>
       </div>
     </div>
 
     </Teleport>
 
-    <aside v-if="vectorFilterPanels.length" class="parcel-type-panel">
-      <div class="tool-title"><b>地块类型</b></div>
-      <section v-for="panel in vectorFilterPanels" :key="panel.serviceId" class="parcel-filter-group">
-        <div class="parcel-filter-heading"><b>{{ panel.serviceName }}</b><small>{{ panel.fieldLabel }}</small></div>
-        <label class="parcel-filter-row parcel-filter-all">
-          <span>全部地块</span>
-          <input
-            type="checkbox"
-            :checked="allVectorCategoriesChecked(panel)"
-            :indeterminate="someVectorCategoriesChecked(panel)"
-            @change="toggleAllVectorCategories(panel, $event)"
-          />
-        </label>
-        <label v-for="item in panel.items" :key="item.value" class="parcel-filter-row">
-          <span>{{ item.label }}</span>
-          <input v-model="item.checked" type="checkbox" @change="applyVectorCategoryFilter(panel)" />
-        </label>
+    <aside v-if="farmlandStatVisible" class="farmland-stat-panel">
+      <div class="tool-title"><b>{{ farmlandStatGroups[0]?.name || '九龙镇高标准农田建设数据' }}</b></div>
+      <div v-if="farmlandStatLoading" class="farmland-stat-state">正在读取定制统计…</div>
+      <div v-else-if="farmlandStatError" class="farmland-stat-state error">{{ farmlandStatError }}</div>
+      <div v-else-if="!farmlandStatGroups.length" class="farmland-stat-state">当前单位暂无定制统计</div>
+      <template v-else>
+      <section v-for="group in farmlandStatGroups" :key="group.name" class="farmland-stat-group">
+        <h3 v-if="farmlandStatGroups.length > 1">{{ group.name }}</h3>
+        <dl>
+          <div v-for="item in group.items" :key="`${group.name}-${item.name}`">
+            <dt>{{ item.name }}</dt>
+            <dd>{{ item.value }}<small v-if="item.unit">{{ item.unit }}</small></dd>
+          </div>
+        </dl>
       </section>
+      </template>
     </aside>
 
     <Teleport to="body">
+      <div v-if="layerContextMenu" class="layer-context-menu" :style="{ left: `${layerContextMenu.x}px`, top: `${layerContextMenu.y}px` }">
+        <button type="button" @click="openLayerColorPicker">选择颜色</button>
+      </div>
+      <div v-if="layerColorPicker" class="layer-color-picker" :style="{ left: `${layerColorPicker.x}px`, top: `${layerColorPicker.y}px` }">
+        <div class="color-wheel">
+          <canvas ref="colorWheelCanvas" :width="COLOR_WHEEL_SIZE" :height="COLOR_WHEEL_SIZE" @pointerdown="onColorWheelPointer"></canvas>
+          <i class="color-wheel-cursor" :style="colorWheelCursorStyle"></i>
+        </div>
+        <label class="color-value-slider">明度<input type="range" min="0" max="100" :value="Math.round(layerColorPicker.value * 100)" :style="{ background: colorValueTrack }" @input="onColorValueInput" /></label>
+      </div>
       <Transition name="map-layer-ghost">
         <div v-if="dragGhost" class="map-layer-drag-ghost" :style="{ left: `${dragGhost.x}px`, top: `${dragGhost.y}px`, width: `${dragGhost.width}px`, height: `${dragGhost.height}px` }">{{ dragGhost.name }}</div>
       </Transition>
@@ -1357,7 +1926,7 @@ onBeforeUnmount(() => {
 .dashboard-map { position: relative; width: 100%; height: 100%; overflow: hidden; background: #031a31; }.dashboard-map__canvas { position: absolute; inset: 0; }
 .dashboard-map--measuring :deep(.leaflet-container) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath fill='%2337dff3' stroke='%23042b44' stroke-width='2' d='m5 22 3-7L20 3l7 7L15 22l-7 3z'/%3E%3Cpath fill='%23fff' d='m18 5 7 7-2 2-7-7z'/%3E%3C/svg%3E") 4 26, crosshair!important; }
 .dashboard-map__empty,.dashboard-map__loading { position: absolute; z-index: 700; inset: 0; display: grid; place-content: center; gap: 12px; justify-items: center; color: #56ddef; background: #031a31e8; font-size: 15px; }.dashboard-map__empty button { padding: 6px 14px; color: #d8faff; background: #075477; border: 1px solid #24cbe3; cursor: pointer; }
-.layer-panel-stack { position: absolute; z-index: 500; top: 80px; left: 10px; width: 255px; height: calc(100% - 90px); display: flex; flex-direction: column; gap: 8px; }
+.layer-panel-stack { position: absolute; z-index: 500; top: 80px; left: 10px; width: 255px; max-height: min(420px, 58%); display: flex; flex-direction: column; gap: 8px; }
 .layer-manager { position: relative; width: 100%; max-height: calc(100% - 20px); overflow-y: auto; color: #bde6ef; background: #03182eed; border: 1px solid #0b6189; box-shadow: 0 0 14px #00a7d52b; }.tool-title { min-height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: #06476b; border-bottom: 1px solid #0d6388; font-size: 15px; }.tool-title button { padding: 2px 4px; color: #7bdcea; background: transparent; border: 0; font-size: 12px; cursor: pointer; }
 .layer-row { width: 100%; display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 7px; padding: 7px 8px; color: #6f99aa; background: transparent; border: 0; border-bottom: 1px solid #0a3e59; text-align: left; cursor: pointer; }.layer-row:hover,.layer-row.active { color: #d6f8ff; background: #07567866; }.layer-row>i { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }.layer-row span,.layer-row b,.layer-row small { min-width: 0; display: block; }.layer-row b { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }.layer-row small { margin-top: 3px; color: #52798a; font-size: 11px; }.layer-row em { color: #39ddef; font-size: 14px; font-style: normal; }.layer-section-title { padding: 5px 8px; color: #6591a3; background: #04243d; font-size: 12px; }.route-symbol { width: 12px!important; height: 2px!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#ff4d5b 0 3px,transparent 3px 5px)!important; }
 .map-search { position: absolute; z-index: 550; top: 10px; right: 70px; width: 42px; min-height: 31px; display: flex; align-items: center; padding: 0; color: #55dff3; background: #031a31ef; border: 1px solid #11618a; box-shadow: 0 0 10px #00a9de1f; transition: width .18s ease, padding .18s ease; }.map-search.expanded { width: 270px; padding: 0 9px; }.map-search input { min-width: 0; height: 29px; flex: 1; border: 0; outline: 0; color: #c6edf7; background: transparent; font-size: 14px; }.map-search-toggle { width: 40px; height: 100%; flex: 0 0 40px; padding: 0; color: currentColor; background: transparent; border: 0; cursor: pointer; font-size: 23px; line-height: 1; transform: scaleX(-1); }.search-results { position: absolute; left: -1px; right: -1px; top: 31px; background: #031a31f5; border: 1px solid #11618a; }.search-results button { width: 100%; padding: 7px 9px; color: #bfe8f1; background: transparent; border: 0; border-bottom: 1px solid #0b405c; text-align: left; cursor: pointer; }.search-results button:hover { background: #075479; }.search-results b,.search-results small { display: block; font-size: 14px; }.search-results small { margin-top: 3px; color: #5c8293; font-size: 11px; }
@@ -1366,7 +1935,7 @@ onBeforeUnmount(() => {
 :deep(.business-task-marker),:deep(.business-drone-marker),:deep(.custom-annotation) { background: transparent; border: 0; }:deep(.business-task-marker span) { width: 23px; height: 23px; display: grid; place-items: center; color: white; background: color-mix(in srgb, var(--marker-color), #062239 35%); border: 2px solid var(--marker-color); border-radius: 50% 50% 50% 5px; transform: rotate(-45deg); box-shadow: 0 0 10px var(--marker-color); font-size: 14px; }:deep(.business-drone-marker) { display: flex; align-items: center; gap: 4px; color: #79eff9; }:deep(.business-drone-marker span) { width: 24px; height: 24px; display: grid; place-items: center; background: #087b9e; border: 1px solid #4defff; border-radius: 50%; box-shadow: 0 0 10px #22e5f4; }:deep(.business-drone-marker b) { padding: 2px 4px; background: #03233ddd; font-size: 12px; white-space: nowrap; }:deep(.business-task-label),:deep(.measure-index) { color: #c9f7ff; background: #03223ddd; border: 1px solid #17698e; box-shadow: none; border-radius: 2px; font: 11px "Microsoft YaHei"; }:deep(.leaflet-popup-content-wrapper),:deep(.leaflet-popup-tip) { color: #d9f8ff; background: #061d34; border: 1px solid #1685ad; border-radius: 2px; }:deep(.business-popup strong),:deep(.business-popup span),:deep(.business-popup small) { display: block; }:deep(.business-popup span) { margin-top: 5px; color: #8db5c3; font-size: 14px; }:deep(.business-popup small) { margin-top: 6px; color: #5d899b; }:deep(.custom-annotation span) { width: 25px; height: 25px; display: grid; place-items: center; color: #fff; background: #e86835; border: 2px solid #ffd7a8; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 0 8px #ff8a45; }
 
 /* Map layer controls and tools share the left rail; category filters sit beneath search. */
-.layer-manager { width: 100%; height: auto; max-height: min(350px,48vh); display: flex; flex: 0 0 auto; flex-direction: column; transform: none; overflow: hidden; border: 1px solid #1688bf; border-radius: 14px; background: #031c37b8; box-shadow: 0 0 18px #00a7d534; }.layer-manager-list{min-height:0;overflow-x:hidden;overflow-y:auto;scrollbar-color:#1688bf #031c37;scrollbar-width:thin}.tool-title { min-height: 46px; flex:0 0 46px; padding: 0 15px; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg, #056ea7c9, #073f6dc9); font-size: 18px; }.tool-title button { font-size: 14px; }.layer-row { box-sizing: border-box; min-height: 43px; flex: 0 0 43px; grid-template-columns: 18px 1fr auto; gap: 10px; padding: 9px 16px; border: 0; border-bottom: 1px solid #0d5278; background: #031c37b8; }.layer-row:last-child { border-bottom: 0; }.layer-row b { font-size: 17px; }.layer-row em { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; font-size: 0; transform: translateX(-8px); }.layer-row.active em { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }.layer-row>i { width: 16px; height: 16px; border-radius: 1px; box-shadow: none; }.layer-row.disabled { cursor: not-allowed; opacity: .55; }.dom-imagery-symbol { width: 16px!important; height: 2px!important; border: 0!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#20b9ff 0 4px,transparent 4px 7px)!important; }
+.layer-manager { width: 100%; height: auto; max-height: none; min-height: 0; display: flex; flex: 1 1 auto; flex-direction: column; transform: none; overflow: hidden; border: 1px solid #1688bf; border-radius: 14px; background: #031c37b8; box-shadow: 0 0 18px #00a7d534; }.layer-manager-list{min-height:0;overflow-x:hidden;overflow-y:auto;scrollbar-width:none}.layer-manager-list::-webkit-scrollbar{display:none}.tool-title { min-height: 46px; flex:0 0 46px; padding: 0 15px; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg, #056ea7c9, #073f6dc9); font-size: 18px; }.tool-title button { font-size: 14px; }.layer-row { box-sizing: border-box; min-height: 43px; flex: 0 0 43px; grid-template-columns: 18px 1fr auto; gap: 10px; padding: 9px 16px; border: 0; border-bottom: 1px solid #0d5278; background: #031c37b8; }.layer-row:last-child { border-bottom: 0; }.layer-row b { font-size: 17px; }.layer-row em { width: 13px; height: 13px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; font-size: 0; transform: translateX(-8px); }.layer-row.active em { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }.layer-row>i { width: 16px; height: 16px; border-radius: 1px; box-shadow: none; }.layer-row.disabled { cursor: not-allowed; opacity: .55; }.dom-imagery-symbol { width: 16px!important; height: 2px!important; border: 0!important; border-radius: 0!important; background: repeating-linear-gradient(90deg,#20b9ff 0 4px,transparent 4px 7px)!important; }
 .layer-section-title { min-height: 36px; flex: 0 0 36px; display: flex; align-items: center; margin: 0; padding: 0 15px; color: #a9dce9; border: 0; border-bottom: 1px solid #1688bf; background: linear-gradient(90deg,#064367d9,#032a49d9); font-size: 14px; font-weight: 700; letter-spacing: .5px; }.layer-row.jiulong-imagery-row { min-height: 43px; height: auto; flex: 0 0 auto; grid-template-columns: minmax(0,1fr) auto; }.layer-row.jiulong-imagery-row b { overflow: visible; white-space: normal; line-height: 1.35; text-overflow: clip; }.jiulong-vector-symbol { width: 16px!important; height: 2px!important; border: 0!important; border-radius: 0!important; background: #ff3f4d!important; box-shadow: 0 0 5px #ff3f4d!important; }
 .layer-manager .layer-row { min-height: 43px; height: auto; flex: 0 0 auto; }
 .layer-manager .layer-row b { overflow: visible; white-space: normal; line-height: 1.35; text-overflow: clip; overflow-wrap: anywhere; }
@@ -1388,9 +1957,17 @@ onBeforeUnmount(() => {
 .layer-manager .map-service-sublayer::before { position: absolute; top: 50%; left: 0; width: 9px; height: 1px; background: #1785aa; content: ''; }
 .layer-manager .map-service-sublayer b { font-size: 14px; font-weight: 500; }
 .layer-manager .map-service-sublayer em { width: 11px; height: 11px; }
+.layer-manager .map-service-row.has-categories { grid-template-columns: 18px minmax(0,1fr) 16px 16px; }
+.category-folder { margin: 0 8px 6px 16px; }
+.category-field-label { padding: 6px 12px 2px; color: #70adbe; font-size: 11px; }
+.layer-manager .category-row { grid-template-columns: 14px minmax(0,1fr) 16px; min-height: 34px; }
+.category-swatch { width: 12px; height: 12px; border-radius: 3px; box-shadow: inset 0 0 0 1px #ffffff55; }
+.category-swatch--all { background: repeating-linear-gradient(135deg,#9ad7ea 0 3px,transparent 3px 6px); }
+.category-row input { width: 14px; height: 14px; margin: 0; accent-color: #28cce8; cursor: pointer; }
 .layer-panel-message { padding: 16px 14px; color: #83b5c6; font-size: 13px; line-height: 1.5; text-align: center; }
 .layer-panel-message.error { color: #ff8e98; }
-.parcel-type-panel { position: relative; width: 100%; min-height: 150px; flex: 1 1 auto; overflow-y: auto; color: #bde6ef; border: 1px solid #1688bf; border-radius: 14px; background: #031c37e8; box-shadow: 0 0 18px #00a7d534; }
+.parcel-type-panel { position: relative; width: 100%; max-height: min(220px, 32%); min-height: 0; flex: 0 1 auto; display: flex; flex-direction: column; overflow: hidden; color: #bde6ef; border: 1px solid #1688bf; border-radius: 14px; background: #031c37e8; box-shadow: 0 0 18px #00a7d534; pointer-events: auto; }
+.parcel-type-list { min-height: 0; overflow: auto; }
 .parcel-type-panel>.tool-title { position: sticky; z-index: 1; top: 0; }
 .parcel-filter-group+.parcel-filter-group { border-top: 1px solid #1688bf; }
 .parcel-filter-heading { padding: 10px 14px 8px; border-bottom: 1px solid #0d5278; background: linear-gradient(90deg,#064367d9,#032a49d9); }
@@ -1408,6 +1985,34 @@ onBeforeUnmount(() => {
 .map-tools { top: 56px; right: 12px; bottom: 34px; width: 138px; display: flex; flex-direction: column; justify-content: center; gap: 5px; overflow: visible; border: 0; border-radius: 0; background: transparent; }.map-tools>button { min-height: 40px; flex: 0 0 40px; grid-template-columns: 26px 1fr; gap: 8px; padding: 5px 12px; border: 1px solid #155a7c; border-radius: 9px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-tools>button:last-of-type { border-bottom: 1px solid #155a7c; }.map-tools>button:hover,.map-tools>button.active { border-color: #24cbe3; background: #075477d0; }.map-tools i { font-size: 19px; }.map-tools span { font-size: 14px; white-space: nowrap; }.compass { width: 23px; height: 23px; font-size: 14px!important; }.right-submenu { top: 50%; right: 146px; width: 118px; transform: translateY(-50%); }.right-submenu button { font-size: 13px; }
 .map-mode-switch { flex: 0 0 82px; display: grid; grid-template-rows: 1fr 1fr; overflow: hidden; border: 1px solid #155a7c; border-radius: 9px; background: #031a30b8; box-shadow: 0 0 8px #00a9de18; }.map-mode-switch button { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 8px; padding: 4px 12px; color: #84b2c3; background: transparent; border: 0; cursor: pointer; }.map-mode-switch button+button { border-top: 1px solid #155a7c; }.map-mode-switch button:hover,.map-mode-switch button.active { color: #fff; background: #075477d0; }.map-mode-switch span { font-size: 14px; white-space: nowrap; }.mode-indicator { width: 15px; height: 15px; display: block; border: 1.5px solid #75cbe9; border-radius: 50%; }.map-mode-switch button.active .mode-indicator { border-color: #c3f8ff; background: #49d9f4; box-shadow: 0 0 7px #27dfff; }
 .map-scale { right: 14px; bottom: 10px; width: 96px; height: 18px; padding: 0; color: #b9e7f4; background: transparent; font-size: 11px; text-align: center; }.map-scale b { position: relative; z-index: 1; display: block; font-size: 11px; font-weight: 600; line-height: 12px; }.map-scale i { position: absolute; right: 0; bottom: 0; left: 0; height: 7px; border-right: 2px solid #b9e7f4; border-bottom: 2px solid #b9e7f4; border-left: 2px solid #b9e7f4; }
+.layer-context-menu,.layer-color-picker { position: fixed; z-index: 30000; min-width: 148px; padding: 6px; color: #e7f7ff; background: #082033f5; border: 1px solid #4a90b5; border-radius: 8px; box-shadow: 0 12px 28px #00111e88; }
+.layer-context-menu button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; color: inherit; background: transparent; border: 0; border-radius: 6px; font-size: 13px; text-align: left; cursor: pointer; }
+.layer-context-menu button:hover { background: #0d4d6e; }
+.layer-color-picker { width: 196px; padding: 12px; }
+.color-wheel { position: relative; width: 168px; height: 168px; margin: 0 auto; touch-action: none; cursor: crosshair; }
+.color-wheel canvas { display: block; width: 168px; height: 168px; border-radius: 50%; }
+.color-wheel-cursor { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #001018aa; pointer-events: none; }
+.color-value-slider { display: grid; gap: 6px; margin: 12px 2px 2px; color: #b7d7e6; font-size: 12px; }
+.color-value-slider input { width: 100%; height: 12px; margin: 0; padding: 0; appearance: none; border: 0; border-radius: 999px; background: #000; cursor: pointer; }
+.color-value-slider input::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; background: #082033; box-shadow: 0 0 0 1px #001018aa; }
+.farmland-stat-panel { position: absolute; z-index: 500; top: 72px; right: 16px; width: 260px; max-height: min(460px, calc(100% - 110px)); display: flex; flex-direction: column; overflow: hidden; color: #d7f4ff; border: 1px solid #1688bf; border-radius: 14px; background: #031c37e8; box-shadow: 0 0 18px #00a7d534; }
+.farmland-stat-panel .tool-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.farmland-stat-state { padding: 16px 14px; color: #8ec3d4; font-size: 13px; text-align: center; }
+.farmland-stat-state.error { color: #ffb0b8; }
+.farmland-stat-group { min-height: 0; overflow: auto; }
+.farmland-stat-group h3 { margin: 0; padding: 10px 14px 0; color: #9adff0; font-size: 13px; }
+.farmland-stat-group dl { margin: 0; }
+.farmland-stat-group div { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid #0d5278; }
+.farmland-stat-group dt { color: #9fd0e0; font-size: 13px; }
+.farmland-stat-group dd { margin: 0; color: #f4fcff; font-size: 18px; font-weight: 700; }
+.farmland-stat-group small { margin-left: 4px; color: #8ec3d4; font-size: 12px; font-weight: 500; }
+:deep(.feature-attribute-popup .leaflet-popup-content-wrapper),:deep(.feature-attribute-popup .leaflet-popup-tip) { color: #e7f7ff; background: #082033f5; border: 1px solid #49b7d8; border-radius: 8px; }
+:deep(.feature-attribute-popup .leaflet-popup-content) { width: 280px; margin: 12px 14px; max-height: 280px; overflow: auto; }
+:deep(.feature-attribute-card strong) { display: block; margin-bottom: 8px; color: #fff; font-size: 14px; }
+:deep(.feature-attribute-card dl) { margin: 0; }
+:deep(.feature-attribute-card div) { display: grid; grid-template-columns: 92px minmax(0,1fr); gap: 8px; padding: 5px 0; border-top: 1px solid #1d5874; }
+:deep(.feature-attribute-card dt) { color: #8ec5d6; font-size: 12px; }
+:deep(.feature-attribute-card dd) { margin: 0; color: #f4fcff; font-size: 12px; overflow-wrap: anywhere; }
 :deep(.leaflet-administrative-boundaries-pane path) { filter: drop-shadow(0 0 4px #168fe2cc); }
 :deep(.leaflet-administrative-boundaries-pane .hailing-boundary-glow) { filter: drop-shadow(0 0 2px #b8f1ff) drop-shadow(0 0 6px #27bfff) drop-shadow(0 0 12px #078de0cc); }
 </style>
