@@ -9,7 +9,7 @@
   container-type: inline-size;
 }
 
-/* Keep layer controls together on the left; category filters sit below search on the right. */
+/* Layer controls and category filters share the left rail at a fixed width. */
 .left-map-rail {
   --map-panel-menu-clearance: 166px;
   position: absolute;
@@ -82,11 +82,10 @@
   flex: 0 1 auto;
 }
 
-.layer-manager-list,
-.parcel-type-panel {
-  scrollbar-color: #6285a4 transparent;
-  scrollbar-width: thin;
+.layer-manager-list {
+  scrollbar-width: none;
 }
+.layer-manager-list::-webkit-scrollbar { display: none; }
 
 .tool-title {
   min-height: 42px;
@@ -140,18 +139,19 @@
 .layer-panel-message.error { color: #ffb6bc; }
 
 .parcel-type-panel {
-  --map-panel-menu-clearance: 166px;
-  position: absolute;
-  z-index: 500;
-  top: 72px;
-  right: 12px;
-  width: clamp(208px, 27cqw, 270px);
-  max-width: calc(100% - 154px);
-  height: max-content;
-  max-height: calc(100% - 88px - var(--map-panel-menu-clearance));
+  position: relative;
+  top: auto;
+  right: auto;
+  z-index: 1;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: min(220px, 32%);
   min-height: 0;
+  flex: 0 1 auto;
   box-sizing: border-box;
-  overflow-y: auto;
+  overflow: hidden;
+  pointer-events: auto;
 }
 .parcel-filter-group + .parcel-filter-group { border-top: 1px solid var(--map-border); }
 .parcel-filter-heading {
@@ -509,7 +509,7 @@
 
 @container (max-width: 650px) {
   .left-map-rail { --map-panel-menu-clearance: 160px; width: min(220px, 42cqw); max-width: none; }
-  .parcel-type-panel { --map-panel-menu-clearance: 160px; width: min(220px, 42cqw); max-width: none; }
+  .parcel-type-panel { width: 100%; max-width: none; }
   .tool-title { padding-inline: 10px; font-size: 15px; }
   .layer-manager .map-service-row { padding-inline: 10px; }
   .map-tools { --tool-size: 36px; gap: 3px; padding: 5px; }
@@ -522,7 +522,7 @@
 
 @container (max-width: 480px) {
   .left-map-rail { --map-panel-menu-clearance: 146px; left: 7px; top: 61px; width: min(130px, 36cqw); }
-  .parcel-type-panel { --map-panel-menu-clearance: 146px; top: 61px; right: 8px; width: min(130px, 36cqw); max-height: calc(100% - 77px - var(--map-panel-menu-clearance)); }
+  .parcel-type-panel { width: 100%; max-height: 160px; }
   .tool-title { min-height: 36px; flex-basis: 36px; font-size: 14px; }
   .layer-manager .map-service-row { min-height: 36px; padding-block: 6px; }
   .layer-manager .map-service-row b { font-size: 11px; }

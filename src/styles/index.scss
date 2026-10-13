@@ -123,6 +123,9 @@ a { color: inherit; text-decoration: none; }
 }
 
 .leaflet-tooltip.jiulong-feature-tooltip {
+  width:max-content;
+  max-width:min(420px,65vw);
+  white-space: normal;
   padding: 7px 10px;
   color: #f4fbff;
   background: rgb(4 35 57 / 96%);
@@ -146,4 +149,21 @@ a { color: inherit; text-decoration: none; }
   color: #fff;
   font-weight: 700;
 }
+
+.jiulong-feature-tooltip .hover-stack {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  scrollbar-width:none;
+}
+.jiulong-feature-tooltip .hover-stack::-webkit-scrollbar { display:none; }
+
+.jiulong-feature-tooltip .hover-stack div {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+}
+.jiulong-feature-tooltip .hover-stack span { flex:0 0 auto; }
+.jiulong-feature-tooltip .hover-stack strong { min-width:0;overflow-wrap:anywhere; }
 

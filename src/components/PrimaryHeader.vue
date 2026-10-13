@@ -18,9 +18,10 @@ const clock = window.setInterval(() => { now.value = new Date() }, 1000)
 const todoRefreshClock = window.setInterval(() => void loadTodoCount(), 60_000)
 const dateText = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' }).format(now.value))
 const timeText = computed(() => now.value.toLocaleTimeString('zh-CN', { hour12: false }))
-const platformBrand = computed(() => user.organizationId === 'agriculture-rural'
-  ? { title: '耕地数字化监管平台', subtitle: 'CULTIVATED LAND · DIGITAL SUPERVISION' }
-  : { title: '海陵区自然资源综合监管平台', subtitle: 'COMPREHENSIVE SUPERVISION · GIS COMMAND CENTER' })
+const platformBrand = computed(() => ({
+  title: user.organizationId === 'agriculture-rural' ? '耕地数字化监管平台' : '海陵区自然资源综合监管平台',
+  subtitle: 'COMPREHENSIVE SUPERVISION · GIS COMMAND CENTER',
+}))
 onBeforeUnmount(() => {
   window.removeEventListener('workflow-todos-changed', refreshWorkflowTodos)
   window.clearInterval(clock)

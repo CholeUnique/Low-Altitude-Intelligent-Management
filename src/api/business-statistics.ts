@@ -84,6 +84,67 @@ export interface BusinessTrend {
   items: BusinessTrendItem[]
 }
 
+export interface CustomStatMetric {
+  name: string
+  value: string
+  unit: string
+}
+
+export interface CustomStatGroup {
+  code?: string
+  serviceId?: string
+  serviceName?: string
+  name: string
+  items: CustomStatMetric[]
+}
+
+function statText(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key]
+    if (value != null && String(value).trim() !== '') return String(value).trim()
+  }
+  return ''
+}
+
+function statMetrics(value: unknown): CustomStatMetric[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const record = item as Record<string, unknown>
+    const name = statText(record, ['itemName', 'name', 'title', 'label', 'metricName', 'statName'])
+    const metricValue = statText(record, ['itemValue', 'value', 'statValue', 'metricValue', 'count'])
+    if (!name && !metricValue) return []
+    return [{
+      name: name || '指标',
+      value: metricValue || '—',
+      unit: statText(record, ['unit', 'itemUnit', 'valueUnit']),
+    }]
+  })
+}
+
+/**
+ * 部门视角定制统计。农业农村局返回九龙镇高标准农田指标；其他部门返回空 groups。
+ */
+export async function getCustomDepartmentStatistics(deptId?: string): Promise<CustomStatGroup[]> {
+  const payload = await apiClient.post<never, unknown>('/v1/biz/statistics/custom-stat', deptId ? { deptId } : {})
+  const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+  const groups = Array.isArray(payload) ? payload : root.groups ?? root.groupList ?? root.list
+  if (!Array.isArray(groups)) return []
+  return groups.flatMap((group) => {
+    if (!group || typeof group !== 'object') return []
+    const record = group as Record<string, unknown>
+    const items = statMetrics(record.items ?? record.metrics ?? record.statItems ?? record.children)
+    if (!items.length) return []
+    return [{
+      code: statText(record, ['groupCode', 'code']),
+      serviceId: statText(record, ['mapServiceId', 'serviceId']),
+      serviceName: statText(record, ['mapServiceName', 'serviceName', 'layerName']),
+      name: statText(record, ['groupName', 'name', 'title', 'sceneName']) || '定制统计',
+      items,
+    }]
+  })
+}
+
 export interface BusinessDashboardStatistics {
   overview: BusinessOverview
   sceneStats: BusinessSceneStat[]
