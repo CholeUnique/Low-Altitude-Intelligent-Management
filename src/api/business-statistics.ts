@@ -91,6 +91,9 @@ export interface CustomStatMetric {
 }
 
 export interface CustomStatGroup {
+  code?: string
+  serviceId?: string
+  serviceName?: string
   name: string
   items: CustomStatMetric[]
 }
@@ -133,6 +136,9 @@ export async function getCustomDepartmentStatistics(deptId?: string): Promise<Cu
     const items = statMetrics(record.items ?? record.metrics ?? record.statItems ?? record.children)
     if (!items.length) return []
     return [{
+      code: statText(record, ['groupCode', 'code']),
+      serviceId: statText(record, ['mapServiceId', 'serviceId']),
+      serviceName: statText(record, ['mapServiceName', 'serviceName', 'layerName']),
       name: statText(record, ['groupName', 'name', 'title', 'sceneName']) || '定制统计',
       items,
     }]

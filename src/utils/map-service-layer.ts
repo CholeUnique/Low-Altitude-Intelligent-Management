@@ -43,6 +43,7 @@ interface ArcGisLayerMetadata {
 interface ArcGisQueryResponse {
   features?: Array<{ attributes?: Record<string, unknown>; geometry?: MapServiceSearchGeometry }>
   fieldAliases?: Record<string, string>
+  exceededTransferLimit?: boolean
   objectIds?: Array<number | string>
   extent?: ArcGisExtent
 }
@@ -69,6 +70,7 @@ export interface MapServiceCategoryValue {
 }
 
 export interface MapServiceCategoryFilter {
+  fieldName: string
   fieldLabel: string
   values: MapServiceCategoryValue[]
   setVisibleValues: (values: string[]) => void
@@ -83,10 +85,47 @@ export interface MapServiceLayerHandle {
   color?: string
   /** 改基准色后返回与分类顺序一致的深浅色；没有分类时返回空数组。 */
   setColor?: (color: string) => string[]
+  setFillOpacity?: (opacity: number) => void
+  setAttributeFilter?: (field?: string, value?: string) => void
   definitionExpression?: () => string
 }
 
+/** 行政边界使用真实服务几何，在地图上绘制双层描边，不依赖影像导出的样式。 */
+export async function createAdministrativeBoundaryLayer(service: MapServiceItem, color = '#9AEEFE'): Promise<MapServiceLayerHandle> {
+  const url = serviceRoot(service.serviceUrl)
+  const layerId = Number(service.arcGisLayerId)
+  const response = await queryAllFeatures(`${url}/${layerId}/query`, new URLSearchParams({
+    where: '1=1', outFields: '*', returnGeometry: 'true', outSR: '4326',
+  }))
+  const group = L.layerGroup()
+  const bounds = L.latLngBounds([])
+  const outlines: L.Polygon[] = []
+  const fills: L.Polygon[] = []
+  for (const feature of response.features || []) {
+    const rings = feature.geometry?.rings
+    if (!rings?.length) continue
+    const coordinates = rings.map(ring => ring.map(([lng, lat]) => L.latLng(lat!, lng!)))
+    coordinates.flat().forEach(point => bounds.extend(point))
+    outlines.push(L.polygon(coordinates, {
+      pane: 'administrative-boundaries', interactive: false, color: '#135888',
+      weight: 10, opacity: .5, fill: false, lineCap: 'round', lineJoin: 'round',
+    }).addTo(group))
+    fills.push(L.polygon(coordinates, {
+      pane: 'administrative-boundaries', interactive: false, color,
+      weight: 4, opacity: 1, fillColor: color === '#9AEEFE' ? '#66B9DA' : color, fillOpacity: .1,
+      lineCap: 'round', lineJoin: 'round', className: 'hailing-boundary-glow',
+    }).addTo(group))
+  }
+  if (!bounds.isValid()) throw new Error('行政边界图层没有有效几何数据')
+  return {
+    layer: group, bounds, color,
+    setColor: next => { fills.forEach(path => path.setStyle({ color: next, fillColor: next })); return [] },
+    setFillOpacity: opacity => { fills.forEach(path => path.setStyle({ fillOpacity: opacity })) },
+  }
+}
+
 export interface MapFeatureAttributeRow {
+  name?: string
   label: string
   value: string
 }
@@ -97,6 +136,12 @@ export interface IdentifiedMapFeature {
   title: string
   /** 命中的字段中文名，搜索结果用来说明匹配来源。 */
   matchLabel?: string
+  matchFieldName?: string
+  objectIdField?: string
+  objectId?: string | number
+  typeLabel?: string
+  typeValue?: string
+  category?: { field: string; label: string; value: string }
   rows: MapFeatureAttributeRow[]
   location: MapServiceCategoryLocation
 }
@@ -113,9 +158,11 @@ export function vectorLayerColor(key: string) {
   const existing = assignedVectorColors.get(key)
   if (existing) return existing
   const used = new Set(assignedVectorColors.values())
-  const color = VECTOR_LAYER_PALETTE.find((item) => !used.has(item))
-    || VECTOR_LAYER_PALETTE[assignedVectorColors.size % VECTOR_LAYER_PALETTE.length]
-    || '#ff4d4f'
+  let color = VECTOR_LAYER_PALETTE.find(item => !used.has(item))
+  let index = assignedVectorColors.size
+  while (!color || used.has(color)) {
+    color = hslToHex((index++ * 137.508) % 360, 78, 56 + (index % 3) * 4)
+  }
   assignedVectorColors.set(key, color)
   return color
 }
@@ -448,8 +495,8 @@ class ArcGisExportLayer extends L.GridLayer {
   private fillColor: [number, number, number, number] = [255, 59, 48, 64]
   private categoryFieldName = ''
   private categoryEntries: Array<{ value: string; color: string }> = []
-  private uniqueValueProven = false
-  private uniqueValueErrorCount = 0
+  private polygonFillAlpha = 64
+  private renderRequests = new Map<HTMLImageElement, AbortController>()
 
   constructor(
     private readonly url: string,
@@ -468,6 +515,12 @@ class ArcGisExportLayer extends L.GridLayer {
       updateWhenZooming: vectorLayerId === undefined,
     })
     if (color) this.applyColor(color)
+    this.on('tileunload', (event: L.TileEvent) => {
+      const tile = event.tile as HTMLImageElement
+      this.renderRequests.get(tile)?.abort()
+      this.renderRequests.delete(tile)
+      if (tile.src.startsWith('blob:')) URL.revokeObjectURL(tile.src)
+    })
   }
 
   setDisplayColor(color: string) {
@@ -484,6 +537,13 @@ class ArcGisExportLayer extends L.GridLayer {
     return this.categoryEntries.map((entry) => entry.color)
   }
 
+  setFillOpacity(opacity: number) {
+    this.polygonFillAlpha = Math.round(Math.max(.05, Math.min(.6, opacity)) * 255)
+    if (this.vectorGeometryType === 'esriGeometryPolygon') this.fillColor[3] = this.polygonFillAlpha
+    this.filterRevision += 1
+    if (this._map) this.redraw()
+  }
+
   setCategories(fieldName: string, values: string[], color: string) {
     this.categoryFieldName = fieldName
     const shades = categoryShadeColors(color, values.length)
@@ -496,13 +556,13 @@ class ArcGisExportLayer extends L.GridLayer {
   private applyColor(color: string) {
     const [red, green, blue] = hexChannels(color)
     this.strokeColor = [red, green, blue, 255]
-    this.fillColor = [red, green, blue, this.vectorGeometryType === 'esriGeometryPoint' ? 230 : 64]
+    this.fillColor = [red, green, blue, this.vectorGeometryType === 'esriGeometryPoint' ? 230 : this.polygonFillAlpha]
   }
 
   private symbolColors(color: string) {
     const [red, green, blue] = hexChannels(color)
     const [outlineRed, outlineGreen, outlineBlue] = hexChannels(darkerShade(color))
-    const fillAlpha = this.vectorGeometryType === 'esriGeometryPoint' ? 230 : 120
+    const fillAlpha = this.vectorGeometryType === 'esriGeometryPoint' ? 230 : this.polygonFillAlpha
     return {
       fill: [red, green, blue, fillAlpha] as [number, number, number, number],
       stroke: [outlineRed, outlineGreen, outlineBlue, 255] as [number, number, number, number],
@@ -557,6 +617,8 @@ class ArcGisExportLayer extends L.GridLayer {
   }
 
   override onRemove(map: L.Map) {
+    this.renderRequests.forEach(controller => controller.abort())
+    this.renderRequests.clear()
     if (this.vectorLayerId !== undefined) {
       map.off('zoomstart', this.hideVectorTiles, this)
       map.off('zoomend', this.finishVectorZoom, this)
@@ -622,22 +684,29 @@ class ArcGisExportLayer extends L.GridLayer {
     tile.alt = ''
     tile.setAttribute('role', 'presentation')
     tile.onload = () => {
-      if (this.categoryEntries.length) this.uniqueValueProven = true
+      if (tile.src.startsWith('blob:')) URL.revokeObjectURL(tile.src)
       done(undefined, tile)
     }
     tile.onerror = () => {
-      // 连续失败且从未成功时，认为旧服务不接受唯一值渲染器，退回整层单色。
-      if (this.categoryEntries.length && !this.uniqueValueProven) {
-        this.uniqueValueErrorCount += 1
-        if (this.uniqueValueErrorCount >= 4) {
-          this.categoryEntries = []
-          this.filterRevision += 1
-          if (this._map) this.redraw()
-        }
-      }
+      if (tile.src.startsWith('blob:')) URL.revokeObjectURL(tile.src)
       done(new Error('地图服务影像加载失败'), tile)
     }
-    tile.src = `${this.url}/${this.imageServer ? 'exportImage' : 'export'}?${parameters.toString()}`
+    const endpoint = `${this.url}/${this.imageServer ? 'exportImage' : 'export'}`
+    // Hundreds of category symbols exceed proxy URL limits. Keep rendering in the POST body.
+    if (parameters.toString().length > 1800) {
+      const controller = new AbortController()
+      this.renderRequests.set(tile, controller)
+      void fetch(endpoint, { method: 'POST', body: parameters, signal: controller.signal })
+        .then(async response => {
+          if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) throw new Error('地图渲染请求失败')
+          const blob = await response.blob()
+          if (!controller.signal.aborted) tile.src = URL.createObjectURL(blob)
+        })
+        .catch(() => { if (!controller.signal.aborted) tile.onerror?.(new Event('error')) })
+        .finally(() => this.renderRequests.delete(tile))
+    } else {
+      tile.src = `${endpoint}?${parameters.toString()}`
+    }
     return tile
   }
 
@@ -652,11 +721,11 @@ class ArcGisExportLayer extends L.GridLayer {
     // 仪表盘允许按服务调整叠放顺序；筛选时的无闪烁替换层必须沿用原服务 pane。
     layer.options.pane = this.options.pane
     layer.definitionExpression = expression
+    layer.polygonFillAlpha = this.polygonFillAlpha
     layer.strokeColor = [...this.strokeColor]
     layer.fillColor = [...this.fillColor]
     layer.categoryFieldName = this.categoryFieldName
     layer.categoryEntries = this.categoryEntries.map((entry) => ({ ...entry }))
-    layer.uniqueValueProven = this.uniqueValueProven
     layer.filterRevision = this.filterRevision + 1
     return layer
   }
@@ -670,6 +739,7 @@ function categoryField(metadata: ArcGisLayerMetadata) {
     关联工程设施: ['GCMC'],
     项目范围: ['XMMC'],
     耕地细化: ['JYZTMC_1'],
+    高标准农田GBZ: ['项目类', 'XMLX'],
   }
   const candidates = [...(layerCandidates[layerName] || []), 'DLMC', '地类名称', '变化类', 'DKLX', 'DKLXMC', '地块类型']
   return candidates.flatMap((candidate) => (metadata.fields || []).filter((field) =>
@@ -677,24 +747,37 @@ function categoryField(metadata: ArcGisLayerMetadata) {
 }
 
 function hoverField(metadata: ArcGisLayerMetadata) {
-  const fields = metadata.fields || []
-  const layerPreferredNames = metadata.name?.trim() === '耕地细化' ? ['JYZTMC_1'] : []
-  const semanticNames = ['GCMC', 'XMMC', 'DLMC', 'DKLX', 'DKLXMC', 'DKMC', '地块类型', '地块名称', '地类名称', '变化类']
-  const preferredNames = [...layerPreferredNames, ...semanticNames, metadata.displayField, 'DKBM', 'DCBH']
-    .filter((name): name is string => Boolean(name))
-  return preferredNames.flatMap((candidate) => fields.filter((field) =>
-    field.name?.toUpperCase() === candidate.toUpperCase() || field.alias?.toUpperCase() === candidate.toUpperCase()))[0]
+  const names = ['DLMC', 'DKLXMC', 'DKLX', '地块类型', '地类名称', '变化类']
+  if (metadata.name?.trim() === '高标准农田GBZ') names.push('项目类', 'XMLX')
+  return names.flatMap(name => (metadata.fields || []).filter(field => field.name?.toUpperCase() === name.toUpperCase() || field.alias === name))[0]
 }
 
 function fieldLabel(field?: { name?: string; alias?: string }) {
   const name = field?.name || ''
   const labels: Record<string, string> = {
-    GCMC: '工程名称', XMMC: '项目名称', DKBM: '地块编码', DCBH: '地块编号',
+    项目类: '项目类型', XMLX: '项目类型', GCMC: '工程名称', XMMC: '项目名称', DKBM: '地块编码', DCBH: '地块编号',
     JYZTMC_1: '经营主体名称',
     DKLX: '地块类型', DKLXMC: '地块类型', DKMC: '地块名称',
     DLMC: '地类名称', '变化类': '变化类型',
   }
   return labels[name] || field?.alias || name || '名称'
+}
+
+interface MapHoverSelection { key: string; expression: string; objectIdField: string; label: string; value: string }
+const selectedHoverByMap = new WeakMap<L.Map, MapHoverSelection>()
+export function setMapHoverSelection(map: L.Map, service?: MapServiceItem, feature?: IdentifiedMapFeature) {
+  selectedHoverByMap.delete(map)
+  if (service && feature?.objectIdField && feature.objectId != null) {
+    selectedHoverByMap.set(map, {
+      key: `${serviceRoot(service.serviceUrl)}/${service.arcGisLayerId}`,
+      expression: `${feature.objectIdField} = ${typeof feature.objectId === 'number' ? feature.objectId : sqlLiteral(String(feature.objectId))}`,
+      objectIdField: feature.objectIdField,
+      label: feature.typeLabel || '地块类型', value: feature.typeValue || '暂无地块类型',
+    })
+  }
+  hoverGeneration += 1
+  hoverSlots.clear()
+  if (sharedHoverTooltip) map.closeTooltip(sharedHoverTooltip)
 }
 
 const hoverSlots = new Map<string, { generation: number; label: string; value: string }>()
@@ -810,8 +893,10 @@ class ArcGisVectorLayer extends L.LayerGroup {
   }
 
   private handleMouseMove(event: L.LeafletMouseEvent) {
-    if (!this.fieldName) return
-    const fieldName = this.fieldName
+    const focus = this._map ? selectedHoverByMap.get(this._map) : undefined
+    if (focus && this.hoverKey !== focus.key) { this.closeVectorTooltip(); return }
+    const fieldName = focus?.objectIdField || this.fieldName
+    if (!fieldName) return
     const generation = hoverGenerationFor(event)
     if (this.hoverTimer !== undefined) window.clearTimeout(this.hoverTimer)
     const sequence = ++this.requestSequence
@@ -823,7 +908,7 @@ class ArcGisVectorLayer extends L.LayerGroup {
       const northWest = map.containerPointToLatLng(pointer.subtract([6, 6]))
       const southEast = map.containerPointToLatLng(pointer.add([6, 6]))
       const parameters = new URLSearchParams({
-        where: this.definitionExpression,
+        where: focus ? `(${this.definitionExpression}) AND (${focus.expression})` : this.definitionExpression,
         geometry: JSON.stringify({
           xmin: northWest.lng,
           ymin: southEast.lat,
@@ -838,22 +923,18 @@ class ArcGisVectorLayer extends L.LayerGroup {
         returnGeometry: 'false',
       })
       try {
-        const response = await loadArcGisJson<ArcGisQueryResponse>(`${this.serviceUrl}/${this.layerId}/query?${parameters.toString()}`)
-        if (sequence !== this.requestSequence) return
+        const response = await queryAllFeatures(`${this.serviceUrl}/${this.layerId}/query`, parameters)
+        if (sequence !== this.requestSequence || (this._map && selectedHoverByMap.get(this._map) !== focus)) return
         const features = response.features || []
         const hasValue = (value: unknown) => value != null && String(value).trim() !== ''
-        let rawValue = features.map((feature) => feature.attributes?.[fieldName]).find(hasValue)
+        let values = [...new Set(features.map(feature => feature.attributes?.[fieldName]).filter(hasValue).map(String))]
         let tooltipLabel = this.fieldLabel
-        if (!hasValue(rawValue) && this.fallbackFieldName) {
+        if (!values.length && this.fallbackFieldName) {
           const fallbackFieldName = this.fallbackFieldName
-          rawValue = features.map((feature) => feature.attributes?.[fallbackFieldName]).find(hasValue)
+          values = [...new Set(features.map(feature => feature.attributes?.[fallbackFieldName]).filter(hasValue).map(String))]
           tooltipLabel = this.fallbackFieldLabel
         }
-        if (rawValue == null || String(rawValue).trim() === '') {
-          publishHover(this.hoverKey, generation, map, null, null)
-          return
-        }
-        publishHover(this.hoverKey, generation, map, tooltipLabel, String(rawValue))
+        publishHover(this.hoverKey, generation, map, focus?.label || tooltipLabel, features.length && focus ? focus.value : values.length ? values.join('、') : null)
       } catch {
         if (sequence === this.requestSequence && this._map) publishHover(this.hoverKey, generation, this._map, null, null)
       }
@@ -864,6 +945,11 @@ class ArcGisVectorLayer extends L.LayerGroup {
     const colors = this.imageLayer instanceof ArcGisExportLayer ? this.imageLayer.setDisplayColor(color) : []
     this.pendingImageLayer?.setDisplayColor(color)
     return colors
+  }
+
+  setFillOpacity(opacity: number) {
+    if (this.imageLayer instanceof ArcGisExportLayer) this.imageLayer.setFillOpacity(opacity)
+    this.pendingImageLayer?.setFillOpacity(opacity)
   }
 
   setCategories(fieldName: string, values: string[], color: string) {
@@ -1107,12 +1193,8 @@ async function createArcGisVectorHandle(
 ): Promise<MapServiceLayerHandle> {
   const tooltipField = hoverField(layerMetadata)
   const tooltipLabel = fieldLabel(tooltipField)
-  const fallbackTooltipField = layerMetadata.displayField
-    ? layerMetadata.fields?.find((field) =>
-        field.name?.toUpperCase() === layerMetadata.displayField?.toUpperCase()
-        && field.name?.toUpperCase() !== tooltipField?.name?.toUpperCase())
-    : undefined
-  const fallbackTooltipLabel = fieldLabel(fallbackTooltipField)
+  const fallbackTooltipField = undefined
+  const fallbackTooltipLabel = ''
   const filterField = categoryField(layerMetadata)
   const filterLabel = fieldLabel(filterField)
   const objectIdFieldName = layerMetadata.fields?.find((field) => field.type === 'esriFieldTypeOID')?.name || 'OBJECTID'
@@ -1123,9 +1205,12 @@ async function createArcGisVectorHandle(
     layerId,
     tooltipField?.name,
     tooltipLabel,
-    fallbackTooltipField?.name,
+    fallbackTooltipField,
     fallbackTooltipLabel,
   )
+  let categoryDefinition = '1=1'
+  let attributeDefinition = '1=1'
+  const applyFilter = () => vectorLayer.setDefinitionExpression(categoryDefinition === '1=0' ? '1=0' : categoryDefinition === '1=1' ? attributeDefinition : attributeDefinition === '1=1' ? categoryDefinition : `(${categoryDefinition}) AND (${attributeDefinition})`)
   let categoryFilter: MapServiceCategoryFilter | undefined
   if (filterField?.name) {
     try {
@@ -1138,15 +1223,17 @@ async function createArcGisVectorHandle(
         vectorLayer.setCategories(filterField.name, values, color)
         const shades = categoryShadeColors(color, values.length)
         categoryFilter = {
+          fieldName: filterField.name,
           fieldLabel: filterLabel,
           values: values.map((value, index) => ({
             value,
             label: value === EMPTY_CATEGORY_VALUE ? '其他' : value,
             color: shades[index] || color,
           })),
-          setVisibleValues: (visibleValues) => vectorLayer.setDefinitionExpression(
-            categoryExpression(filterField.name!, values, visibleValues),
-          ),
+          setVisibleValues: visibleValues => {
+            categoryDefinition = categoryExpression(filterField.name!, values, visibleValues)
+            applyFilter()
+          },
           locateValue: async (value) => {
             const [valueBounds, geometries] = await Promise.all([
               queryCategoryBounds(url, layerId, filterField.name!, value),
@@ -1172,6 +1259,13 @@ async function createArcGisVectorHandle(
         if (shade) item.color = shade
       })
       return shades
+    },
+    setFillOpacity: opacity => vectorLayer.setFillOpacity(opacity),
+    setAttributeFilter: (field, value) => {
+      const type = layerMetadata.fields?.find(item => item.name === field)?.type
+      const numeric = type && /Integer|Double|Single|OID/.test(type) && value != null && value.trim() !== '' && Number.isFinite(Number(value))
+      attributeDefinition = field ? numeric ? `${field} = ${Number(value)}` : categoryMatchExpression(field, value ?? '') : '1=1'
+      applyFilter()
     },
     definitionExpression: () => vectorLayer.currentDefinitionExpression(),
   }
@@ -1323,7 +1417,6 @@ export async function inspectMapService(service: MapServiceItem): Promise<MapSer
   return { isImagery: false }
 }
 
-const HIDDEN_ATTRIBUTE = /^(shape|shape_length|shape_area|st_area\(.+\)|st_length\(.+\))$/i
 const layerFieldCache = new Map<string, Promise<ArcGisLayerMetadata>>()
 
 function cachedLayerMetadata(url: string, layerId: number) {
@@ -1350,10 +1443,10 @@ function extendFeatureBounds(bounds: L.LatLngBounds, geometry?: MapServiceSearch
 
 function attributeRows(attributes?: Record<string, unknown>, aliases?: Record<string, string>): MapFeatureAttributeRow[] {
   return Object.entries(attributes || {})
-    .filter(([name]) => !HIDDEN_ATTRIBUTE.test(name))
     .map(([name, value]) => ({
+      name,
       label: fieldLabel({ name, alias: aliases?.[name] }),
-      value: value == null || String(value).trim() === '' ? '—' : String(value),
+      value: value == null || String(value).trim() === '' ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value),
     }))
 }
 
@@ -1367,13 +1460,81 @@ function featureLocation(feature: { geometry?: MapServiceSearchGeometry }, geome
   }
 }
 
+async function queryArcGis(url: string, parameters: URLSearchParams): Promise<ArcGisQueryResponse> {
+  parameters.set('f', 'json')
+  let data: ArcGisQueryResponse & { error?: { message?: string } }
+  try {
+    const response = await fetch(url, { method: 'POST', body: parameters })
+    if (!response.ok) throw new Error(`图层查询失败 (${response.status})`)
+    data = await response.json() as typeof data
+  } catch {
+    // Some older ArcGIS services allow JSONP but do not enable CORS for POST.
+    data = await loadArcGisJson<ArcGisQueryResponse>(`${url}?${parameters.toString()}`)
+  }
+  if (data.error) throw new Error(data.error.message || '图层查询条件不受服务支持')
+  return data
+}
+
+async function queryAllFeatures(url: string, parameters: URLSearchParams): Promise<ArcGisQueryResponse> {
+  // ID queries work on legacy MapServer versions without pagination and are not
+  // subject to the feature transfer limit. Read every matching ID in small batches.
+  const idParameters = new URLSearchParams(parameters)
+  idParameters.delete('resultRecordCount')
+  idParameters.delete('resultOffset')
+  idParameters.delete('outFields')
+  idParameters.set('returnIdsOnly', 'true')
+  idParameters.set('returnGeometry', 'false')
+  const index = await queryArcGis(url, idParameters)
+  const ids = index.objectIds
+  if (!ids) throw new Error('图层服务未返回完整要素索引')
+  const features: NonNullable<ArcGisQueryResponse['features']> = []
+  let fieldAliases: ArcGisQueryResponse['fieldAliases']
+  const readBatch = async (batchIds: Array<number | string>): Promise<void> => {
+    const batch = new URLSearchParams(parameters)
+    batch.delete('resultRecordCount')
+    batch.delete('resultOffset')
+    batch.set('objectIds', batchIds.join(','))
+    const result = await queryArcGis(url, batch)
+    if (result.exceededTransferLimit) {
+      if (batchIds.length <= 1) throw new Error('服务未能完整返回要素')
+      const middle = Math.ceil(batchIds.length / 2)
+      await readBatch(batchIds.slice(0, middle))
+      await readBatch(batchIds.slice(middle))
+      return
+    }
+    fieldAliases = result.fieldAliases || fieldAliases
+    features.push(...(result.features || []))
+  }
+  for (let offset = 0; offset < ids.length; offset += 200) {
+    await readBatch(ids.slice(offset, offset + 200))
+  }
+  return { features, fieldAliases }
+}
+
+function identifiedFeature(service: MapServiceItem, feature: NonNullable<ArcGisQueryResponse['features']>[number], metadata: ArcGisLayerMetadata, aliases?: Record<string, string>): IdentifiedMapFeature {
+  const rows = attributeRows(feature.attributes, aliases)
+  const type = hoverField(metadata)
+  const category = categoryField(metadata)
+  const oid = metadata.fields?.find(field => field.type === 'esriFieldTypeOID')?.name || 'OBJECTID'
+  const oidValue = feature.attributes?.[oid]
+  return {
+    serviceId: String(service.id), serviceName: service.name,
+    title: rows.find(row => row.value !== '—')?.value || service.name, rows,
+    objectIdField: oid, objectId: typeof oidValue === 'number' || typeof oidValue === 'string' ? oidValue : undefined,
+    typeLabel: type ? fieldLabel(type) : undefined,
+    typeValue: type?.name && feature.attributes?.[type.name] != null ? String(feature.attributes[type.name]) : undefined,
+    category: category?.name && feature.attributes?.[category.name] != null ? { field: category.name, label: fieldLabel(category), value: String(feature.attributes[category.name]) } : undefined,
+    location: featureLocation(feature, service.arcGisGeometryType || metadata.geometryType),
+  }
+}
+
 /** 点击地图时，向可见的矢量 MapServer 查询光标处的要素及全部属性。 */
-export async function identifyVectorFeature(
+export async function identifyVectorFeatures(
   service: MapServiceItem,
   envelope: { west: number; south: number; east: number; north: number },
   definitionExpression = '1=1',
-): Promise<IdentifiedMapFeature | null> {
-  if (!Number.isFinite(Number(service.arcGisLayerId))) return null
+): Promise<IdentifiedMapFeature[]> {
+  if (!Number.isFinite(Number(service.arcGisLayerId))) return []
   const url = serviceRoot(service.serviceUrl)
   const layerId = Number(service.arcGisLayerId)
   const parameters = new URLSearchParams({
@@ -1391,28 +1552,19 @@ export async function identifyVectorFeature(
     outFields: '*',
     returnGeometry: 'true',
     outSR: '4326',
-    resultRecordCount: '1',
+    resultRecordCount: '200',
   })
-  const response = await loadArcGisJson<ArcGisQueryResponse>(`${url}/${layerId}/query?${parameters.toString()}`)
-  const feature = response.features?.[0]
-  if (!feature) return null
-  const rows = attributeRows(feature.attributes, response.fieldAliases)
-  const title = rows.find((row) => row.value !== '—')?.value || service.name
-  return {
-    serviceId: String(service.id),
-    serviceName: service.name,
-    title,
-    rows,
-    location: featureLocation(feature, service.arcGisGeometryType),
-  }
+  const response = await queryAllFeatures(`${url}/${layerId}/query`, parameters)
+  const metadata = await cachedLayerMetadata(url, layerId)
+  return (response.features || []).map(feature => identifiedFeature(service, feature, metadata, response.fieldAliases))
 }
 
 function searchableFieldNames(metadata: ArcGisLayerMetadata) {
   const preferred = ['GCMC', 'XMMC', 'JYZTMC_1', 'DLMC', 'DKLX', 'DKLXMC', 'DKMC', 'DKBM', 'DCBH', '地类名称', '地块名称', '地块类型', '变化类']
   const fields = (metadata.fields || []).filter((field) => {
     const name = field.name || ''
-    if (!name || HIDDEN_ATTRIBUTE.test(name) || field.type === 'esriFieldTypeOID' || field.type === 'esriFieldTypeGeometry') return false
-    if (field.type && field.type !== 'esriFieldTypeString' && field.type !== 'esriFieldTypeGUID') return false
+    if (!name || field.type === 'esriFieldTypeGeometry') return false
+    if (field.type === 'esriFieldTypeBlob' || field.type === 'esriFieldTypeRaster') return false
     return /^[\w\u4e00-\u9fff]+$/.test(name)
   })
   const seen = new Set<string>()
@@ -1423,7 +1575,6 @@ function searchableFieldNames(metadata: ArcGisLayerMetadata) {
       seen.add(name)
       return true
     })
-    .slice(0, 8)
 }
 
 /** 在矢量图层的文本字段里查找人名、地块名、类型名等属性内容。 */
@@ -1436,25 +1587,32 @@ export async function searchVectorLayerText(service: MapServiceItem, keyword: st
   const fields = searchableFieldNames(metadata)
   if (!fields.length) return []
   const escaped = text.replace(/'/g, "''")
+  const textFields = fields.filter(field => !field.type || ['esriFieldTypeString', 'esriFieldTypeGUID', 'esriFieldTypeGlobalID'].includes(field.type))
+  const scalarFields = fields.filter(field => !textFields.includes(field))
+  const searchScalars = /^[\d.eE+:/\sT-]+$/.test(text)
+  const clauses = textFields.map(field => `${field.name} LIKE '%${escaped}%'`)
+  if (searchScalars) clauses.push(...scalarFields.map(field => `CAST(${field.name} AS VARCHAR(255)) LIKE '%${escaped}%'`))
+  if (!clauses.length) return []
   const parameters = new URLSearchParams({
-    where: `(${fields.map((field) => `${field.name} LIKE '%${escaped}%'`).join(' OR ')})`,
+    where: `(${clauses.join(' OR ')})`,
     outFields: '*',
     returnGeometry: 'true',
     outSR: '4326',
-    resultRecordCount: '4',
+    resultRecordCount: '200',
   })
-  const response = await loadArcGisJson<ArcGisQueryResponse>(`${url}/${layerId}/query?${parameters.toString()}`)
-  return (response.features || []).flatMap((feature) => {
-    const rows = attributeRows(feature.attributes, response.fieldAliases)
-    const matched = rows.find((row) => row.value.toLowerCase().includes(text.toLowerCase()))
+  let response: ArcGisQueryResponse
+  try {
+    response = await queryAllFeatures(`${url}/${layerId}/query`, parameters)
+  } catch {
+    // Older databases cannot CAST every numeric/date field. Scan complete attributes
+    // when an expression is unsupported, using ID batching rather than dropping fields.
+    parameters.set('where', '1=1')
+    response = await queryAllFeatures(`${url}/${layerId}/query`, parameters)
+  }
+  return (response.features || []).flatMap(feature => {
+    const result = identifiedFeature(service, feature, metadata, response.fieldAliases)
+    const matched = result.rows.find(row => row.value.toLowerCase().includes(text.toLowerCase()))
     if (!matched) return []
-    return [{
-      serviceId: String(service.id),
-      serviceName: service.name,
-      title: matched.value,
-      matchLabel: matched.label,
-      rows,
-      location: featureLocation(feature, service.arcGisGeometryType || metadata.geometryType),
-    }]
+    return [{ ...result, title: matched.value, matchLabel: matched.label, matchFieldName: matched.name }]
   })
 }

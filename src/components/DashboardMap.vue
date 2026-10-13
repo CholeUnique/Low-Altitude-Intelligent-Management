@@ -4,7 +4,7 @@ import { Aim, Compass, Delete, EditPen, InfoFilled, Location, MapLocation, Pictu
 import L from 'leaflet'
 import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
-import taizhouCityBoundary from '@/assets/geo/taizhou-city.json'
+
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
 import { getCustomDepartmentStatistics, type CustomStatGroup } from '@/api/business-statistics'
 import { listEnabledMapServices, listMapServicesForDepartments, updateMapService, type MapServiceItem } from '@/api/map-service'
@@ -13,12 +13,14 @@ import { useUserStore } from '@/stores/user'
 import type { DashboardMapLayer, DronePatrolRoute } from '@/types'
 import {
   createMapServiceLayer,
+  createAdministrativeBoundaryLayer,
   expandMapServiceSublayers,
-  identifyVectorFeature,
+  identifyVectorFeatures,
   MAP_SERVICE_IMAGERY_PANE,
   MAP_SERVICE_VECTOR_PANE,
   rememberVectorLayerColor,
   searchVectorLayerText,
+  setMapHoverSelection,
   vectorLayerColor,
   type IdentifiedMapFeature,
   type MapServiceCategoryLocation,
@@ -115,14 +117,14 @@ function convertAdministrativeBoundary<T extends { features?: BoundaryFeature[] 
 
 const TAIZHOU_CENTER: L.LatLngTuple = [32.4555, 119.9255]
 const TAIZHOU_ZOOM = 10
-const taizhouCityBoundaryWgs84 = convertAdministrativeBoundary(taizhouCityBoundary)
+
 const taizhouDistrictBoundariesWgs84 = convertAdministrativeBoundary(taizhouDistrictBoundaries)
 const HAILING_DISTRICT = (taizhouDistrictBoundariesWgs84 as {
   features?: Array<{ properties?: { name?: string } }>
 }).features?.find((feature) => feature.properties?.name === '海陵区')
 const token = import.meta.env.VITE_TIANDITU_TOKEN
 const user = useUserStore()
-const showAdministrativeBoundaries = false
+
 const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
 const container = ref<HTMLElement>()
 const mapReady = ref(false)
@@ -140,13 +142,16 @@ const mapServicesError = ref('')
 const mapServiceOrderSaving = ref(false)
 const draggingGroupId = ref('')
 const dragGhost = ref<{ name: string; x: number; y: number; width: number; height: number }>()
-const jiulongBoundaryVisible = ref(false)
+const jiulongBoundaryVisible = ref(user.organizationId === 'agriculture-rural' && !props.focusLayerId)
+
+const jiulongBoundaryError = ref('')
 const layerPanelCollapsed = ref(Boolean(props.floatingControls))
 const layerPanelId = `dashboard-layers-${useId().replace(/:/g, '')}`
 const visibleMapServiceIds = ref<string[]>([])
 const expandedMapServiceGroupIds = ref<string[]>([])
 const expandedCategoryIds = ref<string[]>([])
 interface VectorFilterPanel {
+  fieldName: string
   serviceId: string
   serviceName: string
   fieldLabel: string
@@ -156,35 +161,37 @@ interface VectorFilterPanel {
 }
 const vectorFilterPanels = ref<VectorFilterPanel[]>([])
 const vectorLayerColors = ref<Record<string, string>>({})
+const vectorFillOpacity = ref<Record<string, number>>({})
 const layerContextMenu = ref<{ x: number; y: number; serviceId: string }>()
 const layerColorPicker = ref<{ x: number; y: number; serviceId: string; color: string; hue: number; saturation: number; value: number }>()
 const colorWheelCanvas = ref<HTMLCanvasElement>()
 const COLOR_WHEEL_SIZE = 168
 const attributeSearchResults = ref<IdentifiedMapFeature[]>([])
+interface AttributeSearchGroup { key: string; serviceId: string; serviceName: string; field: string; label: string; value: string; features: IdentifiedMapFeature[] }
+const attributeSearchGroups = computed(() => {
+  const groups = new Map<string, AttributeSearchGroup>()
+  const keyword = searchKeyword.value.trim().toLowerCase()
+  attributeSearchResults.value.forEach(feature => {
+    const category = feature.category?.value.toLowerCase().includes(keyword) ? feature.category : undefined
+    const field = category?.field || feature.matchFieldName
+    if (!field) return
+    const value = category?.value || feature.title
+    const key = `${feature.serviceId}:${field}:${value}`
+    const existing = groups.get(key)
+    if (existing) existing.features.push(feature)
+    else groups.set(key, { key, serviceId: feature.serviceId, serviceName: feature.serviceName, field, label: category?.label || feature.matchLabel || field, value, features: [feature] })
+  })
+  return [...groups.values()]
+})
+const attributeFilters = ref<Record<string, string>>({})
 const attributeSearchLoading = ref(false)
+const attributeSearchError = ref('')
 const farmlandStatGroups = ref<CustomStatGroup[]>([])
 const farmlandStatLoading = ref(false)
 const farmlandStatError = ref('')
 const searchExpanded = ref(false)
 const searchKeyword = ref('')
 const searchInput = ref<HTMLInputElement>()
-interface PlaceSearchResult {
-  id: string
-  name: string
-  address: string
-  longitude: number
-  latitude: number
-  bounds?: [number, number, number, number]
-  level?: number
-}
-interface TiandituSearchResponse {
-  pois?: Array<Record<string, unknown>>
-  area?: Array<Record<string, unknown>>
-  statistics?: { priorityCitys?: Array<Record<string, unknown>>; allAdmins?: Array<Record<string, unknown>> }
-}
-const placeSearchResults = ref<PlaceSearchResult[]>([])
-const placeSearchLoading = ref(false)
-const placeSearchError = ref('')
 const toolMessage = ref('')
 const measureOpen = ref(false)
 const baseMapOpen = ref(false)
@@ -194,6 +201,7 @@ const measureResult = ref('')
 const scaleWidth = ref(96)
 const scaleLabel = ref('5 km')
 interface ParcelSearchResult {
+  serviceId: string
   id: string
   serviceName: string
   fieldLabel: string
@@ -205,6 +213,7 @@ const parcelSearchResults = computed<ParcelSearchResult[]>(() => {
   const keyword = searchKeyword.value.trim().toLowerCase()
   if (!keyword) return []
   return vectorFilterPanels.value.flatMap((panel) => panel.items.map((item) => ({
+    serviceId: panel.serviceId,
     id: `${panel.serviceId}::${item.value}`,
     serviceName: panel.serviceName,
     fieldLabel: panel.fieldLabel,
@@ -227,12 +236,25 @@ let annotationGroup: L.LayerGroup | undefined
 let locationGroup: L.LayerGroup | undefined
 let searchHighlightGroup: L.LayerGroup | undefined
 let selectionHighlightGroup: L.LayerGroup | undefined
-let selectionPopup: L.Popup | undefined
-let administrativeBoundaryGroup: L.LayerGroup | undefined
+const featureCandidates = ref<IdentifiedMapFeature[]>([])
+const selectedFeatureIndex = ref(0)
+const activeFeature = computed(() => featureCandidates.value[selectedFeatureIndex.value])
+const featureLayers = computed(() => {
+  const groups = new Map<string, { serviceId: string; name: string; indices: number[] }>()
+  featureCandidates.value.forEach((feature,index) => {
+    const group = groups.get(feature.serviceId)
+    if (group) group.indices.push(index)
+    else groups.set(feature.serviceId, { serviceId: feature.serviceId, name: feature.serviceName, indices: [index] })
+  })
+  return [...groups.values()]
+})
+const activeFeatureLayerIndex = computed(() => Math.max(0, featureLayers.value.findIndex(layer => layer.serviceId === activeFeature.value?.serviceId)))
+const activeFeatureLayer = computed(() => featureLayers.value[activeFeatureLayerIndex.value])
+
 let hailingBoundaryGroup: L.LayerGroup | undefined
 let jiulongAdminHandle: MapServiceLayerHandle | undefined
 let jiulongAdminRequest = 0
-let jiulongAdminPendingFit = false
+let jiulongAdminPendingFit = jiulongBoundaryVisible.value
 const jiulongAdminService = ref<MapServiceItem>()
 let toolMessageTimer: ReturnType<typeof window.setTimeout> | undefined
 let markerHintTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -241,10 +263,9 @@ let overviewFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 let searchFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 let searchHighlightTimer: ReturnType<typeof window.setInterval> | undefined
 let searchHighlightClearTimer: ReturnType<typeof window.setTimeout> | undefined
-let placeSearchRequestVersion = 0
 let attributeSearchRequestVersion = 0
+let featureSelectionRequestVersion = 0
 let farmlandStatRequestVersion = 0
-let searchPlaceMarker: L.CircleMarker | undefined
 let focusedSceneLayerId = ''
 let overviewFocused = false
 const mapServiceLayers = new Map<string, MapServiceLayerHandle>()
@@ -491,7 +512,8 @@ function onMapServiceGroupClick(group: MapServiceGroup) {
     suppressGroupClick = false
     return
   }
-  void toggleMapServiceGroup(group)
+  if (group.layers.length === 1 && categoryPanelFor(group.layers[0]!)) toggleCategoryFolder(group.layers[0]!)
+  else void toggleMapServiceGroup(group)
 }
 
 async function loadMapServices() {
@@ -502,6 +524,8 @@ async function loadMapServices() {
   jiulongAdminHandle = undefined
   jiulongAdminService.value = undefined
   // 部门切换时先撤掉旧图层，避免新列表返回前仍展示上一部门的服务。
+  clearSelectionHighlight()
+  attributeFilters.value = {}
   mapServiceLayers.forEach((handle) => handle.layer.remove())
   mapServiceLayers.clear()
   loadingMapServiceIds.clear()
@@ -556,6 +580,7 @@ async function toggleMapService(service: MapServiceItem) {
   const existing = mapServiceLayers.get(id)
   if (existing && map.hasLayer(existing.layer)) {
     existing.layer.remove()
+    if (activeFeature.value?.serviceId === id) clearSelectionHighlight()
     visibleMapServiceIds.value = visibleMapServiceIds.value.filter((layerId) => layerId !== id)
     vectorFilterPanels.value = vectorFilterPanels.value.filter((panel) => panel.serviceId !== id)
     expandedCategoryIds.value = expandedCategoryIds.value.filter((layerId) => layerId !== id)
@@ -574,11 +599,13 @@ async function toggleMapService(service: MapServiceItem) {
     }
     mapServiceLayers.set(id, handle)
     assignMapServicePane(handle.layer, paneForMapService(service))
+    handle.setFillOpacity?.(vectorFillOpacity.value[id] ?? .25)
     handle.layer.addTo(map)
     syncMapServiceStack()
     if (!visibleMapServiceIds.value.includes(id)) visibleMapServiceIds.value = [...visibleMapServiceIds.value, id]
     if (handle.categoryFilter && !vectorFilterPanels.value.some((panel) => panel.serviceId === id)) {
       vectorFilterPanels.value = [...vectorFilterPanels.value, {
+        fieldName: handle.categoryFilter.fieldName,
         serviceId: id,
         serviceName: service.name,
         fieldLabel: handle.categoryFilter.fieldLabel,
@@ -620,6 +647,10 @@ function assignVectorColors(groups: MapServiceGroup[]) {
       next[id] = next[id] || vectorLayerColor(id)
     })
   })
+  if (jiulongAdminService.value) {
+    const id = String(jiulongAdminService.value.id)
+    next[id] = next[id] || '#9AEEFE'
+  }
   vectorLayerColors.value = next
 }
 
@@ -785,13 +816,25 @@ function onColorValueInput(event: Event) {
   applyLayerColor(hsvToHex(picker.hue, picker.saturation, value))
 }
 
+const pickerAllowsFill = computed(() => layerColorPicker.value && searchableVectorServices()
+  .some(service => String(service.id) === layerColorPicker.value?.serviceId && service.arcGisGeometryType === 'esriGeometryPolygon'))
+function onFillOpacityInput(event: Event) {
+  const id = layerColorPicker.value?.serviceId
+  if (!id) return
+  const opacity = Number((event.target as HTMLInputElement).value) / 100
+  vectorFillOpacity.value = { ...vectorFillOpacity.value, [id]: opacity }
+  const handle = jiulongAdminService.value && String(jiulongAdminService.value.id) === id ? jiulongAdminHandle : mapServiceLayers.get(id)
+  handle?.setFillOpacity?.(opacity)
+}
+
 function applyLayerColor(color: string) {
   const picker = layerColorPicker.value
   if (!picker || !/^#[0-9a-fA-F]{6}$/.test(color)) return
   layerColorPicker.value = { ...picker, color }
   vectorLayerColors.value = { ...vectorLayerColors.value, [picker.serviceId]: color }
   rememberVectorLayerColor(picker.serviceId, color)
-  const shades = mapServiceLayers.get(picker.serviceId)?.setColor?.(color) || []
+  const handle = jiulongAdminService.value && String(jiulongAdminService.value.id) === picker.serviceId ? jiulongAdminHandle : mapServiceLayers.get(picker.serviceId)
+  const shades = handle?.setColor?.(color) || []
   const panel = vectorFilterPanels.value.find((item) => item.serviceId === picker.serviceId)
   panel?.items.forEach((item, index) => {
     const shade = shades[index]
@@ -838,14 +881,22 @@ async function toggleMapServiceGroup(group: MapServiceGroup) {
   expandedMapServiceGroupIds.value = hideGroup
     ? expandedMapServiceGroupIds.value.filter((id) => id !== group.id)
     : [...expandedMapServiceGroupIds.value, group.id]
-  const targets = hideGroup
-    ? group.layers.filter((service) => visibleMapServiceIds.value.includes(String(service.id)))
-    : group.layers.slice(0, 1).filter((service) => !visibleMapServiceIds.value.includes(String(service.id)))
+  const targets = hideGroup || group.layers.some(service => visibleMapServiceIds.value.includes(String(service.id))) ? [] : group.layers.slice(0, 1)
   await Promise.all(targets.map(toggleMapService))
 }
 
 function applyVectorCategoryFilter(panel: VectorFilterPanel) {
-  panel.apply(panel.items.filter((item) => item.checked).map((item) => item.value))
+  panel.apply(panel.items.filter(item => item.checked).map(item => item.value))
+  if (attributeFilters.value[panel.serviceId]?.startsWith(`${panel.fieldLabel}：`)) {
+    const next = { ...attributeFilters.value }; delete next[panel.serviceId]; attributeFilters.value = next
+  }
+  const selected = activeFeature.value
+  if (selected?.serviceId === panel.serviceId && selected.category && panel.items.some(item => item.value === selected.category?.value && !item.checked)) clearSelectionHighlight()
+}
+
+async function onServiceRowClick(service: MapServiceItem) {
+  if (categoryPanelFor(service)) toggleCategoryFolder(service)
+  else await toggleMapService(service)
 }
 
 function allVectorCategoriesChecked(panel: VectorFilterPanel) {
@@ -890,7 +941,7 @@ function scheduleSceneFocus() {
 }
 
 function focusHailingDistrict() {
-  if (!map || props.focusLayerId || overviewFocused || !HAILING_DISTRICT) return
+  if (!map || props.focusLayerId || overviewFocused || jiulongBoundaryVisible.value || !HAILING_DISTRICT) return
   const bounds = L.geoJSON(HAILING_DISTRICT as GeoJsonObject).getBounds()
   if (!bounds.isValid()) return
   map.invalidateSize({ pan: false })
@@ -980,12 +1031,13 @@ function flashSearchLocation(location: MapServiceCategoryLocation) {
 
 function clearSelectionHighlight() {
   selectionHighlightGroup?.clearLayers()
-  selectionPopup?.remove()
-  selectionPopup = undefined
+  featureCandidates.value = []
+  if (map) setMapHoverSelection(map)
 }
 
-function pinFeatureHighlight(feature: IdentifiedMapFeature, anchor?: L.LatLng) {
+function pinFeatureHighlight(feature: IdentifiedMapFeature, _anchor?: L.LatLng, candidates: IdentifiedMapFeature[] = [feature]) {
   if (!map || !selectionHighlightGroup) return
+  featureSelectionRequestVersion += 1
   clearSearchHighlight()
   clearSelectionHighlight()
   const outlines: L.LatLngExpression[][] = []
@@ -1036,44 +1088,36 @@ function pinFeatureHighlight(feature: IdentifiedMapFeature, anchor?: L.LatLng) {
     fillOpacity: .85,
   }).addTo(selectionHighlightGroup!))
 
-  const content = document.createElement('div')
-  content.className = 'feature-attribute-card'
-  const title = document.createElement('strong')
-  title.textContent = feature.serviceName
-  content.appendChild(title)
-  const list = document.createElement('dl')
-  feature.rows.forEach((row) => {
-    const item = document.createElement('div')
-    const label = document.createElement('dt')
-    const value = document.createElement('dd')
-    label.textContent = row.label
-    value.textContent = row.value
-    item.append(label, value)
-    list.appendChild(item)
-  })
-  if (!feature.rows.length) {
-    const empty = document.createElement('p')
-    empty.textContent = '该要素没有可显示的属性'
-    content.appendChild(empty)
-  } else {
-    content.appendChild(list)
+  featureCandidates.value = candidates
+  selectedFeatureIndex.value = Math.max(0, candidates.indexOf(feature))
+  const service = searchableVectorServices().find(item => String(item.id) === feature.serviceId)
+  setMapHoverSelection(map, service, feature)
+}
+
+function selectFeatureTab(index: number) {
+  const feature = featureCandidates.value[index]
+  if (feature) {
+    pinFeatureHighlight(feature, undefined, featureCandidates.value)
+    void nextTick(() => document.getElementById(`${layerPanelId}-feature-tab-${activeFeatureLayerIndex.value}`)?.focus())
   }
-  const popupAnchor = anchor
-    || feature.location.bounds?.getCenter()
-    || (points[0] ? L.latLng(points[0] as L.LatLngTuple) : map.getCenter())
-  selectionPopup = L.popup({
-    className: 'feature-attribute-popup',
-    maxWidth: 320,
-    autoPan: true,
-    closeButton: true,
-  }).setLatLng(popupAnchor).setContent(content).openOn(map)
-  selectionPopup.on('remove', () => {
-    selectionHighlightGroup?.clearLayers()
-  })
+}
+
+function selectFeatureLayer(index: number) {
+  const layer = featureLayers.value[index]
+  if (layer?.indices[0] != null) selectFeatureTab(layer.indices.includes(selectedFeatureIndex.value) ? selectedFeatureIndex.value : layer.indices[0])
 }
 
 async function focusParcelSearchResult(result: ParcelSearchResult) {
   if (!map) return
+  attributeSearchRequestVersion += 1
+  const panel = vectorFilterPanels.value.find(item => item.serviceId === result.serviceId)
+  if (panel) {
+    mapServiceLayers.get(result.serviceId)?.setAttributeFilter?.()
+    panel.items.forEach(item => { item.checked = item.value === result.value })
+    applyVectorCategoryFilter(panel)
+    attributeFilters.value = { ...attributeFilters.value, [result.serviceId]: `${panel.fieldLabel}：${result.value}` }
+  }
+  clearSelectionHighlight()
   try {
     const location = await result.locate()
     const bounds = location.bounds
@@ -1090,82 +1134,79 @@ async function focusParcelSearchResult(result: ParcelSearchResult) {
   }
 }
 
-function coordinates(value: unknown) {
-  if (typeof value !== 'string') return
-  const [longitude, latitude] = value.split(',').map(Number)
-  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return
-  return { longitude: longitude!, latitude: latitude! }
-}
-
-function placeResult(item: Record<string, unknown>, index: number): PlaceSearchResult | undefined {
-  const point = coordinates(item.lonlat)
-  if (!point) return
-  const rawBounds = typeof item.bound === 'string' ? item.bound.split(',').map(Number) : []
-  const bounds = rawBounds.length === 4 && rawBounds.every(Number.isFinite)
-    ? rawBounds as [number, number, number, number]
-    : undefined
-  const address = [item.province, item.city, item.county, item.address]
-    .filter((value, position, values) => typeof value === 'string' && value.trim() && values.indexOf(value) === position)
-    .join(' · ')
-  return {
-    id: String(item.hotPointID ?? item.adminCode ?? `${item.name ?? 'place'}-${index}`),
-    name: String(item.name ?? '未命名地点'),
-    address: address || String(item.typeName ?? '地名搜索结果'),
-    longitude: point.longitude,
-    latitude: point.latitude,
-    bounds,
-    level: Number.isFinite(Number(item.level)) ? Number(item.level) : undefined,
-  }
+function searchableVectorServices() {
+  const services = mapServiceGroups.value.flatMap(group => group.layers)
+  if (jiulongAdminService.value) services.push(jiulongAdminService.value)
+  return services.filter(service => Number.isFinite(Number(service.arcGisLayerId)) && Boolean(service.arcGisGeometryType))
 }
 
 async function searchLayerAttributes(keyword: string) {
   const requestVersion = ++attributeSearchRequestVersion
+  attributeSearchResults.value = []
+  attributeSearchError.value = ''
   const text = keyword.trim()
-  if (text.length < 1) {
-    attributeSearchResults.value = []
-    attributeSearchLoading.value = false
-    return
-  }
-  const services = mapServiceGroups.value.flatMap((group) => group.layers)
-    .filter((service) => Number.isFinite(Number(service.arcGisLayerId)))
-  if (!services.length) {
-    attributeSearchResults.value = []
-    return
-  }
+  if (!text) { attributeSearchLoading.value = false; return }
+  const services = searchableVectorServices()
   attributeSearchLoading.value = true
+  const found: IdentifiedMapFeature[] = []
+  let failed = 0
   try {
-    const batches = await Promise.all(services.slice(0, 8).map(async (service) => {
-      try {
-        return await searchVectorLayerText(service, text)
-      } catch {
-        return []
-      }
-    }))
+    for (let offset = 0; offset < services.length; offset += 4) {
+      if (requestVersion !== attributeSearchRequestVersion) return
+      const batch = await Promise.allSettled(services.slice(offset, offset + 4).map(service => searchVectorLayerText(service, text)))
+      batch.forEach(result => { if (result.status === 'fulfilled') found.push(...result.value); else failed += 1 })
+    }
     if (requestVersion !== attributeSearchRequestVersion) return
     const seen = new Set<string>()
-    attributeSearchResults.value = batches.flat().filter((feature) => {
-      const identity = `${feature.serviceId}:${feature.matchLabel}:${feature.title}`
+    attributeSearchResults.value = found.filter(feature => {
+      const identity = `${feature.serviceId}:${JSON.stringify(feature.rows)}:${JSON.stringify(feature.location.geometries)}`
       if (seen.has(identity)) return false
-      seen.add(identity)
-      return true
-    }).slice(0, 8)
+      seen.add(identity); return true
+    })
+    attributeSearchError.value = failed ? `${failed} 个图层查询失败，可重试；已显示其他图层的结果。` : ''
+    const exact = attributeSearchGroups.value.filter(group => group.value.toLowerCase() === text.toLowerCase())
+    if (exact.length) await focusAttributeGroups(exact, requestVersion)
+    else if (attributeSearchGroups.value.length === 1) await focusAttributeGroups(attributeSearchGroups.value, requestVersion)
   } finally {
     if (requestVersion === attributeSearchRequestVersion) attributeSearchLoading.value = false
   }
 }
 
-async function focusAttributeResult(feature: IdentifiedMapFeature) {
+async function focusAttributeGroups(groups: AttributeSearchGroup[], version = attributeSearchRequestVersion) {
   if (!map) return
-  const service = mapServiceGroups.value.flatMap((group) => group.layers)
-    .find((item) => String(item.id) === feature.serviceId)
-  if (service && !visibleMapServiceIds.value.includes(feature.serviceId)) await toggleMapService(service)
-  const bounds = feature.location.bounds
-  if (bounds?.isValid()) {
-    map.invalidateSize({ pan: false })
-    map.fitBounds(bounds, { padding: [70, 70], maxZoom: 18, animate: true })
+  const bounds = L.latLngBounds([])
+  for (const group of groups) {
+    if (version !== attributeSearchRequestVersion) return
+    const service = searchableVectorServices().find(item => String(item.id) === group.serviceId)
+    if (!service) continue
+    if (service === jiulongAdminService.value) {
+      if (!jiulongBoundaryVisible.value) { jiulongBoundaryVisible.value = true; await renderJiulongBoundary(false); renderHailingBoundary() }
+    } else if (!visibleMapServiceIds.value.includes(group.serviceId)) await toggleMapService(service)
+    if (version !== attributeSearchRequestVersion) return
+    const handle = service === jiulongAdminService.value ? jiulongAdminHandle : mapServiceLayers.get(group.serviceId)
+    const panel = categoryPanelFor(service)
+    if (panel?.fieldName === group.field) {
+      handle?.setAttributeFilter?.()
+      panel.items.forEach(item => { item.checked = item.value === group.value })
+      applyVectorCategoryFilter(panel)
+      expandedCategoryIds.value = [...new Set([...expandedCategoryIds.value, group.serviceId])]
+    } else handle?.setAttributeFilter?.(group.field, group.value)
+    attributeFilters.value = { ...attributeFilters.value, [group.serviceId]: `${group.label}：${group.value}` }
+    const parent = mapServiceGroups.value.find(item => item.layers.some(layer => String(layer.id) === group.serviceId))
+    if (parent && parent.layers.length > 1) expandedMapServiceGroupIds.value = [...new Set([...expandedMapServiceGroupIds.value, parent.id])]
+    group.features.forEach(feature => { if (feature.location.bounds?.isValid()) bounds.extend(feature.location.bounds) })
   }
-  pinFeatureHighlight(feature)
-  searchKeyword.value = ''
+  if (version !== attributeSearchRequestVersion) return
+  clearSelectionHighlight()
+  if (bounds.isValid()) { map.invalidateSize({ pan:false }); map.fitBounds(bounds, { padding:[70,70],maxZoom:18,animate:true }) }
+}
+function clearAttributeFilter(service: MapServiceItem) {
+  const id = String(service.id)
+  const handle = service === jiulongAdminService.value ? jiulongAdminHandle : mapServiceLayers.get(id)
+  handle?.setAttributeFilter?.()
+  const panel = categoryPanelFor(service)
+  if (panel) { panel.items.forEach(item => { item.checked = true }); applyVectorCategoryFilter(panel) }
+  const next = { ...attributeFilters.value }; delete next[id]; attributeFilters.value = next
 }
 
 async function identifyClickedFeature(event: L.LeafletMouseEvent) {
@@ -1179,27 +1220,30 @@ async function identifyClickedFeature(event: L.LeafletMouseEvent) {
     east: Math.max(northWest.lng, southEast.lng),
     north: Math.max(northWest.lat, southEast.lat),
   }
-  const services = mapServiceGroups.value.flatMap((group) => group.layers)
-    .filter((service) => visibleMapServiceIds.value.includes(String(service.id)) && Number.isFinite(Number(service.arcGisLayerId)))
-  for (const service of services) {
-    try {
-      const expression = mapServiceLayers.get(String(service.id))?.definitionExpression?.() || '1=1'
-      const feature = await identifyVectorFeature(service, envelope, expression)
-      if (!feature) continue
-      pinFeatureHighlight(feature, event.latlng)
-      return
-    } catch {
-      // 单个图层点选失败时继续查询叠在下面的图层。
-    }
-  }
-  clearSelectionHighlight()
+  const requestVersion = ++featureSelectionRequestVersion
+  const services = searchableVectorServices().filter(service => service === jiulongAdminService.value
+    ? jiulongBoundaryVisible.value : visibleMapServiceIds.value.includes(String(service.id)))
+  const results = await Promise.allSettled(services.map(service => {
+    const handle = service === jiulongAdminService.value ? jiulongAdminHandle : mapServiceLayers.get(String(service.id))
+    return identifyVectorFeatures(service, envelope, handle?.definitionExpression?.() || '1=1')
+  }))
+  if (requestVersion !== featureSelectionRequestVersion || !map || activeTool.value) return
+  const candidates = results.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+  if (candidates[0]) pinFeatureHighlight(candidates[0], event.latlng, candidates)
+  else clearSelectionHighlight()
 }
 
-const farmlandStatVisible = computed(() => mapServiceGroups.value.some((group) => {
-  const opened = group.layers.some((service) => visibleMapServiceIds.value.includes(String(service.id)))
-  if (!opened) return false
-  return /九龙镇高标/.test(group.name) || /九龙镇高标/.test(group.source.name)
-}))
+function statLayerKey(name: string) {
+  return name.replace(/高标准/g, '高标').replace(/建设数据$|数据$/g, '').replace(/\s+/g, '').toLowerCase()
+}
+const visibleFarmlandStatGroups = computed(() => farmlandStatGroups.value.filter(stat =>
+  mapServiceGroups.value.some(group => {
+    if (!group.layers.some(service => visibleMapServiceIds.value.includes(String(service.id)))) return false
+    if (stat.serviceId) return stat.serviceId === group.id
+    const name = stat.serviceName || stat.name
+    return statLayerKey(name) === statLayerKey(group.source.name)
+  })))
+const farmlandStatVisible = computed(() => visibleFarmlandStatGroups.value.length > 0)
 
 async function loadFarmlandStats() {
   const requestVersion = ++farmlandStatRequestVersion
@@ -1218,88 +1262,10 @@ async function loadFarmlandStats() {
   }
 }
 
-async function searchPlaces(keyword: string) {
-  const requestVersion = ++placeSearchRequestVersion
-  if (!keyword || !token || !map) {
-    placeSearchResults.value = []
-    placeSearchLoading.value = false
-    placeSearchError.value = ''
-    return
-  }
-  placeSearchLoading.value = true
-  placeSearchError.value = ''
-  try {
-    const postStr = JSON.stringify({
-      keyWord: keyword,
-      level: Math.max(1, Math.min(18, Math.round(map.getZoom()))),
-      mapBound: '-180,-90,180,90',
-      queryType: 7,
-      start: 0,
-      count: 8,
-      show: 2,
-    })
-    const parameters = new URLSearchParams({ postStr, type: 'query', tk: token })
-    const response = await fetch(`https://api.tianditu.gov.cn/v2/search?${parameters.toString()}`)
-    if (!response.ok) throw new Error(`地点搜索请求失败（${response.status}）`)
-    const payload = await response.json() as TiandituSearchResponse
-    if (requestVersion !== placeSearchRequestVersion) return
-    const candidates = [
-      ...(Array.isArray(payload.area) ? payload.area : []),
-      ...(Array.isArray(payload.pois) ? payload.pois : []),
-      ...(Array.isArray(payload.statistics?.priorityCitys) ? payload.statistics!.priorityCitys! : []),
-      ...(Array.isArray(payload.statistics?.allAdmins) ? payload.statistics!.allAdmins! : []),
-    ]
-    const seen = new Set<string>()
-    placeSearchResults.value = candidates.flatMap((item, index) => {
-      const result = placeResult(item, index)
-      if (!result) return []
-      const identity = `${result.name}-${result.longitude}-${result.latitude}`
-      if (seen.has(identity)) return []
-      seen.add(identity)
-      return [result]
-    }).slice(0, 8)
-  } catch (reason) {
-    if (requestVersion !== placeSearchRequestVersion) return
-    placeSearchResults.value = []
-    placeSearchError.value = reason instanceof Error ? reason.message : '地点搜索暂不可用'
-  } finally {
-    if (requestVersion === placeSearchRequestVersion) placeSearchLoading.value = false
-  }
-}
-
-function focusPlaceResult(place: PlaceSearchResult) {
-  if (!map) return
-  searchPlaceMarker?.remove()
-  searchPlaceMarker = L.circleMarker([place.latitude, place.longitude], {
-    radius: 7,
-    color: '#dffcff',
-    weight: 2,
-    fillColor: '#1dddec',
-    fillOpacity: .92,
-  }).addTo(map)
-  const popup = document.createElement('div')
-  const title = document.createElement('strong')
-  const address = document.createElement('small')
-  title.textContent = place.name
-  address.textContent = place.address
-  popup.append(title, address)
-  searchPlaceMarker.bindPopup(popup).openPopup()
-  if (place.bounds) {
-    const [west, south, east, north] = place.bounds
-    map.fitBounds([[south, west], [north, east]], { padding: [70, 70], maxZoom: 17 })
-  } else {
-    map.setView([place.latitude, place.longitude], Math.max(14, Math.min(place.level || 16, 18)), { animate: true })
-  }
-  searchKeyword.value = ''
-}
-
 async function toggleSearch() {
   searchExpanded.value = !searchExpanded.value
   if (!searchExpanded.value) {
-    placeSearchRequestVersion += 1
     searchKeyword.value = ''
-    placeSearchResults.value = []
-    placeSearchError.value = ''
     return
   }
   await nextTick()
@@ -1307,14 +1273,13 @@ async function toggleSearch() {
 }
 
 function focusFirstSearchResult() {
-  const attribute = attributeSearchResults.value[0]
+  const attribute = attributeSearchGroups.value[0]
   if (attribute) {
-    void focusAttributeResult(attribute)
+    void focusAttributeGroups([attribute])
     return
   }
   const parcel = parcelSearchResults.value[0]
   if (parcel) void focusParcelSearchResult(parcel)
-  else if (placeSearchResults.value[0]) focusPlaceResult(placeSearchResults.value[0])
 }
 
 function locateUser() {
@@ -1346,13 +1311,14 @@ function locateUser() {
 
 function resetNorth() {
   if (!map || !HAILING_DISTRICT) return
-  const bounds = L.geoJSON(HAILING_DISTRICT as GeoJsonObject).getBounds()
-  if (!bounds.isValid()) return
+  const bounds = jiulongBoundaryVisible.value ? jiulongAdminHandle?.bounds
+    : L.geoJSON(HAILING_DISTRICT as GeoJsonObject).getBounds()
+  if (!bounds?.isValid()) return
   map.invalidateSize({ pan: false })
   // 与首页刷新后的默认定位参数完全一致：展示完整海陵区边界并保持正北。
   map.fitBounds(bounds, { padding: [36, 36], maxZoom: 13, animate: true })
   overviewFocused = true
-  showToolMessage('已回到海陵区默认视角，地图保持正北向上')
+  showToolMessage(`已回到${jiulongBoundaryVisible.value ? '九龙镇' : '海陵区'}视角，地图保持正北向上`)
 }
 
 function toggleMeasureMenu() {
@@ -1469,41 +1435,15 @@ function switchMode(mode: 'vector' | 'image') {
   baseMapOpen.value = false
 }
 
-function renderAdministrativeBoundaries() {
-  if (!map) return
-  administrativeBoundaryGroup?.remove()
-  administrativeBoundaryGroup = L.layerGroup()
-  L.geoJSON(taizhouDistrictBoundariesWgs84 as GeoJsonObject, {
-    pane: 'administrative-boundaries',
-    style: {
-      color: '#9AEEFE',
-      weight: 3.5,
-      opacity: 1,
-      fillColor: '#66B9DA',
-      fillOpacity: .26,
-    },
-  }).addTo(administrativeBoundaryGroup)
-  L.geoJSON(taizhouCityBoundaryWgs84 as GeoJsonObject, {
-    pane: 'administrative-boundaries',
-    style: {
-      color: '#9AEEFE',
-      weight: 3.5,
-      opacity: 1,
-      fillOpacity: 0,
-      className: 'taizhou-city-boundary',
-    },
-  }).addTo(administrativeBoundaryGroup)
-  administrativeBoundaryGroup.addTo(map)
-}
-
 function renderHailingBoundary() {
   hailingBoundaryGroup?.remove()
   hailingBoundaryGroup = undefined
   // 九龙镇边界与默认行政区划互斥，同时只显示其中一套。
-  if (!map || props.focusLayerId || !HAILING_DISTRICT || jiulongBoundaryVisible.value) return
+  if (!map || props.focusLayerId || !HAILING_DISTRICT || jiulongBoundaryVisible.value || user.organizationId === 'agriculture-rural') return
   hailingBoundaryGroup = L.layerGroup()
+  const boundary = HAILING_DISTRICT as GeoJsonObject
   // Leaflet uses Canvas here, so a second stroke provides a reliable 50% dark-blue halo.
-  L.geoJSON(HAILING_DISTRICT as GeoJsonObject, {
+  L.geoJSON(boundary, {
     pane: 'administrative-boundaries',
     interactive: false,
     style: {
@@ -1515,7 +1455,7 @@ function renderHailingBoundary() {
       lineJoin: 'round',
     },
   }).addTo(hailingBoundaryGroup)
-  L.geoJSON(HAILING_DISTRICT as GeoJsonObject, {
+  L.geoJSON(boundary, {
     pane: 'administrative-boundaries',
     interactive: false,
     style: {
@@ -1548,47 +1488,48 @@ async function renderJiulongBoundary(fit: boolean) {
   jiulongAdminHandle?.layer.remove()
   jiulongAdminHandle = undefined
   if (!map || !jiulongBoundaryVisible.value) return
+  jiulongBoundaryError.value = ''
   const service = jiulongAdminService.value
   if (!service) {
     if (mapServicesLoading.value) {
       if (fit) jiulongAdminPendingFit = true
       return
     }
-    jiulongAdminPendingFit = false
-    jiulongBoundaryVisible.value = false
-    renderHailingBoundary()
-    if (fit) showToolMessage('未找到九龙镇行政区图层')
+    jiulongBoundaryError.value = '九龙镇边界暂未读取成功，请重试。'
     return
   }
   const shouldFit = fit || jiulongAdminPendingFit
   jiulongAdminPendingFit = false
   try {
-    const handle = await createMapServiceLayer(service, vectorLayerColor(`jiulong-admin-${service.id}`))
+    const color = vectorLayerColors.value[String(service.id)] = vectorLayerColors.value[String(service.id)] || '#9AEEFE'
+    const handle = await createAdministrativeBoundaryLayer(service, color)
     if (request !== jiulongAdminRequest || !map || !jiulongBoundaryVisible.value) {
       handle.layer.remove()
       return
     }
     jiulongAdminHandle = handle
+    handle.setFillOpacity?.(vectorFillOpacity.value[String(service.id)] ?? .1)
     handle.layer.addTo(map)
     if (shouldFit && handle.bounds?.isValid()) {
       map.fitBounds(handle.bounds, { padding: [48, 48], maxZoom: 15, animate: true })
+      overviewFocused = true
     }
   } catch (reason) {
     if (request !== jiulongAdminRequest) return
-    jiulongBoundaryVisible.value = false
-    renderHailingBoundary()
-    showToolMessage(reason instanceof Error ? reason.message : '九龙镇行政区加载失败')
+    jiulongBoundaryError.value = reason instanceof Error ? reason.message : '九龙镇行政区加载失败'
+    jiulongAdminPendingFit = shouldFit
   }
 }
 
 function toggleJiulongBoundary() {
+  if (jiulongBoundaryVisible.value && jiulongBoundaryError.value) {
+    void loadMapServices()
+    return
+  }
+  jiulongBoundaryError.value = ''
   jiulongBoundaryVisible.value = !jiulongBoundaryVisible.value
   void renderJiulongBoundary(jiulongBoundaryVisible.value)
   renderHailingBoundary()
-  if (!map || jiulongBoundaryVisible.value || props.focusLayerId || !HAILING_DISTRICT) return
-  const bounds = L.geoJSON(HAILING_DISTRICT as GeoJsonObject).getBounds()
-  if (!bounds.isValid()) return
-  map.fitBounds(bounds, { padding: [36, 36], maxZoom: 13, animate: true })
 }
 
 function updateScale() {
@@ -1646,7 +1587,6 @@ async function initMap() {
     searchHighlightGroup = L.layerGroup().addTo(map)
     selectionHighlightGroup = L.layerGroup().addTo(map)
     addBaseLayers('image')
-    if (showAdministrativeBoundaries) renderAdministrativeBoundaries()
     renderHailingBoundary()
     if (props.focusLayerId) scheduleSceneFocus()
     else scheduleOverviewFocus()
@@ -1703,28 +1643,21 @@ watch(() => props.focusLayerId, () => {
   if (props.focusLayerId) scheduleSceneFocus()
   else scheduleOverviewFocus()
 })
-watch(farmlandStatVisible, (visible) => {
-  if (visible) void loadFarmlandStats()
-})
 watch(() => user.activeDeptId, () => {
-  if (farmlandStatVisible.value) void loadFarmlandStats()
-})
+  farmlandStatGroups.value = []
+  void loadFarmlandStats()
+}, { immediate: true })
 watch(searchKeyword, (value) => {
   if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
   const keyword = value.trim().toLowerCase()
   if (!keyword) {
-    placeSearchRequestVersion += 1
     attributeSearchRequestVersion += 1
-    placeSearchResults.value = []
     attributeSearchResults.value = []
-    placeSearchLoading.value = false
     attributeSearchLoading.value = false
-    placeSearchError.value = ''
     return
   }
   searchFocusTimer = window.setTimeout(() => {
     const keyword = value.trim()
-    void searchPlaces(keyword)
     void searchLayerAttributes(keyword)
   }, 260)
 })
@@ -1776,22 +1709,24 @@ onBeforeUnmount(() => {
         <div class="layer-manager-list" :aria-busy="mapServiceOrderSaving">
           <div v-if="mapServiceOrderSaving" class="layer-order-save-status" role="status">正在保存共享排序…</div>
           <div class="map-service-group administrative-boundary-group">
-            <button class="layer-row map-service-row" :class="{ active: jiulongBoundaryVisible }" type="button" title="九龙镇行政区划边界" role="switch" :aria-checked="jiulongBoundaryVisible" @click="toggleJiulongBoundary">
-              <i class="layer-kind"><MapLocation /></i><span><b>九龙镇行政区划边界</b></span><em :title="jiulongBoundaryVisible ? '隐藏' : '显示'">{{ jiulongBoundaryVisible ? '●' : '○' }}</em>
+            <button class="layer-row map-service-row" @contextmenu="jiulongAdminService && onLayerContextMenu($event, jiulongAdminService)" :class="{ active: jiulongBoundaryVisible }" type="button" title="九龙镇行政区划边界" role="switch" :aria-checked="jiulongBoundaryVisible" @click="toggleJiulongBoundary">
+              <i class="layer-kind" :style="jiulongAdminService ? { color: vectorRowColor(jiulongAdminService) } : undefined"><MapLocation /></i><span><b>九龙镇行政区划边界</b></span><em :title="jiulongBoundaryVisible ? '隐藏' : '显示'">{{ jiulongBoundaryVisible ? '●' : '○' }}</em>
             </button>
           </div>
+          <div v-if="jiulongBoundaryVisible && jiulongBoundaryError" class="layer-panel-message error" role="status">{{ jiulongBoundaryError }} <button type="button" @click="loadMapServices">重试</button></div>
           <div v-if="mapServicesLoading" class="layer-panel-message">正在读取地图服务…</div>
           <div v-else-if="mapServicesError" class="layer-panel-message error">{{ mapServicesError }}</div>
           <div v-else-if="!mapServiceGroups.length" class="layer-panel-message">暂无已启用的地图服务</div>
           <TransitionGroup v-else tag="div" name="map-service-sort" class="map-service-sort-list">
             <div v-for="group in mapServiceGroups" :key="group.id" class="map-service-group" :class="{ 'is-dragging': draggingGroupId === group.id }" :data-group-id="group.id">
               <button class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="`${group.name}(长按可拖动排序)`" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @pointerdown="onMapServicePointerDown($event, group)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
-                <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em v-if="group.layers.length === 1 && categoryPanelFor(group.layers[0]!)" class="layer-expander" :title="isCategoryExpanded(group.layers[0]!) ? '收起分类' : '展开分类'" @pointerdown.stop @click.stop="toggleCategoryFolder(group.layers[0]!)">{{ isCategoryExpanded(group.layers[0]!) ? '⌃' : '⌄' }}</em><em :class="{ 'layer-expander': group.layers.length > 1 }" :title="group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '收起' : '展开') : (isMapServiceGroupActive(group) ? '隐藏' : '显示')">{{ group.layers.length > 1 ? (isMapServiceGroupExpanded(group) ? '⌃' : '⌄') : (isMapServiceGroupActive(group) ? '●' : '○') }}</em>
+                <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em v-if="group.layers.length === 1" role="switch" tabindex="0" :aria-checked="isMapServiceGroupActive(group)" :aria-label="`切换${group.name}可视性`" @pointerdown.stop @click.stop="toggleMapService(group.layers[0]!)" @keydown.enter.stop.prevent="toggleMapService(group.layers[0]!)">{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
               </button>
+              <div v-if="group.layers.length === 1 && attributeFilters[String(group.layers[0]!.id)]" class="attribute-filter-chip">{{ attributeFilters[String(group.layers[0]!.id)] }}<button type="button" aria-label="清除属性筛选" @click="clearAttributeFilter(group.layers[0]!)">×</button></div>
               <div v-if="group.layers.length === 1 && categoryPanelFor(group.layers[0]!) && isCategoryExpanded(group.layers[0]!)" class="map-service-sublayers category-folder">
                 <div class="category-field-label">{{ categoryPanelFor(group.layers[0]!)!.fieldLabel }}</div>
                 <label class="layer-row map-service-row category-row">
-                  <i class="category-swatch category-swatch--all"></i><span><b>全部地块</b></span>
+                  <i class="category-swatch category-swatch--all"></i><span><b>全部类型</b></span>
                   <input type="checkbox" :checked="allVectorCategoriesChecked(categoryPanelFor(group.layers[0]!)!)" :indeterminate="someVectorCategoriesChecked(categoryPanelFor(group.layers[0]!)!)" @change="toggleAllVectorCategories(categoryPanelFor(group.layers[0]!)!, $event)" />
                 </label>
                 <label v-for="item in categoryPanelFor(group.layers[0]!)!.items" :key="item.value" class="layer-row map-service-row category-row">
@@ -1801,13 +1736,14 @@ onBeforeUnmount(() => {
               </div>
               <div v-if="isMapServiceGroupExpanded(group)" class="map-service-sublayers">
                 <div v-for="service in group.layers" :key="service.id" class="map-service-leaf">
-                  <button class="layer-row map-service-row map-service-sublayer" :class="{ active: visibleMapServiceIds.includes(String(service.id)), 'has-categories': categoryPanelFor(service) }" :title="service.name" role="switch" :aria-checked="visibleMapServiceIds.includes(String(service.id))" :aria-expanded="categoryPanelFor(service) ? isCategoryExpanded(service) : undefined" @click="toggleMapService(service)" @contextmenu="onSublayerContextMenu($event, service)">
-                    <i class="layer-kind" :style="vectorRowColor(service) ? { color: vectorRowColor(service) } : undefined"><MapLocation v-if="service.arcGisGeometryType" /><Picture v-else /></i><span><b>{{ service.name }}</b></span><em v-if="categoryPanelFor(service)" class="layer-expander" :title="isCategoryExpanded(service) ? '收起分类' : '展开分类'" @click.stop="toggleCategoryFolder(service)">{{ isCategoryExpanded(service) ? '⌃' : '⌄' }}</em><em :title="visibleMapServiceIds.includes(String(service.id)) ? '隐藏' : '显示'">{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
+                  <button class="layer-row map-service-row map-service-sublayer" :class="{ active: visibleMapServiceIds.includes(String(service.id)), 'has-categories': categoryPanelFor(service) }" :title="service.name" role="switch" :aria-checked="visibleMapServiceIds.includes(String(service.id))" :aria-expanded="categoryPanelFor(service) ? isCategoryExpanded(service) : undefined" @click="onServiceRowClick(service)" @contextmenu="onSublayerContextMenu($event, service)">
+                    <i class="layer-kind" :style="vectorRowColor(service) ? { color: vectorRowColor(service) } : undefined"><MapLocation v-if="service.arcGisGeometryType" /><Picture v-else /></i><span><b>{{ service.name }}</b></span><em role="switch" tabindex="0" :aria-checked="visibleMapServiceIds.includes(String(service.id))" :aria-label="`切换${service.name}可视性`" @click.stop="toggleMapService(service)" @keydown.enter.stop.prevent="toggleMapService(service)" :title="visibleMapServiceIds.includes(String(service.id)) ? '隐藏' : '显示'">{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
                   </button>
+                  <div v-if="attributeFilters[String(service.id)]" class="attribute-filter-chip">{{ attributeFilters[String(service.id)] }}<button type="button" aria-label="清除属性筛选" @click="clearAttributeFilter(service)">×</button></div>
                   <div v-if="categoryPanelFor(service) && isCategoryExpanded(service)" class="category-folder">
                     <div class="category-field-label">{{ categoryPanelFor(service)!.fieldLabel }}</div>
                     <label class="layer-row map-service-row category-row">
-                      <i class="category-swatch category-swatch--all"></i><span><b>全部地块</b></span>
+                      <i class="category-swatch category-swatch--all"></i><span><b>全部类型</b></span>
                       <input type="checkbox" :checked="allVectorCategoriesChecked(categoryPanelFor(service)!)" :indeterminate="someVectorCategoriesChecked(categoryPanelFor(service)!)" @change="toggleAllVectorCategories(categoryPanelFor(service)!, $event)" />
                     </label>
                     <label v-for="item in categoryPanelFor(service)!.items" :key="item.value" class="layer-row map-service-row category-row">
@@ -1853,39 +1789,47 @@ onBeforeUnmount(() => {
 
     <Teleport :to="`#${layerPanelId}-search`" :disabled="!floatingControls" defer>
     <div class="map-search" :class="{ expanded: searchExpanded || floatingControls }">
-      <input v-if="searchExpanded || floatingControls" ref="searchInput" aria-label="搜索地块、人名或地点" v-model="searchKeyword" placeholder="搜索人名、地块、类型或地点" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="floatingControls ? searchKeyword = '' : toggleSearch()" />
+      <input v-if="searchExpanded || floatingControls" ref="searchInput" aria-label="搜索图层属性" v-model="searchKeyword" placeholder="搜索地块类型、人名或图层属性" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="floatingControls ? searchKeyword = '' : toggleSearch()" />
       <button class="map-search-toggle" type="button" :aria-label="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起地图搜索' : '展开地图搜索')" :title="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起搜索' : '搜索地块或地点')" @click="floatingControls ? focusFirstSearchResult() : toggleSearch()">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/></svg>
       </button>
       <div v-if="showSearchSuggestions" class="search-results" aria-live="polite">
-        <template v-if="attributeSearchResults.length">
-          <div class="search-result-title">图层字段</div>
-          <button v-for="feature in attributeSearchResults" :key="`${feature.serviceId}-${feature.matchLabel}-${feature.title}`" @click="focusAttributeResult(feature)"><b>{{ feature.title }}</b><small>{{ feature.serviceName }} · {{ feature.matchLabel }}</small></button>
+        <template v-if="attributeSearchGroups.length">
+          <div class="search-result-title">图层属性 · 点击显示整类数据</div>
+          <button v-for="group in attributeSearchGroups" :key="group.key" @click="focusAttributeGroups([group])"><b>{{ group.value }}</b><small>{{ group.serviceName }} · {{ group.label }} · {{ group.features.length }} 个要素</small></button>
         </template>
         <template v-if="parcelSearchResults.length">
           <div class="search-result-title" :class="{ separated: attributeSearchResults.length }">已打开图层的分类</div>
           <button v-for="item in parcelSearchResults" :key="item.id" @click="focusParcelSearchResult(item)"><b>{{ item.label }}</b><small>{{ item.serviceName }} · {{ item.fieldLabel }}</small></button>
         </template>
-        <template v-if="placeSearchResults.length">
-          <div class="search-result-title" :class="{ separated: parcelSearchResults.length || attributeSearchResults.length }">可能的地点</div>
-          <button v-for="place in placeSearchResults" :key="place.id" @click="focusPlaceResult(place)"><b>{{ place.name }}</b><small>{{ place.address }}</small></button>
-        </template>
-        <p v-if="placeSearchLoading || attributeSearchLoading">正在搜索图层字段和地点…</p>
-        <p v-else-if="placeSearchError">{{ placeSearchError }}</p>
-        <p v-else-if="!parcelSearchResults.length && !placeSearchResults.length && !attributeSearchResults.length">未找到相关字段或地点</p>
+        <p v-if="attributeSearchLoading">正在搜索图层属性…</p>
+        <p v-if="attributeSearchError" role="status">{{ attributeSearchError }}</p>
+        <p v-else-if="!attributeSearchLoading && !parcelSearchResults.length && !attributeSearchResults.length">未找到相关图层属性</p>
       </div>
     </div>
 
     </Teleport>
 
-    <aside v-if="farmlandStatVisible" class="farmland-stat-panel">
-      <div class="tool-title"><b>{{ farmlandStatGroups[0]?.name || '九龙镇高标准农田建设数据' }}</b></div>
+    <aside v-if="activeFeature" class="feature-detail-panel" aria-label="要素详情">
+      <header><div><b>要素详情</b><small>{{ featureLayers.length }} 个叠加图层 · {{ featureCandidates.length }} 个要素</small></div><button type="button" aria-label="关闭要素详情" @click="clearSelectionHighlight">×</button></header>
+      <nav class="feature-detail-tabs" role="tablist" aria-label="叠加要素">
+        <button v-for="(layer,index) in featureLayers" :id="`${layerPanelId}-feature-tab-${index}`" :key="layer.serviceId" :title="layer.name" type="button" role="tab" :aria-selected="activeFeatureLayerIndex === index" :aria-controls="`${layerPanelId}-feature-detail`" :tabindex="activeFeatureLayerIndex === index ? 0 : -1" :class="{ active: activeFeatureLayerIndex === index }" @click="selectFeatureLayer(index)" @keydown.right.prevent="selectFeatureLayer((index + 1) % featureLayers.length)" @keydown.left.prevent="selectFeatureLayer((index + featureLayers.length - 1) % featureLayers.length)">{{ layer.name }}</button>
+      </nav>
+      <section :id="`${layerPanelId}-feature-detail`" role="tabpanel" :aria-labelledby="`${layerPanelId}-feature-tab-${activeFeatureLayerIndex}`" class="feature-detail-content">
+        <div v-if="activeFeatureLayer && activeFeatureLayer.indices.length > 1" class="same-layer-features" aria-label="同层叠加要素"><button v-for="index in activeFeatureLayer.indices" :key="index" type="button" :class="{ active: index === selectedFeatureIndex }" :aria-pressed="index === selectedFeatureIndex" @click="selectFeatureTab(index)">图斑 {{ featureCandidates[index]?.objectId ?? index + 1 }}</button></div>
+        <div class="feature-detail-type"><small>{{ activeFeature.typeLabel || '地块类型' }}</small><b>{{ activeFeature.typeValue || '暂无地块类型' }}</b></div>
+        <dl><div v-for="(row,index) in activeFeature.rows" :key="`${row.name}-${index}`"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl>
+      </section>
+    </aside>
+
+    <aside v-if="farmlandStatVisible && !activeFeature" class="farmland-stat-panel">
+      <div class="tool-title"><b>{{ visibleFarmlandStatGroups[0]?.name || '九龙镇高标准农田建设数据' }}</b></div>
       <div v-if="farmlandStatLoading" class="farmland-stat-state">正在读取定制统计…</div>
       <div v-else-if="farmlandStatError" class="farmland-stat-state error">{{ farmlandStatError }}</div>
       <div v-else-if="!farmlandStatGroups.length" class="farmland-stat-state">当前单位暂无定制统计</div>
       <template v-else>
-      <section v-for="group in farmlandStatGroups" :key="group.name" class="farmland-stat-group">
-        <h3 v-if="farmlandStatGroups.length > 1">{{ group.name }}</h3>
+      <section v-for="group in visibleFarmlandStatGroups" :key="group.name" class="farmland-stat-group">
+        <h3 v-if="visibleFarmlandStatGroups.length > 1">{{ group.name }}</h3>
         <dl>
           <div v-for="item in group.items" :key="`${group.name}-${item.name}`">
             <dt>{{ item.name }}</dt>
@@ -1905,6 +1849,7 @@ onBeforeUnmount(() => {
           <canvas ref="colorWheelCanvas" :width="COLOR_WHEEL_SIZE" :height="COLOR_WHEEL_SIZE" @pointerdown="onColorWheelPointer"></canvas>
           <i class="color-wheel-cursor" :style="colorWheelCursorStyle"></i>
         </div>
+        <label v-if="pickerAllowsFill" class="color-value-slider">填充透明度 {{ 100 - Math.round((vectorFillOpacity[layerColorPicker.serviceId] ?? .25) * 100) }}%<input type="range" aria-label="填充不透明度" min="5" max="60" :value="Math.round((vectorFillOpacity[layerColorPicker.serviceId] ?? .25) * 100)" @input="onFillOpacityInput" /></label>
         <label class="color-value-slider">明度<input type="range" min="0" max="100" :value="Math.round(layerColorPicker.value * 100)" :style="{ background: colorValueTrack }" @input="onColorValueInput" /></label>
       </div>
       <Transition name="map-layer-ghost">
@@ -2006,15 +1951,14 @@ onBeforeUnmount(() => {
 .farmland-stat-group dt { color: #9fd0e0; font-size: 13px; }
 .farmland-stat-group dd { margin: 0; color: #f4fcff; font-size: 18px; font-weight: 700; }
 .farmland-stat-group small { margin-left: 4px; color: #8ec3d4; font-size: 12px; font-weight: 500; }
-:deep(.feature-attribute-popup .leaflet-popup-content-wrapper),:deep(.feature-attribute-popup .leaflet-popup-tip) { color: #e7f7ff; background: #082033f5; border: 1px solid #49b7d8; border-radius: 8px; }
-:deep(.feature-attribute-popup .leaflet-popup-content) { width: 280px; margin: 12px 14px; max-height: 280px; overflow: auto; }
-:deep(.feature-attribute-card strong) { display: block; margin-bottom: 8px; color: #fff; font-size: 14px; }
-:deep(.feature-attribute-card dl) { margin: 0; }
-:deep(.feature-attribute-card div) { display: grid; grid-template-columns: 92px minmax(0,1fr); gap: 8px; padding: 5px 0; border-top: 1px solid #1d5874; }
-:deep(.feature-attribute-card dt) { color: #8ec5d6; font-size: 12px; }
-:deep(.feature-attribute-card dd) { margin: 0; color: #f4fcff; font-size: 12px; overflow-wrap: anywhere; }
-:deep(.leaflet-administrative-boundaries-pane path) { filter: drop-shadow(0 0 4px #168fe2cc); }
-:deep(.leaflet-administrative-boundaries-pane .hailing-boundary-glow) { filter: drop-shadow(0 0 2px #b8f1ff) drop-shadow(0 0 6px #27bfff) drop-shadow(0 0 12px #078de0cc); }
+.attribute-filter-chip { display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 12px;color:#82d8ec;background:#17688b22;font-size:11px;overflow-wrap:anywhere; }.attribute-filter-chip button { flex:0 0 22px;width:22px;height:22px;padding:0;color:#a5dce9;background:transparent;border:0;font-size:18px; }
+.feature-detail-panel { position:absolute;z-index:650;top:var(--cockpit-edge,20px);bottom:100px;right:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);width:clamp(285px,21vw,370px);display:flex;flex-direction:column;min-height:0;color:#dceef6;background:linear-gradient(135deg,#092c44ed,#061e32df);border:1px solid #71c4e540;border-radius:12px;box-shadow:0 12px 32px #00111e55;backdrop-filter:blur(14px);overflow:hidden; }
+.feature-detail-panel > header { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid #71c4e526; }.feature-detail-panel header div { display:grid;gap:4px; }.feature-detail-panel header b { font-size:15px; }.feature-detail-panel header small { font-size:11px;color:#93bacc; }.feature-detail-panel header button { width:28px;height:28px;color:#baddf0;background:transparent;border:0;font-size:22px; }
+.feature-detail-tabs { display:flex;gap:6px;flex:0 0 auto;padding:10px;overflow:auto;scrollbar-width:none;border-bottom:1px solid #71c4e526; }.feature-detail-tabs button { flex:1 0 95px;min-width:0;padding:8px 10px;border:1px solid transparent;border-radius:6px;color:#93bacc;background:#16435633;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }.feature-detail-tabs button.active { color:#effcff;border-color:#4bb4d573;background:#137c9f55; }.feature-detail-tabs small { margin-left:6px;color:#85d5ee; }
+.same-layer-features { display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px; }.same-layer-features button { padding:5px 9px;font-size:11px;border:1px solid #4882a44a;border-radius:5px;color:#92c5d9;background:transparent; }.same-layer-features button.active { border-color:#55c7df;color:#ecfbff;background:#20739155; }
+.feature-detail-content { flex:1;min-height:0;overflow:auto;padding:14px 16px;scrollbar-width:none; }.feature-detail-content::-webkit-scrollbar,.feature-detail-tabs::-webkit-scrollbar { display:none; }.feature-detail-type { display:grid;gap:5px;padding:10px;border-radius:6px;background:#1c75962b; }.feature-detail-type small { font-size:11px;color:#8bc6db; }.feature-detail-type b { font-size:14px; }.feature-detail-content dl { margin:12px 0 0; }.feature-detail-content dl > div { display:grid;grid-template-columns:minmax(80px,.85fr) minmax(0,1.3fr);gap:12px;padding:10px 0;border-bottom:1px solid #71c4e518;font-size:12px;line-height:19px; }.feature-detail-content dt { color:#8bc6db;overflow-wrap:anywhere; }.feature-detail-content dd { margin:0;color:#eef7fc;overflow-wrap:anywhere; }
+@media(max-width:1500px) { .feature-detail-panel { right:calc(var(--cockpit-side-width) + var(--cockpit-edge) + 18px);width:285px; } }
+.dashboard-map--clear-screen .feature-detail-panel { right:var(--cockpit-edge,20px); }
 </style>
 <style scoped src="./DashboardMapTheme.scss" lang="scss"></style>
 

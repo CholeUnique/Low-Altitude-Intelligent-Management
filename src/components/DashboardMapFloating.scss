@@ -12,7 +12,7 @@
 .dashboard-map--floating :deep(.leaflet-tile-pane) { filter:brightness(.66) saturate(.78) contrast(1.12); }
 /* Remote-sensing and business imagery use separate service panes and keep their original colors. */
 .dashboard-map--floating :deep(.leaflet-administrative-boundaries-pane .hailing-boundary-glow) { filter:drop-shadow(0 0 3px #36d8ff) drop-shadow(0 0 8px #0b98dd90); }
-.dashboard-map--floating .left-map-rail { top:32px;bottom:22px;left:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);width:clamp(240px,16vw,280px);max-width:none;transition:left .52s cubic-bezier(.22,1,.36,1); }
+.dashboard-map--floating .left-map-rail { top:var(--cockpit-edge,20px);bottom:22px;left:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);width:clamp(240px,16vw,280px);max-width:none;transition:left .52s cubic-bezier(.22,1,.36,1); }
 .layer-panel-reveal { display:contents; }
 .dashboard-map--floating .layer-panel-stack {
   display:flex; flex-direction:column; flex:1 1 auto; gap:0; width:100%; height:auto; min-height:0;
@@ -52,7 +52,7 @@
 .dashboard-map--floating .layer-manager-list { min-height:0; max-height:none; flex:1 1 auto; padding:4px 0; overflow:auto; scrollbar-width:none; }.dashboard-map--floating .layer-manager-list::-webkit-scrollbar{display:none}
 .layer-kind { display:grid!important;place-items:center;width:20px!important;height:20px!important;color:#a1c6d9;background:transparent!important;box-shadow:none!important; }.layer-kind svg { display:block;width:20px;height:20px; }
 .dashboard-map .layer-manager .map-service-row { grid-template-columns:20px minmax(0,1fr) 30px; }
-.dashboard-map .layer-manager .map-service-row.has-categories { grid-template-columns:20px minmax(0,1fr) 18px 30px; }
+.dashboard-map .layer-manager .map-service-row.has-categories { grid-template-columns:20px minmax(0,1fr) 30px; }
 .dashboard-map--floating .layer-manager .map-service-row.has-categories em.layer-expander { width:18px; height:18px; font-size:16px; }
 .dashboard-map--floating .category-folder { margin:0 8px 6px 22px; border-left:1px solid #75a4c222; }
 .dashboard-map--floating .category-field-label { padding:6px 12px 2px; color:#8ec5d6; font-size:11px; }
@@ -86,7 +86,7 @@
 .dashboard-map--floating .layer-manager .search-result-title { padding:6px 10px;font-size:11px;background:#0b3b5644;color:#7bdeed; }
 .dashboard-map--floating .layer-manager .search-results button { padding:8px 10px; }.dashboard-map--floating .layer-manager .search-results b { font-size:12px;line-height:18px; }.dashboard-map--floating .layer-manager .search-results small { font-size:11px;line-height:16px; }.dashboard-map--floating .layer-manager .search-results p { padding:10px;font-size:12px; }
 .dashboard-map--floating .parcel-type-panel { position:relative;top:auto;right:auto;width:100%;max-width:none;max-height:min(220px,30%);flex:0 1 auto;border-radius:14px;background:var(--map-panel);border:1px solid var(--map-border);box-shadow:0 8px 30px #00111e40;pointer-events:auto; }
-.dashboard-map--floating .farmland-stat-panel { top:32px;right:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);width:clamp(220px,16vw,280px);border-radius:12px;background:var(--map-panel);border:1px solid var(--map-border);box-shadow:0 8px 30px #00111e40; }
+.dashboard-map--floating .farmland-stat-panel { top:var(--cockpit-edge,20px);right:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);width:clamp(220px,16vw,280px);border-radius:12px;background:var(--map-panel);border:1px solid var(--map-border);box-shadow:0 8px 30px #00111e40; }
 .dashboard-map--floating .parcel-type-panel .tool-title { padding-right:18px; }.dashboard-map--floating .parcel-filter-heading { background:#14436633;border-bottom-color:#88b7d61c; }.dashboard-map--floating .parcel-filter-row { border-bottom-color:#88b7d615; }.dashboard-map--floating .parcel-filter-row input { accent-color:#24dceb; }
 .dashboard-map--floating .map-scale { right:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);bottom:25px;color:#cfe2ed;font-size:11px; }
 .dashboard-map--floating .map-tools .measure-result {
@@ -111,4 +111,6 @@
 .dashboard-map--floating.dashboard-map--clear-screen .left-map-rail { left:var(--cockpit-edge,20px); }
 .dashboard-map--floating.dashboard-map--clear-screen .farmland-stat-panel { right:var(--cockpit-edge,20px); }
 .dashboard-map--floating.dashboard-map--clear-screen .map-scale { right:var(--cockpit-edge,20px); }
+.dashboard-map--floating .farmland-stat-panel,
+.dashboard-map--floating .feature-detail-panel { transition:right .52s cubic-bezier(.22,1,.36,1); }
 @media(prefers-reduced-motion:reduce) { .dashboard-map--floating *, .dashboard-map--floating *::after { transition:none!important; } }
