@@ -39,6 +39,7 @@ export interface FlightReviewMedia {
   type: string
   thumbnailUrl: string
   originalUrl: string
+  localFileUrl: string
   fileSize?: number
   shootTime: string
 }
@@ -102,7 +103,28 @@ export async function getFlightReviewMedia(taskId: string, pageNum: number) {
     type: value(item, 'type'),
     thumbnailUrl: value(item, 'thumbnailUrl'),
     originalUrl: value(item, 'originalUrl'),
+    localFileUrl: value(item, 'localFileUrl'),
     fileSize: item.fileSize === null || item.fileSize === undefined ? undefined : Number(item.fileSize),
     shootTime: value(item, 'shootTime'),
   }))
+}
+
+/** 只允许通过当前 API 服务读取后端素材，避免向第三方地址发送登录令牌。 */
+export function flightReviewFileApiPath(localFileUrl: string): string {
+  const url = new URL(localFileUrl, 'http://local.invalid')
+  const path = url.pathname.replace(/^\/api(?=\/v1\/uav\/media\/file\/)/, '')
+  if (!/^\/v1\/uav\/media\/file\/[\w-]+\/?$/.test(path)) throw new Error('后端返回的素材文件地址无效。')
+  return `${path}${url.search}`
+}
+
+export async function getFlightReviewMediaFile(localFileUrl: string, signal?: AbortSignal): Promise<Blob> {
+  const file = await apiClient.get<never, Blob>(flightReviewFileApiPath(localFileUrl), {
+    responseType: 'blob',
+    timeout: 60_000,
+    signal,
+  })
+  if (!(file instanceof Blob) || !file.size || /(?:json|xml|html)/i.test(file.type)) {
+    throw new Error('后端未返回有效的素材文件。')
+  }
+  return file
 }

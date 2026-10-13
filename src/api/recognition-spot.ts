@@ -26,6 +26,15 @@ export interface RecognitionSpotCreateResult {
   spotNos: string[]
 }
 
+export interface RecognitionSpotBatchInput {
+  deptId: string
+  ids: string[]
+}
+
+export interface RecognitionSpotBatchResult {
+  count: number
+}
+
 export interface RecognitionSpotUploadPreviewInput {
   files: File[]
   sceneCode: string
@@ -201,4 +210,19 @@ export async function getRecognitionSpotPage(query: RecognitionSpotPageQuery): P
     pageNum: Number(page.pageNum) || query.pageNum,
     pageSize: Number(page.pageSize) || query.pageSize,
   }
+}
+
+/** 待人工审核（-1）的识别图斑审核通过后转为待核查（0）。 */
+export async function reviewRecognitionSpots(input: RecognitionSpotBatchInput) {
+  return apiClient.post<never, RecognitionSpotBatchResult>('/v1/biz/recognition/spot/review', input)
+}
+
+/** 将待人工审核（-1）或待核查（0）的识别图斑标记为已忽略（4）。 */
+export async function ignoreRecognitionSpots(input: RecognitionSpotBatchInput) {
+  return apiClient.post<never, RecognitionSpotBatchResult>('/v1/biz/recognition/spot/ignore', input)
+}
+
+/** 撤销未派生核查任务的识别图斑，并清理其业务边界及影像关联。 */
+export async function revokeRecognitionSpots(input: RecognitionSpotBatchInput) {
+  return apiClient.post<never, RecognitionSpotBatchResult>('/v1/biz/recognition/spot/revoke', input)
 }

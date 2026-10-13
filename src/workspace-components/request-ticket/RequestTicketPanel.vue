@@ -12,9 +12,11 @@ import {
 } from '@/api/request-ticket'
 import type { TaskGeometryFeatureCollection } from '@/api/governance-task'
 import { getDepartmentOptions, getMyDepartments, type DepartmentOption } from '@/api/auth'
+import { useUserStore } from '@/stores/user'
 import TaskRangeMap from '@/components/TaskRangeMap.vue'
 import TaskSchedulePicker from '@/components/TaskSchedulePicker.vue'
 
+const user = useUserStore()
 const records = ref<RequestTicket[]>([])
 const types = ref<RequestTicketTypeOption[]>([])
 const requesterOptions = ref<DepartmentOption[]>([])
@@ -30,13 +32,25 @@ const showCreate = ref(false)
 const submitting = ref(false)
 const scopeCoordinates = ref<[number, number][]>([])
 const filters = reactive<{ name: string; type: string; priority: string; status: string }>({ name: '', type: '', priority: '', status: '' })
-const form = reactive({ name: '', type: '', description: '', requester: '', contactPerson: '', contactNumber: '', startTime: '', endTime: '', frequency: '', priority: '1', resultTypes: [] as string[] })
+const form = reactive({ name: '', type: '', description: '', contactPerson: '', contactNumber: '', startTime: '', endTime: '', frequency: '', priority: '1', resultTypes: [] as string[] })
 const resultTypeOptions = [
   ['PHOTO', '照片'], ['VIDEO', '视频'], ['LIVE', '直播'], ['MODEL_2D', '二维成果'],
   ['MODEL_3D', '三维成果'], ['PANORAMA', '全景'], ['EVENT', '事件'], ['REPORT', '巡检报告'],
 ] as const
 
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const currentRequester = computed(() => {
+  const deptId = user.activeDeptId
+  if (deptId) {
+    const department = requesterOptions.value.find((item) => item.deptId === deptId)
+      || user.currentUser?.deptList?.find((item) => item.deptId === deptId)
+    if (department?.deptName) return department.deptName
+    if (user.currentUser?.deptId === deptId && user.currentUser.deptName) return user.currentUser.deptName
+  } else if (user.currentUser?.deptName) {
+    return user.currentUser.deptName
+  }
+  return user.organization.name
+})
 const ticketSchedule = computed<string[]>({
   get: () => form.startTime && form.endTime ? [form.startTime, form.endTime] : [],
   set: (value) => {
@@ -136,7 +150,7 @@ function applyFilters() { pageNum.value = 1; void loadPage() }
 function resetFilters() { Object.assign(filters, { name: '', type: '', priority: '', status: '' }); pageNum.value = 1; void loadPage() }
 function changePage(next: number) { if (next < 1 || next > pageCount.value || next === pageNum.value) return; pageNum.value = next; void loadPage() }
 function resetForm() {
-  Object.assign(form, { name: '', type: '', description: '', requester: '', contactPerson: '', contactNumber: '', startTime: '', endTime: '', frequency: '', priority: '1', resultTypes: [] })
+  Object.assign(form, { name: '', type: '', description: '', contactPerson: '', contactNumber: '', startTime: '', endTime: '', frequency: '', priority: '1', resultTypes: [] })
   scopeCoordinates.value = []
 }
 function openCreate() { resetForm(); showCreate.value = true }
@@ -160,7 +174,7 @@ async function submitTicket() {
     const scope = requestTicketScope()
     await addRequestTicket({
       name: form.name.trim(), type: form.type, description: form.description.trim() || undefined,
-      requester: form.requester.trim() || undefined, contactPerson: form.contactPerson.trim() || undefined,
+      requester: currentRequester.value, contactPerson: form.contactPerson.trim() || undefined,
       contactNumber: form.contactNumber.trim() || undefined, startTime: toTimestamp(form.startTime), endTime: toTimestamp(form.endTime),
       frequency: form.frequency.trim() || undefined, priority: Number(form.priority), resultTypes: form.resultTypes,
       scope,
@@ -212,7 +226,7 @@ onMounted(() => void loadInitial())
             <label><span>工单名称 *</span><input v-model="form.name" maxlength="100" required /></label>
             <label><span>工单类型 *</span><select v-model="form.type" required><option value="" disabled>请选择工单类型</option><option v-for="item in types" :key="item.id" :value="item.name">{{ item.name }}</option></select></label>
             <label class="wide"><span>工单描述</span><textarea v-model="form.description" rows="3"></textarea></label>
-            <label><span>需求单位</span><select v-model="form.requester"><option value="" disabled>{{ requesterOptions.length ? '请选择需求单位' : '暂无可选需求单位' }}</option><option v-for="item in requesterOptions" :key="item.deptId" :value="item.deptName">{{ item.deptName }}</option></select></label>
+            <label><span>需求单位</span><input :value="currentRequester" readonly aria-label="当前需求单位" title="按当前登录身份自动确定" /></label>
             <label><span>执行频率</span><input v-model="form.frequency" placeholder="如：每周一次" /></label>
             <label><span>联系人</span><input v-model="form.contactPerson" /></label>
             <label><span>联系电话</span><input v-model="form.contactNumber" /></label>
@@ -278,4 +292,5 @@ onMounted(() => void loadInitial())
 .ticket-card>header{height:46px}.ticket-card>header b{font-size:16px}.ticket-card>header span{font-size:12px}.ticket-card>header button{font-size:13px}
 .filter-grid{padding:14px 15px}.filter-grid label span{margin-bottom:7px;font-size:13px}.filter-grid input,.filter-grid select{height:38px;font-size:14px}
 .table-wrap table{font-size:13px}.table-wrap th{height:44px;font-size:13px}.table-wrap td{height:62px;font-size:13px;line-height:1.5}.table-wrap td>b{font-size:14px}.table-wrap td>small{font-size:11px}.type-tag,.priority{padding:4px 8px;font-size:12px}.status{font-size:12px}.table-wrap td button{font-size:13px}.table-card>footer{height:46px;font-size:12px}
+.form-grid input[readonly]{color:#496a7a;background:#f1f6f8;cursor:default}
 </style>
