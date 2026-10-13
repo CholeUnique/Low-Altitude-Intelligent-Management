@@ -27,6 +27,7 @@ const emit = defineEmits<{
   'finish-drawing': []
   'undo-point': []
   'clear-drawing': []
+  'map-service-selection-change': [ids: Array<string | number>]
   created: [result: RecognitionSpotCreateResult]
 }>()
 
@@ -129,10 +130,12 @@ watch(() => props.scenes, (items) => {
 }, { immediate: true, deep: true })
 watch([() => props.initialMapServiceIds, () => props.mapServices], () => {
   const availableIds = new Set(props.mapServices.map((service) => String(service.id)))
-  const defaults = props.initialMapServiceIds.filter((id) => availableIds.has(String(id)))
-  if (!selectedMapServiceIds.value.length) selectedMapServiceIds.value = [...defaults]
-  else selectedMapServiceIds.value = selectedMapServiceIds.value.filter((id) => availableIds.has(String(id)))
+  selectedMapServiceIds.value = props.initialMapServiceIds.filter((id) => availableIds.has(String(id)))
 }, { immediate: true, deep: true })
+
+function notifyMapServiceSelection() {
+  emit('map-service-selection-change', [...selectedMapServiceIds.value])
+}
 </script>
 
 <template>
@@ -172,7 +175,7 @@ watch([() => props.initialMapServiceIds, () => props.mapServices], () => {
       <fieldset class="reference-services field--wide">
         <legend>参考影像地图服务 <em>*</em></legend>
         <div v-if="mapServices.length" class="reference-service-list">
-          <label v-for="service in mapServices" :key="service.id"><input v-model="selectedMapServiceIds" type="checkbox" :value="service.id" /><span :title="service.name">{{ service.name }}</span></label>
+          <label v-for="service in mapServices" :key="service.id"><input v-model="selectedMapServiceIds" type="checkbox" :value="service.id" @change="notifyMapServiceSelection" /><span :title="service.name">{{ service.name }}</span></label>
         </div>
         <small v-else>暂无已启用的影像地图服务</small>
       </fieldset>

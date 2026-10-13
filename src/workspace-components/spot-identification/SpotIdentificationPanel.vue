@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { getTaskAbnormalPage } from '@/api/governance-task'
 import type { GovernanceTask, TaskAbnormal } from '@/api/governance-task'
+import { getRecognitionSpotPage, ignoreRecognitionSpots, reviewRecognitionSpots, revokeRecognitionSpots, type RecognitionSpotCreateResult } from '@/api/recognition-spot'
+import { ApiBusinessError } from '@/api/client'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { inspectMapService } from '@/utils/map-service-layer'
@@ -21,12 +23,16 @@ const props = withDefaults(defineProps<{
   sceneName?: string
   node?: WorkspaceNodeConfig
 }>(), { tasks: () => [], selectedTaskId: '', taskLoading: false, taskError: '' })
-const emit = defineEmits<{ 'select-task': [taskId: string] }>()
-const taskSceneFilter = ref('')
-const taskStatusFilter = ref<number | ''>('')
+type SceneSpot = TaskAbnormal & {
+  deptId?: string
+  taskId?: string
+  sourceTaskName?: string
+  mapServices: MapServiceItem[]
+  fromRecognitionApi?: boolean
+}
+const sceneFilter = ref('')
 const keyword = ref('')
-const abnormalType = ref('')
-const handleStatus = ref<number | ''>('')
+const handleStatus = ref<number | ''>(-1)
 const activeId = ref('')
 const periods = ref(1)
 const periodsManuallySelected = ref(false)
@@ -34,7 +40,7 @@ const synchronizedMapView = ref<SynchronizedMapView>()
 const mapFullscreen = ref(false)
 const loading = ref(false)
 const loadError = ref('')
-const records = ref<TaskAbnormal[]>([])
+const records = ref<SceneSpot[]>([])
 const activeImageIndex = ref(0)
 const hiddenImageIdsBySpot = ref<Record<string, string[]>>({})
 const pendingDeleteImage = ref<RelatedImagery>()
@@ -49,39 +55,43 @@ let sceneRequestVersion = 0
 const spotDrawing = ref(false)
 const drawingPeriod = ref<number>()
 const draftCoordinates = ref<Array<[number, number]>>([])
-const taskAbnormalCounts = ref<Record<string, number | undefined>>({})
+const pendingReview = ref<{ id: string; spotNo: string; title: string; deptId: string }>()
+const reviewBusy = ref(false)
+const reviewError = ref('')
+const reviewMessage = ref('')
+type SpotAction = 'ignore' | 'revoke'
+type PendingSpotAction = { kind: SpotAction; id: string; spotNo: string; title: string; deptId: string; handleStatus: number }
+const pendingSpotAction = ref<PendingSpotAction>()
+const spotActionBusy = ref(false)
+const spotActionError = ref('')
+const revokeAcknowledged = ref(false)
 let requestVersion = 0
-let taskCountRequestVersion = 0
-let taskSelectedByUser = false
-
-const taskStatusOptions = [
-  { value: 0, label: '待执行' },
-  { value: 1, label: '执行中' },
-  { value: 2, label: '待核查' },
-  { value: 3, label: '已失败' },
-  { value: 4, label: '已取消' },
-  { value: 5, label: '已完成' },
+const statusOptions = [
+  { value: -1, label: '待人工审核' },
+  { value: 0, label: '待核查' },
+  { value: 1, label: '核查中' },
+  { value: 2, label: '已处置' },
+  { value: 3, label: '已销号' },
+  { value: 4, label: '已忽略' },
 ]
-const taskSceneOptions = computed(() => [...new Map(props.tasks.map((task) => [task.sceneCode, task.sceneName || task.sceneCode])).entries()])
-const filteredTasks = computed(() => props.tasks
-  .filter((task) => (!taskSceneFilter.value || task.sceneCode === taskSceneFilter.value)
-    && (taskStatusFilter.value === '' || task.taskStatus === taskStatusFilter.value))
-  .map((task, originalIndex) => ({ task, originalIndex }))
-  .sort((left, right) => {
-    const leftHasNoSpots = taskAbnormalCounts.value[left.task.id] === 0
-    const rightHasNoSpots = taskAbnormalCounts.value[right.task.id] === 0
-    if (leftHasNoSpots !== rightHasNoSpots) return leftHasNoSpots ? 1 : -1
-    return left.originalIndex - right.originalIndex
-  })
-  .map(({ task }) => task))
-const typeOptions = computed(() => [...new Map(records.value.map((item) => [item.abnormalType, item.abnormalTypeDesc])).entries()])
+const sceneOptions = computed(() => [...new Map(records.value.filter((item) => item.sceneCode).map((item) => [item.sceneCode,
+  scenes.value.find((scene) => scene.code === item.sceneCode)?.name
+    || props.tasks.find((task) => task.sceneCode === item.sceneCode)?.sceneName
+    || item.sceneCode,
+])).entries()])
 const filtered = computed(() => records.value.filter((item) => {
-  const matchKeyword = !keyword.value.trim() || `${item.id} ${item.title} ${item.description} ${item.abnormalTypeDesc}`.toLowerCase().includes(keyword.value.trim().toLowerCase())
+  const matchKeyword = !keyword.value.trim() || `${item.id} ${item.spotNo} ${item.title} ${item.description} ${item.abnormalTypeDesc}`.toLowerCase().includes(keyword.value.trim().toLowerCase())
   return matchKeyword
-    && (!abnormalType.value || item.abnormalType === abnormalType.value)
+    && (!sceneFilter.value || item.sceneCode === sceneFilter.value)
     && (handleStatus.value === '' || item.handleStatus === handleStatus.value)
 }))
 const active = computed(() => filtered.value.find((item) => item.id === activeId.value) || filtered.value[0])
+const activeSceneName = computed(() => {
+  const sceneCode = active.value?.sceneCode || selectedGovernanceTask.value?.sceneCode
+  return scenes.value.find((scene) => scene.code === sceneCode)?.name
+    || (selectedGovernanceTask.value?.sceneCode === sceneCode ? selectedGovernanceTask.value?.sceneName : '')
+    || sceneCode
+})
 
 type RelatedImagery = { id: string; label: string; url?: string; date?: string; local?: boolean; mapService?: MapServiceItem }
 const manualImageryBySpot = ref<Record<string, RelatedImagery[]>>({})
@@ -106,7 +116,7 @@ function loadHiddenImagery(taskId?: string) {
   }
 }
 function persistHiddenImagery() {
-  const key = hiddenImageryStorageKey(props.task?.id)
+  const key = hiddenImageryStorageKey(active.value?.bizTaskId || `recognition-${user.activeDeptId}`)
   if (!key) return
   try {
     window.localStorage.setItem(key, JSON.stringify(hiddenImageIdsBySpot.value))
@@ -114,17 +124,30 @@ function persistHiddenImagery() {
     // 存储不可用时仍保留当前会话内的图斑级排除状态。
   }
 }
-const selectedGovernanceTask = computed(() => props.tasks.find((task) => task.id === props.selectedTaskId))
-const taskComparisonImagery = computed<RelatedImagery[]>(() => (selectedGovernanceTask.value?.comparisonImages || []).map((image) => ({
-  id: `task-comparison-${selectedGovernanceTask.value?.id}-${image.id}`,
-  label: image.label,
-  url: image.imageUrl,
-  date: image.captureTime,
-  mapService: image.mapService,
-})))
+const selectedGovernanceTask = computed(() => props.tasks.find((task) => task.id === active.value?.bizTaskId))
+const taskComparisonImagery = computed<RelatedImagery[]>(() => {
+  const taskImages = (selectedGovernanceTask.value?.comparisonImages || []).map((image) => ({
+    id: `task-comparison-${selectedGovernanceTask.value?.id}-${image.id}`,
+    label: image.label,
+    url: image.imageUrl,
+    date: image.captureTime,
+    mapService: image.mapService,
+  }))
+  const taskServiceIds = new Set(taskImages.flatMap((image) => image.mapService ? [String(image.mapService.id)] : []))
+  const spotServices = (active.value?.mapServices || []).filter((service) => !taskServiceIds.has(String(service.id)))
+  return [...taskImages, ...spotServices.map((service) => ({ id: `spot-service-${service.id}`, label: service.name, mapService: service }))]
+})
 const displayableImagery = computed(() => [...taskComparisonImagery.value, ...currentManualImagery.value]
   .filter((item) => Boolean(item.url || item.mapService) && !currentHiddenImageIds.value.includes(item.id)))
-const activeMapServiceIds = computed<Array<string | number>>(() => displayableImagery.value.flatMap((image) => image.mapService ? [image.mapService.id] : []))
+const activeMapServiceIds = computed<Array<string | number>>(() => [...new Set(displayableImagery.value.flatMap((image) => image.mapService ? [String(image.mapService.id)] : []))])
+const formMapServices = computed(() => {
+  const services = new Map<string, MapServiceItem>()
+  for (const service of imageryMapServices.value) services.set(String(service.id), service)
+  for (const image of [...taskComparisonImagery.value, ...currentManualImagery.value]) {
+    if (image.mapService) services.set(String(image.mapService.id), image.mapService)
+  }
+  return [...services.values()]
+})
 const comparisonPeriods = computed<ComparisonPeriod[]>(() => {
   const images = displayableImagery.value
   return Array.from({ length: periods.value }, (_, index) => {
@@ -142,7 +165,7 @@ function imageryThumbnailPeriod(image: RelatedImagery, index: number): Compariso
 }
 
 function statusLabel(value: number) {
-  return ({ 0: '待核查', 1: '核查中', 2: '已处置', 3: '已销号' } as Record<number, string>)[value] || '未处理'
+  return statusOptions.find((status) => status.value === value)?.label || '未知状态'
 }
 function levelLabel(value: number) {
   return ({ 1: '一般', 2: '较重', 3: '严重' } as Record<number, string>)[value] || `等级 ${value}`
@@ -150,13 +173,12 @@ function levelLabel(value: number) {
 function formatTime(value?: string) {
   return value ? value.replace('T', ' ').slice(0, 16) : '-'
 }
+function spotSourceLabel(value: string) {
+  return ({ MANUAL_UPLOAD: '文件上传', MANUAL_DRAW: '手工绘制', API_IMPORT: '接口导入', TASK_ABNORMAL: '任务识别' } as Record<string, string>)[value] || value
+}
 function selectSpot(id: string) {
   activeId.value = id
   activeImageIndex.value = 0
-}
-function selectTask(id: string) {
-  taskSelectedByUser = true
-  if (id !== props.selectedTaskId) emit('select-task', id)
 }
 function selectImage(index: number) {
   if (spotDrawing.value || draftCoordinates.value.length) cancelSpotDrawing()
@@ -204,8 +226,9 @@ function clearSpotDrawing() {
   draftCoordinates.value = []
   drawingPeriod.value = undefined
 }
-function handleSpotCreated() {
+function handleSpotCreated(result: RecognitionSpotCreateResult) {
   cancelSpotDrawing()
+  void loadSpots(result.spotNos?.[0])
 }
 function synchronizeMapView(view: SynchronizedMapView) {
   synchronizedMapView.value = view
@@ -245,6 +268,36 @@ function clearManualImagery() {
 function isMapServiceAdded(service: MapServiceItem) {
   return displayableImagery.value.some((image) => String(image.mapService?.id) === String(service.id))
 }
+function synchronizeMapServiceSelection(ids: Array<string | number>) {
+  const spotId = currentSpotId.value
+  if (!spotId) return
+  const selectedIds = new Set(ids.map(String))
+  const visibleIds = new Set(activeMapServiceIds.value.map(String))
+  const hiddenIds = new Set(currentHiddenImageIds.value)
+  const manualImages = [...currentManualImagery.value]
+
+  for (const image of displayableImagery.value) {
+    if (image.mapService && !selectedIds.has(String(image.mapService.id))) hiddenIds.add(image.id)
+  }
+  for (const serviceId of selectedIds) {
+    if (visibleIds.has(serviceId)) continue
+    const hiddenImage = [...taskComparisonImagery.value, ...manualImages].find((image) =>
+      image.mapService && String(image.mapService.id) === serviceId && hiddenIds.has(image.id))
+    if (hiddenImage) {
+      hiddenIds.delete(hiddenImage.id)
+      continue
+    }
+    const service = formMapServices.value.find((item) => String(item.id) === serviceId)
+    if (service) manualImages.push({ id: `selected-service-${spotId}-${service.id}`, label: service.name, mapService: service })
+  }
+
+  manualImageryBySpot.value = { ...manualImageryBySpot.value, [spotId]: manualImages }
+  if (hiddenIds.size !== currentHiddenImageIds.value.length || [...hiddenIds].some((id) => !currentHiddenImageIds.value.includes(id))) {
+    hiddenImageIdsBySpot.value = { ...hiddenImageIdsBySpot.value, [spotId]: [...hiddenIds] }
+    persistHiddenImagery()
+  }
+  activeImageIndex.value = 0
+}
 async function openImageServicePicker() {
   if (!active.value) return
   servicePickerVisible.value = true
@@ -261,21 +314,8 @@ async function openImageServicePicker() {
   }
 }
 function addSelectedMapServices() {
-  const spotId = currentSpotId.value
-  if (!spotId || !selectedMapServiceIds.value.length) return
-  const selectedIds = new Set(selectedMapServiceIds.value)
-  const existingServiceIds = new Set(displayableImagery.value.flatMap((image) => image.mapService ? [String(image.mapService.id)] : []))
-  const additions: RelatedImagery[] = imageryMapServices.value
-    .filter((service) => selectedIds.has(String(service.id)) && !existingServiceIds.has(String(service.id)))
-    .map((service) => ({
-      id: `selected-service-${spotId}-${service.id}`,
-      label: service.name,
-      mapService: service,
-    }))
-  manualImageryBySpot.value = {
-    ...manualImageryBySpot.value,
-    [spotId]: [...currentManualImagery.value, ...additions],
-  }
+  if (!currentSpotId.value || !selectedMapServiceIds.value.length) return
+  synchronizeMapServiceSelection([...activeMapServiceIds.value, ...selectedMapServiceIds.value])
   servicePickerVisible.value = false
   selectedMapServiceIds.value = []
 }
@@ -302,65 +342,204 @@ function confirmImageDelete() {
   activeImageIndex.value = 0
 }
 
-async function loadTaskAbnormals(taskId?: string, preferredSpotNo?: string) {
+async function loadAllRecognitionSpots(deptId?: string) {
+  const first = await getRecognitionSpotPage({ deptId, pageNum: 1, pageSize: 200 })
+  const all = [...first.records]
+  const pageSize = Math.max(1, first.records.length || first.pageSize || 200)
+  for (let pageNum = 2; pageNum <= Math.ceil(first.total / pageSize); pageNum += 1) {
+    const page = await getRecognitionSpotPage({ deptId, pageNum, pageSize: 200 })
+    all.push(...page.records)
+  }
+  return all
+}
+
+async function loadAllTaskSpots(task: GovernanceTask): Promise<SceneSpot[]> {
+  const first = await getTaskAbnormalPage({ bizTaskId: task.id, pageNum: 1, pageSize: 200 })
+  const all = [...first.records]
+  const pageSize = Math.max(1, first.records.length || first.pageSize || 200)
+  for (let pageNum = 2; pageNum <= Math.ceil(first.total / pageSize); pageNum += 1) {
+    const page = await getTaskAbnormalPage({ bizTaskId: task.id, pageNum, pageSize: 200 })
+    all.push(...page.records)
+  }
+  const mapServices = (task.comparisonImages || []).flatMap((image) => image.mapService ? [image.mapService] : [])
+  return all.map((item) => ({ ...item, bizTaskId: task.id, sceneCode: item.sceneCode || task.sceneCode,
+    deptId: task.deptId, sourceTaskName: task.name, mapServices }))
+}
+
+async function loadSpots(preferredSpotNo?: string) {
   const version = ++requestVersion
-  records.value = []
-  activeId.value = ''
-  activeImageIndex.value = 0
+  const deptId = user.activeDeptId
   loadError.value = ''
-  if (!taskId) return
   loading.value = true
   try {
-    // 后端可能对 pageSize 设置上限，因此按首屏实际返回条数继续读取所有页。
-    const first = await getTaskAbnormalPage({ bizTaskId: taskId, pageNum: 1, pageSize: 100 })
-    const allRecords = [...first.records]
-    const actualPageSize = Math.max(1, first.records.length || first.pageSize || 100)
-    const pageCount = Math.ceil(first.total / actualPageSize)
-    for (let pageNum = 2; pageNum <= pageCount; pageNum += 1) {
-      const page = await getTaskAbnormalPage({ bizTaskId: taskId, pageNum, pageSize: 100 })
-      allRecords.push(...page.records)
-    }
-    if (version !== requestVersion) return
-    const taskRecords = new Map<string, TaskAbnormal>()
-    allRecords.forEach((item) => taskRecords.set(item.id, item))
-    records.value = [...taskRecords.values()]
-    activeId.value = records.value.find((item) => item.spotNo === preferredSpotNo)?.id || records.value[0]?.id || ''
+    const recognitionSpots = await loadAllRecognitionSpots(deptId)
+    const taskResults = await Promise.allSettled(props.tasks.map(loadAllTaskSpots))
+    if (version !== requestVersion || deptId !== user.activeDeptId) return
+    const merged = new Map<string, SceneSpot>()
+    const recognitionById = new Map(recognitionSpots.map((item) => [item.id, item]))
+    taskResults.forEach((result) => {
+      if (result.status !== 'fulfilled') return
+      result.value.forEach((item) => {
+        const existing = merged.get(item.id)
+        const derivedTaskId = recognitionById.get(item.id)?.taskId
+        if (!existing || item.bizTaskId === derivedTaskId || existing.bizTaskId !== derivedTaskId) merged.set(item.id, item)
+      })
+    })
+    recognitionSpots.forEach((item) => {
+      const existing = merged.get(item.id)
+      const services = new Map<string, MapServiceItem>()
+      ;[...(existing?.mapServices || []), ...item.mapServices].forEach((service) => services.set(String(service.id || service.serviceUrl), service))
+      merged.set(item.id, {
+        ...existing,
+        ...item,
+        fromRecognitionApi: true,
+        bizTaskId: existing?.bizTaskId || item.taskId || '',
+        abnormalLevel: existing?.abnormalLevel || 1,
+        imageMediaId: existing?.imageMediaId,
+        imageUrl: existing?.imageUrl,
+        mapServices: [...services.values()],
+      })
+    })
+    records.value = [...merged.values()].sort((left, right) =>
+      (right.foundTime || right.createTime || '').localeCompare(left.foundTime || left.createTime || ''))
+    activeId.value = records.value.find((item) => item.spotNo === preferredSpotNo)?.id
+      || (records.value.some((item) => item.id === activeId.value) ? activeId.value : records.value[0]?.id || '')
   } catch (error) {
     if (version !== requestVersion) return
+    records.value = []
+    activeId.value = ''
     loadError.value = error instanceof Error ? error.message : '异常图斑加载失败。'
   } finally {
     if (version === requestVersion) loading.value = false
   }
 }
 
-async function loadTaskAbnormalCounts(tasks: GovernanceTask[]) {
-  const version = ++taskCountRequestVersion
-  taskAbnormalCounts.value = {}
-  const results = await Promise.allSettled(tasks.map((task) => getTaskAbnormalPage({
-    bizTaskId: task.id,
-    pageNum: 1,
-    pageSize: 1,
-  })))
-  if (version !== taskCountRequestVersion) return
-  taskAbnormalCounts.value = Object.fromEntries(tasks.map((task, index) => {
-    const result = results[index]
-    return [task.id, result?.status === 'fulfilled' ? result.value.total : undefined]
-  }))
-  if (!taskSelectedByUser) emit('select-task', filteredTasks.value[0]?.id || '')
+function openReview() {
+  const spot = active.value
+  if (!spot || spot.handleStatus !== -1 || reviewBusy.value) return
+  const deptId = spot.deptId || user.activeDeptId
+  if (!deptId) {
+    reviewError.value = '当前图斑缺少处理部门，无法审核。'
+    return
+  }
+  reviewError.value = ''
+  reviewMessage.value = ''
+  pendingReview.value = { id: spot.id, spotNo: spot.spotNo || spot.id, title: spot.title, deptId }
 }
 
-watch(() => props.task?.id, (taskId) => {
-  cancelSpotDrawing()
+async function confirmReview() {
+  const pending = pendingReview.value
+  if (!pending || reviewBusy.value) return
+  const current = records.value.find((item) => item.id === pending.id)
+  if (!current || current.handleStatus !== -1 || (current.deptId || user.activeDeptId) !== pending.deptId) {
+    reviewError.value = '图斑状态已变化，请重新选择后再试。'
+    return
+  }
+  reviewBusy.value = true
+  reviewError.value = ''
+  const submittingDeptId = user.activeDeptId
+  try {
+    const result = await reviewRecognitionSpots({ deptId: pending.deptId, ids: [pending.id] })
+    if (submittingDeptId !== user.activeDeptId) return
+    if (Number(result.count) > 0) {
+      pendingReview.value = undefined
+      await loadSpots(pending.spotNo)
+      reviewMessage.value = `图斑“${pending.title}”已审核通过，转为待核查。`
+    } else {
+      pendingReview.value = undefined
+      await loadSpots(pending.spotNo)
+      reviewError.value = '后台未处理该图斑，列表已刷新，请确认最新状态。'
+    }
+  } catch (error) {
+    if (submittingDeptId !== user.activeDeptId) return
+    if (error instanceof ApiBusinessError && ['10220', '10201'].includes(error.code)) {
+      pendingReview.value = undefined
+      await loadSpots(pending.spotNo)
+      reviewError.value = '图斑状态已变化或记录不存在，列表已刷新。'
+    } else {
+      reviewError.value = error instanceof ApiBusinessError && error.code === '10107'
+        ? '当前账号无权审核该图斑，请联系管理员。'
+        : error instanceof Error ? error.message : '审核失败，请稍后再试。'
+    }
+  } finally {
+    reviewBusy.value = false
+  }
+}
+
+function canOperateSpot(spot: SceneSpot | undefined) {
+  return Boolean(spot?.fromRecognitionApi && !spot.taskId && (spot.handleStatus === -1 || spot.handleStatus === 0))
+}
+
+function openSpotAction(kind: SpotAction) {
+  const spot = active.value
+  if (!spot || !canOperateSpot(spot) || spotActionBusy.value) return
+  const deptId = spot.deptId || user.activeDeptId
+  if (!deptId) {
+    reviewError.value = '当前图斑缺少处理部门，无法提交操作。'
+    return
+  }
+  reviewError.value = ''
+  reviewMessage.value = ''
+  spotActionError.value = ''
+  revokeAcknowledged.value = false
+  pendingSpotAction.value = { kind, id: spot.id, spotNo: spot.spotNo || spot.id, title: spot.title, deptId, handleStatus: spot.handleStatus }
+}
+
+function closeSpotAction() {
+  if (spotActionBusy.value) return
+  pendingSpotAction.value = undefined
+  spotActionError.value = ''
+}
+
+async function confirmSpotAction() {
+  const pending = pendingSpotAction.value
+  if (!pending || spotActionBusy.value || (pending.kind === 'revoke' && !revokeAcknowledged.value)) return
+  const current = records.value.find((item) => item.id === pending.id)
+  if (!current || !canOperateSpot(current) || current.handleStatus !== pending.handleStatus || (current.deptId || user.activeDeptId) !== pending.deptId) {
+    spotActionError.value = '图斑信息已变化，请关闭弹窗后重新选择。'
+    return
+  }
+  spotActionBusy.value = true
+  spotActionError.value = ''
+  const submittingDeptId = user.activeDeptId
+  try {
+    const input = { deptId: pending.deptId, ids: [pending.id] }
+    const result = pending.kind === 'ignore' ? await ignoreRecognitionSpots(input) : await revokeRecognitionSpots(input)
+    if (submittingDeptId !== user.activeDeptId) return
+    pendingSpotAction.value = undefined
+    await loadSpots(pending.spotNo)
+    if (Number(result.count) > 0) reviewMessage.value = `图斑“${pending.title}”已${pending.kind === 'ignore' ? '忽略' : '撤销'}。`
+    else reviewError.value = '后台未处理该图斑，列表已刷新，请确认最新状态。'
+  } catch (error) {
+    if (submittingDeptId !== user.activeDeptId) return
+    if (error instanceof ApiBusinessError && ['10220', '10201'].includes(error.code)) {
+      pendingSpotAction.value = undefined
+      await loadSpots(pending.spotNo)
+      reviewError.value = '图斑状态已变化或记录不存在，列表已刷新。'
+    } else {
+      spotActionError.value = error instanceof ApiBusinessError && error.code === '10107'
+        ? '当前账号无权处理该图斑，请联系管理员。'
+        : error instanceof Error ? error.message : '图斑处理失败，请稍后再试。'
+    }
+  } finally {
+    spotActionBusy.value = false
+  }
+}
+
+watch([() => props.tasks.map((task) => task.id).join(','), () => user.activeDeptId], () => {
+  records.value = []
+  activeId.value = ''
+  pendingReview.value = undefined
+  pendingSpotAction.value = undefined
+  reviewError.value = ''
+  reviewMessage.value = ''
   clearManualImagery()
-  loadHiddenImagery(taskId)
+  void loadSpots()
+}, { immediate: true })
+watch(() => active.value?.bizTaskId, (taskId) => {
+  cancelSpotDrawing()
+  loadHiddenImagery(taskId || `recognition-${user.activeDeptId}`)
   pendingDeleteImage.value = undefined
-  void loadTaskAbnormals(taskId)
-}, { immediate: true })
-watch(() => props.tasks.map((task) => task.id).join(','), () => {
-  void loadTaskAbnormalCounts(props.tasks)
-}, { immediate: true })
-watch(filteredTasks, (items) => {
-  if (!items.some((item) => item.id === props.selectedTaskId)) emit('select-task', items[0]?.id || '')
 })
 watch(filtered, (items) => {
   if (!items.some((item) => item.id === activeId.value)) {
@@ -412,36 +591,20 @@ onBeforeUnmount(() => {
 <template>
   <div class="governance-page spot-page">
     <aside class="left-column">
-      <section class="panel task-selector">
-        <div class="panel-title"><span>场景任务</span><small>{{ filteredTasks.length }} / {{ tasks.length }} 个</small></div>
-        <div class="task-filters">
-          <select v-model="taskSceneFilter"><option value="">全部场景</option><option v-for="[value, label] in taskSceneOptions" :key="value" :value="value">{{ label }}</option></select>
-          <select v-model="taskStatusFilter"><option value="">全部执行状态</option><option v-for="item in taskStatusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select>
-        </div>
-        <div class="task-scroll">
-          <button v-for="item in filteredTasks" :key="item.id" class="recognition-task-item" :class="{ active: item.id === selectedTaskId }" @click="selectTask(item.id)">
-            <span><b>{{ item.name }}</b><small>{{ item.sceneName || item.sceneCode }} · {{ item.taskStatusDesc }}</small></span>
-          </button>
-          <div v-if="taskLoading" class="task-empty">正在加载场景任务…</div>
-          <div v-else-if="taskError" class="task-empty list-empty--error">{{ taskError }}</div>
-          <div v-else-if="!filteredTasks.length" class="task-empty">暂无符合条件的场景任务</div>
-        </div>
-      </section>
-
       <section class="panel spot-list">
         <div class="panel-title"><span>问题图斑列表</span><small>{{ filtered.length }} / {{ records.length }} 处</small></div>
         <div class="filters">
           <input v-model="keyword" placeholder="搜索图斑编号、名称或类型" />
-          <select v-model="abnormalType"><option value="">全部类型</option><option v-for="[value, label] in typeOptions" :key="value" :value="value">{{ label }}</option></select>
-          <select v-model="handleStatus"><option value="">全部处置状态</option><option :value="0">待核查</option><option :value="1">核查中</option><option :value="2">已处置</option><option :value="3">已销号</option></select>
+          <select v-model="sceneFilter"><option value="">全部场景类型</option><option v-for="[value, label] in sceneOptions" :key="value" :value="value">{{ label }}</option></select>
+          <select v-model="handleStatus"><option value="">全部处置状态</option><option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select>
         </div>
         <div class="spot-scroll">
           <button v-for="(item, index) in filtered" :key="item.id" class="spot-item" :class="{ active: item.id === active?.id }" @click="selectSpot(item.id)">
             <i>{{ index + 1 }}</i>
-            <span><b>{{ item.title }}</b><small>图斑 {{ item.spotNo || `#${item.id}` }} · {{ item.abnormalTypeDesc }}</small></span>
+            <span><b>{{ item.title }}</b><small>图斑 {{ item.spotNo || `#${item.id}` }} · {{ item.abnormalTypeDesc }}</small><small v-if="item.sourceTaskName" class="source-task">来源任务：{{ item.sourceTaskName }}</small></span>
             <em :class="`status-${item.handleStatus}`">{{ statusLabel(item.handleStatus) }}</em>
           </button>
-          <div v-if="loading" class="list-empty">正在加载当前任务异常图斑…</div>
+          <div v-if="loading" class="list-empty">正在加载场景异常图斑…</div>
           <div v-else-if="loadError" class="list-empty list-empty--error">{{ loadError }}</div>
           <div v-else-if="!filtered.length" class="list-empty">当前筛选条件下暂无异常图斑</div>
         </div>
@@ -490,11 +653,11 @@ onBeforeUnmount(() => {
 
     <aside class="right-column">
       <ManualSpotCreatePanel
-        :key="selectedTaskId || 'no-task'"
-        :scene-code="selectedGovernanceTask?.sceneCode || active?.sceneCode"
+        :key="user.activeDeptId || 'no-dept'"
+        :scene-code="active?.sceneCode"
         :scenes="scenes"
-        :dept-id="selectedGovernanceTask?.deptId || user.activeDeptId"
-        :map-services="imageryMapServices"
+        :dept-id="active?.deptId || user.activeDeptId"
+        :map-services="formMapServices"
         :initial-map-service-ids="activeMapServiceIds"
         :drawing-available="displayableImagery.some((image) => Boolean(image.mapService))"
         :drawing="spotDrawing"
@@ -505,18 +668,32 @@ onBeforeUnmount(() => {
         @finish-drawing="finishSpotDrawing"
         @undo-point="undoSpotDrawingPoint"
         @clear-drawing="clearSpotDrawing"
+        @map-service-selection-change="synchronizeMapServiceSelection"
         @created="handleSpotCreated"
       />
       <section class="panel detail">
-        <div class="panel-title">异常图斑详细信息</div>
+        <div class="panel-title"><span>异常图斑详细信息</span><button class="review-button" type="button" :disabled="!active || active.handleStatus !== -1 || reviewBusy" @click="openReview">审核通过</button></div>
+        <div class="detail-actions">
+          <button class="detail-action detail-action--ignore" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('ignore')">忽略图斑</button>
+          <button class="detail-action detail-action--revoke" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('revoke')">撤销图斑</button>
+        </div>
+        <p v-if="reviewMessage" class="review-feedback review-feedback--success" role="status">{{ reviewMessage }}</p>
+        <p v-if="reviewError && !pendingReview" class="review-feedback review-feedback--error" role="alert">{{ reviewError }}</p>
         <template v-if="active">
           <dl>
             <dt>图斑编号</dt><dd>{{ active.spotNo || `#${active.id}` }}</dd>
+            <dt>图斑名称</dt><dd>{{ active.title }}</dd>
+            <dt>所属场景</dt><dd>{{ activeSceneName || '未返回' }}</dd>
+            <template v-if="active.spotSource"><dt>图斑来源</dt><dd>{{ spotSourceLabel(active.spotSource) }}</dd></template>
+            <dt>关联任务</dt><dd>{{ active.sourceTaskName || selectedGovernanceTask?.name || active.bizTaskId || '-' }}</dd>
             <dt>异常类型</dt><dd>{{ active.abnormalTypeDesc }}</dd>
             <dt>异常等级</dt><dd :class="`text-level-${active.abnormalLevel}`">{{ levelLabel(active.abnormalLevel) }}</dd>
-            <dt>面积</dt><dd>{{ active.area ?? '-' }} ㎡</dd>
+            <dt>面积</dt><dd>{{ active.area == null ? '-' : `${active.area} ㎡` }}</dd>
+            <template v-if="active.longitude !== undefined && active.latitude !== undefined"><dt>中心坐标</dt><dd>{{ active.longitude.toFixed(6) }}，{{ active.latitude.toFixed(6) }}</dd></template>
             <dt>处置状态</dt><dd>{{ statusLabel(active.handleStatus) }}</dd>
             <dt>发现时间</dt><dd>{{ formatTime(active.foundTime) }}</dd>
+            <template v-if="active.createTime"><dt>创建时间</dt><dd>{{ formatTime(active.createTime) }}</dd></template>
+            <template v-if="active.updateTime"><dt>更新时间</dt><dd>{{ formatTime(active.updateTime) }}</dd></template>
             <dt>关联影像</dt><dd>{{ displayableImagery.length ? `${displayableImagery.length} 项` : '未关联' }}</dd>
           </dl>
           <p>{{ active.description || '暂无异常图斑描述。' }}</p>
@@ -524,6 +701,24 @@ onBeforeUnmount(() => {
         <div v-else class="detail-empty">暂无图斑信息</div>
       </section>
     </aside>
+    <div v-if="pendingReview" class="review-mask" @click.self="!reviewBusy && (pendingReview = undefined)">
+      <section class="review-dialog" role="alertdialog" aria-modal="true" aria-labelledby="spot-review-title">
+        <h3 id="spot-review-title">确认审核通过</h3>
+        <p>图斑“{{ pendingReview.title }}”（{{ pendingReview.spotNo }}）审核通过后将转为待核查，可继续创建核查任务。</p>
+        <p v-if="reviewError" class="review-dialog-error" role="alert">{{ reviewError }}</p>
+        <footer><button type="button" :disabled="reviewBusy" @click="pendingReview = undefined">取消</button><button type="button" class="primary" :disabled="reviewBusy" @click="confirmReview">{{ reviewBusy ? '正在审核…' : '确认通过' }}</button></footer>
+      </section>
+    </div>
+    <div v-if="pendingSpotAction" class="review-mask" @click.self="closeSpotAction">
+      <section class="review-dialog spot-action-dialog" :class="`spot-action-dialog--${pendingSpotAction.kind}`" role="alertdialog" aria-modal="true" aria-labelledby="spot-action-title">
+        <h3 id="spot-action-title">{{ pendingSpotAction.kind === 'ignore' ? '忽略图斑' : '撤销图斑' }}</h3>
+        <p>{{ pendingSpotAction.kind === 'ignore' ? '忽略后图斑仍可查询，但不再参与派单，也不能用于创建核查任务。' : '撤销后图斑将从列表中移除，业务边界和参考影像关联会被清理；此操作不可恢复。' }}</p>
+        <dl><div><dt>图斑</dt><dd>{{ pendingSpotAction.title }}</dd></div><div><dt>编号</dt><dd>{{ pendingSpotAction.spotNo }}</dd></div><div><dt>当前状态</dt><dd>{{ statusLabel(pendingSpotAction.handleStatus) }}</dd></div></dl>
+        <label v-if="pendingSpotAction.kind === 'revoke'" class="spot-action-acknowledge"><input v-model="revokeAcknowledged" type="checkbox" :disabled="spotActionBusy" /><span>我已了解：撤销会清理图斑边界与影像关联，且不可恢复。</span></label>
+        <p v-if="spotActionError" class="spot-action-error" role="alert">{{ spotActionError }}</p>
+        <footer><button type="button" :disabled="spotActionBusy" @click="closeSpotAction">返回</button><button type="button" class="primary" :disabled="spotActionBusy || (pendingSpotAction.kind === 'revoke' && !revokeAcknowledged)" @click="confirmSpotAction">{{ spotActionBusy ? '正在处理…' : pendingSpotAction.kind === 'ignore' ? '确认忽略' : '确认撤销' }}</button></footer>
+      </section>
+    </div>
     <div v-if="pendingDeleteImage" class="image-delete-mask" @click.self="pendingDeleteImage = undefined">
       <section class="image-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="image-delete-title">
         <h3 id="image-delete-title">确认从当前图斑移除</h3>
@@ -605,6 +800,12 @@ onBeforeUnmount(() => {
 .spot-item b { font-size: 15px; }
 .spot-item small { font-size: 12px; }
 .spot-item em { padding: 5px 7px; font-size: 12px; }
+.left-column { display: block; }
+.left-column > .spot-list { height: 100%; box-sizing: border-box; }
+.spot-item { min-height: 70px; grid-template-columns: 34px minmax(0, 1fr) auto; border-top: 1px solid #e3ebef; border-bottom: 0; }
+.spot-item small.source-task { margin-top: 2px; color: #3790a8; }
+.spot-item em.status--1 { color: #9a6a0c; background: #fff2cf; }
+.spot-item em.status-4 { color: #667986; background: #ecf0f2; }
 .map-header-actions small,
 .map-header-actions button,
 .analysis-title-hint,
@@ -624,12 +825,63 @@ onBeforeUnmount(() => {
   padding-block: 10px;
   font-size: 14px;
 }
+.detail dd {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 .detail > p {
   margin-inline: 14px;
   padding: 12px;
   font-size: 13px;
 }
 .detail-empty { font-size: 14px; }
+.detail {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #8aa9b7 #edf4f7;
+}
+.detail::-webkit-scrollbar { width: 8px; }
+.detail::-webkit-scrollbar-track { background: #edf4f7; }
+.detail::-webkit-scrollbar-thumb { background: #8aa9b7; border: 2px solid #edf4f7; border-radius: 8px; }
+.detail::-webkit-scrollbar-thumb:hover { background: #668b9c; }
+/* 新增表单可内部滚动，两个右侧面板均分可用高度。 */
+.right-column { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+.review-button { flex: none; padding: 6px 10px; color: #08799d; background: #e8f6fa; border: 1px solid #9ed4e3; border-radius: 5px; font-size: 12px; font-weight: 700; line-height: 1.2; cursor: pointer; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.review-button:hover:not(:disabled) { color: #fff; background: #168eb3; border-color: #168eb3; box-shadow: 0 2px 8px #08779c32; }
+.review-button:focus-visible { outline: 2px solid #08799d; outline-offset: 2px; }
+.review-button:disabled { color: #91a7b2; background: #edf3f5; border-color: #d6e2e8; cursor: not-allowed; }
+.detail-actions { flex: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 9px 12px; border-bottom: 1px solid #e1ebf1; background: #f8fbfc; }
+.detail-action { min-height: 30px; padding: 5px 7px; border: 1px solid; border-radius: 5px; background: #fff; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.detail-action--ignore { color: #567481; border-color: #afc7d2; }
+.detail-action--ignore:hover:not(:disabled) { color: #fff; background: #607e8b; border-color: #607e8b; box-shadow: 0 2px 8px #607e8b32; }
+.detail-action--revoke { color: #ae5a51; border-color: #e0b9b2; }
+.detail-action--revoke:hover:not(:disabled) { color: #fff; background: #b96051; border-color: #b96051; box-shadow: 0 2px 8px #b9605132; }
+.detail-action:focus-visible { outline: 2px solid #08799d; outline-offset: 2px; }
+.detail-action:disabled { color: #91a7b2; background: #edf3f5; border-color: #d6e2e8; cursor: not-allowed; }
+.detail > p.review-feedback { margin: 9px 14px 0; padding: 8px 10px; font-size: 12px; }
+.detail > p.review-feedback--success { color: #147254; background: #e4f6ef; }
+.detail > p.review-feedback--error { color: #b63f4d; background: #ffedf0; }
+.review-mask { position: fixed; z-index: 4300; inset: 0; display: grid; place-items: center; padding: 20px; background: #10243199; backdrop-filter: blur(2px); }
+.review-dialog { width: min(420px, calc(100vw - 40px)); overflow: hidden; color: #29475a; background: #fff; border: 1px solid #b9d1dc; border-radius: 8px; box-shadow: 0 18px 46px #102a3d66; }
+.review-dialog h3 { margin: 0; padding: 16px 18px; color: #173c54; border-bottom: 1px solid #e0eaef; font-size: 17px; }
+.review-dialog p { margin: 0; padding: 17px 18px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.review-dialog p.review-dialog-error { padding-top: 0; color: #b63f4d; }
+.review-dialog footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; background: #f6f9fa; border-top: 1px solid #e0eaef; }
+.review-dialog footer button { min-width: 76px; min-height: 34px; padding: 0 12px; color: #466877; background: #fff; border: 1px solid #bfd4df; border-radius: 4px; cursor: pointer; }
+.review-dialog footer button.primary { color: #fff; background: #168eae; border-color: #168eae; }
+.review-dialog footer button:disabled { opacity: .5; cursor: not-allowed; }
+.spot-action-dialog dl { display: grid; gap: 8px; margin: 0 18px 16px; padding: 11px 13px; border: 1px solid #e3edf1; border-radius: 6px; background: #f8fbfc; }
+.spot-action-dialog dl div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.spot-action-dialog dt { flex: none; color: #8199a5; }
+.spot-action-dialog dd { min-width: 0; margin: 0; color: #335568; font-weight: 700; overflow-wrap: anywhere; text-align: right; }
+.spot-action-acknowledge { display: flex; align-items: flex-start; gap: 8px; margin: 0 18px 16px; color: #9c5449; font-size: 12px; line-height: 1.5; cursor: pointer; }
+.spot-action-acknowledge input { margin: 2px 0 0; accent-color: #b96555; }
+.review-dialog p.spot-action-error { padding: 0 18px 15px; color: #a84545; }
+.spot-action-dialog--ignore footer button.primary { background: #607e8b; border-color: #607e8b; }
+.spot-action-dialog--revoke footer button.primary { background: #b96051; border-color: #b96051; }
 .map-compare :deep(.period-badge) { font-size: 13px; }
 .map-compare :deep(.empty-imagery) { font-size: 15px; }
 @media (max-width: 1180px) {

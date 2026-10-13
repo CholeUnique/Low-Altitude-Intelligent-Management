@@ -65,7 +65,8 @@ export interface RecognitionSpotUploadPreviewResult {
 export interface RecognitionSpotUploadConfirmInput {
   batchNo: string
   typeField: string
-  typeMappings: Array<{ value: string; abnormalType: RecognitionAbnormalType }>
+  /** 异常类型编码取自当前场景启用的元数据选项。 */
+  typeMappings: Array<{ value: string; abnormalType: string }>
   mapServiceIds: Array<string | number>
   title?: string
   description?: string

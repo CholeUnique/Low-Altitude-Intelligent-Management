@@ -10,12 +10,12 @@ import {
 import {
   getRecognitionSpotPage,
   ignoreRecognitionSpots,
-  reviewRecognitionSpots,
   revokeRecognitionSpots,
   type RecognitionAbnormalType,
   type RecognitionSpotItem,
 } from '@/api/recognition-spot'
 import { ApiBusinessError } from '@/api/client'
+import { getDepartmentOptions, type DepartmentOption } from '@/api/auth'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { assignNonGrainReview, getNonGrainReviewerId, isNonGrainScene } from '@/api/non-grain-assignment'
 import type { MapServiceItem } from '@/api/map-service'
@@ -39,7 +39,7 @@ const mapFullscreen = ref(false)
 const records = ref<ReviewSpot[]>([])
 const keyword = ref('')
 const typeFilter = ref('')
-const statusFilter = ref<number | ''>(-1)
+const statusFilter = ref<number | ''>(0)
 
 function toggleMapFullscreen() {
   mapFullscreen.value = !mapFullscreen.value
@@ -55,9 +55,12 @@ const creatingTasks = ref(false)
 const taskCreateVisible = ref(false)
 const taskPriority = ref(1)
 const taskCreateError = ref('')
+const departmentOptions = ref<DepartmentOption[]>([])
+const departmentOptionsLoading = ref(false)
+const departmentOptionsError = ref(false)
 const operationMessage = ref('')
 const operationError = ref('')
-type SpotAction = 'review' | 'ignore' | 'revoke'
+type SpotAction = 'ignore' | 'revoke'
 type PendingSpotAction = { kind: SpotAction; id: string; spotNo: string; title: string; deptId: string; handleStatus: number }
 const pendingSpotAction = ref<PendingSpotAction>()
 const spotActionBusy = ref(false)
@@ -81,18 +84,17 @@ const statuses = [
   { value: 1, label: '核查中' },
   { value: 2, label: '已处置' },
   { value: 3, label: '已销号' },
-  { value: -1, label: '待人工审核' },
   { value: 4, label: '已忽略' },
 ]
 
 const spotActionCopy: Record<SpotAction, { title: string; description: string; confirm: string }> = {
-  review: { title: '审核通过', description: '审核通过后，图斑将由“待人工审核”转为“待核查”，可以继续创建核查任务。', confirm: '确认通过' },
   ignore: { title: '忽略图斑', description: '忽略后图斑记录仍可查询，但不再参与派单，也不能用于创建核查任务。', confirm: '确认忽略' },
   revoke: { title: '撤销图斑', description: '撤销后图斑将从列表中移除，业务边界及参考影像关联会被清理；此操作不可恢复。', confirm: '确认撤销' },
 }
 const pendingSpotActionCopy = computed(() => pendingSpotAction.value ? spotActionCopy[pendingSpotAction.value.kind] : undefined)
 
-const filtered = computed(() => records.value.filter((item) => {
+const visibleRecords = computed(() => records.value.filter((item) => item.handleStatus !== -1))
+const filtered = computed(() => visibleRecords.value.filter((item) => {
   const text = `${item.spotNo} ${item.title} ${item.description} ${item.abnormalTypeDesc}`.toLowerCase()
   return (!keyword.value.trim() || text.includes(keyword.value.trim().toLowerCase()))
     && (!typeFilter.value || item.abnormalType === typeFilter.value)
@@ -100,7 +102,7 @@ const filtered = computed(() => records.value.filter((item) => {
 }))
 const active = computed(() => filtered.value.find((item) => item.id === activeId.value) || filtered.value[0])
 const statusCounts = computed(() => statuses.map((status) => ({
-  ...status, count: records.value.filter((item) => item.handleStatus === status.value).length,
+  ...status, count: visibleRecords.value.filter((item) => item.handleStatus === status.value).length,
 })))
 const selected = computed(() => records.value.filter((item) => selectedIds.value.includes(item.id)))
 const activeSceneName = computed(() => {
@@ -116,11 +118,12 @@ const selectedSceneName = computed(() => {
 const selectedDeptName = computed(() => {
   const item = selected.value[0]
   if (!item) return '-'
-  return item.sourceDeptName
-    || user.currentUser?.deptList?.find((department) => department.deptId === item.deptId)?.deptName
-    || (item.deptId === user.activeDeptId ? user.currentUser?.deptName : undefined)
-    || item.deptId
-    || '-'
+  const deptId = String(item.deptId || user.activeDeptId || '')
+  return departmentOptions.value.find((department) => department.deptId === deptId)?.deptName
+    || (item.sourceDeptName && !/^\d+$/.test(item.sourceDeptName) ? item.sourceDeptName : undefined)
+    || user.currentUser?.deptList?.find((department) => String(department.deptId) === deptId)?.deptName
+    || (deptId === user.activeDeptId ? user.currentUser?.deptName : undefined)
+    || (departmentOptionsLoading.value ? '正在查询部门…' : departmentOptionsError.value ? '部门名称获取失败' : '未找到对应部门')
 })
 const activeAsTaskAbnormal = computed<TaskAbnormal | undefined>(() => active.value ? ({
   id: active.value.id,
@@ -185,7 +188,7 @@ function canSelect(item: ReviewSpot) {
 }
 function canOperateSpot(item: ReviewSpot | undefined, kind: SpotAction) {
   if (!item?.fromRecognitionApi || item.derivedTaskId) return false
-  return kind === 'review' ? item.handleStatus === -1 : item.handleStatus === -1 || item.handleStatus === 0
+  return (kind === 'ignore' || kind === 'revoke') && item.handleStatus === 0
 }
 function openSpotAction(kind: SpotAction) {
   const spot = active.value
@@ -220,11 +223,9 @@ async function submitSpotAction() {
   const submittingDeptId = user.activeDeptId
   try {
     const input = { deptId: pending.deptId, ids: [pending.id] }
-    const result = pending.kind === 'review'
-      ? await reviewRecognitionSpots(input)
-      : pending.kind === 'ignore'
-        ? await ignoreRecognitionSpots(input)
-        : await revokeRecognitionSpots(input)
+    const result = pending.kind === 'ignore'
+      ? await ignoreRecognitionSpots(input)
+      : await revokeRecognitionSpots(input)
     if (user.activeDeptId !== submittingDeptId) return
     pendingSpotAction.value = undefined
     await loadSpots(pending.spotNo)
@@ -386,6 +387,12 @@ function openTaskCreateDialog() {
   taskPriority.value = 1
   taskCreateError.value = ''
   taskCreateVisible.value = true
+  departmentOptionsLoading.value = true
+  departmentOptionsError.value = false
+  void getDepartmentOptions()
+    .then((options) => { departmentOptions.value = options })
+    .catch(() => { departmentOptionsError.value = true })
+    .finally(() => { departmentOptionsLoading.value = false })
 }
 
 async function createSelectedTasks() {
@@ -461,11 +468,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 <template>
   <div class="general-review">
     <section class="stat-grid">
-      <article><span>疑似图斑总数</span><b>{{ records.length }}</b><small>不区分场景与来源任务</small></article>
+      <article><span>疑似图斑总数</span><b>{{ visibleRecords.length }}</b><small>不区分场景与来源任务</small></article>
       <article><span>待核查</span><b>{{ statusCounts[0]?.count || 0 }}</b><small>等待派生核查任务</small></article>
       <article><span>核查中</span><b>{{ statusCounts[1]?.count || 0 }}</b><small>已进入核查流程</small></article>
       <article><span>已完成处置</span><b>{{ (statusCounts[2]?.count || 0) + (statusCounts[3]?.count || 0) }}</b><small>已处置及已销号</small></article>
-      <div class="heading-actions"><button :disabled="!selectedIds.length || creatingTasks" @click="openTaskCreateDialog">{{ `选中图斑创建任务（${selectedIds.length}）` }}</button></div>
+      <div class="heading-actions"><button :disabled="!selectedIds.length || creatingTasks" @click="openTaskCreateDialog">{{ `勾选图斑创建任务（${selectedIds.length}）` }}</button></div>
     </section>
 
     <div v-if="operationMessage" class="operation-message success">{{ operationMessage }}</div>
@@ -473,7 +480,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 
     <section class="review-layout">
       <aside class="spot-list panel">
-        <header><b>问题图斑列表</b><span>{{ filtered.length }} / {{ records.length }} 处</span></header>
+        <header><b>问题图斑列表</b><span>{{ filtered.length }} / {{ visibleRecords.length }} 处</span></header>
         <div class="filters"><input v-model="keyword" placeholder="搜索图斑编号、名称或类型" /><div><select v-model="typeFilter"><option value="">全部类型</option><option v-for="item in abnormalTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select><select v-model="statusFilter"><option value="">全部状态</option><option v-for="item in statuses" :key="item.value" :value="item.value">{{ item.label }}</option></select></div></div>
         <div class="spot-scroll">
           <button v-for="(item,index) in filtered" :key="item.id" class="spot-row" :class="{ active: active?.id === item.id, checked: selectedIds.includes(item.id) }" @click="selectSpot(item.id)">
@@ -512,8 +519,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
         <section class="spot-action-card panel" aria-label="图斑审核与处置">
           <header><b>图斑操作</b><span v-if="active">{{ statusLabel(active.handleStatus) }}</span></header>
           <div class="spot-action-card__body">
-            <div v-if="active && (canOperateSpot(active, 'review') || canOperateSpot(active, 'ignore'))" class="spot-action-card__buttons">
-              <button v-if="canOperateSpot(active, 'review')" class="spot-action-button spot-action-button--review" type="button" @click="openSpotAction('review')">审核通过</button>
+            <div v-if="active && canOperateSpot(active, 'ignore')" class="spot-action-card__buttons">
               <button class="spot-action-button spot-action-button--ignore" type="button" @click="openSpotAction('ignore')">忽略图斑</button>
               <button class="spot-action-button spot-action-button--revoke" type="button" @click="openSpotAction('revoke')">撤销图斑</button>
             </div>
@@ -566,7 +572,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
     <div v-if="pendingSpotAction && pendingSpotActionCopy" class="dialog-mask" @click.self="closeSpotAction">
       <section class="spot-action-dialog" :class="`spot-action-dialog--${pendingSpotAction.kind}`" role="alertdialog" aria-modal="true" aria-labelledby="spot-action-title">
         <header>
-          <span class="spot-action-dialog__marker">{{ pendingSpotAction.kind === 'review' ? '✓' : pendingSpotAction.kind === 'ignore' ? '–' : '!' }}</span>
+          <span class="spot-action-dialog__marker">{{ pendingSpotAction.kind === 'ignore' ? '–' : '!' }}</span>
           <div><small>图斑审核与处置</small><h2 id="spot-action-title">{{ pendingSpotActionCopy.title }}</h2></div>
           <button type="button" aria-label="关闭" :disabled="spotActionBusy" @click="closeSpotAction">×</button>
         </header>
@@ -1045,7 +1051,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
   border-radius: 999px;
   color: #8c651b;
   background: #fff2d3;
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .spot-action-card__body { padding: 9px 10px; }
@@ -1063,7 +1069,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
   border-radius: 5px;
   background: #fff;
   color: #3b6779;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;

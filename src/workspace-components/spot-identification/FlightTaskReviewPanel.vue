@@ -84,7 +84,7 @@ function showAiPendingNotice(planId: string) {
 }
 function handleSpotUploaded(result: RecognitionSpotCreateResult) {
   uploadVisible.value = false
-  uploadMessage.value = `成功导入 ${result.count || result.spotNos?.length || 0} 个疑似图斑，当前为待人工审核状态。可前往核查任务研判查看。`
+  uploadMessage.value = `成功导入 ${result.count || result.spotNos?.length || 0} 个疑似图斑，当前为待人工审核状态。可前往场景异常识别查看。`
 }
 
 function mediaKind(media: FlightReviewMedia): 'image' | 'video' | 'other' {
