@@ -128,3 +128,54 @@ export async function getFlightReviewMediaFile(localFileUrl: string, signal?: Ab
   }
   return file
 }
+
+/** 按当前视频素材 ID 读取配套字幕，不把 MP4 当成 SRT，也不触发字幕生成。 */
+export async function getFlightReviewVideoSrtFile(mediaId: string, signal?: AbortSignal): Promise<Blob> {
+  if (!/^[\w-]+$/.test(mediaId)) throw new Error('视频素材 ID 无效。')
+  let file: Blob
+  try {
+    file = await apiClient.get<never, Blob>(`/v1/uav/media/srt/${encodeURIComponent(mediaId)}`, {
+      responseType: 'blob',
+      timeout: 20_000,
+      signal,
+    })
+  } catch (reason) {
+    const status = (reason as { response?: { status?: number } } | undefined)?.response?.status
+    if (status === 404) throw new Error('当前视频的 SRT 尚未就绪，请确认后端已生成字幕，或手动选择对应 SRT。')
+    throw reason
+  }
+  if (!(file instanceof Blob) || !file.size || /(?:json|xml|html)/i.test(file.type)) {
+    throw new Error('后端未返回有效的 SRT 文件，请确认当前视频字幕已就绪。')
+  }
+  if (file.size > 20 * 1024 * 1024) throw new Error('SRT 文件超过 20 MB。')
+  return file
+}
+
+/** 手动选择素材列表中的 SRT 附件；第三方原文件只匿名读取。 */
+export async function getFlightReviewSrtFile(media: FlightReviewMedia, signal?: AbortSignal): Promise<Blob> {
+  if (media.localFileUrl) return getFlightReviewMediaFile(media.localFileUrl, signal)
+  if (!media.originalUrl) throw new Error('该 SRT 没有可读取的文件地址，请选择本地 SRT。')
+  const url = new URL(media.originalUrl, window.location.href)
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('SRT 文件地址无效。')
+  const response = await fetch(url.href, { signal, credentials: 'omit', referrerPolicy: 'no-referrer' })
+  if (!response.ok) throw new Error(`SRT 读取失败（HTTP ${response.status}），可改为选择本地文件。`)
+  const limit = 20 * 1024 * 1024
+  if (Number(response.headers.get('content-length')) > limit) throw new Error('SRT 文件超过 20 MB。')
+  if (!response.body) throw new Error('SRT 文件内容为空。')
+  const reader = response.body.getReader()
+  const chunks: Uint8Array<ArrayBuffer>[] = []
+  let size = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > limit) throw new Error('SRT 文件超过 20 MB。')
+      chunks.push(new Uint8Array(value))
+    }
+  } finally {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
+  }
+  return new Blob(chunks, { type: 'text/plain' })
+}

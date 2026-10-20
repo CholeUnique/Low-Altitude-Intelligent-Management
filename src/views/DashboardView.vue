@@ -6,15 +6,14 @@ import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import { Timer, Position } from '@element-plus/icons-vue'
 import DashboardMap from '@/components/DashboardMap.vue'
 import { useUserStore } from '@/stores/user'
-import { getGovernanceTaskGeometry, getGovernanceTaskPage, getTaskAbnormalPage, type GovernanceTask, type TaskGeometryFeatureCollection } from '@/api/governance-task'
+import { getGovernanceTaskGeometry, getGovernanceTaskPage, type GovernanceTask, type TaskGeometryFeatureCollection } from '@/api/governance-task'
 import { getScene } from '@/mocks/portal'
-import { getBusinessDashboardStatistics, type BusinessDashboardStatistics } from '@/api/business-statistics'
+import { getBusinessAbnormalSummary, getBusinessDashboardStatistics, type BusinessDashboardStatistics, type BusinessSceneStat } from '@/api/business-statistics'
+import { createDashboardGeometryLoader, loadDashboardSceneCounts } from '@/utils/dashboard-loading'
 import { getDepartmentOptions, getMyDepartments, switchDepartment } from '@/api/auth'
 import {
   getLiveStreams,
-  getFlightTaskMedia,
   getUavDeviceSummary,
-  getUavFlightTaskOptions,
   getUavFlightSummary,
   getUavMediaSummary,
   type UavDeviceSummary,
@@ -22,7 +21,6 @@ import {
   type UavMediaSummary,
 } from '@/api/patrol'
 import type { LiveStream } from '@/adapters/dasFly'
-import type { LiveMediaItem } from '@/mocks/patrol-live'
 import { findOrganizationScene, isTaskVisibleForOrganization } from '@/utils/scene-visibility'
 import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
 import type { DashboardMapLayer } from '@/types'
@@ -35,29 +33,28 @@ const statisticsLoading = ref(false)
 const statisticsError = ref('')
 const currentUnitTasks = ref<GovernanceTask[]>([])
 const currentUnitTasksLoaded = ref(false)
-/** 按当前单位场景汇总的真实异常图斑数，取自每个任务的异常图斑分页接口 total。 */
+/** 当前部门的场景级完整汇总，不再扫描任务异常分页。 */
 const sceneAbnormalCounts = ref<Record<string, number>>({})
-const sceneAbnormalCountsLoading = ref(false)
 const taskRanges = ref<Record<string, TaskGeometryFeatureCollection>>({})
+const taskRangesLoading = ref(false)
+const geometryLoader = createDashboardGeometryLoader(taskId => getGovernanceTaskGeometry(taskId, undefined, false, user.activeDeptId))
 const livePreviews = ref<LiveStream[]>([])
 const livePreviewLoading = ref(true)
 const livePreviewLoaded = ref(false)
 const onlineUavCount = ref<number>()
 const uavDeviceSummary = ref<UavDeviceSummary>()
 const uavFlightSummary = ref<UavFlightSummary>()
+/** 素材数量与容量统一读取后端汇总，不在首页扫描任务素材明细。 */
 const uavMediaSummary = ref<UavMediaSummary>()
-const classifiedMediaCounts = ref<{ totalCount: number; photoCount: number; videoCount: number }>()
 const isMapClearScreen = ref(false)
 let statisticsRequestVersion = 0
 let geometryRequestVersion = 0
 let abnormalCountRequestVersion = 0
 let livePreviewRequestVersion = 0
-let mediaCountRequestVersion = 0
-let mediaCountsLoadedKey = ''
-let mediaCountsLoadingKey = ''
 const sceneId = computed(() => typeof route.params.sceneId === 'string' ? route.params.sceneId : '')
 const organization = computed(() => user.organization)
 const activeScene = computed(() => getScene(organization.value, sceneId.value))
+const sceneGeometryPending = computed(() => Boolean(activeScene.value) && (taskRangesLoading.value || (!currentUnitTasksLoaded.value && statisticsLoading.value)))
 const mapLayerColors = ['#23d7f0', '#ffb43c', '#8e7dff', '#38e0a8', '#ff6f86', '#4d9dff']
 const mapLayers = computed<DashboardMapLayer[]>(() => {
   if (!currentUnitTasksLoaded.value) return []
@@ -117,7 +114,7 @@ const sceneBusinessStats = computed(() => {
     code: string
     name: string
     taskCount: number
-    abnormalCount: number
+    abnormalCount: number | undefined
     description: string
     visual: string
   }>()
@@ -129,14 +126,14 @@ const sceneBusinessStats = computed(() => {
     const name = scene?.name || task.sceneName || task.sceneCode || '未分类场景'
     const current = groupedScenes.get(id)
     const taskCount = (current?.taskCount || 0) + 1
-    const abnormalCount = sceneAbnormalCounts.value[id] ?? current?.abnormalCount ?? 0
+    const abnormalCount = sceneAbnormalCounts.value[id]
     groupedScenes.set(id, {
       id,
       code: current?.code || task.sceneCode,
       name,
       taskCount,
       abnormalCount,
-      description: `任务 ${taskCount} · 异常 ${sceneAbnormalCountsLoading.value && sceneAbnormalCounts.value[id] === undefined ? '—' : abnormalCount}`,
+      description: `任务 ${taskCount} · 异常 ${formatCount(abnormalCount)}`,
       visual: organization.value.id === 'agriculture-rural' ? 'field' : 'forest',
     })
   })
@@ -156,7 +153,7 @@ const taskStatusLegend = computed(() => [
   { name: '已失败', count: unitTaskSummary.value.failed, color: '#ec8298' },
   { name: '已取消', count: unitTaskSummary.value.canceled, color: '#64879b' },
 ].filter((item, index) => index < 3 || item.count > 0))
-const mediaPhotoRate = computed(() => percentage(classifiedMediaCounts.value?.photoCount, classifiedMediaCounts.value?.totalCount))
+const mediaPhotoRate = computed(() => percentage(uavMediaSummary.value?.photoCount, uavMediaSummary.value?.totalCount))
 const fleetAvailabilityRate = computed(() => percentage(
   uavDeviceSummary.value?.onlineCount,
   uavDeviceSummary.value?.totalCount,
@@ -295,51 +292,41 @@ function polygonCenter(polygons: [number, number][][]): [number, number] {
   ]
 }
 
-async function loadTaskRanges(tasks: GovernanceTask[], requestVersion: number) {
+async function loadTaskRanges() {
   const currentGeometryRequest = ++geometryRequestVersion
-  const results = await Promise.allSettled(tasks.map(async (task) => [
-    task.id,
-    await getGovernanceTaskGeometry(task.id, undefined, false),
-  ] as const))
-  if (requestVersion !== statisticsRequestVersion || currentGeometryRequest !== geometryRequestVersion) return
-  taskRanges.value = Object.fromEntries(results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []))
+  const scene = activeScene.value
+  // 首页没有任务范围定位需求时，连 GeoJSON 请求都不发送。
+  if (!scene || !currentUnitTasksLoaded.value) {
+    taskRanges.value = {}
+    taskRangesLoading.value = false
+    return
+  }
+  const tasks = currentUnitTasks.value.filter(task => findOrganizationScene(organization.value, task.sceneCode, task.sceneName)?.id === scene.id)
+  taskRangesLoading.value = true
+  const isCurrent = () => currentGeometryRequest === geometryRequestVersion
+  try {
+    const ranges = await geometryLoader.load(tasks, isCurrent)
+    if (isCurrent()) taskRanges.value = ranges
+  } finally {
+    if (isCurrent()) taskRangesLoading.value = false
+  }
 }
 
-/**
- * 场景统计接口可能漏掉部分场景；不能将缺失场景直接当作“异常 0”。
- * 这里按任务调用异常图斑分页接口，只读取 total，再归并到场景，确保首页卡片展示真实数量。
- */
-async function loadSceneAbnormalCounts(tasks: GovernanceTask[], requestVersion: number) {
+/** 优先复用 scene-stat；缺失场景按 sceneCode 补一次完整汇总，不按任务累加。 */
+async function loadSceneAbnormalCounts(tasks: GovernanceTask[], requestVersion: number, deptId: string | undefined, sceneStats: BusinessSceneStat[]) {
   const currentAbnormalRequest = ++abnormalCountRequestVersion
-  sceneAbnormalCountsLoading.value = true
-  const failedSceneIds = new Set<string>()
-  try {
-    const results = await Promise.allSettled(tasks.map(async (task) => [
-      task.id,
-      await getTaskAbnormalPage({ bizTaskId: task.id, pageNum: 1, pageSize: 1 }),
-    ] as const))
-    if (requestVersion !== statisticsRequestVersion || currentAbnormalRequest !== abnormalCountRequestVersion) return
-
-    const counts: Record<string, number> = {}
-    results.forEach((result, index) => {
-      const task = tasks[index]
-      if (!task) return
-      const scene = findOrganizationScene(organization.value, task.sceneCode, task.sceneName)
-      if (!scene) return
-      if (result.status !== 'fulfilled') {
-        failedSceneIds.add(scene.id)
-        return
-      }
-      counts[scene.id] = (counts[scene.id] || 0) + result.value[1].total
-    })
-    // 同一场景中只要有一个任务异常数无法获取，就保留统计接口值，避免展示不完整的小计。
-    failedSceneIds.forEach((sceneId) => { delete counts[sceneId] })
-    sceneAbnormalCounts.value = counts
-  } finally {
-    if (requestVersion === statisticsRequestVersion && currentAbnormalRequest === abnormalCountRequestVersion) {
-      sceneAbnormalCountsLoading.value = false
-    }
-  }
+  const isCurrent = () => requestVersion === statisticsRequestVersion && currentAbnormalRequest === abnormalCountRequestVersion
+  const byCode = await loadDashboardSceneCounts(tasks.map(task => task.sceneCode), sceneStats,
+    sceneCode => getBusinessAbnormalSummary({ deptId, sceneCode }), isCurrent)
+  if (!isCurrent()) return
+  const counts: Record<string, number> = {}
+  tasks.forEach(task => {
+    const scene = findOrganizationScene(organization.value, task.sceneCode, task.sceneName)
+    const id = scene?.id || resolveWorkspaceSceneId(task.sceneCode, task.sceneName) || task.sceneCode || task.sceneName || 'uncategorized'
+    const count = byCode[task.sceneCode]
+    if (count !== undefined) counts[id] = count
+  })
+  sceneAbnormalCounts.value = counts
 }
 
 const departmentNameMatchers = {
@@ -389,11 +376,13 @@ async function loadBusinessStatistics(resetExisting = false) {
     statisticsError.value = ''
     // 切换身份期间不可继续展示上一单位数据；待本次请求完成后再呈现新单位结果。
     statistics.value = undefined
-    currentUnitTasks.value = []
     currentUnitTasksLoaded.value = false
+    geometryRequestVersion += 1
+    geometryLoader.clear()
+    currentUnitTasks.value = []
     taskRanges.value = {}
+    taskRangesLoading.value = false
     sceneAbnormalCounts.value = {}
-    sceneAbnormalCountsLoading.value = false
   }
 
   if (user.authMode === 'real' && !deptId) {
@@ -411,7 +400,8 @@ async function loadBusinessStatistics(resetExisting = false) {
     }
   }
 
-  const statisticsPromise = getBusinessDashboardStatistics({ deptId })
+  // 立即绑定拒绝处理，避免任务接口较慢时统计接口的失败成为未处理的 Promise。
+  const statisticsPromise = Promise.allSettled([getBusinessDashboardStatistics({ deptId })])
   const taskPromise = getGovernanceTaskPage({ pageNum: 1, pageSize: 100, deptId, organizationId })
 
   try {
@@ -424,18 +414,15 @@ async function loadBusinessStatistics(resetExisting = false) {
       currentUnitTasks.value = pageResult.value.records
         .filter((task) => isTaskVisibleForOrganization(organization.value, task, deptId))
       currentUnitTasksLoaded.value = true
-      void loadTaskRanges(currentUnitTasks.value, requestVersion)
-      void loadSceneAbnormalCounts(currentUnitTasks.value, requestVersion)
     } else if (!currentUnitTasksLoaded.value) {
       // 首次加载失败时保持明确的空状态；后台刷新失败则保留最后一次成功数据。
       currentUnitTasks.value = []
       currentUnitTasksLoaded.value = false
       taskRanges.value = {}
       sceneAbnormalCounts.value = {}
-      sceneAbnormalCountsLoading.value = false
     }
 
-    const statisticsResult = await Promise.allSettled([statisticsPromise])
+    const statisticsResult = await statisticsPromise
     if (requestVersion !== statisticsRequestVersion) return
     const statisticsPage = statisticsResult[0]
     if (statisticsPage?.status === 'fulfilled') {
@@ -448,6 +435,8 @@ async function loadBusinessStatistics(resetExisting = false) {
         ? statisticsPage.reason.message
         : '统计接口请求失败'
     }
+    void loadSceneAbnormalCounts(currentUnitTasks.value, requestVersion, deptId,
+      statisticsPage?.status === 'fulfilled' ? statisticsPage.value.sceneStats || [] : [])
   } catch (error) {
     // 防御性兜底：无论任何解析/渲染异常，均不可让首页永久处于加载状态。
     statisticsError.value = error instanceof Error ? error.message : '首页数据加载失败'
@@ -456,71 +445,22 @@ async function loadBusinessStatistics(resetExisting = false) {
   }
 }
 
-function mediaExtension(fileName: string) {
-  const cleanName = fileName.split(/[?#]/)[0]?.trim() || ''
-  const match = cleanName.match(/\.([^.]+)$/)
-  return match?.[1]?.toUpperCase() || ''
-}
-
-async function loadAllTaskMedia(taskId: string) {
-  const records: LiveMediaItem[] = []
-  let pageNum = 1
-  let total = Number.POSITIVE_INFINITY
-  while (records.length < total) {
-    const result = await getFlightTaskMedia({ taskId, pageNum, pageSize: 200 })
-    records.push(...result.list)
-    total = result.total
-    if (!result.list.length || records.length >= total) break
-    pageNum += 1
-  }
-  return records
-}
-
-async function loadClassifiedMediaCounts() {
-  const contextKey = `${user.organizationId}:${user.activeDeptId ?? ''}:${user.token}`
-  if (mediaCountsLoadedKey === contextKey || mediaCountsLoadingKey === contextKey) return
-  mediaCountsLoadingKey = contextKey
-  classifiedMediaCounts.value = undefined
-  const requestVersion = ++mediaCountRequestVersion
-  try {
-    const taskResult = await getUavFlightTaskOptions({ pageNum: 1, pageSize: 200 })
-    let totalCount = 0
-    let photoCount = 0
-    let videoCount = 0
-    const imageTypes = new Set(['JPG', 'JPEG', 'PNG', 'TIF', 'TIFF', 'DNG', 'WEBP', 'BMP'])
-    const videoTypes = new Set(['MP4', 'MOV', 'M4V', 'AVI', 'MKV', 'WEBM'])
-    const excludedTypes = new Set(['OBS', 'NAV', 'MRK', 'RTK'])
-    for (let index = 0; index < taskResult.list.length; index += 5) {
-      const groups = await Promise.all(taskResult.list.slice(index, index + 5).map((task) => loadAllTaskMedia(task.id)))
-      groups.flat().forEach((media) => {
-        const extension = mediaExtension(media.name)
-        const declaredType = String(media.mediaType || '').toUpperCase()
-        if (excludedTypes.has(extension) || excludedTypes.has(declaredType)) return
-        totalCount += 1
-        if (imageTypes.has(extension)) photoCount += 1
-        else if (videoTypes.has(extension)) videoCount += 1
-      })
-    }
-    if (requestVersion !== mediaCountRequestVersion) return
-    classifiedMediaCounts.value = { totalCount, photoCount, videoCount }
-    mediaCountsLoadedKey = contextKey
-  } catch {
-    if (requestVersion === mediaCountRequestVersion) classifiedMediaCounts.value = undefined
-  } finally {
-    if (mediaCountsLoadingKey === contextKey) mediaCountsLoadingKey = ''
-  }
-}
-
-async function loadLivePreview() {
+async function loadLivePreview(resetMediaSummary = false) {
   const requestVersion = ++livePreviewRequestVersion
+  if (resetMediaSummary) uavMediaSummary.value = undefined
   const initialLoad = !livePreviewLoaded.value
   if (initialLoad) livePreviewLoading.value = true
   try {
-    const [streamsResult, deviceSummaryResult, flightSummaryResult, mediaSummaryResult] = await Promise.allSettled([
+    const [streamsResult, deviceSummaryResult, flightSummaryResult] = await Promise.allSettled([
       getLiveStreams(),
       getUavDeviceSummary(),
       getUavFlightSummary(),
-      getUavMediaSummary(),
+      // 素材卡片独立提交结果，不等待直播分享地址等较慢请求完成。
+      getUavMediaSummary().then((summary) => {
+        if (requestVersion === livePreviewRequestVersion) uavMediaSummary.value = summary
+      }, () => {
+        if (requestVersion === livePreviewRequestVersion) uavMediaSummary.value = undefined
+      }),
     ])
     if (requestVersion !== livePreviewRequestVersion) return
     if (deviceSummaryResult.status === 'fulfilled') {
@@ -534,13 +474,6 @@ async function loadLivePreview() {
     } else if (initialLoad) {
       uavFlightSummary.value = undefined
     }
-    if (mediaSummaryResult.status === 'fulfilled') {
-      uavMediaSummary.value = mediaSummaryResult.value
-    } else if (initialLoad) {
-      uavMediaSummary.value = undefined
-    }
-    void loadClassifiedMediaCounts()
-
     if (streamsResult.status === 'fulfilled') {
       const result = streamsResult.value
       if (onlineUavCount.value === undefined) onlineUavCount.value = result.onlineDeviceCount
@@ -573,12 +506,21 @@ const dashboardRefreshTimer = window.setInterval(() => {
 }, 60_000)
 onBeforeUnmount(() => {
   window.clearInterval(dashboardRefreshTimer)
+  statisticsRequestVersion += 1
+  abnormalCountRequestVersion += 1
+  geometryRequestVersion += 1
+  livePreviewRequestVersion += 1
+  geometryLoader.clear()
 })
+// 只在进入场景或该场景任务更新时读取几何；普通首页及定时统计刷新不扫描范围。
+watch([() => activeScene.value?.id, currentUnitTasks, currentUnitTasksLoaded], () => {
+  void loadTaskRanges()
+}, { immediate: true, flush: 'sync' })
 // 登录完成、部门切换或单位切换时，始终按最终的认证上下文重新拉取。flush: 'post'
 // 会把 setRealSession 内的多项同步状态更新合并后再执行，避免中间态请求。
 watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => user.organizationId], () => {
   void loadBusinessStatistics(true)
-  void loadLivePreview()
+  void loadLivePreview(true)
 }, { immediate: true, flush: 'post' })
 </script>
 
@@ -616,12 +558,20 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <h2>航拍素材成果</h2>
                 <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入采集数据" @click="openDataManagement">采集数据 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="media-summary"><DashboardRing :value="formatCount(classifiedMediaCounts?.totalCount)" label="素材总数" tone="blue" :rate="mediaPhotoRate" title="圆环展示照片在素材总数中的占比" /><dl class="metric-legend"><div><dt><i class="legend-blue"></i>照片</dt><dd>{{ formatCount(classifiedMediaCounts?.photoCount) }}</dd></div><div><dt><i class="legend-mint"></i>视频</dt><dd>{{ formatCount(classifiedMediaCounts?.videoCount) }}</dd></div><div><dt><i class="legend-muted"></i>素材容量</dt><dd>{{ formatFileSize(uavMediaSummary?.totalFileSize) }}</dd></div></dl></div>
+              <div class="media-summary">
+                <DashboardRing :value="formatCount(uavMediaSummary?.totalCount)" label="素材总数" tone="blue" :rate="mediaPhotoRate" title="圆环展示照片在素材总数中的占比" />
+                <dl class="metric-legend">
+                  <div><dt><i class="legend-blue"></i>照片</dt><dd>{{ formatCount(uavMediaSummary?.photoCount) }}</dd></div>
+                  <div><dt><i class="legend-mint"></i>视频</dt><dd>{{ formatCount(uavMediaSummary?.videoCount) }}</dd></div>
+                  <div><dt><i class="legend-violet"></i>其他素材</dt><dd>{{ formatCount(uavMediaSummary?.otherCount) }}</dd></div>
+                  <div><dt><i class="legend-muted"></i>素材容量</dt><dd>{{ formatFileSize(uavMediaSummary?.totalFileSize) }}</dd></div>
+                </dl>
+              </div>
             </section>
           </aside>
 
           <article class="cockpit-panel map-overview">
-            <DashboardMap :key="activeScene?.id || organization.id" :layers="mapLayers" :routes="patrolRoutes" :focus-layer-id="activeScene?.id" :screen-cleared="isMapClearScreen" floating-controls @toggle-clear-screen="isMapClearScreen = !isMapClearScreen" />
+            <DashboardMap :key="activeScene?.id || organization.id" :layers="mapLayers" :routes="patrolRoutes" :focus-layer-id="activeScene?.id" :focus-geometry-pending="sceneGeometryPending" :screen-cleared="isMapClearScreen" floating-controls @toggle-clear-screen="isMapClearScreen = !isMapClearScreen" />
           </article>
 
           <aside class="overview-side overview-side--right" :inert="isMapClearScreen" :aria-hidden="isMapClearScreen">

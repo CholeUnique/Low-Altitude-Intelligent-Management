@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { getFlightTaskMedia, getUavFlightTaskOptions, type UavFlightTaskOption } from '@/api/patrol'
+import type { FlightReviewMedia } from '@/api/flight-review'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
+import { toggleVideoSurfacePlayback } from '@/utils/video-playback'
+
+const VideoTelemetryOverlay = defineAsyncComponent(() => import('@/workspace-components/spot-identification/VideoTelemetryOverlay.vue'))
+const SrtInfoDialog = defineAsyncComponent(() => import('@/workspace-components/spot-identification/SrtInfoDialog.vue'))
 
 type DataTab = 'collection' | 'recognition'
 interface TaskMediaState { list: LiveMediaItem[]; all: LiveMediaItem[]; total: number; loading: boolean; error: string }
+interface CollectionMediaEntry { media: LiveMediaItem; task: UavFlightTaskOption }
 
 const props = withDefaults(defineProps<{ embedded?: boolean; activeTab?: DataTab }>(), { embedded: false, activeTab: 'collection' })
 const keyword = ref('')
@@ -24,7 +30,20 @@ const mediaByTask = ref<Record<string, TaskMediaState>>({})
 const currentPage = ref(1)
 const pageSize = ref(40)
 const previewMedia = ref<LiveMediaItem>()
-const previewItems = ref<LiveMediaItem[]>([])
+const previewTask = ref<UavFlightTaskOption>()
+const previewItems = ref<CollectionMediaEntry[]>([])
+const videoElement = ref<HTMLVideoElement>()
+const videoPlaybackStarted = ref(false)
+const telemetryVisible = ref(false)
+const videoInteractionError = ref('')
+const srtContext = shallowRef<{ planName: string; media: FlightReviewMedia[]; initialId: string }>()
+watch(videoElement, (video, _previous, onCleanup) => {
+  videoPlaybackStarted.value = !!video && (!video.paused || video.played.length > 0)
+  if (!video || videoPlaybackStarted.value) return
+  const markStarted = () => { videoPlaybackStarted.value = true }
+  video.addEventListener('play', markStarted, { once: true })
+  onCleanup(() => video.removeEventListener('play', markStarted))
+}, { flush: 'sync' })
 const previewIndex = ref(-1)
 const previewScale = ref(1)
 const previewOffsetX = ref(0)
@@ -77,6 +96,29 @@ const deviceCount = computed(() => deviceOptions.value.length)
 const previewImageStyle = computed(() => ({
   transform: `translate3d(${previewOffsetX.value}px, ${previewOffsetY.value}px, 0) scale(${previewScale.value})`,
 }))
+const previewReviewMedia = computed(() => previewMedia.value && previewTask.value ? toReviewMedia(previewMedia.value, previewTask.value) : undefined)
+const previewTaskMedia = computed(() => previewTask.value ? taskReviewMedia(previewTask.value) : [])
+
+function toReviewMedia(media: LiveMediaItem, task: UavFlightTaskOption): FlightReviewMedia {
+  return { id: media.id, taskId: task.id, fileName: media.name, type: isVideoMedia(media) ? 'video' : media.mediaType || 'image',
+    thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: '', shootTime: media.capturedAt }
+}
+function taskReviewMedia(task: UavFlightTaskOption) {
+  return (mediaByTask.value[task.id]?.all || []).map(media => toReviewMedia(media, task))
+}
+function openSrtInfo(media: LiveMediaItem, task: UavFlightTaskOption) {
+  if (!isVideoMedia(media)) return
+  videoElement.value?.pause()
+  const videos = (mediaByTask.value[task.id]?.all || []).filter(isVideoMedia)
+  if (!videos.some(item => item.id === media.id)) videos.unshift(media)
+  srtContext.value = { planName: task.name, media: videos.map(item => toReviewMedia(item, task)), initialId: `${task.id}:${media.id}` }
+}
+async function togglePreviewVideo(event: MouseEvent) {
+  const video = videoElement.value
+  videoInteractionError.value = ''
+  try { await toggleVideoSurfacePlayback(event) }
+  catch { if (video && videoElement.value === video) videoInteractionError.value = '视频暂时无法播放，请使用底部播放按钮重试。' }
+}
 
 function mediaExtension(media: LiveMediaItem) {
   const name = media.name.split(/[?#]/)[0]?.trim() || ''
@@ -159,6 +201,8 @@ function resetPreviewTransform() {
   previewPointerId = undefined
 }
 function resetVideoPlayback() {
+  telemetryVisible.value = false
+  videoInteractionError.value = ''
   window.clearTimeout(videoLoadTimer)
   videoPlaybackReady.value = false
   videoPlaybackFailed.value = false
@@ -172,17 +216,21 @@ function beginVideoPlaybackCheck() {
     videoPlaybackFailed.value = true
   }, 20_000)
 }
-function openMedia(media: LiveMediaItem, items: LiveMediaItem[]) {
+function openMedia(media: LiveMediaItem, task: UavFlightTaskOption, items: CollectionMediaEntry[]) {
   if (!media.originalUrl && !media.thumbnail) return
-  previewItems.value = items.filter((item) => item.originalUrl || item.thumbnail)
-  previewIndex.value = previewItems.value.findIndex((item) => item === media)
-  previewMedia.value = previewItems.value[previewIndex.value] || media
+  previewItems.value = items.filter(({ media: item }) => item.originalUrl || item.thumbnail)
+  previewIndex.value = previewItems.value.findIndex((item) => item.task.id === task.id && item.media.id === media.id)
+  const entry = previewItems.value[previewIndex.value]
+  previewMedia.value = entry?.media || media
+  previewTask.value = entry?.task || task
   resetPreviewTransform()
   resetVideoPlayback()
   if (isVideoMedia(previewMedia.value)) beginVideoPlaybackCheck()
 }
 function closePreview() {
+  srtContext.value = undefined
   previewMedia.value = undefined
+  previewTask.value = undefined
   previewItems.value = []
   previewIndex.value = -1
   resetPreviewTransform()
@@ -191,12 +239,13 @@ function closePreview() {
 function switchPreview(step: number) {
   if (!previewItems.value.length) return
   previewIndex.value = (previewIndex.value + step + previewItems.value.length) % previewItems.value.length
-  const nextMedia = previewItems.value[previewIndex.value]
-  if (!nextMedia) return
-  previewMedia.value = nextMedia
+  const entry = previewItems.value[previewIndex.value]
+  if (!entry) return
+  previewMedia.value = entry.media
+  previewTask.value = entry.task
   resetPreviewTransform()
   resetVideoPlayback()
-  if (isVideoMedia(nextMedia)) beginVideoPlaybackCheck()
+  if (isVideoMedia(entry.media)) beginVideoPlaybackCheck()
 }
 function markVideoReady() {
   window.clearTimeout(videoLoadTimer)
@@ -205,6 +254,7 @@ function markVideoReady() {
   videoFailureReason.value = ''
 }
 function markVideoFailed() {
+  telemetryVisible.value = false
   window.clearTimeout(videoLoadTimer)
   videoPlaybackReady.value = false
   videoPlaybackFailed.value = true
@@ -251,6 +301,7 @@ function endPreviewDrag(event: PointerEvent) {
   if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
 }
 function handlePreviewKey(event: KeyboardEvent) {
+  if (srtContext.value) return
   if (!previewMedia.value) return
   if (event.key === 'Escape') closePreview()
   else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') switchPreview(-1)
@@ -259,6 +310,7 @@ function handlePreviewKey(event: KeyboardEvent) {
   event.preventDefault()
 }
 async function loadTasks() {
+  closePreview()
   const version = ++loadVersion
   loading.value = true
   mediaScanLoading.value = false
@@ -285,7 +337,7 @@ async function loadTasks() {
 watch([keyword, mediaTypeFilter, taskFilter, timeFilter, deviceFilter, statusFilter, pageSize], () => { currentPage.value = 1 })
 watch(pageCount, () => setPage(currentPage.value))
 watch(() => props.activeTab, (tab) => {
-  if (tab !== 'collection') return
+  if (tab !== 'collection') { closePreview(); return }
   if (!tasks.value.length && !loading.value) void loadTasks()
 })
 onMounted(() => {
@@ -325,10 +377,10 @@ onBeforeUnmount(() => {
         <div v-else-if="error" class="page-state error-state"><span>{{ error }}</span><button @click="loadTasks">重新加载</button></div>
         <div v-else-if="!pageMedia.length" class="page-state">{{ mediaLoadErrors ? '部分数据读取失败，当前没有符合筛选条件的素材' : '没有符合筛选条件的图片或视频' }}</div>
         <section v-else class="collection-media-grid media-grid" aria-label="采集数据列表">
-          <button v-for="{ media, task } in pageMedia" :key="`${task.id}-${media.id}`" class="media-card" @click="openMedia(media, filteredMedia.map((entry) => entry.media))">
+          <article v-for="{ media, task } in pageMedia" :key="`${task.id}-${media.id}`" class="media-card" :class="{ 'has-srt': isVideoMedia(media) }"><button type="button" class="media-card-open" :aria-label="`预览 ${media.name}`" @click="openMedia(media, task, filteredMedia)">
             <div class="media-preview" :class="{ 'video-preview':isVideoMedia(media), 'has-thumbnail':isVideoMedia(media) && Boolean(media.thumbnail) }"><template v-if="isVideoMedia(media)"><img v-if="media.thumbnail" :src="media.thumbnail" :alt="`${media.name} 视频缩略图`" loading="lazy" /><span class="video-preview__play"><i>▶</i><em>视频</em></span></template><img v-else-if="mediaSource(media)" :src="mediaSource(media)" :alt="media.name" loading="lazy" /><span v-else>暂无缩略图</span></div>
             <div class="media-card__info"><strong :title="media.name">{{ media.name }}</strong><small>{{ isVideoMedia(media) ? '视频' : '图片' }} · {{ media.capturedAt || task.createTime }}</small><small class="media-card__task" :title="task.name">来源任务：{{ task.name }}</small></div>
-          </button>
+          </button><button v-if="isVideoMedia(media)" type="button" class="media-card-srt" :aria-label="`${media.name}：SRT 信息`" @click.stop="openSrtInfo(media, task)">SRT 信息</button></article>
         </section>
 
         <footer class="collection-pagination">
@@ -343,7 +395,10 @@ onBeforeUnmount(() => {
       <button class="preview-close" title="退出全屏（Esc）" aria-label="退出全屏" @click="closePreview"><span>×</span><em>退出全屏</em></button>
       <button class="preview-nav preview-prev" title="上一张（← / ↑）" aria-label="上一张" @click.stop="switchPreview(-1)">‹</button>
       <section v-if="isVideoMedia(previewMedia)" class="preview-video-stage" @click.stop>
-        <video v-if="previewMedia.originalUrl && !videoPlaybackFailed" :key="`${previewMedia.id}-${videoFailureReason}`" :src="previewMedia.originalUrl" controls autoplay playsinline preload="auto" @loadeddata="markVideoReady" @canplay="markVideoReady" @playing="markVideoReady" @error="markVideoFailed" />
+        <video v-if="previewMedia.originalUrl && !videoPlaybackFailed" ref="videoElement" :key="`${previewTask?.id}:${previewMedia.id}:${videoFailureReason}`" :src="previewMedia.originalUrl" controls controlslist="nofullscreen" autoplay playsinline preload="auto" @loadeddata="markVideoReady" @canplay="markVideoReady" @playing="markVideoReady" @error="markVideoFailed" @click="togglePreviewVideo" />
+        <button v-if="previewMedia.originalUrl && !videoPlaybackFailed" type="button" class="collection-telemetry-toggle" :aria-pressed="telemetryVisible" @click.stop="telemetryVisible = !telemetryVisible">⌖ {{ telemetryVisible ? '关闭协同展示' : '协同展示' }}</button>
+        <VideoTelemetryOverlay v-if="telemetryVisible && previewReviewMedia && videoElement && !videoPlaybackFailed" :key="`${previewReviewMedia.taskId}:${previewReviewMedia.id}`" :media="previewReviewMedia" :media-list="previewTaskMedia" :video="videoElement" :playback-started="videoPlaybackStarted" :fullscreen="true" @close="telemetryVisible = false" />
+        <span v-if="videoInteractionError" class="video-interaction-error" role="status">{{ videoInteractionError }}</span>
         <div v-if="previewMedia.originalUrl && !videoPlaybackReady && !videoPlaybackFailed" class="video-loading"><i></i><span>正在读取原视频…</span></div>
         <section v-if="videoPlaybackFailed || !previewMedia.originalUrl" class="hevc-notice">
           <i>!</i>
@@ -370,6 +425,7 @@ onBeforeUnmount(() => {
       <button class="preview-nav preview-next" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
       <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small></footer>
     </div>
+    <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" :initial-id="srtContext.initialId" @close="srtContext = undefined" />
   </div>
 </template>
 
@@ -440,6 +496,14 @@ onBeforeUnmount(() => {
 .collection-media-grid .media-card strong { padding-right:0; }
 .collection-media-grid .media-card__info small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .collection-media-grid .media-card__task { color:#6a809b; }
+.collection-media-grid .media-card { position:relative; display:block; }
+.media-card-open { display:grid; grid-template-rows:140px 74px; width:100%; height:100%; min-width:0; padding:0; border:0; color:inherit; background:#fff; text-align:left; font:inherit; cursor:pointer; }
+.media-card-open:hover { filter:none!important; box-shadow:none!important; }
+.media-card-open:focus-visible { outline-offset:-3px; }
+.collection-media-grid .media-card .media-card__info { min-width:0; padding:10px 12px 11px; }
+.collection-media-grid .media-card.has-srt strong { padding-right:76px; }
+.media-card-srt { position:absolute; top:148px; right:8px; min-height:24px; padding:3px 7px; border:1px solid #add5e2; border-radius:4px; color:#167e9d; background:#edf9fc; font:600 12px/16px "Microsoft YaHei",sans-serif; cursor:pointer; }
+.media-card-srt:hover { color:#fff; background:#167e9d; border-color:#167e9d; }
 .media-preview { position:relative; height:122px; background:linear-gradient(135deg,#d8e4ed,#c5d5e0); }
 .media-preview::after { position:absolute; inset:0; background:linear-gradient(180deg,transparent 65%,#0a1c2f42); content:""; pointer-events:none; }
 .media-preview.video-preview { color:#c8d7e4; background:linear-gradient(145deg,#172a3a,#09131d); text-align:center; }
@@ -463,6 +527,9 @@ onBeforeUnmount(() => {
 .preview-image-stage.dragging img { transition:none; }
 .preview-video-stage { position:relative; width:calc(100vw - 220px); height:calc(100vh - 162px); display:flex; align-items:center; justify-content:center; overflow:hidden; background:#02060a; box-shadow:0 16px 55px #000b; }
 .preview-video-stage video { width:100%; height:100%; display:block; background:#000; object-fit:contain; }
+.collection-telemetry-toggle { position:absolute; z-index:3; top:6px; left:6px; padding:8px 12px; border:1px solid #7fdde8aa; border-radius:5px; color:#e6fbff; background:#0c344be6; font-size:12px; font-weight:700; cursor:pointer; }
+.collection-telemetry-toggle:hover,.collection-telemetry-toggle[aria-pressed=true] { background:#147c9d; }
+.video-interaction-error { position:absolute; z-index:3; bottom:72px; left:50%; max-width:calc(100% - 32px); transform:translateX(-50%); padding:8px 12px; border-radius:5px; color:#fff; background:#102d40e8; font-size:13px; pointer-events:none; }
 .video-loading { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:#b9c8d5; background:#07111ddd; font-size:13px; pointer-events:none; }
 .video-loading i { width:32px; height:32px; border:3px solid #648399; border-top-color:#58c7ff; border-radius:50%; animation:video-loading-spin .8s linear infinite; }
 .preview-video-download { position:absolute; z-index:3; top:16px; right:16px; display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 14px; color:#fff; border:1px solid #72c9f7; border-radius:5px; background:#126eaaeb; box-shadow:0 5px 15px #0005; font-size:12px; font-weight:600; text-decoration:none; }

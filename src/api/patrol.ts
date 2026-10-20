@@ -91,6 +91,7 @@ export interface UavMediaSummary {
   totalCount?: number
   photoCount?: number
   videoCount?: number
+  otherCount?: number
   downloadedCount?: number
   downloadFailedCount?: number
   cleanedCount?: number
@@ -323,6 +324,7 @@ export async function getUavMediaSummary(): Promise<UavMediaSummary> {
     totalCount: optionalNumber(item.totalCount),
     photoCount: optionalNumber(item.photoCount),
     videoCount: optionalNumber(item.videoCount),
+    otherCount: optionalNumber(item.otherCount),
     downloadedCount: optionalNumber(item.downloadedCount),
     downloadFailedCount: optionalNumber(item.downloadFailedCount),
     cleanedCount: optionalNumber(item.cleanedCount),

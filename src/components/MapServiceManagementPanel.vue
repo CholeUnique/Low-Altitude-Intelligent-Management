@@ -46,6 +46,22 @@ const editorMode = ref<EditorMode>('add')
 const statusConfirm = ref<{ service: MapServiceItem; nextStatus: 0 | 1 }>()
 const editorTitle = computed(() => ({ add: '新增地图服务', edit: '编辑地图服务', view: '地图服务详情' })[editorMode.value])
 const form = reactive({ id: '' as string | number, name: '', serviceUrl: '', type: '', sort: 0, status: 1, preset: 0, remark: '', createTime: '', updateTime: '', departmentScope: 'all' as DepartmentScope, deptIds: [] as string[], deptNames: [] as string[] })
+const serviceUrlWarnings = computed(() => getServiceUrlWarnings(form.serviceUrl))
+
+function getServiceUrlWarnings(address: string): string[] {
+  const warnings: string[] = []
+  try {
+    const url = new URL(address.trim())
+    const protocol = [...url.searchParams.entries()].find(([key]) => key.toUpperCase() === 'SERVICE')?.[1].toUpperCase()
+    if (protocol === 'WFS' || /\/wfs\/?$/i.test(url.pathname)) {
+      warnings.push('当前地址是 WFS 要素查询服务，首页暂不支持直接加载。请向服务方获取同图层的 WMS / WMTS 地址，并同步修改服务类型；只改类型不能转换协议。')
+    }
+    if (/^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])$/i.test(url.hostname) || url.hostname.toLowerCase().endsWith('.localhost')) {
+      warnings.push('localhost / 回环地址指向访问者自己的电脑。供其他电脑访问时，请改用所有访问者均可连通的服务器 IP 或域名，并确认跨域配置。')
+    }
+  } catch { /* 输入过程中不打断编辑，地址可用性由实际加载结果确认。 */ }
+  return warnings
+}
 const selectableDepartments = computed(() => {
   const options = new Map(departments.value.map((department) => [department.deptId, department]))
   form.deptIds.forEach((id, index) => {
@@ -179,9 +195,10 @@ async function openEditor(mode: EditorMode, row?: MapServiceItem) {
 }
 
 async function submitService() {
+  if (editorMode.value === 'view' || busy.value) return
   if (!form.name.trim()) return showError(new Error('请输入服务名称'))
   if (!form.serviceUrl.trim()) return showError(new Error('请输入服务地址'))
-  if (editorMode.value === 'add' && !form.type) return showError(new Error('请选择服务类型'))
+  if (!form.type) return showError(new Error('请选择服务类型'))
   if (form.departmentScope === 'selected' && !form.deptIds.length) return showError(new Error('请至少选择一个适用部门，或改选全部部门适用'))
   busy.value = true
   try {
@@ -300,9 +317,10 @@ watch(() => user.activeDeptId, () => {
         <header><div><h2>{{ editorTitle }}</h2><p>地图服务注册信息</p></div><button type="button" @click="editorOpen = false">×</button></header>
         <form @submit.prevent="submitService">
           <label><span>服务名称 *</span><input v-model.trim="form.name" maxlength="100" :disabled="editorMode === 'view'" required></label>
-          <label v-if="editorMode === 'add'"><span>服务类型 *</span><select v-model="form.type" required><option value="" disabled>请选择服务类型</option><option v-for="option in serviceTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-          <label v-else><span>服务类型{{ editorMode === 'edit' ? '（只读）' : '' }}</span><input :value="serviceTypeLabel(form.type)" readonly aria-readonly="true" title="已有服务的类型由后端记录，编辑时保持不变"></label>
-          <label class="wide"><span>服务地址 *</span><textarea v-model.trim="form.serviceUrl" maxlength="500" :disabled="editorMode === 'view'" required></textarea></label>
+          <label v-if="editorMode !== 'view'"><span>服务类型 *</span><select v-model="form.type" required aria-label="服务类型"><option value="" disabled>请选择服务类型</option><option v-if="form.type && !serviceTypeOptions.some(option => option.value === form.type)" :value="form.type">{{ form.type }}（原配置）</option><option v-for="option in serviceTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+          <label v-else><span>服务类型</span><input :value="serviceTypeLabel(form.type)" readonly aria-readonly="true"></label>
+          <label class="wide"><span>服务地址 *</span><textarea v-model.trim="form.serviceUrl" maxlength="500" :disabled="editorMode === 'view'" required></textarea><small v-if="editorMode !== 'view'" class="department-hint">GeoServer 请按发布协议选择 WMS / WMTS，可填写服务入口或 GetCapabilities 地址；多个图层时指定 layers / LAYER，WMTS 可用 TILEMATRIXSET 指定矩阵集。ArcGIS 请填写 MapServer / ImageServer 服务根地址。</small></label>
+          <div v-if="serviceUrlWarnings.length" class="wide service-config-warnings" role="status"><p v-for="warning in serviceUrlWarnings" :key="warning">{{ warning }}</p></div>
           <label><span>排序</span><input v-model.number="form.sort" type="number" :disabled="editorMode === 'view'"></label>
           <label v-if="editorMode === 'view'"><span>状态</span><input :value="form.status === 1 ? '启用' : '停用'" disabled></label>
           <label v-if="editorMode === 'view'"><span>数据来源</span><input :value="form.preset === 1 ? '系统预置' : '自定义'" disabled></label>
@@ -354,4 +372,5 @@ watch(() => user.activeDeptId, () => {
 .department-summary{display:block;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#99d8e8}.department-selector{min-width:0;margin:0;padding:13px 15px 14px;border:1px solid #20546a;border-radius:4px;background:#092334}.department-selector legend{padding:0 6px;color:#a6d3e1;font-size:13px;font-weight:700}.department-scope{display:flex;flex-wrap:wrap;gap:10px}.department-scope label,.department-options label{display:flex;align-items:center;gap:8px;cursor:pointer}.department-scope label{min-height:36px;padding:0 13px;color:#d9edf4;background:#0b2c40;border:1px solid #26617a;border-radius:4px}.service-modal .department-selector input[type=radio],.service-modal .department-selector input[type=checkbox]{width:16px;height:16px;min-height:0;flex:none;margin:0;padding:0;accent-color:#24b7d6}.service-modal .department-selector label span{display:inline;margin:0;color:inherit;font-size:13px}.department-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px;max-height:170px;overflow-y:auto}.department-options label{min-width:0;min-height:36px;padding:6px 9px;box-sizing:border-box;color:#c7e1e9;background:#0c2b3d;border:1px solid #1b4e64;border-radius:4px}.department-options label:hover{border-color:#40a9c4;background:#10374d}.department-options label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.department-hint{margin:9px 0 0;color:#7ba4b5;font-size:12px;line-height:1.5}.department-hint--error{color:#ef9da9}.department-hint button{padding:0 4px;color:#65d4eb;background:transparent;border:0;cursor:pointer}@media(max-width:620px){.department-options{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .status-confirm-mask{position:fixed;inset:0;z-index:130;padding:24px;display:grid;place-items:center;background:#00111cc7;backdrop-filter:blur(4px)}.status-confirm-dialog{width:min(510px,calc(100vw - 40px));display:grid;grid-template-columns:58px minmax(0,1fr);gap:16px;padding:24px 24px 0;color:#c7e0e9;background:linear-gradient(145deg,#0d3045,#081f2f);border:1px solid #26718b;border-radius:8px;box-shadow:0 24px 70px #000c}.status-confirm-icon{width:54px;height:54px;display:grid;place-items:center;border-radius:50%;font-size:25px;font-weight:800}.status-confirm-icon.enable{color:#70ebc5;background:#123f3b;border:1px solid #2a9b7d;box-shadow:0 0 18px #2fd3a333}.status-confirm-icon.disable{color:#ffc07a;background:#48351f;border:1px solid #b97a34;box-shadow:0 0 18px #e6974033}.status-confirm-copy h3{margin:1px 0 8px;color:#f1fbff;font-size:20px}.status-confirm-copy>p{margin:0;color:#8fb2c0;font-size:13px;line-height:1.7}.status-confirm-service{margin-top:16px;padding:11px 13px;display:grid;grid-template-columns:78px minmax(0,1fr);align-items:center;gap:10px;background:#071c2a;border:1px solid #17475b;border-radius:4px}.status-confirm-service span{color:#668e9e;font-size:12px}.status-confirm-service strong{overflow:hidden;color:#dff7ff;font-size:13px;text-overflow:ellipsis;white-space:nowrap}.status-confirm-dialog>footer{grid-column:1/-1;margin:6px -24px 0;padding:14px 24px;display:flex;justify-content:flex-end;gap:10px;background:#071c2a;border-top:1px solid #17475b;border-radius:0 0 8px 8px}.status-confirm-dialog footer button{min-width:92px;height:38px;padding:0 17px;color:#a9d3e2;background:#0b2b3e;border:1px solid #28657d;border-radius:4px;font-size:14px;font-weight:700;cursor:pointer}.status-confirm-dialog footer button.confirm.enable{color:#fff;background:linear-gradient(135deg,#168e79,#20af91);border-color:#4bd0b3}.status-confirm-dialog footer button.confirm.disable{color:#fff;background:linear-gradient(135deg,#a96628,#d48235);border-color:#e9a258}.status-confirm-dialog footer button:disabled{opacity:.55;cursor:wait}
 .service-modal input[readonly]{color:#d7ecf3;background:#102c3b;border-color:#286078;cursor:default}
+.service-config-warnings{padding:10px 12px;color:#f2ce91;background:#47381d66;border:1px solid #8b713d;border-radius:4px;font-size:12px;line-height:1.7}.service-config-warnings p+p{margin-top:7px}
 </style>

@@ -24,11 +24,19 @@ interface ArcGisExtent {
 }
 
 interface ArcGisMapServiceMetadata {
+  spatialReference?: ArcGisSpatialReference
   fullExtent?: ArcGisExtent
   initialExtent?: ArcGisExtent
+  extent?: ArcGisExtent
   singleFusedMapCache?: boolean
+  minLOD?: number
+  maxLOD?: number
   tileInfo?: {
-    lods?: Array<{ level?: number }>
+    rows?: number
+    cols?: number
+    origin?: { x?: number; y?: number }
+    spatialReference?: ArcGisSpatialReference
+    lods?: Array<{ level?: number; resolution?: number }>
   }
   layers?: Array<{ id?: number; name?: string }>
 }
@@ -90,11 +98,16 @@ export interface MapServiceLayerHandle {
   definitionExpression?: () => string
 }
 
+export interface MapServiceLayerOptions {
+  /** 无已配置范围时的业务请求边界，不作为服务发布范围返回。 */
+  fallbackRequestBounds?: L.LatLngBounds
+}
+
 /** 行政边界使用真实服务几何，在地图上绘制双层描边，不依赖影像导出的样式。 */
 export async function createAdministrativeBoundaryLayer(service: MapServiceItem, color = '#9AEEFE'): Promise<MapServiceLayerHandle> {
   const url = serviceRoot(service.serviceUrl)
   const layerId = Number(service.arcGisLayerId)
-  const response = await queryAllFeatures(`${url}/${layerId}/query`, new URLSearchParams({
+  const response = await queryAllFeatures(servicePath(url, `${layerId}/query`), new URLSearchParams({
     where: '1=1', outFields: '*', returnGeometry: 'true', outSR: '4326',
   }))
   const group = L.layerGroup()
@@ -237,10 +250,11 @@ export interface MapServiceInspection {
   bounds?: [number, number, number, number]
 }
 
-interface ServiceRemarkConfig {
+interface ServiceRemarkConfig extends MapServiceLayerOptions {
   bounds?: L.LatLngBounds
   minZoom?: number
   maxZoom?: number
+  tileWkid?: number
 }
 
 let jsonpSequence = 0
@@ -248,6 +262,66 @@ const tileMapMetadataCache = new Map<string, Promise<ServiceRemarkConfig>>()
 
 function serviceRoot(serviceUrl: string) {
   return serviceUrl.trim().replace(/\/+$/, '')
+}
+
+/** 子路径必须插入到查询参数之前，避免 token/devAPIKey 被拼进路径。 */
+function servicePath(url: string, path: string) {
+  const [address = ''] = url.split('#', 1)
+  const queryIndex = address.indexOf('?')
+  const base = queryIndex < 0 ? address : address.slice(0, queryIndex)
+  const query = queryIndex < 0 ? '' : address.slice(queryIndex)
+  return `${base.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}${query}`
+}
+
+function serviceParameters(url: string, parameters: URLSearchParams, omit: string[] = []) {
+  const [address = ''] = url.split('#', 1)
+  const queryIndex = address.indexOf('?')
+  const base = queryIndex < 0 ? address : address.slice(0, queryIndex)
+  const query = new URLSearchParams(queryIndex < 0 ? '' : address.slice(queryIndex + 1))
+  omit.forEach((key) => query.delete(key))
+  parameters.forEach((value, key) => query.set(key, value))
+  return `${base}?${query.toString()}`
+}
+
+function isTileRequestUrl(url: string) {
+  return /\/arcgis\/tile\/tile(?:[/?#]|$)/i.test(url)
+}
+
+/** 泰州转发入口不是 MapServer：按提供方示例补齐 /tile/层级/行/列。 */
+function taizhouForwarderTemplate(url: string) {
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return }
+  if (parsed.hostname !== 'jiangsu.tianditu.gov.cn') return
+  const pathname = parsed.pathname.replace(/%7B/gi, '{').replace(/%7D/gi, '}')
+  const match = pathname.match(/^(\/taizhou\/forwarder\/services\/[^/]+\/arcgis\/tile)(?:\/tile(?:\/(?:\d+|\{z\})\/(?:\d+|\{y\})\/(?:\d+|\{x\}))?)?\/?$/i)
+  if (!match) return
+  parsed.searchParams.delete('f')
+  parsed.searchParams.delete('callback')
+  const query = parsed.searchParams.toString()
+  return `${parsed.origin}${match[1]}/tile/{z}/{y}/{x}${query ? `?${query}` : ''}`
+}
+
+function invalidMetadataError(url: string) {
+  return new Error(isTileRequestUrl(url)
+    ? '当前地址是瓦片接口，未返回 ArcGIS 元数据；请配置带 {z}/{x}/{y} 参数的完整瓦片地址或有效的 MapServer 服务地址'
+    : '地图服务未返回有效的 JSON 数据，请检查服务地址和访问授权')
+}
+
+function serviceResponseError(status: number) {
+  if ([401, 403, 498, 499].includes(status)) {
+    return new Error(`地图服务拒绝访问（${status}），请检查密钥、服务授权及允许访问的来源`)
+  }
+  return new Error(`地图服务请求失败（${status}）`)
+}
+
+function validateArcGisPayload<T extends object>(payload: unknown, url: string): T {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw invalidMetadataError(url)
+  const data = payload as { error?: { code?: number } | string; status?: number; code?: string | number }
+  const code = Number(typeof data.error === 'object' ? data.error?.code : data.status ?? data.code)
+  if (data.error || [401, 403, 498, 499].includes(code) || Number(data.status) >= 400) {
+    throw Number.isFinite(code) && code > 0 ? serviceResponseError(code) : new Error('地图服务返回错误，请检查服务地址和访问授权')
+  }
+  return payload as T
 }
 
 function normalizedType(type: string) {
@@ -277,11 +351,11 @@ function leafletWmtsTemplate(url: string) {
     .replace(/\{TileRow\}/gi, '{y}')
 }
 
-function loadArcGisJson<T extends object>(url: string) {
+function loadArcGisJsonp<T extends object>(url: string) {
   const callbackName = `__mapServiceMetadata_${Date.now()}_${++jsonpSequence}`
   return new Promise<T>((resolve, reject) => {
     const script = document.createElement('script')
-    const callbacks = window as unknown as Record<string, (payload: T & { error?: unknown }) => void>
+    const callbacks = window as unknown as Record<string, (payload: unknown) => void>
     let completed = false
     let timeoutId = 0
     const finish = (payload?: T, reason?: Error) => {
@@ -294,19 +368,57 @@ function loadArcGisJson<T extends object>(url: string) {
       else resolve(payload || {} as T)
     }
     callbacks[callbackName] = (payload) => {
-      if (payload?.error) finish(undefined, new Error('地图服务元数据返回错误'))
-      else finish(payload)
+      try {
+        finish(validateArcGisPayload<T>(payload, url))
+      } catch (error) {
+        finish(undefined, error instanceof Error ? error : invalidMetadataError(url))
+      }
     }
     script.onerror = () => finish(undefined, new Error('无法访问地图服务元数据'))
     timeoutId = window.setTimeout(() => finish(undefined, new Error('读取地图服务元数据超时')), 10000)
     const parameters = new URLSearchParams({ f: 'json', callback: callbackName })
-    script.src = `${url}${url.includes('?') ? '&' : '?'}${parameters.toString()}`
+    script.src = serviceParameters(url, parameters)
     document.head.appendChild(script)
   })
 }
 
-function loadArcGisMetadata(url: string) {
-  return loadArcGisJson<ArcGisMapServiceMetadata>(url)
+async function loadArcGisJson<T extends object>(url: string): Promise<T> {
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), 8000)
+  let response: Response
+  try {
+    // 泰州等转发服务允许 CORS，但不一定支持 callback，且可能用 text/plain 返回 JSON。
+    response = await fetch(serviceParameters(url, new URLSearchParams({ f: 'json' }), ['callback']), { signal: controller.signal })
+  } catch (error) {
+    window.clearTimeout(timeoutId)
+    if (controller.signal.aborted) throw new Error('读取地图服务数据超时，请稍后重试')
+    if (error instanceof TypeError) return loadArcGisJsonp<T>(url)
+    throw error
+  }
+  try {
+    if (!response.ok) throw serviceResponseError(response.status)
+    const text = await response.text()
+    let payload: unknown
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      throw invalidMetadataError(url)
+    }
+    return validateArcGisPayload<T>(payload, url)
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('读取地图服务数据超时，请稍后重试')
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+async function loadArcGisMetadata(url: string) {
+  const metadata = await loadArcGisJson<ArcGisMapServiceMetadata>(url)
+  if (!metadata.tileInfo && !Array.isArray(metadata.layers) && !metadata.fullExtent && !metadata.initialExtent && !metadata.extent) {
+    throw invalidMetadataError(url)
+  }
+  return metadata
 }
 
 function extentBounds(extent?: ArcGisExtent) {
@@ -346,7 +458,7 @@ function arcGisBounds(
   config: ServiceRemarkConfig,
   preferCachedMapExtent = true,
 ) {
-  const serviceBounds = extentBounds(metadata.fullExtent) || extentBounds(metadata.initialExtent)
+  const serviceBounds = extentBounds(metadata.fullExtent) || extentBounds(metadata.initialExtent) || extentBounds(metadata.extent)
   // 缓存型 MapServer 的真实瓦片可能大于人工备注范围，不能用备注裁掉有效瓦片。
   return preferCachedMapExtent && metadata.singleFusedMapCache
     ? serviceBounds || config.bounds
@@ -366,7 +478,11 @@ function parseServiceRemark(remark?: string): ServiceRemarkConfig {
     if (typeof payload === 'string') payload = JSON.parse(payload)
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {}
     const record = payload as Record<string, unknown>
-    const rawBounds = record.bounds ?? record.extent ?? record
+    const rawBounds = record.bounds ?? record.fullExtent ?? record.extent ?? record.initialExtent ?? record
+    const tileInfo = record.tileInfo as { lods?: Array<{ level?: unknown }>; spatialReference?: ArcGisSpatialReference } | undefined
+    const levels = (Array.isArray(tileInfo?.lods) ? tileInfo.lods : [])
+      .flatMap((lod) => lod.level == null ? [] : [finiteNumber(lod.level)])
+      .filter((level): level is number => level !== undefined && Number.isInteger(level) && level >= 0)
     const wkid = finiteNumber(record.wkid)
       ?? finiteNumber((record.spatialReference as Record<string, unknown> | undefined)?.latestWkid)
       ?? finiteNumber((record.spatialReference as Record<string, unknown> | undefined)?.wkid)
@@ -397,8 +513,9 @@ function parseServiceRemark(remark?: string): ServiceRemarkConfig {
     }
     return {
       bounds: extentBounds(extent),
-      minZoom: finiteNumber(record.minZoom),
-      maxZoom: finiteNumber(record.maxZoom),
+      minZoom: finiteNumber(record.minZoom) ?? (levels.length ? Math.min(...levels) : undefined),
+      maxZoom: finiteNumber(record.maxZoom) ?? (levels.length ? Math.max(...levels) : undefined),
+      tileWkid: finiteNumber(record.tileWkid) ?? tileInfo?.spatialReference?.latestWkid ?? tileInfo?.spatialReference?.wkid,
     }
   } catch {
     return {}
@@ -691,7 +808,7 @@ class ArcGisExportLayer extends L.GridLayer {
       if (tile.src.startsWith('blob:')) URL.revokeObjectURL(tile.src)
       done(new Error('地图服务影像加载失败'), tile)
     }
-    const endpoint = `${this.url}/${this.imageServer ? 'exportImage' : 'export'}`
+    const endpoint = servicePath(this.url, this.imageServer ? 'exportImage' : 'export')
     // Hundreds of category symbols exceed proxy URL limits. Keep rendering in the POST body.
     if (parameters.toString().length > 1800) {
       const controller = new AbortController()
@@ -705,7 +822,7 @@ class ArcGisExportLayer extends L.GridLayer {
         .catch(() => { if (!controller.signal.aborted) tile.onerror?.(new Event('error')) })
         .finally(() => this.renderRequests.delete(tile))
     } else {
-      tile.src = `${endpoint}?${parameters.toString()}`
+      tile.src = serviceParameters(endpoint, parameters)
     }
     return tile
   }
@@ -923,7 +1040,7 @@ class ArcGisVectorLayer extends L.LayerGroup {
         returnGeometry: 'false',
       })
       try {
-        const response = await queryAllFeatures(`${this.serviceUrl}/${this.layerId}/query`, parameters)
+        const response = await queryAllFeatures(servicePath(this.serviceUrl, `${this.layerId}/query`), parameters)
         if (sequence !== this.requestSequence || (this._map && selectedHoverByMap.get(this._map) !== focus)) return
         const features = response.features || []
         const hasValue = (value: unknown) => value != null && String(value).trim() !== ''
@@ -1040,7 +1157,7 @@ async function queryCategoryBounds(serviceUrl: string, layerId: number, fieldNam
     outSR: '4326',
   })
   const response = await loadArcGisJson<ArcGisQueryResponse>(
-    `${serviceUrl}/${layerId}/query?${parameters.toString()}`,
+    serviceParameters(servicePath(serviceUrl, `${layerId}/query`), parameters),
   )
   return extentBounds(response.extent)
 }
@@ -1059,7 +1176,7 @@ async function queryCategoryGeometries(
     returnGeometry: 'false',
   })
   const idResponse = await loadArcGisJson<ArcGisQueryResponse>(
-    `${serviceUrl}/${layerId}/query?${idParameters.toString()}`,
+    serviceParameters(servicePath(serviceUrl, `${layerId}/query`), idParameters),
   )
   const objectIds = idResponse.objectIds || []
   const geometries: MapServiceSearchGeometry[] = []
@@ -1079,7 +1196,7 @@ async function queryCategoryGeometries(
         outSR: '4326',
       })
       appendGeometries(await loadArcGisJson<ArcGisQueryResponse>(
-        `${serviceUrl}/${layerId}/query?${parameters.toString()}`,
+        serviceParameters(servicePath(serviceUrl, `${layerId}/query`), parameters),
       ))
     }
   } else {
@@ -1090,7 +1207,7 @@ async function queryCategoryGeometries(
       outSR: '4326',
     })
     appendGeometries(await loadArcGisJson<ArcGisQueryResponse>(
-      `${serviceUrl}/${layerId}/query?${parameters.toString()}`,
+      serviceParameters(servicePath(serviceUrl, `${layerId}/query`), parameters),
     ))
   }
 
@@ -1104,7 +1221,7 @@ async function queryCategoryValues(serviceUrl: string, layerId: number, fieldNam
     returnGeometry: 'false',
   })
   const idResponse = await loadArcGisJson<ArcGisQueryResponse>(
-    `${serviceUrl}/${layerId}/query?${idParameters.toString()}`,
+    serviceParameters(servicePath(serviceUrl, `${layerId}/query`), idParameters),
   )
   const objectIds = idResponse.objectIds || []
   const valueSet = new Set<string>()
@@ -1128,7 +1245,7 @@ async function queryCategoryValues(serviceUrl: string, layerId: number, fieldNam
         returnGeometry: 'false',
       })
       appendValues(await loadArcGisJson<ArcGisQueryResponse>(
-        `${serviceUrl}/${layerId}/query?${parameters.toString()}`,
+        serviceParameters(servicePath(serviceUrl, `${layerId}/query`), parameters),
       ))
     }
   } else {
@@ -1139,7 +1256,7 @@ async function queryCategoryValues(serviceUrl: string, layerId: number, fieldNam
       returnGeometry: 'false',
     })
     appendValues(await loadArcGisJson<ArcGisQueryResponse>(
-      `${serviceUrl}/${layerId}/query?${parameters.toString()}`,
+      serviceParameters(servicePath(serviceUrl, `${layerId}/query`), parameters),
     ))
   }
 
@@ -1149,11 +1266,472 @@ async function queryCategoryValues(serviceUrl: string, layerId: number, fieldNam
   }
 }
 
+function geographicTileSamples(coords: { x: number; y: number; z: number }, tileSize = 256) {
+  const worldSize = tileSize * 2 ** coords.z
+  const sourceY = (pixelY: number) => {
+    const latitude = Math.atan(Math.sinh(Math.PI * (1 - 2 * pixelY / worldSize))) * 180 / Math.PI
+    return (90 - latitude) / 360 * worldSize
+  }
+  const samples = Array.from({ length: tileSize }, (_, row) => ({
+    top: sourceY(coords.y * tileSize + row),
+    bottom: sourceY(coords.y * tileSize + row + 1),
+  }))
+  const firstRow = Math.floor(samples[0]!.top / tileSize)
+  const lastRow = Math.floor((samples[tileSize - 1]!.bottom - 1e-8) / tileSize)
+  return { samples, rows: Array.from({ length: lastRow - firstRow + 1 }, (_, index) => firstRow + index) }
+}
+
+interface GeographicTileRequest {
+  promise: Promise<HTMLImageElement | undefined>
+  cancel: () => void
+  start: () => void
+  started: boolean
+  consumers: Map<HTMLElement, L.Coords>
+}
+
+/** 经纬度缓存的行号不能当作墨卡托行号使用；将源瓦片逐行投影到现有地图。 */
+class TaizhouGeographicTileLayer extends L.GridLayer {
+  private images = new Map<string, HTMLImageElement>()
+  private missingTiles = new Map<string, number>()
+  private requests = new Map<string, GeographicTileRequest>()
+  private tileSources = new WeakMap<HTMLElement, Set<string>>()
+  protected renderedTiles = new Map<string, HTMLCanvasElement>()
+  private projectionPlans = new Map<string, ReturnType<typeof geographicTileSamples>>()
+  private activeRequests = 0
+  private drainScheduled = false
+  private stopping = false
+  protected unloadedTiles = new WeakSet<HTMLElement>()
+  protected coverageBounds?: L.LatLngBounds
+  protected tileLabel = '泰州天地图'
+
+  constructor(private readonly template: string, config: ServiceRemarkConfig) {
+    super({
+      pane: MAP_SERVICE_IMAGERY_PANE,
+      tileSize: 256,
+      bounds: config.bounds ?? config.fallbackRequestBounds,
+      minZoom: config.minZoom ?? 0,
+      minNativeZoom: config.minZoom ?? 1,
+      maxNativeZoom: config.maxZoom ?? 18,
+      maxZoom: config.maxZoom ?? 22,
+      noWrap: true,
+      keepBuffer: 1,
+      updateWhenIdle: true,
+      updateWhenZooming: false,
+    })
+    this.coverageBounds = config.bounds ?? config.fallbackRequestBounds
+    this.on('tileunload', (event: L.TileEvent) => {
+      this.unloadedTiles.add(event.tile)
+      this.releaseSources(event.tile)
+    })
+  }
+
+  protected releaseSources(tile: HTMLElement) {
+    for (const key of this.tileSources.get(tile) || []) {
+      const request = this.requests.get(key)
+      if (!request) continue
+      request.consumers.delete(tile)
+      if (!request.consumers.size) request.cancel()
+    }
+    this.tileSources.delete(tile)
+  }
+
+  private scheduleRequests() {
+    if (this.drainScheduled || this.stopping) return
+    this.drainScheduled = true
+    queueMicrotask(() => {
+      this.drainScheduled = false
+      if (this.stopping || !this._map) return
+      const map = this._map
+      const center = typeof map.getCenter === 'function' ? map.getCenter() : undefined
+      const priority = (request: GeographicTileRequest) => Math.min(...[...request.consumers.values()].map(coords => {
+        if (!center) return 0
+        const point = map.project(center, coords.z)
+        return (coords.x + 0.5 - point.x / 256) ** 2 + (coords.y + 0.5 - point.y / 256) ** 2
+      }))
+      // 每轮按最新视角重新排序；共享源瓦片仍被其他画布使用时不能取消。
+      const queued = [...this.requests.values()].filter(request => !request.started && request.consumers.size)
+      queued.sort((a, b) => priority(a) - priority(b))
+      for (const request of queued) {
+        if (this.activeRequests >= 6) break
+        request.started = true
+        this.activeRequests += 1
+        request.start()
+      }
+    })
+  }
+
+  protected sourceTileIntersects(level: string | number, row: number, column: number) {
+    if (this.coverageBounds) {
+      const span = 360 / 2 ** Number(level)
+      const west = column * span - 180
+      const north = 90 - row * span
+      if (west >= this.coverageBounds.getEast() || west + span <= this.coverageBounds.getWest()
+        || north <= this.coverageBounds.getSouth() || north - span >= this.coverageBounds.getNorth()) return false
+    }
+    return true
+  }
+
+  protected tileUrl(level: string | number, row: number, column: number) {
+    return this.template.replace('{z}', String(level)).replace('{y}', String(row)).replace('{x}', String(column))
+  }
+
+  protected sourceImage(level: string | number, row: number, column: number, tile: HTMLElement, coords: L.Coords): Promise<HTMLImageElement | undefined> {
+    if (!this.sourceTileIntersects(level, row, column)) return Promise.resolve(undefined)
+    const key = `${level}/${row}/${column}`
+    const missingUntil = this.missingTiles.get(key)
+    if (missingUntil && missingUntil > Date.now()) return Promise.resolve(undefined)
+    this.missingTiles.delete(key)
+    const cached = this.images.get(key)
+    if (cached) {
+      this.images.delete(key)
+      this.images.set(key, cached)
+      return Promise.resolve(cached)
+    }
+    const sources = this.tileSources.get(tile) || new Set<string>()
+    sources.add(key)
+    this.tileSources.set(tile, sources)
+    const pending = this.requests.get(key)
+    if (pending) {
+      pending.consumers.set(tile, coords)
+      return pending.promise
+    }
+    const image = new Image()
+    const controller = new AbortController()
+    let objectUrl = ''
+    let settled = false
+    let cancel = () => {}
+    let useDirectImage = () => {}
+    let showFetchedImage = (_blob: Blob) => {}
+    let finishMissing = () => {}
+    let finishError = (_error: Error) => {}
+    let start = () => {}
+    const url = this.tileUrl(level, row, column)
+    const promise = new Promise<HTMLImageElement | undefined>((resolve, reject) => {
+      let timeout: number | undefined
+      const finish = (error?: Error, missing = false, cancelled = false) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeout)
+        controller.abort()
+        image.onload = null
+        image.onerror = null
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
+        if (this.requests.get(key)?.started) this.activeRequests -= 1
+        this.requests.delete(key)
+        this.scheduleRequests()
+        if (cancelled) {
+          image.src = ''
+          resolve(undefined)
+          return
+        }
+        if (error) {
+          image.src = ''
+          reject(error)
+          return
+        }
+        if (missing) {
+          // 只缓存已经确认不存在的瓦片，不把授权拒绝、断网或超时缓存成空白。
+          this.missingTiles.set(key, Date.now() + 180000)
+          while (this.missingTiles.size > 1024) this.missingTiles.delete(this.missingTiles.keys().next().value!)
+          resolve(undefined)
+          return
+        }
+        this.images.set(key, image)
+        while (this.images.size > 64) this.images.delete(this.images.keys().next().value!)
+        resolve(image)
+      }
+      cancel = () => finish(undefined, false, true)
+      finishMissing = () => finish(undefined, true)
+      finishError = error => finish(error)
+      image.onload = () => finish()
+      image.onerror = () => finish(new Error(`${this.tileLabel}返回内容无法显示为图片`))
+      showFetchedImage = blob => {
+        if (settled) return
+        objectUrl = URL.createObjectURL(blob)
+        image.src = objectUrl
+      }
+      useDirectImage = () => {
+        if (settled) return
+        image.onerror = () => finish(new Error(`${this.tileLabel}瓦片读取失败，网络或跨域限制使浏览器无法确认状态`))
+        image.src = url
+      }
+      start = () => {
+        // 等待并发槽位不计入网络超时。
+        timeout = window.setTimeout(() => finish(new Error(`${this.tileLabel}瓦片读取超时`)), 15000)
+        void (async () => {
+          let response: Response
+          try {
+            response = await fetch(url, { signal: controller.signal })
+          } catch (error) {
+            if (settled) return
+            if (error instanceof TypeError) { useDirectImage(); return }
+            finishError(error instanceof Error ? error : new Error(`${this.tileLabel}瓦片请求失败`))
+            return
+          }
+          if (settled) return
+          if (response.status === 404 || response.status === 204) { finishMissing(); return }
+          if (!response.ok) { finishError(serviceResponseError(response.status)); return }
+          const blob = await response.blob()
+          showFetchedImage(blob)
+        })().catch(error => { if (!settled) finishError(error instanceof Error ? error : new Error('地图瓦片加载失败')) })
+      }
+    })
+    this.requests.set(key, { promise, cancel, start, started: false, consumers: new Map([[tile, coords]]) })
+    // 先读取 HTTP 状态区分正常的范围外空白和真正的访问失败；旧服务不允许 CORS 时保留图片直连。
+    this.scheduleRequests()
+    return promise
+  }
+
+  override createTile(coords: L.Coords, done: L.DoneCallback) {
+    const tile = document.createElement('canvas')
+    tile.width = tile.height = 256
+    const context = tile.getContext('2d')
+    if (!context) {
+      queueMicrotask(() => done(new Error('浏览器无法绘制地图瓦片'), tile))
+      return tile
+    }
+    const renderKey = `${coords.z}/${coords.x}/${coords.y}`
+    const rendered = this.renderedTiles.get(renderKey)
+    if (rendered) {
+      this.renderedTiles.delete(renderKey)
+      this.renderedTiles.set(renderKey, rendered)
+      context.drawImage(rendered, 0, 0)
+      queueMicrotask(() => { if (!this.unloadedTiles.has(tile) && this._map) done(undefined, tile) })
+      return tile
+    }
+    const planKey = `${coords.z}/${coords.y}`
+    const plan = this.projectionPlans.get(planKey) || geographicTileSamples(coords)
+    this.projectionPlans.delete(planKey)
+    this.projectionPlans.set(planKey, plan)
+    while (this.projectionPlans.size > 64) this.projectionPlans.delete(this.projectionPlans.keys().next().value!)
+    const { samples, rows } = plan
+    void Promise.allSettled(rows.map(async row => ({ row, image: await this.sourceImage(coords.z, row, coords.x, tile, coords) })))
+      .then(results => {
+        if (this.unloadedTiles.has(tile) || !this._map) return
+        let painted = false
+        let failure: Error | undefined
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            failure ||= result.reason instanceof Error ? result.reason : new Error('地图瓦片加载失败')
+            continue
+          }
+          const { row, image } = result.value
+          if (!image) continue
+          painted = true
+          const imageWidth = image.naturalWidth || 256
+          const imageHeight = image.naturalHeight || 256
+          samples.forEach(({ top, bottom }, destinationRow) => {
+            const start = Math.max(top, row * 256)
+            const end = Math.min(bottom, (row + 1) * 256)
+            if (end <= start) return
+            context.drawImage(image,
+              0, (start - row * 256) * imageHeight / 256, imageWidth, (end - start) * imageHeight / 256,
+              0, destinationRow + (start - top) / (bottom - top), 256, (end - start) / (bottom - top))
+          })
+        }
+        // 部分源瓦片有效时仍显示已绘制内容，避免一个缺块拖掉整张画布。
+        if (failure && painted) this.fire('tileerror', { error: failure, tile, coords })
+        // 只复用完整成功的重投影结果；空白、缺块及错误仍按源瓦片缓存规则重试。
+        if (!failure && results.every(result => result.status === 'fulfilled' && result.value.image)) {
+          this.renderedTiles.set(renderKey, tile)
+          while (this.renderedTiles.size > 32) this.renderedTiles.delete(this.renderedTiles.keys().next().value!)
+        }
+        done(painted ? undefined : failure, tile)
+      })
+      .catch(error => {
+        if (!this.unloadedTiles.has(tile) && this._map) done(error instanceof Error ? error : new Error('地图瓦片加载失败'), tile)
+      })
+      .finally(() => this.releaseSources(tile))
+    return tile
+  }
+
+  override onAdd(map: L.Map) {
+    this.stopping = false
+    return super.onAdd(map)
+  }
+
+  override onRemove(map: L.Map) {
+    this.stopping = true
+    this.requests.forEach(request => request.cancel())
+    this.requests.clear()
+    this.images.clear()
+    this.missingTiles.clear()
+    this.renderedTiles.clear()
+    this.projectionPlans.clear()
+    return super.onRemove(map)
+  }
+}
+
+interface TileMatrix {
+  id: string
+  resolution: number
+  origin: [number, number]
+  tileWidth: number
+  tileHeight: number
+  width?: number
+  height?: number
+  limits?: { minRow: number; maxRow: number; minCol: number; maxCol: number }
+}
+
+function projectionWkid(crs: string | number) {
+  if (/CRS:?84$/i.test(String(crs))) return 4326
+  const wkid = Number(String(crs).match(/(\d+)\/?$/)?.[1])
+  const normalized = [102100, 102113, 900913].includes(wkid) ? 3857 : wkid
+  if (![4326, 4490, 3857, 4528, 4549].includes(normalized)) throw new Error(`暂不支持地图服务坐标系：${crs}`)
+  return normalized
+}
+
+function projectCoordinate(lng: number, lat: number, wkid: number): [number, number] {
+  if ([4326, 4490].includes(wkid)) return [lng, lat]
+  if (wkid === 3857) return [lng * 20037508.342789244 / 180, Math.log(Math.tan(Math.PI / 4 + Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI / 360)) * 6378137]
+  return proj4('EPSG:4326', `EPSG:${wkid}`, [lng, lat]) as [number, number]
+}
+
+function unprojectCoordinate(x: number, y: number, wkid: number): [number, number] {
+  if ([4326, 4490].includes(wkid)) return [x, y]
+  if (wkid === 3857) return [x * 180 / 20037508.342789244, Math.atan(Math.sinh(y / 6378137)) * 180 / Math.PI]
+  return proj4(`EPSG:${wkid}`, 'EPSG:4326', [x, y]) as [number, number]
+}
+
+function mapPixelCoordinate(coords: L.Coords, x: number, y: number): [number, number] {
+  const world = 256 * 2 ** coords.z
+  return [(coords.x * 256 + x) / world * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * (coords.y * 256 + y) / world))) * 180 / Math.PI]
+}
+
+/** 根据真实矩阵重投影，复用现有的限流、取消、图片及画布缓存。 */
+class MatrixTileLayer extends TaizhouGeographicTileLayer {
+  protected override tileLabel = '地图服务'
+  private byId: Map<string, TileMatrix>
+
+  constructor(private matrices: TileMatrix[], private wkid: number, private address: (matrix: string, row: number, col: number) => string, config: ServiceRemarkConfig) {
+    const largest = Math.max(...matrices.map(matrix => matrix.resolution))
+    const metresPerUnit = [4326, 4490].includes(wkid) ? 111319.49079327358 : 1
+    // 不在只有高精度缓存的服务上缩到全国后请求成千上万张源瓦片。
+    const minZoom = Math.max(0, Math.floor(Math.log2(156543.03392804097 / (largest * metresPerUnit))) - 1)
+    super('', { ...config, minZoom, maxZoom: 22 })
+    const options = this.options as L.GridLayerOptions
+    options.minNativeZoom = undefined
+    options.maxNativeZoom = undefined
+    this.byId = new Map(matrices.map(matrix => [matrix.id, matrix]))
+  }
+
+  protected override tileUrl(level: string | number, row: number, col: number) {
+    return this.address(String(level), row, col)
+  }
+
+  protected override sourceTileIntersects(level: string | number, row: number, col: number) {
+    const matrix = this.byId.get(String(level))
+    if (!matrix || row < 0 || col < 0 || (matrix.width !== undefined && col >= matrix.width) || (matrix.height !== undefined && row >= matrix.height)) return false
+    const limits = matrix.limits
+    if (limits && (row < limits.minRow || row > limits.maxRow || col < limits.minCol || col > limits.maxCol)) return false
+    if (!this.coverageBounds) return true
+    const corners = [0, .5, 1].flatMap(dx => [0, .5, 1].map(dy => unprojectCoordinate(
+      matrix.origin[0] + (col + dx) * matrix.tileWidth * matrix.resolution,
+      matrix.origin[1] - (row + dy) * matrix.tileHeight * matrix.resolution, this.wkid)))
+    return Math.min(...corners.map(p => p[0])) < this.coverageBounds.getEast()
+      && Math.max(...corners.map(p => p[0])) > this.coverageBounds.getWest()
+      && Math.min(...corners.map(p => p[1])) < this.coverageBounds.getNorth()
+      && Math.max(...corners.map(p => p[1])) > this.coverageBounds.getSouth()
+  }
+
+  private plan(coords: L.Coords) {
+    const project = (x: number, y: number) => projectCoordinate(...mapPixelCoordinate(coords, x, y), this.wkid)
+    const center = project(128, 128), right = project(129, 128), bottom = project(128, 129)
+    const desired = Math.max(Math.hypot(right[0] - center[0], right[1] - center[1]), Math.hypot(bottom[0] - center[0], bottom[1] - center[1]))
+    const matrix = this.matrices.reduce((best, item) => Math.abs(Math.log(item.resolution / desired)) < Math.abs(Math.log(best.resolution / desired)) ? item : best)
+    const points = Array.from({ length: 17 }, (_, y) => Array.from({ length: 17 }, (_, x) => {
+      const point = project(x * 16, y * 16)
+      return [(point[0] - matrix.origin[0]) / matrix.resolution, (matrix.origin[1] - point[1]) / matrix.resolution] as [number, number]
+    }))
+    const tiles = new Map<string, { row: number; col: number }>()
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const corners = [points[y]![x]!, points[y]![x + 1]!, points[y + 1]![x]!, points[y + 1]![x + 1]!]
+      if (!corners.flat().every(Number.isFinite)) throw new Error('切片坐标转换失败，请检查坐标系及切片矩阵')
+      const minCol = Math.floor(Math.min(...corners.map(p => p[0])) / matrix.tileWidth)
+      const maxCol = Math.floor((Math.max(...corners.map(p => p[0])) - 1e-7) / matrix.tileWidth)
+      const minRow = Math.floor(Math.min(...corners.map(p => p[1])) / matrix.tileHeight)
+      const maxRow = Math.floor((Math.max(...corners.map(p => p[1])) - 1e-7) / matrix.tileHeight)
+      if ((maxCol - minCol + 1) * (maxRow - minRow + 1) > 64) throw new Error('当前比例尺超出切片矩阵可用范围')
+      for (let row = minRow; row <= maxRow; row++) for (let col = minCol; col <= maxCol; col++) {
+        if (this.sourceTileIntersects(matrix.id, row, col)) tiles.set(`${row}/${col}`, { row, col })
+      }
+      if (tiles.size > 64) throw new Error('当前比例尺超出切片矩阵可用范围')
+    }
+    return { matrix, points, tiles: [...tiles.values()] }
+  }
+
+  override createTile(coords: L.Coords, done: L.DoneCallback) {
+    const tile = document.createElement('canvas')
+    tile.width = tile.height = 256
+    const context = tile.getContext('2d'), key = `${coords.z}/${coords.x}/${coords.y}`
+    if (!context) { queueMicrotask(() => done(new Error('浏览器无法绘制地图瓦片'), tile)); return tile }
+    const cached = this.renderedTiles.get(key)
+    if (cached) {
+      this.renderedTiles.delete(key); this.renderedTiles.set(key, cached)
+      context.drawImage(cached, 0, 0)
+      queueMicrotask(() => { if (this._map && !this.unloadedTiles.has(tile)) done(undefined, tile) })
+      return tile
+    }
+    void Promise.resolve().then(async () => {
+      if (!this._map || this.unloadedTiles.has(tile)) return
+      const { matrix, points, tiles } = this.plan(coords)
+      const results = await Promise.allSettled(tiles.map(async source => ({ ...source, image: await this.sourceImage(matrix.id, source.row, source.col, tile, coords) })))
+      if (!this._map || this.unloadedTiles.has(tile)) return
+      let painted = false, failure: Error | undefined
+      for (const result of results) {
+        if (result.status === 'rejected') { failure ||= result.reason instanceof Error ? result.reason : new Error('地图瓦片读取失败'); continue }
+        const { image, row, col } = result.value
+        if (!image) continue
+        painted = true
+        for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+          const a = points[y]![x]!, b = points[y]![x + 1]!, c = points[y + 1]![x]!, d = points[y + 1]![x + 1]!
+          drawTileTriangle(context, image, [a, b, c], [[x * 16, y * 16], [(x + 1) * 16, y * 16], [x * 16, (y + 1) * 16]], matrix, row, col)
+          drawTileTriangle(context, image, [b, d, c], [[(x + 1) * 16, y * 16], [(x + 1) * 16, (y + 1) * 16], [x * 16, (y + 1) * 16]], matrix, row, col)
+        }
+      }
+      if (failure && painted) this.fire('tileerror', { error: failure, tile, coords })
+      if (painted && !failure && results.every(result => result.status === 'fulfilled' && result.value.image)) {
+        this.renderedTiles.set(key, tile)
+        while (this.renderedTiles.size > 32) this.renderedTiles.delete(this.renderedTiles.keys().next().value!)
+      }
+      done(painted ? undefined : failure, tile)
+    }).catch(error => { if (this._map && !this.unloadedTiles.has(tile)) done(error instanceof Error ? error : new Error('地图瓦片绘制失败'), tile) })
+      .finally(() => this.releaseSources(tile))
+    return tile
+  }
+}
+
+function drawTileTriangle(context: CanvasRenderingContext2D, image: HTMLImageElement, source: [number, number][], destination: [number, number][], matrix: TileMatrix, row: number, col: number) {
+  const [p, q, r] = source as [[number, number], [number, number], [number, number]]
+  const [a, b, c] = destination as [[number, number], [number, number], [number, number]]
+  const sx = col * matrix.tileWidth, sy = row * matrix.tileHeight
+  if (Math.max(p[0], q[0], r[0]) <= sx || Math.min(p[0], q[0], r[0]) >= sx + matrix.tileWidth
+    || Math.max(p[1], q[1], r[1]) <= sy || Math.min(p[1], q[1], r[1]) >= sy + matrix.tileHeight) return
+  const ux = q[0] - p[0], uy = q[1] - p[1], vx = r[0] - p[0], vy = r[1] - p[1], det = ux * vy - uy * vx
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return
+  const xx = ((b[0] - a[0]) * vy - (c[0] - a[0]) * uy) / det
+  const xy = ((c[0] - a[0]) * ux - (b[0] - a[0]) * vx) / det
+  const yx = ((b[1] - a[1]) * vy - (c[1] - a[1]) * uy) / det
+  const yy = ((c[1] - a[1]) * ux - (b[1] - a[1]) * vx) / det
+  context.save(); context.beginPath(); context.moveTo(...a); context.lineTo(...b); context.lineTo(...c); context.closePath(); context.clip()
+  context.transform(xx, yx, xy, yy, a[0] - xx * p[0] - xy * p[1], a[1] - yx * p[0] - yy * p[1])
+  context.drawImage(image, 0, 0, image.naturalWidth || matrix.tileWidth, image.naturalHeight || matrix.tileHeight, sx, sy, matrix.tileWidth, matrix.tileHeight)
+  context.restore()
+}
+
+function createTaizhouForwarderLayer(template: string, config: ServiceRemarkConfig): MapServiceLayerHandle {
+  // 提供方的 12/657/3412 示例符合经纬度矩阵；若提供墨卡托服务可用 tileWkid:3857 覆盖。
+  const wkid = config.tileWkid ?? 4490
+  if ([3857, 102100, 102113].includes(wkid)) return { layer: createTemplateLayer(template, false, config), bounds: config.bounds }
+  if (![4326, 4490].includes(wkid)) throw new Error(`暂不支持该天地图切片坐标系：${wkid}`)
+  return { layer: new TaizhouGeographicTileLayer(template, config), bounds: config.bounds }
+}
+
 function createTemplateLayer(url: string, tms = false, config: ServiceRemarkConfig = {}) {
   if (!hasTileTemplate(url)) throw new Error('瓦片服务地址缺少 {z}/{x}/{y} 模板参数')
   return L.tileLayer(url, {
     pane: MAP_SERVICE_IMAGERY_PANE,
-    bounds: config.bounds,
+    bounds: config.bounds ?? config.fallbackRequestBounds,
     tms,
     minNativeZoom: config.minZoom,
     maxNativeZoom: config.maxZoom,
@@ -1163,25 +1741,309 @@ function createTemplateLayer(url: string, tms = false, config: ServiceRemarkConf
   })
 }
 
-function createWmsLayer(url: string, config: ServiceRemarkConfig) {
-  let layers = ''
+function ogcParameter(url: string, name: string) {
   try {
-    const parsed = new URL(url, window.location.href)
-    layers = parsed.searchParams.get('layers') || parsed.searchParams.get('LAYERS') || ''
-  } catch {
-    // 地址格式错误时交给 Leaflet 触发网络错误；这里只补充必要参数校验。
+    const parameters = new URL(url, window.location?.href).searchParams
+    for (const [key, value] of parameters) if (key.toUpperCase() === name.toUpperCase()) return value
+  } catch { /* 单个无效地址不应阻断整个服务列表展开。 */ }
+}
+
+function ogcProtocol(service: MapServiceItem): 'WMS' | 'WMTS' | undefined {
+  const type = normalizedType(service.type), url = service.serviceUrl
+  const protocol = ogcParameter(url, 'SERVICE')?.toUpperCase()
+  if (protocol === 'WMTS' || type.includes('WMTS') || /\/(?:wmts|WMTSServer)(?:[/?]|$)/i.test(url)) return 'WMTS'
+  if (protocol === 'WMS' || type.includes('WMS') || /\/(?:wms|WMSServer)(?:[/?]|$)/i.test(url)) return 'WMS'
+  if (type === 'GEOSERVER' && !protocol) return 'WMS'
+}
+
+const ogcControlParameters = new Set(['SERVICE', 'REQUEST', 'VERSION', 'LAYERS', 'LAYER', 'STYLES', 'STYLE', 'FORMAT', 'TRANSPARENT', 'SRS', 'CRS', 'BBOX', 'WIDTH', 'HEIGHT', 'TILEMATRIXSET', 'TILEMATRIX', 'TILEROW', 'TILECOL'])
+
+function ogcBaseUrl(url: string) {
+  const parsed = new URL(url, window.location?.href)
+  for (const key of [...parsed.searchParams.keys()]) if (ogcControlParameters.has(key.toUpperCase())) parsed.searchParams.delete(key)
+  parsed.hash = ''
+  return parsed.toString()
+}
+
+function ogcRequestUrl(url: string, parameters: URLSearchParams) {
+  const parsed = new URL(url), names = new Set([...parameters.keys()].map(key => key.toUpperCase()))
+  for (const key of [...parsed.searchParams.keys()]) if (names.has(key.toUpperCase())) parsed.searchParams.delete(key)
+  return serviceParameters(parsed.toString(), parameters)
+}
+
+function xmlChildren(node: Element | Document, name: string): Element[] {
+  return [...node.children].filter(child => child.localName === name)
+}
+
+function xmlDescendants(node: Element | Document, name: string): Element[] {
+  return [...node.getElementsByTagName('*')].filter(child => child.localName === name)
+}
+
+function xmlText(node: Element | Document, name: string) {
+  return xmlChildren(node, name)[0]?.textContent?.trim() || ''
+}
+
+function xmlNumber(node: Element, name: string) {
+  const text = xmlText(node, name)
+  return text ? finiteNumber(text) : undefined
+}
+
+const ogcCapabilitiesCache = new Map<string, { expires: number; request: Promise<Document> }>()
+
+async function loadOgcCapabilities(url: string, protocol: 'WMS' | 'WMTS') {
+  const query = new URLSearchParams({ SERVICE: protocol, REQUEST: 'GetCapabilities' })
+  const version = ogcParameter(url, 'VERSION')
+  if (version) query.set('VERSION', version)
+  const address = serviceParameters(ogcBaseUrl(url), query)
+  const cached = ogcCapabilitiesCache.get(address)
+  if (cached && cached.expires > Date.now()) return cached.request
+  const request = (async () => {
+    const controller = new AbortController(), timeout = window.setTimeout(() => controller.abort(), 8000)
+    try {
+      const response = await fetch(address, { signal: controller.signal })
+      if (!response.ok) throw serviceResponseError(response.status)
+      const xml = new DOMParser().parseFromString(await response.text(), 'application/xml')
+      if (xmlDescendants(xml, 'parsererror').length) throw new Error(`${protocol} 服务描述不是有效的 XML`)
+      const error = xmlDescendants(xml, 'ServiceException')[0] || xmlDescendants(xml, 'ExceptionText')[0]
+      if (error) throw new Error(`${protocol} 服务拒绝请求：${error.textContent?.trim().slice(0, 180)}`)
+      if (!['Capabilities', 'WMS_Capabilities', 'WMT_MS_Capabilities'].includes(xml.documentElement.localName)) throw new Error(`${protocol} 未返回有效的 GetCapabilities 服务描述`)
+      return xml
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(`${protocol} 服务描述读取超时`)
+      if (error instanceof TypeError) throw new Error(`${protocol} 服务描述无法跨域读取，请启用 CORS 或配置同源代理`)
+      throw error
+    } finally { window.clearTimeout(timeout) }
+  })()
+  ogcCapabilitiesCache.set(address, { expires: Date.now() + 60000, request })
+  while (ogcCapabilitiesCache.size > 32) ogcCapabilitiesCache.delete(ogcCapabilitiesCache.keys().next().value!)
+  request.catch(() => { if (ogcCapabilitiesCache.get(address)?.request === request) ogcCapabilitiesCache.delete(address) })
+  return request
+}
+
+function wgsBounds(values: number[]) {
+  const [west, south, east, north] = values
+  if (values.length !== 4 || !values.every(Number.isFinite) || west! >= east! || south! >= north! || west! < -180 || east! > 180 || south! < -90 || north! > 90) return
+  return L.latLngBounds([south!, west!], [north!, east!])
+}
+
+function geographicXmlBounds(node: Element) {
+  const geographic = xmlChildren(node, 'EX_GeographicBoundingBox')[0]
+  if (geographic) return wgsBounds(['westBoundLongitude', 'southBoundLatitude', 'eastBoundLongitude', 'northBoundLatitude'].map(name => xmlNumber(geographic, name) ?? NaN))
+  const latLon = xmlChildren(node, 'LatLonBoundingBox')[0]
+  if (latLon) return wgsBounds(['minx', 'miny', 'maxx', 'maxy'].map(name => latLon.getAttribute(name)?.trim() ? Number(latLon.getAttribute(name)) : NaN))
+  const box = xmlChildren(node, 'WGS84BoundingBox')[0]
+  if (box) return wgsBounds(`${xmlText(box, 'LowerCorner')} ${xmlText(box, 'UpperCorner')}`.trim().split(/\s+/).map(Number))
+}
+
+interface WmsDefinition {
+  endpoint: string
+  layers: string
+  version: string
+  crs: string
+  wkid: number
+  styles: string
+  format: string
+  transparent: string
+  bounds?: L.LatLngBounds
+}
+
+async function resolveWms(url: string, config: ServiceRemarkConfig): Promise<WmsDefinition> {
+  const requested = ogcParameter(url, 'LAYERS')?.split(',').map(name => name.trim()).filter(Boolean)
+  let xml: Document | undefined
+  try { xml = await loadOgcCapabilities(url, 'WMS') } catch (error) {
+    // 显式提供图层时保留仅允许图片跨域、禁止 XML 跨域的旧服务接入能力。
+    if (!requested?.length || (error instanceof Error && /拒绝访问|拒绝请求/.test(error.message))) throw error
   }
-  if (!layers) throw new Error('WMS 服务地址必须包含 layers 参数')
-  return L.tileLayer.wms(url, {
-    pane: MAP_SERVICE_IMAGERY_PANE,
-    bounds: config.bounds,
-    minZoom: config.minZoom,
-    maxZoom: config.maxZoom || 22,
-    layers,
-    format: 'image/png',
-    transparent: true,
-    version: '1.3.0',
+  const entries: Array<{ name: string; leaf: boolean; crs: string[]; bounds?: L.LatLngBounds }> = []
+  const visit = (node: Element, inheritedCrs: string[] = [], inheritedBounds?: L.LatLngBounds) => {
+    const crs = [...new Set([...inheritedCrs, ...[...xmlChildren(node, 'CRS'), ...xmlChildren(node, 'SRS')].flatMap(element => element.textContent?.trim().split(/\s+/) || [])])]
+    const bounds = geographicXmlBounds(node) || inheritedBounds
+    const children = xmlChildren(node, 'Layer'), name = xmlText(node, 'Name')
+    if (name) entries.push({ name, leaf: !children.length, crs, bounds })
+    children.forEach(child => visit(child, crs, bounds))
+  }
+  if (xml) xmlDescendants(xml, 'Capability').flatMap(node => xmlChildren(node, 'Layer')).forEach(node => visit(node))
+  const leaves = entries.filter(entry => entry.leaf)
+  if (!requested?.length && leaves.length !== 1) throw new Error(`WMS 包含${leaves.length}个可用图层，请在地址中指定 layers=图层名${leaves.length ? `（如 ${leaves.slice(0, 5).map(layer => layer.name).join('、')}）` : ''}`)
+  const names = requested?.length ? requested : [leaves[0]!.name]
+  const selected = names.map(name => entries.find(entry => entry.name === name))
+  if (xml && selected.some(entry => !entry)) throw new Error('WMS 中不存在所选图层，请检查 layers 参数')
+  const advertised = selected[0]?.crs.filter(crs => selected.every(entry => entry?.crs.includes(crs))) || []
+  let crs = ogcParameter(url, 'CRS') || ogcParameter(url, 'SRS')
+  if (!crs) crs = ['EPSG:3857', 'EPSG:900913', 'CRS:84', 'EPSG:4326', 'EPSG:4490'].find(code => advertised.some(item => item.toUpperCase() === code)) || advertised.find(code => { try { projectionWkid(code); return true } catch { return false } })
+  if (!crs && advertised.length) throw new Error('WMS 未声明前端支持的坐标系')
+  crs ||= 'EPSG:3857'
+  const wkid = projectionWkid(crs)
+  if (advertised.length && !advertised.some(item => item.toUpperCase() === crs!.toUpperCase())) throw new Error(`WMS 图层不支持配置的坐标系 ${crs}`)
+  const version = ogcParameter(url, 'VERSION') || xml?.documentElement.getAttribute('version') || '1.1.1'
+  if (!['1.1.0', '1.1.1', '1.3.0'].includes(version)) throw new Error(`暂不支持 WMS 版本 ${version}`)
+  const availableBounds = selected.flatMap(entry => entry?.bounds ? [entry.bounds] : [])
+  const bounds = availableBounds.length === selected.length ? L.latLngBounds(availableBounds.flatMap(bound => [bound.getSouthWest(), bound.getNorthEast()])) : undefined
+  const mapOperation = xml && xmlDescendants(xml, 'Request').flatMap(node => xmlChildren(node, 'GetMap'))[0]
+  const formats = mapOperation ? xmlChildren(mapOperation, 'Format').map(node => node.textContent?.trim() || '') : []
+  const format = ogcParameter(url, 'FORMAT') || (formats.includes('image/png') ? 'image/png' : formats.find(value => /^image\/(?:jpeg|jpg|gif|webp)$/i.test(value))) || (formats.length ? '' : 'image/png')
+  if (!format || (formats.length && !formats.includes(format))) throw new Error('WMS 未提供所选图片格式')
+  return { endpoint: ogcBaseUrl(url), layers: names.join(','), version, crs, wkid,
+    styles: ogcParameter(url, 'STYLES') || '', format,
+    transparent: ogcParameter(url, 'TRANSPARENT') || 'true', bounds: config.bounds || bounds }
+}
+
+/** 显式生成唯一一组 WMS 参数；正确处理 1.3 的经纬度轴序，不修改全局 CRS。 */
+class OgcWmsTileLayer extends L.TileLayer {
+  constructor(private definition: WmsDefinition, config: ServiceRemarkConfig) {
+    super(definition.endpoint, { pane: MAP_SERVICE_IMAGERY_PANE, bounds: definition.bounds ?? config.fallbackRequestBounds,
+      minZoom: config.minZoom, maxZoom: config.maxZoom ?? 22, noWrap: true, keepBuffer: 1 })
+  }
+
+  override getTileUrl(coords: L.Coords) {
+    const size = this.getTileSize()
+    const nw = this._map.unproject(L.point(coords.x * size.x, coords.y * size.y), coords.z)
+    const se = this._map.unproject(L.point((coords.x + 1) * size.x, (coords.y + 1) * size.y), coords.z)
+    const definition = this.definition
+    const corners = [projectCoordinate(nw.lng, nw.lat, definition.wkid), projectCoordinate(se.lng, nw.lat, definition.wkid),
+      projectCoordinate(nw.lng, se.lat, definition.wkid), projectCoordinate(se.lng, se.lat, definition.wkid)]
+    const a = [Math.min(...corners.map(point => point[0])), Math.min(...corners.map(point => point[1]))]
+    const b = [Math.max(...corners.map(point => point[0])), Math.max(...corners.map(point => point[1]))]
+    const latFirst = definition.version === '1.3.0' && [4326, 4490].includes(definition.wkid) && !/CRS:?84$/i.test(definition.crs)
+    const parameters = new URLSearchParams({ SERVICE: 'WMS', REQUEST: 'GetMap', VERSION: definition.version,
+      LAYERS: definition.layers, STYLES: definition.styles, FORMAT: definition.format, TRANSPARENT: definition.transparent,
+      WIDTH: String(size.x), HEIGHT: String(size.y), BBOX: (latFirst ? [a[1], a[0], b[1], b[0]] : [...a, ...b]).join(',') })
+    parameters.set(definition.version === '1.3.0' ? 'CRS' : 'SRS', definition.crs)
+    return serviceParameters(definition.endpoint, parameters)
+  }
+}
+
+function operationEndpoint(xml: Document, operation: string, sourceUrl: string) {
+  const operationNode = xmlDescendants(xml, 'Operation').find(node => node.getAttribute('name') === operation)
+  const get = operationNode && xmlDescendants(operationNode, 'Get')[0]
+  const href = get?.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || get?.getAttribute('href')
+  const endpoint = new URL(href || ogcBaseUrl(sourceUrl), sourceUrl)
+  if (!['http:', 'https:'].includes(endpoint.protocol)) throw new Error('地图服务声明了无效的请求地址')
+  const original = new URL(ogcBaseUrl(sourceUrl))
+  // 不把当前服务的 token/key 自动转发到服务描述中的其他域名。
+  if (original.origin === endpoint.origin) original.searchParams.forEach((value, key) => { if (!endpoint.searchParams.has(key)) endpoint.searchParams.set(key, value) })
+  return ogcBaseUrl(endpoint.toString())
+}
+
+interface WmtsDefinition { matrices: TileMatrix[]; wkid: number; address: (matrix: string, row: number, col: number) => string; bounds?: L.LatLngBounds }
+
+async function resolveWmts(url: string, config: ServiceRemarkConfig): Promise<WmtsDefinition> {
+  const xml = await loadOgcCapabilities(url, 'WMTS')
+  const contents = xmlDescendants(xml, 'Contents')[0]
+  if (!contents) throw new Error('WMTS 服务描述中缺少 Contents')
+  const layers = xmlChildren(contents, 'Layer'), requestedLayer = ogcParameter(url, 'LAYER') || ogcParameter(url, 'LAYERS')
+  const layer = requestedLayer ? layers.find(node => xmlText(node, 'Identifier') === requestedLayer) : layers.length === 1 ? layers[0] : undefined
+  if (!layer) throw new Error('WMTS 包含多个图层或指定图层不存在，请在地址中配置 LAYER=图层标识')
+  const layerId = xmlText(layer, 'Identifier'), links = xmlChildren(layer, 'TileMatrixSetLink')
+  const sets = xmlChildren(contents, 'TileMatrixSet'), requestedSet = ogcParameter(url, 'TILEMATRIXSET')
+  const candidates = links.flatMap(link => {
+    const id = xmlText(link, 'TileMatrixSet'), node = sets.find(set => xmlText(set, 'Identifier') === id)
+    if (!node || (requestedSet && id !== requestedSet)) return []
+    try { return [{ id, node, link, wkid: projectionWkid(xmlText(node, 'SupportedCRS')) }] } catch { return [] }
+  }).sort((a, b) => Number(b.wkid === 3857) - Number(a.wkid === 3857))
+  const selected = candidates[0]
+  if (!selected) throw new Error('WMTS 没有匹配且受支持的 TileMatrixSet，请检查矩阵集和坐标系')
+  const metresPerUnit = [4326, 4490].includes(selected.wkid) ? 111319.49079327358 : 1
+  const declaredCrs = xmlText(selected.node, 'SupportedCRS')
+  const limits = xmlDescendants(selected.link, 'TileMatrixLimits')
+  const matrices: TileMatrix[] = xmlChildren(selected.node, 'TileMatrix').flatMap(node => {
+    const id = xmlText(node, 'Identifier'), scale = xmlNumber(node, 'ScaleDenominator')
+    const corner = xmlText(node, 'TopLeftCorner').split(/\s+/).map(Number)
+    const tileWidth = xmlNumber(node, 'TileWidth'), tileHeight = xmlNumber(node, 'TileHeight'), width = xmlNumber(node, 'MatrixWidth'), height = xmlNumber(node, 'MatrixHeight')
+    if (!id || !scale || scale <= 0 || corner.length !== 2 || !corner.every(Number.isFinite)
+      || ![tileWidth, tileHeight, width, height].every(value => value !== undefined && Number.isInteger(value) && value > 0)) return []
+    const swap = [4326, 4490].includes(selected.wkid) && !/CRS:?84$/i.test(declaredCrs) && Math.abs(corner[0]!) <= 90
+    const limit = limits.find(item => xmlText(item, 'TileMatrix') === id)
+    if (limits.length && !limit) return []
+    const range = limit ? { minRow: xmlNumber(limit, 'MinTileRow')!, maxRow: xmlNumber(limit, 'MaxTileRow')!, minCol: xmlNumber(limit, 'MinTileCol')!, maxCol: xmlNumber(limit, 'MaxTileCol')! } : undefined
+    if (range && (!Object.values(range).every(Number.isInteger) || range.minRow < 0 || range.minCol < 0 || range.maxRow < range.minRow || range.maxCol < range.minCol || range.maxRow >= height! || range.maxCol >= width!)) throw new Error('WMTS TileMatrixSetLimits 无效')
+    return [{ id, resolution: scale * .00028 / metresPerUnit, origin: (swap ? [corner[1]!, corner[0]!] : [corner[0]!, corner[1]!]) as [number, number], tileWidth: tileWidth!, tileHeight: tileHeight!, width: width!, height: height!, limits: range }]
+  }).sort((a, b) => b.resolution - a.resolution)
+  if (!matrices.length) throw new Error('WMTS 没有有效的可用切片矩阵')
+  const styles = xmlChildren(layer, 'Style'), requestedStyle = ogcParameter(url, 'STYLE')
+  const styleNode = requestedStyle ? styles.find(node => xmlText(node, 'Identifier') === requestedStyle) : styles.find(node => ['true', '1'].includes(node.getAttribute('isDefault') || '')) || styles[0]
+  if (requestedStyle && !styleNode) throw new Error('WMTS 中不存在配置的 STYLE')
+  const style = styleNode ? xmlText(styleNode, 'Identifier') : ''
+  const formats = xmlChildren(layer, 'Format').map(node => node.textContent?.trim() || '')
+  const format = ogcParameter(url, 'FORMAT') || formats.find(value => value === 'image/png') || formats.find(value => value.startsWith('image/'))
+  if (!format || !formats.includes(format)) throw new Error('WMTS 未提供所选图片格式，矢量瓦片需专用渲染器')
+  const dimensions = xmlChildren(layer, 'Dimension').map(node => {
+    const id = xmlText(node, 'Identifier'), values = xmlChildren(node, 'Value')
+    const value = ogcParameter(url, id) || xmlText(node, 'Default') || (values.length === 1 ? values[0]!.textContent?.trim() : '')
+    if (!id || !value) throw new Error(`WMTS 维度 ${id} 缺少默认值，请在地址中配置该参数`)
+    return [id, value] as const
   })
+  const endpoint = operationEndpoint(xml, 'GetTile', url)
+  const resource = xmlChildren(layer, 'ResourceURL').find(node => node.getAttribute('resourceType') === 'tile' && node.getAttribute('format') === format)?.getAttribute('template')
+  let resourceTemplate: string | undefined
+  if (resource) {
+    const target = new URL(resource, url), original = new URL(ogcBaseUrl(url))
+    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('WMTS ResourceURL 地址无效')
+    if (target.origin === original.origin) original.searchParams.forEach((value, key) => { if (![...target.searchParams.keys()].some(name => name.toUpperCase() === key.toUpperCase())) target.searchParams.set(key, value) })
+    resourceTemplate = target.toString().replace(/%7B/gi, '{').replace(/%7D/gi, '}')
+  }
+  const address = (matrix: string, row: number, col: number) => {
+    if (resourceTemplate) {
+      const replacements: Record<string, string> = { layer: layerId, style, format, tilematrixset: selected.id, tilematrix: matrix, tilerow: String(row), tilecol: String(col),
+        ...Object.fromEntries(dimensions.map(([key, value]) => [key.toLowerCase(), value])) }
+      return resourceTemplate.replace(/\{([^{}]+)\}/g, (_match, key: string) => {
+        const value = replacements[key.toLowerCase()]
+        if (value === undefined || value === '') throw new Error(`WMTS ResourceURL 缺少参数 ${key}`)
+        return encodeURIComponent(value)
+      })
+    }
+    return ogcRequestUrl(endpoint, new URLSearchParams({
+      SERVICE: 'WMTS', REQUEST: 'GetTile', VERSION: '1.0.0', LAYER: layerId, STYLE: style, FORMAT: format,
+      TILEMATRIXSET: selected.id, TILEMATRIX: matrix, TILEROW: String(row), TILECOL: String(col), ...Object.fromEntries(dimensions),
+    }))
+  }
+  address(matrices[0]!.id, 0, 0)
+  return { matrices, wkid: selected.wkid, address, bounds: config.bounds || geographicXmlBounds(layer) }
+}
+
+class AdvertisedTileLayer extends L.TileLayer {
+  private byZoom: Map<number, TileMatrix>
+  constructor(matrices: TileMatrix[], private address: WmtsDefinition['address'], config: ServiceRemarkConfig) {
+    const pairs = matrices.map(matrix => [Math.round(Math.log2(156543.03392804097 / matrix.resolution)), matrix] as const)
+    const levels = pairs.map(([level]) => level)
+    super('', { pane: MAP_SERVICE_IMAGERY_PANE, bounds: config.bounds ?? config.fallbackRequestBounds,
+      minNativeZoom: Math.min(...levels), maxNativeZoom: Math.max(...levels), maxZoom: 22, noWrap: true, keepBuffer: 1 })
+    this.byZoom = new Map(pairs)
+  }
+  override getTileUrl(coords: L.Coords) {
+    const matrix = this.byZoom.get(coords.z), range = matrix?.limits
+    if (!matrix || coords.x < 0 || coords.y < 0 || (matrix.width !== undefined && coords.x >= matrix.width) || (matrix.height !== undefined && coords.y >= matrix.height)
+      || (range && (coords.x < range.minCol || coords.x > range.maxCol || coords.y < range.minRow || coords.y > range.maxRow))) return 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+    return this.address(matrix.id, coords.y, coords.x)
+  }
+}
+
+async function createOgcLayer(service: MapServiceItem, protocol: 'WMS' | 'WMTS', config: ServiceRemarkConfig): Promise<MapServiceLayerHandle> {
+  if (protocol === 'WMS') {
+    const definition = await resolveWms(service.serviceUrl, config)
+    return { layer: new OgcWmsTileLayer(definition, config), bounds: definition.bounds }
+  }
+  let definition: WmtsDefinition
+  try { definition = await resolveWmts(service.serviceUrl, config) } catch (error) {
+    if (legacyWmtsTemplateAllowed(service.serviceUrl, config, error)) return { layer: createTemplateLayer(leafletWmtsTemplate(service.serviceUrl), false, config), bounds: config.bounds }
+    throw error
+  }
+  const standard = definition.wkid === 3857 && definition.matrices.every((matrix, index, matrices) => {
+    const level = Math.round(Math.log2(156543.03392804097 / matrix.resolution))
+    return matrix.tileWidth === 256 && matrix.tileHeight === 256 && level >= 0
+      && Math.abs(matrix.origin[0] + 20037508.342789244) < .001 && Math.abs(matrix.origin[1] - 20037508.342789244) < .001
+      && Math.abs(matrix.resolution / (156543.03392804097 / 2 ** level) - 1) < 1e-7
+      && (index === 0 || Math.round(Math.log2(156543.03392804097 / matrices[index - 1]!.resolution)) + 1 === level)
+  })
+  const resolved = { ...config, bounds: definition.bounds }
+  return { layer: standard ? new AdvertisedTileLayer(definition.matrices, definition.address, resolved)
+    : new MatrixTileLayer(definition.matrices, definition.wkid, definition.address, resolved), bounds: definition.bounds }
+}
+
+function legacyWmtsTemplateAllowed(url: string, config: ServiceRemarkConfig, error: unknown) {
+  const explicitCrs = ogcParameter(url, 'CRS') || ogcParameter(url, 'SRS') || ogcParameter(url, 'TILEMATRIXSET') || ''
+  return hasTileTemplate(leafletWmtsTemplate(url)) && (!config.tileWkid || [3857, 102100, 102113].includes(config.tileWkid))
+    && !/4326|4490/.test(explicitCrs) && error instanceof Error && /无法跨域读取|读取超时/.test(error.message)
 }
 
 async function createArcGisVectorHandle(
@@ -1282,13 +2144,40 @@ async function createArcGisLayer(
   const metadata = await loadArcGisMetadata(url)
   const bounds = arcGisBounds(metadata, config, !imageServer)
   if (metadata.singleFusedMapCache) {
-    const levels = (metadata.tileInfo?.lods || []).map((lod) => Number(lod.level)).filter(Number.isFinite)
+    const info = metadata.tileInfo
+    const minLOD = config.minZoom ?? (metadata.minLOD != null && metadata.minLOD >= 0 ? metadata.minLOD : undefined)
+    const maxLOD = config.maxZoom ?? (metadata.maxLOD != null && metadata.maxLOD >= 0 ? metadata.maxLOD : undefined)
+    const lods = (info?.lods || []).filter(lod => lod.level != null && Number.isInteger(lod.level)
+      && (minLOD === undefined || lod.level >= minLOD) && (maxLOD === undefined || lod.level <= maxLOD))
+    const levels = lods.map(lod => lod.level!)
+    {
+      const spatialReference = info?.spatialReference || metadata.spatialReference
+      const code = spatialReference?.latestWkid || spatialReference?.wkid || config.tileWkid
+      if (!code) throw new Error('缓存服务未提供切片坐标系，请补充 tileInfo.spatialReference')
+      const wkid = projectionWkid(code)
+      const origin = info?.origin
+      if (!Number.isFinite(origin?.x) || !Number.isFinite(origin?.y)) throw new Error('缓存服务未提供有效切片原点')
+      const tileWidth = info?.cols ?? 256, tileHeight = info?.rows ?? 256
+      if (![tileWidth, tileHeight].every(value => Number.isInteger(value) && value > 0 && value <= 4096)) throw new Error('缓存服务切片尺寸无效')
+      const matrices: TileMatrix[] = lods.flatMap(lod => Number.isFinite(lod.resolution) && lod.resolution! > 0 ? [{
+        id: String(lod.level), resolution: lod.resolution!, origin: [origin!.x!, origin!.y!] as [number, number],
+        tileWidth, tileHeight,
+      }] : [])
+      if (!matrices.length) throw new Error('缓存服务没有有效的可用切片级别与分辨率')
+      const standard = wkid === 3857 && matrices.every((matrix, index) => matrix.tileWidth === 256 && matrix.tileHeight === 256
+        && Math.abs(matrix.origin[0] + 20037508.342789244) < .001 && Math.abs(matrix.origin[1] - 20037508.342789244) < .001
+        && Math.abs(matrix.resolution / (156543.03392804097 / 2 ** Number(matrix.id)) - 1) < 1e-7
+        && (index === 0 || Number(matrix.id) === Number(matrices[index - 1]!.id) + 1))
+      if (!standard) return {
+        layer: new MatrixTileLayer(matrices, wkid, (level, row, col) => servicePath(url, `tile/${encodeURIComponent(level)}/${row}/${col}`), { ...config, bounds }), bounds,
+      }
+    }
     return {
-      layer: L.tileLayer(`${url}/tile/{z}/{y}/{x}`, {
+      layer: L.tileLayer(servicePath(url, 'tile/{z}/{y}/{x}'), {
         pane: MAP_SERVICE_IMAGERY_PANE,
-        bounds,
-        minNativeZoom: config.minZoom ?? (levels.length ? Math.min(...levels) : 0),
-        maxNativeZoom: config.maxZoom ?? (levels.length ? Math.max(...levels) : 22),
+        bounds: bounds ?? config.fallbackRequestBounds,
+        minNativeZoom: minLOD ?? (levels.length ? Math.min(...levels) : 0),
+        maxNativeZoom: maxLOD ?? (levels.length ? Math.max(...levels) : 22),
         maxZoom: Math.max(config.maxZoom || 22, 22),
         noWrap: true,
         keepBuffer: 3,
@@ -1298,14 +2187,14 @@ async function createArcGisLayer(
   }
   if (!imageServer) {
     if (selectedLayerId !== undefined) {
-      const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${selectedLayerId}`)
+      const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(servicePath(url, String(selectedLayerId)))
       if (selectedGeometryType && !layerMetadata.geometryType) layerMetadata.geometryType = selectedGeometryType
       if (layerMetadata.geometryType) return createArcGisVectorHandle(url, selectedLayerId, layerMetadata, bounds, color)
     }
     for (const definition of (metadata.layers || []).slice(0, 12)) {
       if (!Number.isFinite(Number(definition.id))) continue
       const layerId = Number(definition.id)
-      const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${layerId}`)
+      const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(servicePath(url, String(layerId)))
       if (layerMetadata.geometryType !== 'esriGeometryPolygon') continue
       return createArcGisVectorHandle(url, layerId, layerMetadata, bounds, color)
     }
@@ -1313,18 +2202,31 @@ async function createArcGisLayer(
   return { layer: new ArcGisExportLayer(url, imageServer), bounds }
 }
 
-export async function createMapServiceLayer(service: MapServiceItem, color?: string): Promise<MapServiceLayerHandle> {
+export async function createMapServiceLayer(service: MapServiceItem, color?: string, options: MapServiceLayerOptions = {}): Promise<MapServiceLayerHandle> {
   const url = serviceRoot(service.serviceUrl)
   const type = normalizedType(service.type)
-  const config = parseServiceRemark(service.remark)
+  const config: ServiceRemarkConfig = {
+    ...parseServiceRemark(service.remark),
+    fallbackRequestBounds: options.fallbackRequestBounds?.isValid() ? options.fallbackRequestBounds : undefined,
+  }
+  const forwarderTemplate = taizhouForwarderTemplate(url)
+  if (forwarderTemplate) return createTaizhouForwarderLayer(forwarderTemplate, config)
+  const protocol = ogcProtocol(service)
+  if (protocol) return createOgcLayer(service, protocol, config)
+
+  // 已配置瓦片模板时直接加载，兼容后台将转发瓦片误标为 MapServer 的情况。
+  const template = leafletWmtsTemplate(url)
+  if (hasTileTemplate(template)) {
+    const tms = type.includes('TMS')
+    const resolvedConfig = tms ? await tmsConfig(template, config) : config
+    return { layer: createTemplateLayer(template, tms, resolvedConfig), bounds: resolvedConfig.bounds }
+  }
 
   if (type.includes('TMS')) {
     const resolvedConfig = await tmsConfig(url, config)
     return { layer: createTemplateLayer(url, true, resolvedConfig), bounds: resolvedConfig.bounds }
   }
   if (type.includes('XYZ')) return { layer: createTemplateLayer(url, false, config), bounds: config.bounds }
-  if (type.includes('WMTS')) return { layer: createTemplateLayer(leafletWmtsTemplate(url), false, config), bounds: config.bounds }
-  if (type.includes('WMS')) return { layer: createWmsLayer(url, config), bounds: config.bounds }
   if (type.includes('ARCGIS_IMAGESERVER') || /\/ImageServer(?:\?|$)/i.test(url)) {
     return createArcGisLayer(url, true, config)
   }
@@ -1341,6 +2243,7 @@ export async function createMapServiceLayer(service: MapServiceItem, color?: str
 export async function expandMapServiceSublayers(service: MapServiceItem): Promise<MapServiceItem[]> {
   const url = serviceRoot(service.serviceUrl)
   const type = normalizedType(service.type)
+  if (taizhouForwarderTemplate(url) || ogcProtocol(service) || hasTileTemplate(leafletWmtsTemplate(url)) || isTileRequestUrl(url)) return [service]
   if (!(type.includes('ARCGIS_MAPSERVER') || type === 'ARCGIS' || /\/MapServer(?:\?|$)/i.test(url))) return [service]
 
   try {
@@ -1350,7 +2253,7 @@ export async function expandMapServiceSublayers(service: MapServiceItem): Promis
       const layerId = Number(definition.id)
       if (!Number.isFinite(layerId)) return undefined
       try {
-        const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${layerId}`)
+        const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(servicePath(url, String(layerId)))
         if (!layerMetadata.geometryType) return undefined
         return { id: layerId, name: definition.name || `子图层${layerId}`, geometryType: layerMetadata.geometryType }
       } catch {
@@ -1384,6 +2287,22 @@ export async function inspectMapService(service: MapServiceItem): Promise<MapSer
   const url = serviceRoot(service.serviceUrl)
   const type = normalizedType(service.type)
   const config = parseServiceRemark(service.remark)
+  if (taizhouForwarderTemplate(url)) return { isImagery: true, bounds: serializableBounds(config.bounds) }
+  const protocol = ogcProtocol(service)
+  if (protocol) {
+    try {
+      const definition = protocol === 'WMS' ? await resolveWms(url, config) : await resolveWmts(url, config)
+      return { isImagery: true, bounds: serializableBounds(definition.bounds) }
+    } catch (error) {
+      if (protocol === 'WMTS' && legacyWmtsTemplateAllowed(url, config, error)) return { isImagery: true, bounds: serializableBounds(config.bounds) }
+      throw error
+    }
+  }
+
+  if (hasTileTemplate(leafletWmtsTemplate(url))) {
+    const resolvedConfig = type.includes('TMS') ? await tmsConfig(leafletWmtsTemplate(url), config) : config
+    return { isImagery: true, bounds: serializableBounds(resolvedConfig.bounds) }
+  }
 
   if (type.includes('ARCGIS_IMAGESERVER') || /\/ImageServer(?:\?|$)/i.test(url)) {
     const metadata = await loadArcGisMetadata(url)
@@ -1399,7 +2318,7 @@ export async function inspectMapService(service: MapServiceItem): Promise<MapSer
     }
     for (const definition of (metadata.layers || []).slice(0, 12)) {
       if (!Number.isFinite(Number(definition.id))) continue
-      const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(`${url}/${Number(definition.id)}`)
+      const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(servicePath(url, String(Number(definition.id))))
       if (layerMetadata.geometryType) return { isImagery: false }
     }
     return { isImagery: true, bounds: serializableBounds(arcGisBounds(metadata, config)) }
@@ -1423,7 +2342,7 @@ function cachedLayerMetadata(url: string, layerId: number) {
   const key = `${url}/${layerId}`
   const cached = layerFieldCache.get(key)
   if (cached) return cached
-  const request = loadArcGisJson<ArcGisLayerMetadata>(`${url}/${layerId}`)
+  const request = loadArcGisJson<ArcGisLayerMetadata>(servicePath(url, String(layerId)))
   layerFieldCache.set(key, request)
   request.catch(() => layerFieldCache.delete(key))
   return request
@@ -1462,15 +2381,17 @@ function featureLocation(feature: { geometry?: MapServiceSearchGeometry }, geome
 
 async function queryArcGis(url: string, parameters: URLSearchParams): Promise<ArcGisQueryResponse> {
   parameters.set('f', 'json')
-  let data: ArcGisQueryResponse & { error?: { message?: string } }
+  let response: Response
   try {
-    const response = await fetch(url, { method: 'POST', body: parameters })
-    if (!response.ok) throw new Error(`图层查询失败 (${response.status})`)
-    data = await response.json() as typeof data
+    response = await fetch(url, { method: 'POST', body: parameters })
   } catch {
     // Some older ArcGIS services allow JSONP but do not enable CORS for POST.
-    data = await loadArcGisJson<ArcGisQueryResponse>(`${url}?${parameters.toString()}`)
+    return loadArcGisJson<ArcGisQueryResponse>(serviceParameters(url, parameters))
   }
+  if ([405, 501].includes(response.status)) return loadArcGisJson<ArcGisQueryResponse>(serviceParameters(url, parameters))
+  if (!response.ok) throw serviceResponseError(response.status)
+  const data = await response.json() as ArcGisQueryResponse & { error?: { code?: number; message?: string } }
+  if (data.error?.code && [401, 403, 498, 499].includes(data.error.code)) throw serviceResponseError(data.error.code)
   if (data.error) throw new Error(data.error.message || '图层查询条件不受服务支持')
   return data
 }
@@ -1554,7 +2475,7 @@ export async function identifyVectorFeatures(
     outSR: '4326',
     resultRecordCount: '200',
   })
-  const response = await queryAllFeatures(`${url}/${layerId}/query`, parameters)
+  const response = await queryAllFeatures(servicePath(url, `${layerId}/query`), parameters)
   const metadata = await cachedLayerMetadata(url, layerId)
   return (response.features || []).map(feature => identifiedFeature(service, feature, metadata, response.fieldAliases))
 }
@@ -1602,12 +2523,12 @@ export async function searchVectorLayerText(service: MapServiceItem, keyword: st
   })
   let response: ArcGisQueryResponse
   try {
-    response = await queryAllFeatures(`${url}/${layerId}/query`, parameters)
+    response = await queryAllFeatures(servicePath(url, `${layerId}/query`), parameters)
   } catch {
     // Older databases cannot CAST every numeric/date field. Scan complete attributes
     // when an expression is unsupported, using ID batching rather than dropping fields.
     parameters.set('where', '1=1')
-    response = await queryAllFeatures(`${url}/${layerId}/query`, parameters)
+    response = await queryAllFeatures(servicePath(url, `${layerId}/query`), parameters)
   }
   return (response.features || []).flatMap(feature => {
     const result = identifiedFeature(service, feature, metadata, response.fieldAliases)

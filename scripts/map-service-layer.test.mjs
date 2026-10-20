@@ -28,6 +28,10 @@ let numericFallback = false
 let clicked = false
 const requests = []
 globalThis.fetch = async (url, options) => {
+  if (options.method !== 'POST') {
+    const gbz = new URL(url).pathname.endsWith('/1')
+    return { ok: true, text: async () => JSON.stringify({ name: gbz ? '高标准农田GBZ' : '地块', fields: gbz ? fields.filter(f => f.name !== 'DLMC') : fields, geometryType: 'esriGeometryPoint' }) }
+  }
   assert.equal(options.method, 'POST')
   const p = options.body
   requests.push(new URLSearchParams(p))
