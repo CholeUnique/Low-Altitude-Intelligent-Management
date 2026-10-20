@@ -7,6 +7,11 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "type-check": "vue-tsc --noEmit",
+    "test:video-telemetry": "node scripts/video-telemetry.test.mjs && node scripts/telemetry-location.test.mjs && node scripts/telemetry-panel.test.mjs && node scripts/srt-inspector.test.mjs && node scripts/collection-video-telemetry.test.mjs",
+    "test:dashboard-media": "node scripts/dashboard-media-summary.test.mjs",
+    "test:dashboard-loading": "node scripts/dashboard-loading.test.mjs",
+    "test:map-service-editor": "node scripts/map-service-editor.test.mjs",
+    "test:map-services": "node scripts/map-service-access.test.mjs && node scripts/map-service-layer.test.mjs && node scripts/taizhou-forwarder.test.mjs && node scripts/dashboard-boundary.test.mjs && node scripts/ogc-services.test.mjs && node scripts/matrix-tiles.test.mjs",
     "smoke:api": "node scripts/api-smoke.mjs",
     "preview": "vite preview"
   },

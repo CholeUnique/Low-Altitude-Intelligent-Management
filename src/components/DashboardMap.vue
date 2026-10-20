@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue'
 import { Aim, Compass, Delete, EditPen, InfoFilled, Location, MapLocation, Picture, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
 import L from 'leaflet'
 import type { GeoJsonObject } from 'geojson'
@@ -36,6 +36,8 @@ const props = defineProps<{
   screenCleared?: boolean
   /** 从场景入口进入时，自动聚焦该场景实际任务范围。 */
   focusLayerId?: string
+  /** 场景几何准备好后再定位并挂载底图，避免先下载错误视角的瓦片。 */
+  focusGeometryPending?: boolean
 }>()
 const emit = defineEmits<{ 'toggle-clear-screen': [] }>()
 
@@ -142,9 +144,10 @@ const mapServicesError = ref('')
 const mapServiceOrderSaving = ref(false)
 const draggingGroupId = ref('')
 const dragGhost = ref<{ name: string; x: number; y: number; width: number; height: number }>()
-const jiulongBoundaryVisible = ref(user.organizationId === 'agriculture-rural' && !props.focusLayerId)
+const jiulongBoundaryVisible = ref(false)
 
 const jiulongBoundaryError = ref('')
+const jiulongBoundaryLoading = ref(false)
 const layerPanelCollapsed = ref(Boolean(props.floatingControls))
 const layerPanelId = `dashboard-layers-${useId().replace(/:/g, '')}`
 const visibleMapServiceIds = ref<string[]>([])
@@ -231,6 +234,7 @@ let resizeObserver: ResizeObserver | undefined
 let resizeFrame: number | undefined
 let baseLayer: L.TileLayer | undefined
 let labelLayer: L.TileLayer | undefined
+let baseLayersInitialized = false
 let measureGroup: L.LayerGroup | undefined
 let annotationGroup: L.LayerGroup | undefined
 let locationGroup: L.LayerGroup | undefined
@@ -256,10 +260,9 @@ let jiulongAdminHandle: MapServiceLayerHandle | undefined
 let jiulongAdminRequest = 0
 let jiulongAdminPendingFit = jiulongBoundaryVisible.value
 const jiulongAdminService = ref<MapServiceItem>()
+const jiulongAdminSourceId = ref('')
 let toolMessageTimer: ReturnType<typeof window.setTimeout> | undefined
 let markerHintTimer: ReturnType<typeof window.setTimeout> | undefined
-let sceneFocusTimer: ReturnType<typeof window.setTimeout> | undefined
-let overviewFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 let searchFocusTimer: ReturnType<typeof window.setTimeout> | undefined
 let searchHighlightTimer: ReturnType<typeof window.setInterval> | undefined
 let searchHighlightClearTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -270,7 +273,8 @@ let focusedSceneLayerId = ''
 let overviewFocused = false
 const mapServiceLayers = new Map<string, MapServiceLayerHandle>()
 const mapServicePaneNames = new Map<string, string>()
-const loadingMapServiceIds = new Set<string>()
+const loadingMapServiceIds = reactive(new Set<string>())
+const mapServiceVisibilityVersions = new Map<string, number>()
 let mapServiceRequestVersion = 0
 let mapServicePaneSerial = 0
 let dragPressTimer: ReturnType<typeof window.setTimeout> | undefined
@@ -513,6 +517,7 @@ function onMapServiceGroupClick(group: MapServiceGroup) {
     return
   }
   if (group.layers.length === 1 && categoryPanelFor(group.layers[0]!)) toggleCategoryFolder(group.layers[0]!)
+  else if (group.layers.length === 1) void toggleMapServiceGroupVisibility(group)
   else void toggleMapServiceGroup(group)
 }
 
@@ -523,12 +528,16 @@ async function loadMapServices() {
   jiulongAdminHandle?.layer.remove()
   jiulongAdminHandle = undefined
   jiulongAdminService.value = undefined
+  jiulongAdminSourceId.value = ''
+  jiulongBoundaryLoading.value = false
+  jiulongBoundaryError.value = ''
   // 部门切换时先撤掉旧图层，避免新列表返回前仍展示上一部门的服务。
   clearSelectionHighlight()
   attributeFilters.value = {}
   mapServiceLayers.forEach((handle) => handle.layer.remove())
   mapServiceLayers.clear()
   loadingMapServiceIds.clear()
+  mapServiceVisibilityVersions.clear()
   visibleMapServiceIds.value = []
   vectorFilterPanels.value = []
   expandedCategoryIds.value = []
@@ -541,6 +550,7 @@ async function loadMapServices() {
     const expandedServices = await Promise.all(sourceServices.map(expandMapServiceSublayers))
     if (requestVersion !== mapServiceRequestVersion) return
     jiulongAdminService.value = undefined
+    jiulongAdminSourceId.value = ''
     const groups = sourceServices.map((source, index) => ({
       id: String(source.id),
       name: source.name,
@@ -574,32 +584,69 @@ async function loadMapServices() {
   }
 }
 
+function hideMapService(service: MapServiceItem) {
+  const id = String(service.id)
+  mapServiceVisibilityVersions.set(id, (mapServiceVisibilityVersions.get(id) || 0) + 1)
+  loadingMapServiceIds.delete(id)
+  mapServiceLayers.get(id)?.layer.remove()
+  if (activeFeature.value?.serviceId === id) clearSelectionHighlight()
+  visibleMapServiceIds.value = visibleMapServiceIds.value.filter((layerId) => layerId !== id)
+  vectorFilterPanels.value = vectorFilterPanels.value.filter((panel) => panel.serviceId !== id)
+  expandedCategoryIds.value = expandedCategoryIds.value.filter((layerId) => layerId !== id)
+}
+
+function taizhouServiceBounds(service: MapServiceItem) {
+  const isTaizhou = /泰州\s*天地图/.test(service.name)
+    || /^https?:\/\/jiangsu\.tianditu\.gov\.cn\/taizhou\/forwarder\//i.test(service.serviceUrl)
+  // 服务方确认业务覆盖泰州全市；缺少精确范围时，用行政外包范围定位并限制请求。
+  if (isTaizhou) return L.geoJSON(taizhouDistrictBoundariesWgs84 as GeoJsonObject).getBounds()
+}
+
+function mapServiceViewBounds(service: MapServiceItem, handle: MapServiceLayerHandle) {
+  return handle.bounds?.isValid() ? handle.bounds : taizhouServiceBounds(service)
+}
+
 async function toggleMapService(service: MapServiceItem) {
   if (!map) return
   const id = String(service.id)
   const existing = mapServiceLayers.get(id)
   if (existing && map.hasLayer(existing.layer)) {
-    existing.layer.remove()
-    if (activeFeature.value?.serviceId === id) clearSelectionHighlight()
-    visibleMapServiceIds.value = visibleMapServiceIds.value.filter((layerId) => layerId !== id)
-    vectorFilterPanels.value = vectorFilterPanels.value.filter((panel) => panel.serviceId !== id)
-    expandedCategoryIds.value = expandedCategoryIds.value.filter((layerId) => layerId !== id)
+    hideMapService(service)
     return
   }
   if (loadingMapServiceIds.has(id)) return
   loadingMapServiceIds.add(id)
   const requestVersion = mapServiceRequestVersion
+  const visibilityVersion = (mapServiceVisibilityVersions.get(id) || 0) + 1
+  mapServiceVisibilityVersions.set(id, visibilityVersion)
   try {
     const color = service.arcGisGeometryType ? vectorLayerColors.value[id] || vectorLayerColor(id) : undefined
-    const handle = existing || await createMapServiceLayer(service, color)
+    const handle = existing || await createMapServiceLayer(service, color, { fallbackRequestBounds: taizhouServiceBounds(service) })
     if (existing && color) existing.setColor?.(color)
-    if (requestVersion !== mapServiceRequestVersion) {
+    if (requestVersion !== mapServiceRequestVersion || visibilityVersion !== mapServiceVisibilityVersions.get(id)) {
       handle.layer.remove()
       return
     }
     mapServiceLayers.set(id, handle)
+    if (!existing) {
+      let lastTileErrorTime = 0
+      handle.layer.on('tileerror', (event: L.TileErrorEvent) => {
+        if (!map?.hasLayer(handle.layer) || requestVersion !== mapServiceRequestVersion) return
+        const now = Date.now()
+        if (now - lastTileErrorTime < 8000) return
+        lastTileErrorTime = now
+        showToolMessage(`${service.name}：${event.error?.message || '地图瓦片加载失败，请检查实际瓦片请求及访问授权'}`, 6500)
+      })
+    }
     assignMapServicePane(handle.layer, paneForMapService(service))
     handle.setFillOpacity?.(vectorFillOpacity.value[id] ?? .25)
+    const viewBounds = mapServiceViewBounds(service, handle)
+    if (viewBounds?.isValid() && !viewBounds.contains(map.getBounds())) {
+      map.invalidateSize({ pan: false })
+      // 默认行政视角直接就位再添加图层，避免先请求旧的大视窗；真实服务范围保留平滑定位。
+      map.fitBounds(viewBounds, { padding: [48, 48], maxZoom: 19, animate: Boolean(handle.bounds?.isValid()) })
+      overviewFocused = true
+    }
     handle.layer.addTo(map)
     syncMapServiceStack()
     if (!visibleMapServiceIds.value.includes(id)) visibleMapServiceIds.value = [...visibleMapServiceIds.value, id]
@@ -615,20 +662,10 @@ async function toggleMapService(service: MapServiceItem) {
       }]
       if (!expandedCategoryIds.value.includes(id)) expandedCategoryIds.value = [...expandedCategoryIds.value, id]
     }
-    if (handle.bounds?.isValid()) {
-      // 用户当前视窗已完全位于新图层覆盖范围内时保持原视角，避免每次勾选
-      // 图层都打断正在进行的放大查看或平移操作。
-      if (!handle.bounds.contains(map.getBounds())) {
-        map.invalidateSize({ pan: false })
-        map.fitBounds(handle.bounds, { padding: [48, 48], maxZoom: 19, animate: true })
-      }
-    } else {
-      showToolMessage(`${service.name} 未提供有效影像范围，已显示但无法自动定位`)
-    }
   } catch (reason) {
-    if (requestVersion === mapServiceRequestVersion) showToolMessage(reason instanceof Error ? reason.message : `${service.name} 加载失败`, 5000)
+    if (requestVersion === mapServiceRequestVersion && visibilityVersion === mapServiceVisibilityVersions.get(id)) showToolMessage(`${service.name}：${reason instanceof Error ? reason.message : '加载失败'}`, 6500)
   } finally {
-    if (requestVersion === mapServiceRequestVersion) loadingMapServiceIds.delete(id)
+    if (requestVersion === mapServiceRequestVersion && visibilityVersion === mapServiceVisibilityVersions.get(id)) loadingMapServiceIds.delete(id)
   }
 }
 
@@ -848,8 +885,8 @@ function singleVectorService(group: MapServiceGroup) {
 }
 
 function isMapServiceGroupActive(group: MapServiceGroup) {
-  if (group.layers.length > 1) return expandedMapServiceGroupIds.value.includes(group.id)
-  return group.layers.some((service) => visibleMapServiceIds.value.includes(String(service.id)))
+  return (jiulongBoundaryVisible.value && jiulongAdminSourceId.value === group.id)
+    || group.layers.some((service) => visibleMapServiceIds.value.includes(String(service.id)) || loadingMapServiceIds.has(String(service.id)))
 }
 
 function isMapServiceGroupExpanded(group: MapServiceGroup) {
@@ -883,6 +920,16 @@ async function toggleMapServiceGroup(group: MapServiceGroup) {
     : [...expandedMapServiceGroupIds.value, group.id]
   const targets = hideGroup || group.layers.some(service => visibleMapServiceIds.value.includes(String(service.id))) ? [] : group.layers.slice(0, 1)
   await Promise.all(targets.map(toggleMapService))
+}
+
+async function toggleMapServiceGroupVisibility(group: MapServiceGroup) {
+  if (isMapServiceGroupActive(group)) {
+    // 关闭父服务同时关闭从该服务抽取的行政边界；单独关闭兄弟子图层不影响边界。
+    if (jiulongAdminSourceId.value === group.id) closeJiulongBoundary()
+    group.layers.forEach(hideMapService)
+  } else {
+    await Promise.all(group.layers.map(toggleMapService))
+  }
 }
 
 function applyVectorCategoryFilter(panel: VectorFilterPanel) {
@@ -931,12 +978,9 @@ function focusSceneLayer() {
 
 function scheduleSceneFocus() {
   if (!props.focusLayerId) return
-  if (sceneFocusTimer) window.clearTimeout(sceneFocusTimer)
-  // 场景入口会触发路由和地图重建。图层绘制、容器尺寸稳定后再聚焦，避免
-  // 初始尺寸尚未计算时 fitBounds 被忽略。
-  window.requestAnimationFrame(() => {
-    focusSceneLayer()
-    sceneFocusTimer = window.setTimeout(focusSceneLayer, 180)
+  void nextTick(() => {
+    if (!baseLayersInitialized) initializeBaseLayers()
+    else if (focusedSceneLayerId !== props.focusLayerId) focusSceneLayer()
   })
 }
 
@@ -952,12 +996,21 @@ function focusHailingDistrict() {
 
 function scheduleOverviewFocus() {
   if (props.focusLayerId || overviewFocused) return
-  if (overviewFocusTimer) window.clearTimeout(overviewFocusTimer)
-  // 只在单位总览地图初次挂载后定位一次；业务数据轮询不会再触发。
-  overviewFocusTimer = window.setTimeout(() => {
-    overviewFocusTimer = undefined
-    focusHailingDistrict()
-  }, 100)
+  void nextTick(() => {
+    if (!baseLayersInitialized) initializeBaseLayers()
+    else focusHailingDistrict()
+  })
+}
+
+function initializeBaseLayers() {
+  if (!map || baseLayersInitialized || props.focusGeometryPending) return
+  // 此时尚无瓦片层：先应用最终初始视角，之后底图/注记只下载这个视角。
+  // 场景无可用几何时保留城市视角，不让空/失败的范围请求阻塞底图。
+  if (props.focusLayerId) focusSceneLayer()
+  else focusHailingDistrict()
+  baseLayersInitialized = true
+  addBaseLayers(mapMode.value)
+  void loadMapServices()
 }
 
 function clearSearchHighlight() {
@@ -1431,7 +1484,7 @@ function clearAnnotations() {
 
 function switchMode(mode: 'vector' | 'image') {
   mapMode.value = mode
-  addBaseLayers(mode)
+  if (baseLayersInitialized) addBaseLayers(mode)
   baseMapOpen.value = false
 }
 
@@ -1480,7 +1533,20 @@ function detachJiulongAdminLayer(source: MapServiceItem, layers: MapServiceItem[
   const fromFarmland = /永久基本农田/.test(source.name)
   if (!fromFarmland && jiulongAdminService.value) return layers
   jiulongAdminService.value = admin
+  jiulongAdminSourceId.value = String(source.id)
   return rest
+}
+
+function closeJiulongBoundary(clearError = true) {
+  jiulongAdminRequest += 1
+  jiulongAdminHandle?.layer.remove()
+  jiulongAdminHandle = undefined
+  jiulongBoundaryVisible.value = false
+  jiulongBoundaryLoading.value = false
+  jiulongAdminPendingFit = false
+  if (clearError) jiulongBoundaryError.value = ''
+  if (activeFeature.value?.serviceId === String(jiulongAdminService.value?.id)) clearSelectionHighlight()
+  renderHailingBoundary()
 }
 
 async function renderJiulongBoundary(fit: boolean) {
@@ -1495,11 +1561,13 @@ async function renderJiulongBoundary(fit: boolean) {
       if (fit) jiulongAdminPendingFit = true
       return
     }
-    jiulongBoundaryError.value = '九龙镇边界暂未读取成功，请重试。'
+    closeJiulongBoundary(false)
+    jiulongBoundaryError.value = '当前可用服务中未找到九龙镇行政区边界，已关闭显示。请检查来源服务是否启用。'
     return
   }
   const shouldFit = fit || jiulongAdminPendingFit
   jiulongAdminPendingFit = false
+  jiulongBoundaryLoading.value = true
   try {
     const color = vectorLayerColors.value[String(service.id)] = vectorLayerColors.value[String(service.id)] || '#9AEEFE'
     const handle = await createAdministrativeBoundaryLayer(service, color)
@@ -1516,20 +1584,30 @@ async function renderJiulongBoundary(fit: boolean) {
     }
   } catch (reason) {
     if (request !== jiulongAdminRequest) return
+    closeJiulongBoundary(false)
     jiulongBoundaryError.value = reason instanceof Error ? reason.message : '九龙镇行政区加载失败'
-    jiulongAdminPendingFit = shouldFit
+  } finally {
+    if (request === jiulongAdminRequest) jiulongBoundaryLoading.value = false
   }
 }
 
 function toggleJiulongBoundary() {
-  if (jiulongBoundaryVisible.value && jiulongBoundaryError.value) {
-    void loadMapServices()
+  if (jiulongBoundaryVisible.value) {
+    closeJiulongBoundary()
     return
   }
   jiulongBoundaryError.value = ''
-  jiulongBoundaryVisible.value = !jiulongBoundaryVisible.value
-  void renderJiulongBoundary(jiulongBoundaryVisible.value)
+  jiulongBoundaryVisible.value = true
+  void renderJiulongBoundary(true)
   renderHailingBoundary()
+}
+
+function retryJiulongBoundary() {
+  jiulongBoundaryError.value = ''
+  jiulongBoundaryVisible.value = true
+  jiulongAdminPendingFit = true
+  if (jiulongAdminService.value) void renderJiulongBoundary(true)
+  else void loadMapServices()
 }
 
 function updateScale() {
@@ -1556,6 +1634,8 @@ async function initMap() {
   }
   try {
     await nextTick()
+    if (!container.value) return
+    baseLayersInitialized = false
     mapServicePaneNames.clear()
     map = L.map(container.value, {
       center: TAIZHOU_CENTER,
@@ -1586,11 +1666,8 @@ async function initMap() {
     locationGroup = L.layerGroup().addTo(map)
     searchHighlightGroup = L.layerGroup().addTo(map)
     selectionHighlightGroup = L.layerGroup().addTo(map)
-    addBaseLayers('image')
     renderHailingBoundary()
-    if (props.focusLayerId) scheduleSceneFocus()
-    else scheduleOverviewFocus()
-    void loadMapServices()
+    initializeBaseLayers()
     updateScale()
     map.on('moveend zoomend resize', updateScale)
     map.on('click', (event) => {
@@ -1616,7 +1693,6 @@ async function initMap() {
       })
     })
     resizeObserver.observe(container.value)
-    window.setTimeout(() => map?.invalidateSize(), 100)
   } catch {
     mapError.value = '地图初始化失败，请重新加载'
   }
@@ -1630,7 +1706,8 @@ function retryMap() {
 }
 
 onMounted(initMap)
-watch(() => user.activeDeptId, () => { if (map) void loadMapServices() })
+watch(() => user.activeDeptId, () => { if (map && baseLayersInitialized) void loadMapServices() })
+watch(() => props.focusGeometryPending, () => { initializeBaseLayers() })
 watch(() => props.layers, () => {
   if (!map) return
   // 旧业务场景只用于搜索和场景入口定位，不再作为地图图层自动绘制。
@@ -1665,8 +1742,6 @@ onBeforeUnmount(() => {
   stopMapServiceDrag()
   if (toolMessageTimer) window.clearTimeout(toolMessageTimer)
   if (markerHintTimer) window.clearTimeout(markerHintTimer)
-  if (sceneFocusTimer) window.clearTimeout(sceneFocusTimer)
-  if (overviewFocusTimer) window.clearTimeout(overviewFocusTimer)
   if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
   clearSearchHighlight()
   clearSelectionHighlight()
@@ -1679,6 +1754,7 @@ onBeforeUnmount(() => {
   jiulongAdminHandle?.layer.remove()
   jiulongAdminHandle = undefined
   map?.remove()
+  map = undefined
 })
 </script>
 
@@ -1713,14 +1789,15 @@ onBeforeUnmount(() => {
               <i class="layer-kind" :style="jiulongAdminService ? { color: vectorRowColor(jiulongAdminService) } : undefined"><MapLocation /></i><span><b>九龙镇行政区划边界</b></span><em :title="jiulongBoundaryVisible ? '隐藏' : '显示'">{{ jiulongBoundaryVisible ? '●' : '○' }}</em>
             </button>
           </div>
-          <div v-if="jiulongBoundaryVisible && jiulongBoundaryError" class="layer-panel-message error" role="status">{{ jiulongBoundaryError }} <button type="button" @click="loadMapServices">重试</button></div>
+          <div v-if="jiulongBoundaryLoading" class="layer-panel-message" role="status">正在读取九龙镇边界…</div>
+          <div v-if="jiulongBoundaryError" class="layer-panel-message error" role="status">{{ jiulongBoundaryError }} <button type="button" :disabled="mapServicesLoading" @click="retryJiulongBoundary">重试</button></div>
           <div v-if="mapServicesLoading" class="layer-panel-message">正在读取地图服务…</div>
           <div v-else-if="mapServicesError" class="layer-panel-message error">{{ mapServicesError }}</div>
           <div v-else-if="!mapServiceGroups.length" class="layer-panel-message">暂无已启用的地图服务</div>
           <TransitionGroup v-else tag="div" name="map-service-sort" class="map-service-sort-list">
             <div v-for="group in mapServiceGroups" :key="group.id" class="map-service-group" :class="{ 'is-dragging': draggingGroupId === group.id }" :data-group-id="group.id">
               <button class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="`${group.name}(长按可拖动排序)`" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @pointerdown="onMapServicePointerDown($event, group)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
-                <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em v-if="group.layers.length === 1" role="switch" tabindex="0" :aria-checked="isMapServiceGroupActive(group)" :aria-label="`切换${group.name}可视性`" @pointerdown.stop @click.stop="toggleMapService(group.layers[0]!)" @keydown.enter.stop.prevent="toggleMapService(group.layers[0]!)">{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
+                <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em role="switch" tabindex="0" :aria-checked="isMapServiceGroupActive(group)" :aria-label="`切换${group.name}可视性`" :title="isMapServiceGroupActive(group) ? '关闭整个服务及其依赖边界' : '显示服务图层'" @pointerdown.stop @click.stop="toggleMapServiceGroupVisibility(group)" @keydown.enter.stop.prevent="toggleMapServiceGroupVisibility(group)">{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
               </button>
               <div v-if="group.layers.length === 1 && attributeFilters[String(group.layers[0]!.id)]" class="attribute-filter-chip">{{ attributeFilters[String(group.layers[0]!.id)] }}<button type="button" aria-label="清除属性筛选" @click="clearAttributeFilter(group.layers[0]!)">×</button></div>
               <div v-if="group.layers.length === 1 && categoryPanelFor(group.layers[0]!) && isCategoryExpanded(group.layers[0]!)" class="map-service-sublayers category-folder">

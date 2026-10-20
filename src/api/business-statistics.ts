@@ -153,6 +153,12 @@ export interface BusinessDashboardStatistics {
   trend: BusinessTrend
 }
 
+/** 支持按当前部门、场景直接汇总，不需要读取每个任务的异常分页。 */
+export async function getBusinessAbnormalSummary(query: BusinessStatisticsQuery): Promise<BusinessAbnormalSummary> {
+  if (!query.deptId) throw new Error('未获取到当前单位标识，无法加载异常统计数据。')
+  return apiClient.post<never, BusinessAbnormalSummary>('/v1/biz/statistics/abnormal-summary', query)
+}
+
 /**
  * 首页业务统计。真实模式下五个接口必须全部成功，调用失败交给页面明确展示，绝不回退为 Mock 数据。
  */
@@ -165,7 +171,7 @@ export async function getBusinessDashboardStatistics(query: BusinessStatisticsQu
     apiClient.post<never, BusinessOverview>('/v1/biz/statistics/overview', query),
     apiClient.post<never, BusinessSceneStat[]>('/v1/biz/statistics/scene-stat', query),
     apiClient.post<never, BusinessTaskSummary>('/v1/biz/statistics/task-summary', query),
-    apiClient.post<never, BusinessAbnormalSummary>('/v1/biz/statistics/abnormal-summary', query),
+    getBusinessAbnormalSummary(query),
     apiClient.post<never, BusinessTrend>('/v1/biz/statistics/trend', trendQuery),
   ])
 
