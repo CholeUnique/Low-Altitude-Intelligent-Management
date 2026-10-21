@@ -33,14 +33,18 @@ export function resolveC5Style(code: unknown, name?: unknown): C5Style {
 export function c5Color(style: C5Style) { return `rgb(${style.rgb.join(',')})` }
 const patterns = new Map<string,string>()
 /** 以标准 RGB 及图式生成 PNG；使用 ArcGIS picture-fill 符号，避免给每种地类随意配色。 */
-export function c5Pattern(style: C5Style) {
-  const key = `${style.code}:${style.pattern}`
+export function c5Pattern(style: C5Style, fillOpacity = 1) {
+  const opacity = Math.max(0, Math.min(1, fillOpacity))
+  const key = `${style.code}:${style.pattern}:${opacity}`
   const cached = patterns.get(key)
   if (cached) return cached
   const canvas = document.createElement('canvas'); canvas.width=canvas.height=48
   const context = canvas.getContext('2d')
   if (!context) return ''
+  context.globalAlpha=opacity
   context.fillStyle=c5Color(style);context.fillRect(0,0,48,48)
+  // 图例保留标准色；地图填充透出影像，图式线条仍保持可辨识度。
+  context.globalAlpha=opacity < 1 ? .7 : 1
   context.strokeStyle=/forest|bamboo|mangrove/.test(style.pattern)?'rgb(0,85,42)':/rice|dry|irrigated|orchard|tea|rubber/.test(style.pattern)?'rgb(0,160,100)':/grass|shrub|agriculture|park/.test(style.pattern)?'rgb(0,146,63)':/salt|snow|marsh|port/.test(style.pattern)?'rgb(0,147,221)':/sand|bare|rock/.test(style.pattern)?'rgb(119,88,25)':/tidal/.test(style.pattern)?'rgb(96,93,92)':'rgb(0,0,0)'
   context.fillStyle=context.strokeStyle;context.lineWidth=.8
   const line=(x:number,y:number,a:number,b:number)=>{context.beginPath();context.moveTo(x,y);context.lineTo(a,b);context.stroke()}
@@ -96,6 +100,6 @@ export function c5Pattern(style: C5Style) {
   const url=canvas.toDataURL('image/png');patterns.set(key,url);return url
 }
 export function c5Symbol(style: C5Style) {
-  return {type:'esriPFS',imageData:c5Pattern(style).split(',')[1],contentType:'image/png',width:36,height:36,xscale:1,yscale:1,
+  return {type:'esriPFS',imageData:c5Pattern(style, .28).split(',')[1],contentType:'image/png',width:36,height:36,xscale:1,yscale:1,
     outline:{type:'esriSLS',style:'esriSLSSolid',color:[96,93,92,255],width:.34}}
 }
