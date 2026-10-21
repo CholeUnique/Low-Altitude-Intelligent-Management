@@ -32,10 +32,10 @@ const router = createRouter({
     { path: '/tasks/:taskId', name: 'task-detail', component: () => import('@/views/TaskDetailView.vue'), meta: { title: '任务详情页' } },
     { path: '/patrol/route-plan', name: 'patrol-route-plan', component: () => import('@/views/PatrolRoutePlanView.vue'), meta: { title: '低空巡查发现模块 · 航线规划' } },
     { path: '/patrol/live', name: 'patrol-live', component: () => import('@/views/PatrolLiveView.vue'), meta: { title: '低空巡查发现模块 · 实时巡航' } },
-    { path: '/workspace/:sceneId/:taskId?', name: 'workspace', component: () => import('@/views/WorkspaceView.vue'), meta: { title: '场景作业工作台' } },
+    { path: '/workspace/:sceneId/:taskId?', name: 'workspace', component: () => import('@/views/WorkspaceView.vue'), meta: { title: '场景作业工作台', hidePrimaryHeader: true } },
     { path: '/algorithms', name: 'algorithms', component: () => import('@/views/AlgorithmRepositoryView.vue'), meta: { title: '算法能力仓库' } },
     { path: '/account-management', redirect: (to) => ({ name: 'account-management', params: { section: 'profile' }, query: to.query }) },
-    { path: '/account-management/:section(profile|users|departments|scenes|permissions|metadata|map-services)', name: 'account-management', component: () => import('@/views/AccountManagementView.vue'), meta: { title: '后台管理' } },
+    { path: '/account-management/:section(profile|users|departments|scenes|permissions|metadata|map-services)', name: 'account-management', component: () => import('@/views/AccountManagementView.vue'), meta: { title: '后台管理', hidePrimaryHeader: true } },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],
 })

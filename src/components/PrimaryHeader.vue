@@ -20,7 +20,7 @@ const dateText = computed(() => new Intl.DateTimeFormat('zh-CN', { year: 'numeri
 const timeText = computed(() => now.value.toLocaleTimeString('zh-CN', { hour12: false }))
 const platformBrand = computed(() => ({
   title: user.organizationId === 'agriculture-rural' ? '耕地数字化监管平台' : '海陵区自然资源综合监管平台',
-  subtitle: 'COMPREHENSIVE SUPERVISION · GIS COMMAND CENTER',
+  subtitle: user.organizationId === 'agriculture-rural' ? 'CULTIVATED LAND DIGITAL SUPERVISION PLATFORM' : 'COMPREHENSIVE SUPERVISION · GIS COMMAND CENTER',
 }))
 onBeforeUnmount(() => {
   window.removeEventListener('workflow-todos-changed', refreshWorkflowTodos)

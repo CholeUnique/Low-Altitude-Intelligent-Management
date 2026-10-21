@@ -39,6 +39,7 @@ function harness({ fail = false, missing = false, deferred, deferredService, vis
     taizhouDistrictBoundariesWgs84: cityGeometry,
     map: { fitBounds(bounds, options) { calls.fits += 1; calls.lastFit = { bounds, options }; calls.order.push('fit') }, hasLayer: layer => layer.attached, getBounds: () => ({}), invalidateSize() {} },
     mapServiceLayers: new Map(), loadingMapServiceIds: new Set(), mapServiceVisibilityVersions: new Map(),
+    requestedLayerOrder: [],
     createMapServiceLayer: async (_service, _color, options) => {
       calls.creationOptions = options
       return deferredService ? deferredService.promise : handle

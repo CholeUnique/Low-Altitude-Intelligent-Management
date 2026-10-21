@@ -77,6 +77,11 @@ assert.equal(boundaryPaths[1].style.fillColor, '#ff0000')
 assert.equal(boundaryPaths[1].style.fillOpacity, .15)
 globalThis.fetch = regularFetch
 const service={id:'test',name:'测试图层',serviceUrl:'https://example.test/MapServer',arcGisLayerId:0,arcGisGeometryType:'esriGeometryPoint'}
+const topicRecords = await api.queryMapServiceFeatures(service, ['DLMC'], "DLMC = '水浇地'")
+assert.equal(topicRecords.features.length,401,'Topic classification must include records beyond legacy transfer limits')
+assert(requests.every(p => p.get('where') === "DLMC = '水浇地'"), 'Every topic query batch retains its scope')
+await assert.rejects(api.queryMapServiceFeatures(service, ['MISSING_FIELD']), /字段不存在/, 'Reject unknown field names before constructing a query')
+requests.length = 0
 const matches=await api.searchVectorLayerText(service,'needle')
 assert.equal(matches.length,401,'All matching records survive transfer-limit batching')
 assert(requests[0].get('where').includes('FIELD_11'),'Fields after the eighth field remain searchable')
