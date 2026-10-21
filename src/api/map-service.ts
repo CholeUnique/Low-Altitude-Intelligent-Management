@@ -5,6 +5,9 @@ export interface MapServiceItem {
   name: string
   serviceUrl: string
   type: string
+  topicCode?: string | null
+  dataType?: string | null
+  serviceTime?: string | null
   sort?: number
   status: number
   preset?: number
@@ -23,12 +26,17 @@ export interface MapServiceListQuery {
   deptId?: string | number
   keyword?: string
   status?: 0 | 1
+  topicCode?: string
+  dataType?: string
 }
 
 export interface MapServiceCreateInput {
   name: string
   serviceUrl: string
   type?: string
+  topicCode?: string
+  dataType?: string
+  serviceTime?: string
   sort?: number
   remark?: string
   /** 空数组表示所有部门均可使用。 */
