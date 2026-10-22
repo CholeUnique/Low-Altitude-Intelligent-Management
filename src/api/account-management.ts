@@ -47,12 +47,13 @@ export interface UserCreateInput extends UpdateMyInfoInput {
   deptIdList: UserDepartmentInput[]
   defaultDeptId?: string
   position?: string
-  role?: 'ADMIN' | 'USER'
+  role?: 'USER'
+  deptAdminIds?: string[]
   status?: number
   remark?: string
 }
 
-export interface UserUpdateInput extends Omit<UserCreateInput, 'username' | 'password'> {
+export interface UserUpdateInput extends Omit<UserCreateInput, 'username' | 'password' | 'deptAdminIds' | 'role'> {
   id: string
 }
 
@@ -72,6 +73,7 @@ export interface DepartmentInfo {
 
 export interface DepartmentInput {
   deptId?: string
+  parentId?: string
   name: string
   code?: string
   sort?: number
@@ -117,11 +119,15 @@ export function getUserDetail(id: string, deptId?: string) {
 }
 
 export function addUser(input: UserCreateInput) {
-  return apiClient.post<never, void>('/v1/user/add', input)
+  return apiClient.post<never, CurrentUser>('/v1/user/add', input)
 }
 
 export function updateUser(input: UserUpdateInput) {
   return apiClient.post<never, void>('/v1/user/update', input)
+}
+
+export function setUserDepartmentAdmin(input: { deptId: string; userId: string; flag: 0 | 1 }) {
+  return apiClient.post<never, CurrentUser>('/v1/user/dept-admin/set', input)
 }
 
 export function updateUserStatus(id: string, status: number, deptId?: string) {

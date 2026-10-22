@@ -81,22 +81,22 @@ const renderer = Vue.createRenderer({
 })
 const pending = []
 let componentSource = readFileSync('src/workspace-components/spot-identification/SrtInfoDialog.vue', 'utf8')
-componentSource = componentSource.replace('</script>', 'defineExpose({ selectedId, tab, data, raw, busy, error, expanded, gpsFilter, searchInput, page, pageSize, pageRecords, selectedRecord, download, load });\n</script>')
+componentSource = componentSource.replace('</script>', 'defineExpose({ tab, data, raw, busy, error, expanded, gpsFilter, searchInput, page, pageSize, pageRecords, selectedRecord, download, load });\n</script>')
 const { descriptor } = parse(componentSource)
 const Dialog = load(compileScript(descriptor, { id: 'srt-test', inlineTemplate: true }).content, {
   vue: Vue, '@/utils/video-telemetry': telemetry, '@/utils/srt-inspector': inspector,
   '@/api/flight-review': { getFlightReviewVideoSrtFile: (id, signal) => new Promise((resolve, reject) => pending.push({ id, signal, resolve, reject })) },
 }).default
-const media = [{ id: '210987654321000001', taskId: 'task1', fileName: 'A.mp4', type: 'video' }, { id: '210987654321000002', taskId: 'task2', fileName: 'B.mp4', type: 'video' }]
+const media = { id: '210987654321000001', taskId: 'task1', fileName: 'A.mp4', type: 'video' }
 let closes = 0
-const app = renderer.createApp(Dialog, { planName: '测试飞行计划', media, initialId: 'task1:210987654321000001', onClose: () => closes++ })
+const app = renderer.createApp(Dialog, { planName: '测试飞行计划', media, onClose: () => closes++ })
 const vm = app.mount(node('root'))
 const flush = async () => { await new Promise(resolve => setImmediate(resolve)); await Vue.nextTick() }
-assert.equal(pending[0].id, media[0].id, 'Read using video ID without precision loss')
+assert.equal(pending[0].id, media.id, 'Read using the clicked video ID without precision loss')
 pending.shift().resolve(new Blob([source])); await flush()
 assert.equal(vm.data.records.length, 4)
 const renderedText = item => (item.text || '') + item.children.map(renderedText).join('')
-for (const removed of ['原始记录只读 · 不触发后台生成', 'ALTITUDE PROFILE', 'SOURCE DETAILS', 'DATA AVAILABILITY', 'TELEMETRY FIELDS', 'SRT 原始采样']) {
+for (const removed of ['原始记录只读 · 不触发后台生成', 'ALTITUDE PROFILE', 'SOURCE DETAILS', 'DATA AVAILABILITY', 'TELEMETRY FIELDS', 'SRT 原始采样', 'FLIGHT TELEMETRY', '数据源']) {
   assert(!renderedText(body).includes(removed), `Remove marked content rather than leaving its placeholder: ${removed}`)
 }
 assert.equal(vm.raw, source.replace(/^\ufeff/, ''))
@@ -112,14 +112,13 @@ vm.tab = 'raw'; await Vue.nextTick()
 function find(item, predicate) { return predicate(item) ? item : item.children.map(child => find(child, predicate)).find(Boolean) }
 assert.equal(find(body, item => item.type === 'textarea').props.value, vm.raw, 'Raw view exposes the entire original, not just GPS fields')
 assert(!find(body, item => 'innerHTML' in item.props), 'Never render untrusted SRT as HTML')
-vm.selectedId = 'task2:210987654321000002'; await Vue.nextTick()
-const old = pending.shift()
-vm.selectedId = 'task1:210987654321000001'; await Vue.nextTick()
-const fresh = pending.shift()
+assert(!find(body, item => item.props['aria-label'] === '选择视频的 SRT'), 'The dialog cannot switch to a different video')
+vm.load(); const old = pending.shift()
+vm.load(); const fresh = pending.shift()
 assert(old.signal.aborted)
 fresh.resolve(new Blob([Array.from({ length: 105 }, (_, i) => cue(i + 1, '00:00:00,000', '00:00:01,000', `[iso: ${i}]`)).join('')])); await flush()
 old.resolve(new Blob([source])); await flush()
-assert.equal(vm.data.records.length, 105, 'Late source response cannot overwrite current source')
+assert.equal(vm.data.records.length, 105, 'A late retry cannot overwrite the clicked video data')
 vm.tab = 'records'; await Vue.nextTick()
 assert.equal(vm.pageRecords.length, 25)
 vm.page = 5; await Vue.nextTick()
@@ -150,4 +149,4 @@ assert(previousFocus.restored)
 closing.resolve(new Blob([source])); await flush()
 assert.equal(vm.data, undefined, 'Closing invalidates pending content')
 assert.equal(body.children.length, 0, 'Teleport content is removed on close')
-console.log('SRT inspector parsing, full records, dialog navigation, source races, download and cleanup passed')
+console.log('SRT inspector parsing, full records, single-video dialog, retry races, download and cleanup passed')

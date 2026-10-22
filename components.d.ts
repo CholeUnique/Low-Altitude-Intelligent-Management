@@ -29,6 +29,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SceneManagementPanel: typeof import('./src/components/SceneManagementPanel.vue')['default']
+    StatusConfirmDialog: typeof import('./src/components/StatusConfirmDialog.vue')['default']
     TaskHistory: typeof import('./src/components/task-center/TaskHistory.vue')['default']
     TaskRangeMap: typeof import('./src/components/TaskRangeMap.vue')['default']
     TaskRangeThumbnail: typeof import('./src/components/TaskRangeThumbnail.vue')['default']

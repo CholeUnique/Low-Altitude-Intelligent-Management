@@ -103,6 +103,8 @@ export interface MapServiceLayerHandle {
 export interface MapServiceLayerOptions {
   /** 无已配置范围时的业务请求边界，不作为服务发布范围返回。 */
   fallbackRequestBounds?: L.LatLngBounds
+  /** 图层的准确业务覆盖范围；优先用于限制缓存瓦片请求。 */
+  boundsOverride?: L.LatLngBounds
 }
 
 /** 行政边界使用真实服务几何，在地图上绘制双层描边，不依赖影像导出的样式。 */
@@ -459,7 +461,9 @@ function arcGisBounds(
   metadata: ArcGisMapServiceMetadata,
   config: ServiceRemarkConfig,
   preferCachedMapExtent = true,
+  boundsOverride?: L.LatLngBounds,
 ) {
+  if (boundsOverride?.isValid()) return boundsOverride
   const serviceBounds = extentBounds(metadata.fullExtent) || extentBounds(metadata.initialExtent) || extentBounds(metadata.extent)
   // 缓存型 MapServer 的真实瓦片可能大于人工备注范围，不能用备注裁掉有效瓦片。
   return preferCachedMapExtent && metadata.singleFusedMapCache
@@ -1731,10 +1735,17 @@ class MatrixTileLayer extends TaizhouGeographicTileLayer {
     const corners = [0, .5, 1].flatMap(dx => [0, .5, 1].map(dy => unprojectCoordinate(
       matrix.origin[0] + (col + dx) * matrix.tileWidth * matrix.resolution,
       matrix.origin[1] - (row + dy) * matrix.tileHeight * matrix.resolution, this.wkid)))
-    return Math.min(...corners.map(p => p[0])) < this.coverageBounds.getEast()
-      && Math.max(...corners.map(p => p[0])) > this.coverageBounds.getWest()
-      && Math.min(...corners.map(p => p[1])) < this.coverageBounds.getNorth()
-      && Math.max(...corners.map(p => p[1])) > this.coverageBounds.getSouth()
+    const west = Math.min(...corners.map(p => p[0]))
+    const east = Math.max(...corners.map(p => p[0]))
+    const south = Math.min(...corners.map(p => p[1]))
+    const north = Math.max(...corners.map(p => p[1]))
+    // ArcGIS fullExtent 是矩形包络；只用“有一点相交”会在影像边缘把
+    // 实际覆盖范围之外的边缘瓦片也发出去。以瓦片中心作为覆盖判定，
+    // 过滤纯粹由矩形边缘重叠造成的请求；局部空洞返回的 404 则作为空白瓦片。
+    const centerLng = (west + east) / 2
+    const centerLat = (south + north) / 2
+    return centerLng >= this.coverageBounds.getWest() && centerLng <= this.coverageBounds.getEast()
+      && centerLat >= this.coverageBounds.getSouth() && centerLat <= this.coverageBounds.getNorth()
   }
 
   private plan(coords: L.Coords) {
@@ -1800,6 +1811,86 @@ class MatrixTileLayer extends TaizhouGeographicTileLayer {
       done(painted ? undefined : failure, tile)
     }).catch(error => { if (this._map && !this.unloadedTiles.has(tile)) done(error instanceof Error ? error : new Error('地图瓦片绘制失败'), tile) })
       .finally(() => this.releaseSources(tile))
+    return tile
+  }
+}
+
+/** Keep the fast native Web Mercator renderer while filtering edge/cache-miss tiles. */
+class CoverageAwareArcGisTileLayer extends L.TileLayer {
+  constructor(
+    private template: string,
+    private coverageBounds: L.LatLngBounds | undefined,
+    options: L.TileLayerOptions,
+  ) {
+    super(template, options)
+  }
+
+  _isValidTile(coords: L.Coords) {
+    const internals = L.TileLayer.prototype as unknown as {
+      _isValidTile: (this: L.TileLayer, tileCoords: L.Coords) => boolean
+      _tileCoordsToBounds: (this: L.TileLayer, tileCoords: L.Coords) => L.LatLngBounds
+    }
+    if (!internals._isValidTile.call(this, coords)) return false
+    if (!this.coverageBounds) return true
+    return this.coverageBounds.contains(internals._tileCoordsToBounds.call(this, coords).getCenter())
+  }
+
+  override createTile(coords: L.Coords, done: L.DoneCallback) {
+    const tile = document.createElement('canvas')
+    const size = this.getTileSize()
+    tile.width = size.x
+    tile.height = size.y
+    const context = tile.getContext('2d')
+    if (!context) {
+      queueMicrotask(() => done(new Error('浏览器无法绘制地图瓦片'), tile))
+      return tile
+    }
+    const url = this.template.replace('{z}', String(coords.z)).replace('{y}', String(coords.y)).replace('{x}', String(coords.x))
+    let completed = false
+    const finish = (error?: Error) => {
+      if (completed) return
+      completed = true
+      done(error, tile)
+    }
+    const image = new Image()
+    let objectUrl = ''
+    const draw = () => {
+      try {
+        context.drawImage(image, 0, 0, tile.width, tile.height)
+        finish()
+      } catch {
+        finish(new Error('地图服务影像绘制失败'))
+      } finally {
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
+      }
+    }
+    image.onload = draw
+    image.onerror = () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      finish(new Error('地图服务瓦片读取失败，网络或跨域限制使浏览器无法显示'))
+    }
+    void fetch(url).then(async (response) => {
+      if (completed) return
+      // ArcGIS 缓存范围边界外、或影像覆盖空洞的 404 是透明空白，不是图层故障。
+      if (response.status === 404 || response.status === 204) {
+        finish()
+        return
+      }
+      if (!response.ok) {
+        finish(serviceResponseError(response.status))
+        return
+      }
+      objectUrl = URL.createObjectURL(await response.blob())
+      image.src = objectUrl
+    }).catch((error) => {
+      if (completed) return
+      if (error instanceof TypeError) {
+        // Preserve support for older ArcGIS hosts that do not permit CORS fetches.
+        image.src = url
+        return
+      }
+      finish(error instanceof Error ? error : new Error('地图瓦片请求失败'))
+    })
     return tile
   }
 }
@@ -2250,16 +2341,16 @@ async function createArcGisLayer(
   selectedLayerId?: number,
   selectedGeometryType?: string,
   color?: string,
+  boundsOverride?: L.LatLngBounds,
 ): Promise<MapServiceLayerHandle> {
   const metadata = await loadArcGisMetadata(url)
-  const bounds = arcGisBounds(metadata, config, !imageServer)
+  const bounds = arcGisBounds(metadata, config, !imageServer, boundsOverride)
   if (metadata.singleFusedMapCache) {
     const info = metadata.tileInfo
     const minLOD = config.minZoom ?? (metadata.minLOD != null && metadata.minLOD >= 0 ? metadata.minLOD : undefined)
     const maxLOD = config.maxZoom ?? (metadata.maxLOD != null && metadata.maxLOD >= 0 ? metadata.maxLOD : undefined)
     const lods = (info?.lods || []).filter(lod => lod.level != null && Number.isInteger(lod.level)
       && (minLOD === undefined || lod.level >= minLOD) && (maxLOD === undefined || lod.level <= maxLOD))
-    const levels = lods.map(lod => lod.level!)
     {
       const spatialReference = info?.spatialReference || metadata.spatialReference
       const code = spatialReference?.latestWkid || spatialReference?.wkid || config.tileWkid
@@ -2278,21 +2369,26 @@ async function createArcGisLayer(
         && Math.abs(matrix.origin[0] + 20037508.342789244) < .001 && Math.abs(matrix.origin[1] - 20037508.342789244) < .001
         && Math.abs(matrix.resolution / (156543.03392804097 / 2 ** Number(matrix.id)) - 1) < 1e-7
         && (index === 0 || Number(matrix.id) === Number(matrices[index - 1]!.id) + 1))
-      if (!standard) return {
+      if (standard) {
+        const levels = matrices.map(matrix => Number(matrix.id))
+        const requestBounds = bounds ?? config.fallbackRequestBounds
+        return {
+          layer: new CoverageAwareArcGisTileLayer(servicePath(url, 'tile/{z}/{y}/{x}'), requestBounds, {
+            pane: MAP_SERVICE_IMAGERY_PANE,
+            bounds: requestBounds,
+            minNativeZoom: minLOD ?? Math.min(...levels),
+            maxNativeZoom: maxLOD ?? Math.max(...levels),
+            maxZoom: Math.max(config.maxZoom || 22, 22),
+            noWrap: true,
+            keepBuffer: 3,
+          }), bounds,
+        }
+      }
+      // Nonstandard matrices use the reprojection renderer, which filters
+      // against the service extent and treats empty cache cells as transparent.
+      return {
         layer: new MatrixTileLayer(matrices, wkid, (level, row, col) => servicePath(url, `tile/${encodeURIComponent(level)}/${row}/${col}`), { ...config, bounds }), bounds,
       }
-    }
-    return {
-      layer: L.tileLayer(servicePath(url, 'tile/{z}/{y}/{x}'), {
-        pane: MAP_SERVICE_IMAGERY_PANE,
-        bounds: bounds ?? config.fallbackRequestBounds,
-        minNativeZoom: minLOD ?? (levels.length ? Math.min(...levels) : 0),
-        maxNativeZoom: maxLOD ?? (levels.length ? Math.max(...levels) : 22),
-        maxZoom: Math.max(config.maxZoom || 22, 22),
-        noWrap: true,
-        keepBuffer: 3,
-      }),
-      bounds,
     }
   }
   if (!imageServer) {
@@ -2340,10 +2436,10 @@ export async function createMapServiceLayer(service: MapServiceItem, color?: str
   }
   if (type.includes('XYZ')) return { layer: createTemplateLayer(url, false, config), bounds: config.bounds }
   if (type.includes('ARCGIS_IMAGESERVER') || /\/ImageServer(?:\?|$)/i.test(url)) {
-    return createArcGisLayer(url, true, config)
+    return createArcGisLayer(url, true, config, undefined, undefined, undefined, options.boundsOverride)
   }
   if (type.includes('ARCGIS_MAPSERVER') || type === 'ARCGIS' || /\/MapServer(?:\?|$)/i.test(url)) {
-    return createArcGisLayer(url, false, config, service.arcGisLayerId, service.arcGisGeometryType, color)
+    return createArcGisLayer(url, false, config, service.arcGisLayerId, service.arcGisGeometryType, color, options.boundsOverride)
   }
   throw new Error(`暂不支持地图服务类型：${service.type || '未知'}`)
 }

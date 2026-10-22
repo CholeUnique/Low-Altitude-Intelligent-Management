@@ -16,10 +16,13 @@ import {
 } from '@/api/scene'
 import { useUserStore } from '@/stores/user'
 import type { CurrentUser } from '@/types'
+import { formatBeijingDateTime } from '@/utils/date-time'
+import StatusConfirmDialog from '@/components/StatusConfirmDialog.vue'
 
 type EditorMode = 'add' | 'edit' | 'view'
 
 const userStore = useUserStore()
+const isDepartmentAdmin = computed(() => userStore.isActiveDepartmentAdmin)
 const scenes = ref<BizSceneDto[]>([])
 const assignees = ref<BizSceneAssignee[]>([])
 const users = ref<CurrentUser[]>([])
@@ -76,11 +79,7 @@ function refTypeLabel(value?: string) {
   return refTypeOptions.find((item) => item[0] === value)?.[1] || value || '不默认关联'
 }
 
-function formatTime(value?: string) {
-  if (!value) return '-'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
-}
+function formatTime(value?: string) { return formatBeijingDateTime(value) }
 
 function assigneeFor(sceneCode: string) {
   return assignees.value.find((item) => item.sceneCode === sceneCode)
@@ -108,7 +107,13 @@ async function loadScenes() {
 }
 
 async function loadDepartments() {
-  departments.value = (await getDepartmentList()) || []
+  const result = (await getDepartmentList(isDepartmentAdmin.value ? { deptId: userStore.activeDeptId } : {})) || []
+  departments.value = isDepartmentAdmin.value
+    ? result.filter((item) => String(item.id) === String(userStore.activeDeptId))
+    : result
+  if (isDepartmentAdmin.value && !departments.value.length && userStore.activeDeptId) {
+    departments.value = [{ id: String(userStore.activeDeptId), name: userStore.currentUser?.deptName || '当前部门', status: 1 }]
+  }
   const activeDeptId = userStore.activeDeptId ? String(userStore.activeDeptId) : ''
   selectedDeptId.value = departments.value.some((item) => String(item.id) === activeDeptId)
     ? activeDeptId
@@ -226,15 +231,27 @@ async function submitScene() {
   }
 }
 
-async function toggleScene(row: BizSceneDto) {
-  const nextStatus = row.status === 1 ? 0 : 1
-  if (!window.confirm(`确认${nextStatus === 1 ? '启用' : '停用'}场景“${row.sceneName}”吗？`)) return
+const statusTarget = ref<{ row: BizSceneDto; nextStatus: 0 | 1 } | null>(null)
+const statusBusy = ref(false)
+
+function toggleScene(row: BizSceneDto) {
+  statusTarget.value = { row, nextStatus: row.status === 1 ? 0 : 1 }
+}
+
+async function confirmToggleScene() {
+  const target = statusTarget.value
+  if (!target || statusBusy.value) return
+  statusBusy.value = true
   try {
-    await updateBizSceneStatus(String(row.id), nextStatus, selectedDeptId.value || undefined)
-    showResult(`场景已${nextStatus === 1 ? '启用' : '停用'}`)
+    await updateBizSceneStatus(String(target.row.id), target.nextStatus, selectedDeptId.value || undefined)
+    showResult(`场景已${target.nextStatus === 1 ? '启用' : '停用'}`)
     await loadScenes()
+    statusTarget.value = null
   } catch (error) {
+    statusTarget.value = null
     showError(error)
+  } finally {
+    statusBusy.value = false
   }
 }
 
@@ -324,7 +341,7 @@ onMounted(() => void loadInitial())
 
     <section class="scene-panel">
       <form class="scene-filters" @submit.prevent="loadScenes">
-        <label class="department-filter"><span>管理部门</span><select v-model="selectedDeptId" :disabled="loading || !departments.length" @change="changeDepartment"><option value="" disabled>{{ departments.length ? '请选择管理部门' : '暂无可选部门' }}</option><option v-for="item in sortedDepartments" :key="String(item.id)" :value="String(item.id)">{{ departmentOptionLabel(item) }}</option></select></label>
+        <label class="department-filter"><span>管理部门</span><select v-model="selectedDeptId" :disabled="isDepartmentAdmin || loading || !departments.length" @change="changeDepartment"><option value="" disabled>{{ departments.length ? '请选择管理部门' : '暂无可选部门' }}</option><option v-for="item in sortedDepartments" :key="String(item.id)" :value="String(item.id)">{{ departmentOptionLabel(item) }}</option></select></label>
         <label class="keyword-filter"><span>场景关键字</span><input v-model.trim="filters.keyword" placeholder="搜索场景名称或编码"></label>
         <label><span>场景分类</span><select v-model="filters.category"><option value="">全部分类</option><option v-for="item in categoryOptions" :key="item[0]" :value="item[0]">{{ item[1] }}</option></select></label>
         <label><span>运行状态</span><select v-model="filters.status"><option value="">全部状态</option><option :value="1">启用</option><option :value="0">停用</option></select></label>
@@ -387,6 +404,8 @@ onMounted(() => void loadInitial())
         </form>
       </section>
     </div>
+
+    <StatusConfirmDialog :open="!!statusTarget" :action="statusTarget?.nextStatus === 1 ? 'enable' : 'disable'" subject="场景" :target="statusTarget?.row.sceneName || ''" :description="statusTarget?.nextStatus === 1 ? '启用后，该场景可重新用于相关业务任务。' : '停用后，该场景将不再用于新任务；已有场景配置和历史数据不会删除。'" :busy="statusBusy" @cancel="statusTarget = null" @confirm="confirmToggleScene" />
 
     <div v-if="assigneeOpen" class="scene-mask" @mousedown.self="assigneeOpen = false">
       <section class="scene-modal assignee-modal" role="dialog" aria-modal="true">

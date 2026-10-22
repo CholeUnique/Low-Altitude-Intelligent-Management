@@ -6,9 +6,9 @@ import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
+import { getJiulongArcGisLayerBounds } from '@/utils/jiulong-arcgis-layers'
 import { getCustomDepartmentStatistics, type CustomStatGroup } from '@/api/business-statistics'
-import { listEnabledMapServices, listMapServicesForDepartments, updateMapService, type MapServiceItem } from '@/api/map-service'
-import { getDepartmentList } from '@/api/account-management'
+import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
 import type { DashboardMapLayer, DronePatrolRoute } from '@/types'
 import {
@@ -152,9 +152,6 @@ function sortedServiceGroups(groups: MapServiceGroup[]) {
 const mapServiceGroups = ref<MapServiceGroup[]>([])
 const mapServicesLoading = ref(false)
 const mapServicesError = ref('')
-const mapServiceOrderSaving = ref(false)
-const draggingGroupId = ref('')
-const dragGhost = ref<{ name: string; x: number; y: number; width: number; height: number }>()
 const jiulongBoundaryVisible = ref(false)
 
 const jiulongBoundaryError = ref('')
@@ -288,17 +285,6 @@ const loadingMapServiceIds = reactive(new Set<string>())
 const mapServiceVisibilityVersions = new Map<string, number>()
 let mapServiceRequestVersion = 0
 let mapServicePaneSerial = 0
-let dragPressTimer: ReturnType<typeof window.setTimeout> | undefined
-let dragPointerId: number | undefined
-let dragStartX = 0
-let dragStartY = 0
-let dragRowX = 0
-let dragRowY = 0
-let dragGroupId = ''
-let dragOriginalOrder: string[] = []
-let dragActive = false
-let suppressGroupClick = false
-let previousUserSelect = ''
 let measurePoints: L.LatLng[] = []
 
 function dismissToolMessage() {
@@ -346,14 +332,16 @@ function addBaseLayers(mode: 'vector' | 'image') {
 
 function paneForMapService(service: MapServiceItem) {
   if (!map) return MAP_SERVICE_IMAGERY_PANE
-  const groupId = String(service.id)
-  let paneName = mapServicePaneNames.get(groupId)
+  const groupId = String(service.sourceServiceId ?? service.id)
+  const kind = service.arcGisGeometryType ? 'vector' : 'imagery'
+  const paneKey = `${groupId}:${kind}`
+  let paneName = mapServicePaneNames.get(paneKey)
   if (!paneName) {
-    paneName = `dashboard-service-${++mapServicePaneSerial}`
+    paneName = `dashboard-service-${kind}-${++mapServicePaneSerial}`
     const pane = map.createPane(paneName)
     pane.style.zIndex = service.arcGisGeometryType ? '335' : '235'
     pane.style.pointerEvents = 'none'
-    mapServicePaneNames.set(groupId, paneName)
+    mapServicePaneNames.set(paneKey, paneName)
   }
   const pane = map.getPane(paneName)
   if (pane) pane.style.zIndex = service.arcGisGeometryType ? '335' : '235'
@@ -535,7 +523,6 @@ function onMapServicePointerCancel() {
     requestedLayerOrder.splice(0, requestedLayerOrder.length, ...dragOriginalStack)
     syncMapServiceStack()
   }
-  stopMapServiceDrag()
 }
 
 function onMapServiceGroupClick(group: MapServiceGroup) {
@@ -550,7 +537,6 @@ function onMapServiceGroupClick(group: MapServiceGroup) {
 }
 
 async function loadMapServices() {
-  stopMapServiceDrag()
   const requestVersion = ++mapServiceRequestVersion
   jiulongAdminRequest += 1
   jiulongAdminHandle?.layer.remove()
@@ -669,7 +655,10 @@ async function toggleMapService(service: MapServiceItem) {
   mapServiceVisibilityVersions.set(id, visibilityVersion)
   try {
     const color = service.arcGisGeometryType ? vectorLayerColors.value[id] || vectorLayerColor(id) : undefined
-    const handle = existing || await createMapServiceLayer(service, color, { fallbackRequestBounds: taizhouServiceBounds(service) })
+    const handle = existing || await createMapServiceLayer(service, color, {
+      fallbackRequestBounds: taizhouServiceBounds(service),
+      boundsOverride: getJiulongArcGisLayerBounds(service.serviceUrl),
+    })
     if (existing && color) existing.setColor?.(color)
     if (requestVersion !== mapServiceRequestVersion || visibilityVersion !== mapServiceVisibilityVersions.get(id)) {
       handle.layer.remove()
@@ -1563,9 +1552,7 @@ function renderHailingBoundary() {
       color: '#9AEEFE',
       weight: 4,
       opacity: 1,
-      fill: true,
-      fillColor: '#66B9DA',
-      fillOpacity: .1,
+      fill: false,
       lineCap: 'round',
       lineJoin: 'round',
       className: 'hailing-boundary-glow',
@@ -1787,7 +1774,6 @@ watch(searchKeyword, (value) => {
   }, 260)
 })
 onBeforeUnmount(() => {
-  stopMapServiceDrag()
   if (toolMessageTimer) window.clearTimeout(toolMessageTimer)
   if (markerHintTimer) window.clearTimeout(markerHintTimer)
   if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
@@ -1975,9 +1961,6 @@ onBeforeUnmount(() => {
         <label v-if="pickerAllowsFill" class="color-value-slider">填充透明度 {{ 100 - Math.round((vectorFillOpacity[layerColorPicker.serviceId] ?? .25) * 100) }}%<input type="range" aria-label="填充不透明度" min="5" max="60" :value="Math.round((vectorFillOpacity[layerColorPicker.serviceId] ?? .25) * 100)" @input="onFillOpacityInput" /></label>
         <label class="color-value-slider">明度<input type="range" min="0" max="100" :value="Math.round(layerColorPicker.value * 100)" :style="{ background: colorValueTrack }" @input="onColorValueInput" /></label>
       </div>
-      <Transition name="map-layer-ghost">
-        <div v-if="dragGhost" class="map-layer-drag-ghost" :style="{ left: `${dragGhost.x}px`, top: `${dragGhost.y}px`, width: `${dragGhost.width}px`, height: `${dragGhost.height}px` }">{{ dragGhost.name }}</div>
-      </Transition>
       <Transition name="tool-message">
         <div v-if="toolMessage" class="tool-message" role="status" aria-live="polite">
           <span class="tool-message__icon" aria-hidden="true"><InfoFilled /></span>
@@ -2009,15 +1992,9 @@ onBeforeUnmount(() => {
 .layer-manager .layer-row b { overflow: visible; white-space: normal; line-height: 1.35; text-overflow: clip; overflow-wrap: anywhere; }
 .layer-manager .map-service-row { grid-template-columns: minmax(0,1fr) auto; }
 .layer-manager .map-service-group { border-bottom: 1px solid #0d5278; }
-.layer-order-save-status { padding: 7px 12px; color: #b9edf6; background: #075070b5; border-bottom: 1px solid #2ea3bc; font-size: 12px; }
 .layer-manager .map-service-group:last-child { border-bottom: 0; }
 .layer-manager .map-service-group>.map-service-row { border-bottom: 0; }
-.layer-manager .map-service-group.is-dragging { opacity: .32; background: #14799a30; outline: 1px dashed #69ddee; outline-offset: -2px; }
 .layer-manager .map-service-row { touch-action: pan-y; }
-.map-service-sort-move { transition: transform .25s cubic-bezier(.2,.8,.2,1); }
-.map-layer-drag-ghost { position: fixed; z-index: 20000; display: flex; align-items: center; box-sizing: border-box; padding: 8px 16px; overflow: hidden; color: #e7fbff; background: linear-gradient(110deg,#135a7fe8,#063451f2); border: 1px solid #5bdaed; border-radius: 9px; box-shadow: 0 12px 28px #001a2b88,0 0 20px #39ddef55; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; transform: scale(1.025); }
-.map-layer-ghost-enter-active,.map-layer-ghost-leave-active { transition: opacity .16s ease, transform .16s ease; }
-.map-layer-ghost-enter-from,.map-layer-ghost-leave-to { opacity: 0; transform: scale(.96); }
 .layer-manager .map-service-sublayers { position: relative; padding-left: 16px; border-top: 1px solid #0b4668; background: #02172dcc; }
 .layer-manager .map-service-sublayers::before { position: absolute; top: 0; bottom: 0; left: 17px; width: 1px; background: #1785aa80; content: ''; }
 .layer-manager .map-service-sublayer { position: relative; min-height: 38px; padding: 7px 16px 7px 24px; border-bottom: 1px dashed #0b4668; background: #04253ebf; }

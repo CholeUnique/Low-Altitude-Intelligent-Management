@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 
 const tileLayers = []
+function TileLayer(url, options) { this.url = url; this.options = options }
 const leaflet = {
-  TileLayer: class {}, LayerGroup: class {}, Layer: class {}, GridLayer: class {},
+  TileLayer, LayerGroup: class {}, Layer: class {}, GridLayer: function GridLayer(options) { this.options = options; this.on = () => this },
   tileLayer: (url, options) => { const layer = { url, options }; tileLayers.push(layer); return layer },
 }
 globalThis.window = { setTimeout, clearTimeout }
@@ -23,7 +24,7 @@ const source = ts.transpileModule(readFileSync('src/utils/map-service-layer.ts',
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText
 const module = { exports: {} }
-const internals = new Function('require', 'module', 'exports', `${source}\nreturn { loadArcGisJson, loadArcGisMetadata, queryArcGis, servicePath, serviceParameters };`)(id => {
+const internals = new Function('require', 'module', 'exports', `${source}\nreturn { loadArcGisJson, loadArcGisMetadata, queryArcGis, servicePath, serviceParameters, CoverageAwareArcGisTileLayer };`)(id => {
   if (id === 'leaflet') return { default: leaflet }
   if (id === 'proj4') return { default: { defs() {} } }
   throw new Error(`Unexpected dependency ${id}`)
@@ -77,8 +78,9 @@ globalThis.fetch = async () => response({ singleFusedMapCache: true, tileInfo: {
   spatialReference: { wkid: 3857 }, origin: { x: -20037508.342789244, y: 20037508.342789244 }, rows: 256, cols: 256,
   lods: Array.from({ length: 19 }, (_, level) => ({ level, resolution: 156543.03392804097 / 2 ** level })),
 } })
-await api.createMapServiceLayer({ id: 'cached', name: '缓存影像', serviceUrl: root, type: 'ARCGIS_MAPSERVER' })
-assert.equal(tileLayers.at(-1).url, 'https://example.test/MapServer/tile/{z}/{y}/{x}?devAPIKey=test-key')
+const cached = await api.createMapServiceLayer({ id: 'cached', name: '缓存影像', serviceUrl: root, type: 'ARCGIS_MAPSERVER' })
+assert(cached.layer instanceof internals.CoverageAwareArcGisTileLayer, 'Standard cached ArcGIS services use extent-aware handling')
+assert.equal(cached.layer.url, 'https://example.test/MapServer/tile/{z}/{y}/{x}?devAPIKey=test-key')
 
 globalThis.fetch = async () => { throw new Error('Template URLs must not request metadata') }
 const templateService = { id: 'forwarder', name: '泰州天地图', type: 'ARCGIS_MAPSERVER', serviceUrl: 'https://example.test/arcgis/tile/tile?devAPIKey=test-key&z={z}&x={x}&y={y}' }

@@ -105,6 +105,18 @@ export const JIULONG_ARCGIS_LAYERS: ArcGisLayerDefinition[] = [
   },
 ]
 
+export function getJiulongArcGisLayerBounds(serviceUrl: string) {
+  const normalizedUrl = serviceUrl.trim().split(/[?#]/, 1)[0]!.replace(/\/+$/, '').toLowerCase()
+  const definition = JIULONG_ARCGIS_LAYERS.find((layer) => normalizedUrl.endsWith(`/${layer.servicePath.toLowerCase()}`))
+  // The cached 0.2 m services each publish their own fullExtent. Do not replace
+  // those per-service extents with the shared township overview rectangle: at
+  // the edge Leaflet requests any tile that merely overlaps the rectangle,
+  // including tiles outside that image's actual cached coverage (404s).
+  // The local 0.02 m service has an overly broad service extent, so it keeps its
+  // surveyed footprint override.
+  return definition?.id === 'jiulong-202604-high-resolution' ? definition.focusBounds : undefined
+}
+
 /**
  * 九龙镇内置影像也应参与异常图斑的多期影像匹配。
  * 它们并不一定存在于后端地图服务列表，因此在这里提供带已知覆盖范围的候选项。
@@ -215,7 +227,7 @@ function createLayer(definition: ArcGisLayerDefinition) {
   const serviceUrl = `${JIULONG_ARCGIS_BASE_URL}/${definition.servicePath}`
   if (definition.kind === 'cached') {
     return L.tileLayer(`${serviceUrl}/tile/{z}/{y}/{x}`, {
-      bounds: CACHED_SERVICE_BOUNDS,
+      bounds: definition.focusBounds,
       minNativeZoom: 0,
       maxNativeZoom: 23,
       minZoom: 0,

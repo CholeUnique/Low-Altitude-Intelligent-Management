@@ -9,6 +9,8 @@ export interface MapServiceItem {
   dataType?: string | null
   serviceTime?: string | null
   sort?: number
+  /** 服务对应影像/数据的时间，ISO-8601 格式；列表排序优先按此时间。 */
+  serviceTime?: string
   status: number
   preset?: number
   remark?: string
@@ -30,6 +32,22 @@ export interface MapServiceListQuery {
   dataType?: string
 }
 
+export interface MapServiceTypeOption {
+  id: string | number
+  code: string
+  name: string
+  children?: string[]
+}
+
+export interface MapServiceTypeOptions {
+  serviceTypes: MapServiceTypeOption[]
+  dataTypes: MapServiceTypeOption[]
+}
+
+export function getMapServiceTypeOptions() {
+  return apiClient.post<never, MapServiceTypeOptions>('/v1/map/service/type/options', {})
+}
+
 export interface MapServiceCreateInput {
   name: string
   serviceUrl: string
@@ -38,6 +56,7 @@ export interface MapServiceCreateInput {
   dataType?: string
   serviceTime?: string
   sort?: number
+  serviceTime?: string
   remark?: string
   /** 空数组表示所有部门均可使用。 */
   deptIds?: Array<string | number>
@@ -47,11 +66,22 @@ export interface MapServiceUpdateInput extends Partial<MapServiceCreateInput> {
   id: string | number
 }
 
+function compareMapServiceTime(left: MapServiceItem, right: MapServiceItem) {
+  const leftTime = left.serviceTime ? Date.parse(left.serviceTime) : Number.NaN
+  const rightTime = right.serviceTime ? Date.parse(right.serviceTime) : Number.NaN
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return leftTime - rightTime
+  if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) return Number.isFinite(leftTime) ? -1 : 1
+  return (Number(left.sort) || 0) - (Number(right.sort) || 0)
+}
+
+function sortMapServices(services: MapServiceItem[]) {
+  return services.sort(compareMapServiceTime)
+}
+
 export async function listMapServices(query: MapServiceListQuery = {}) {
   if (isMockMode()) return []
   const services = await apiClient.post<never, MapServiceItem[]>('/v1/map/service/list', query)
-  return (Array.isArray(services) ? services : [])
-    .sort((left, right) => (Number(left.sort) || 0) - (Number(right.sort) || 0))
+  return sortMapServices(Array.isArray(services) ? services : [])
 }
 
 /** 后端只提供单部门视角列表；管理员管理页需逐部门汇总并按服务 ID 去重。 */
@@ -66,8 +96,7 @@ export async function listMapServicesForDepartments(
       .map((deptId) => listMapServices({ ...query, deptId })))
     batch.flat().forEach((service) => services.set(String(service.id), service))
   }
-  return [...services.values()]
-    .sort((left, right) => (Number(left.sort) || 0) - (Number(right.sort) || 0))
+  return sortMapServices([...services.values()])
 }
 
 export async function getMapServiceDetail(id: string | number) {
@@ -101,5 +130,5 @@ export async function listEnabledMapServices(deptId?: string | number) {
     .filter((service) => Number(service.status) === 1
       && Boolean(service.serviceUrl?.trim())
       && (!deptId || !service.deptIds?.length || service.deptIds.some((id) => String(id) === String(deptId))))
-    .sort((left, right) => (Number(left.sort) || 0) - (Number(right.sort) || 0))
+    .sort(compareMapServiceTime)
 }

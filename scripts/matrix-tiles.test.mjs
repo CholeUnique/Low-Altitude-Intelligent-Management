@@ -12,8 +12,18 @@ const coords = coordsAt(119.9255, 32.4555, 11)
 
 h.setMetadata(metadata(3857, [0, 1, 2, 3].map(level => ({ level, resolution: 156543.03392804097 / 2 ** level })), { x: -20037508.342789244, y: 20037508.342789244 }))
 const canonical = await api.createMapServiceLayer(service('standard'))
-assert.equal(canonical.layer.kind, 'native', 'Verified standard Mercator caches retain the lightweight native renderer')
+assert(canonical.layer instanceof internals.CoverageAwareArcGisTileLayer, 'Standard Mercator caches use the lightweight coverage-aware renderer')
 assert.match(canonical.layer.url, /\/tile\/\{z\}\/\{y\}\/\{x\}\?token=test-key$/)
+h.setStatus(404)
+const missingCanonical = await render(canonical.layer, coords).completed
+assert.equal(missingCanonical.error, undefined, 'Empty cached tiles are treated as transparent rather than layer failures')
+assert.equal(missingCanonical.tile.draws.length, 0)
+h.setStatus(200)
+
+const standardBounds = h.L.latLngBounds([31, 119], [33, 120.3])
+const boundedStandard = await api.createMapServiceLayer(service('standard-bounded'), undefined, { fallbackRequestBounds: standardBounds })
+assert.equal(boundedStandard.layer._isValidTile(coordsAt(120.4, 32.5, 9)), false, 'A standard cache tile crossing the edge is filtered when its center is outside coverage')
+assert.equal(boundedStandard.layer._isValidTile(coordsAt(119.9, 32.5, 9)), true, 'Standard cache tiles centered inside coverage remain loadable')
 
 h.setMetadata(metadata(4326, [9, 10, 11].map(level => ({ level, resolution: 180 / (256 * 2 ** level) }))))
 const geographic = await api.createMapServiceLayer(service('geographic'))
@@ -67,6 +77,8 @@ assert.equal((await render(projected.layer, coordsAt(119.9255, 32.4555, 10)).com
 const fallback = h.L.latLngBounds([31.9, 119.6], [33.3, 120.6])
 h.setMetadata(metadata(4326, [{ level: 8, resolution: 360 / (256 * 2 ** 8) }]))
 const bounded = await api.createMapServiceLayer(service('bounded'), undefined, { fallbackRequestBounds: fallback })
+assert.equal(bounded.layer.sourceTileIntersects('8', 40, 214), false, 'Partially overlapping edge tiles whose center is outside service coverage are not requested')
+assert.equal(bounded.layer.sourceTileIntersects('8', 40, 213), true, 'Tiles centered inside service coverage remain requestable')
 const beforeOutside = tileCalls().length
 const outside = await render(bounded.layer, coordsAt(111.5, 34.5, 8)).completed
 assert.equal(outside.error, undefined)

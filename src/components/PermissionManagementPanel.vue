@@ -11,6 +11,10 @@ import {
   type UserDepartmentPermission,
 } from '@/api/permission-management'
 import type { CurrentUser } from '@/types'
+import { useUserStore } from '@/stores/user'
+
+const userStore = useUserStore()
+const isDepartmentAdmin = computed(() => userStore.isActiveDepartmentAdmin)
 
 const users = ref<CurrentUser[]>([])
 const userKeyword = ref('')
@@ -79,9 +83,11 @@ function normalizeUser(value: CurrentUser): CurrentUser {
 async function loadUsers() {
   userLoading.value = true
   try {
-    const result = await getUserPage({ pageNum: 1, pageSize: 100, keyword: userKeyword.value.trim(), role: 'USER' })
+    const result = await getUserPage({ pageNum: 1, pageSize: 100, keyword: userKeyword.value.trim(), role: 'USER', deptId: isDepartmentAdmin.value ? userStore.activeDeptId : undefined })
     // 管理员天然拥有全部权限，不进入部门权限分配范围。即使后端忽略角色筛选，前端也会再次过滤。
-    users.value = (result.records || []).map(normalizeUser).filter((item) => item.role !== 'ADMIN')
+    users.value = (result.records || []).map(normalizeUser).filter((item) => item.role === 'USER'
+      && (!isDepartmentAdmin.value || (item.deptList || []).some((dept) => String(dept.deptId) === String(userStore.activeDeptId))
+        || String(item.deptId || item.defaultDeptId || '') === String(userStore.activeDeptId)))
     if (!users.value.some((item) => String(item.id) === selectedUserId.value)) {
       selectedUserId.value = users.value[0] ? String(users.value[0].id) : ''
     }
@@ -104,6 +110,7 @@ function clearPermissionState() {
 function mergeUserDepartments(result: UserDepartmentPermission[]) {
   const merged = new Map(result.map((item) => [item.deptId, item]))
   for (const dept of selectedUser.value?.deptList || []) {
+    if (isDepartmentAdmin.value && String(dept.deptId) !== String(userStore.activeDeptId)) continue
     const deptId = String(dept.deptId)
     if (!merged.has(deptId)) {
       merged.set(deptId, { deptId, deptName: dept.deptName, menuIds: [], menus: [] })
@@ -116,8 +123,8 @@ async function loadPermissions(preferredDeptId = selectedDeptId.value) {
   if (!selectedUserId.value) return clearPermissionState()
   permissionLoading.value = true
   try {
-    const result = await getUserDepartmentPermissions(selectedUserId.value)
-    permissions.value = mergeUserDepartments(result)
+    const result = await getUserDepartmentPermissions(selectedUserId.value, isDepartmentAdmin.value ? userStore.activeDeptId : undefined)
+    permissions.value = mergeUserDepartments(isDepartmentAdmin.value ? result.filter((item) => item.deptId === String(userStore.activeDeptId)) : result)
     const defaultDeptId = String(selectedUser.value?.defaultDeptId || selectedUser.value?.deptId || '')
     selectedDeptId.value = permissions.value.some((item) => item.deptId === preferredDeptId)
       ? preferredDeptId
@@ -142,6 +149,7 @@ async function selectUser(user: CurrentUser) {
 }
 
 function selectDepartment(deptId: string) {
+  if (isDepartmentAdmin.value && deptId !== String(userStore.activeDeptId)) return
   if (deptId === selectedDeptId.value) return
   selectedDeptId.value = deptId
   resetDraft()
@@ -183,7 +191,7 @@ function togglePermission(menuId: string) {
 }
 
 function mutationPayload(menuIds: string[]) {
-  if (!selectedUser.value || selectedUser.value.role === 'ADMIN') {
+  if (!selectedUser.value || selectedUser.value.role !== 'USER' || (isDepartmentAdmin.value && selectedDeptId.value !== String(userStore.activeDeptId))) {
     throw new Error('管理员默认拥有全部权限，无需进行权限分配')
   }
   return {
@@ -282,7 +290,7 @@ onMounted(async () => {
         <div v-else-if="!permissions.length" class="permission-empty permission-empty--large"><b>该用户未归属任何部门</b><span>请先在用户管理中为该用户设置所属部门</span></div>
         <template v-else>
           <div class="department-tabs" role="tablist" aria-label="所属部门">
-            <button v-for="dept in permissions" :key="dept.deptId" type="button" :class="{ active: dept.deptId === selectedDeptId }" @click="selectDepartment(dept.deptId)">
+            <button v-for="dept in permissions" :key="dept.deptId" type="button" :class="{ active: dept.deptId === selectedDeptId }" :disabled="isDepartmentAdmin" @click="selectDepartment(dept.deptId)">
               <span>{{ dept.deptName || `部门 ${dept.deptId}` }}</span><small>{{ dept.deptRole || '部门成员' }}</small>
             </button>
           </div>

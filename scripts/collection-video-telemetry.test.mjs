@@ -49,7 +49,7 @@ const Overlay = Vue.defineComponent({ props: ['media', 'mediaList', 'video', 'pl
   Vue.onBeforeUnmount(() => closedOverlays++)
   return () => Vue.h('section', { class: 'stub-overlay' })
 } })
-const SrtDialog = Vue.defineComponent({ props: ['planName', 'media', 'initialId'], emits: ['close'], setup(props, { emit }) {
+const SrtDialog = Vue.defineComponent({ props: ['planName', 'media'], emits: ['close'], setup(props, { emit }) {
   srtInstances.push({ props, close: () => emit('close') })
   return () => Vue.h('section', { class: 'stub-srt-dialog' })
 } })
@@ -62,16 +62,21 @@ const noUrlVideo = { id: 'no-url', name: 'MISSING.mp4', capturedAt: '2026-10-10 
 const attachment = { id: 'srt', name: 'DJI_SAME.SRT', capturedAt: '2026-10-09 11:00', thumbnail: '' }
 const componentPath = 'src/views/DataResultsView.vue'
 let source = readFileSync(componentPath, 'utf8')
-source = source.replace('</script>', 'defineExpose({ previewMedia, previewTask, previewItems, videoElement, videoPlaybackStarted, telemetryVisible, srtContext, filteredMedia, mediaTypeFilter, openMedia, openSrtInfo, switchPreview, closePreview, retryVideoPlayback, videoPlaybackFailed });\n</script>')
+source = source.replace('</script>', 'defineExpose({ previewMedia, previewTask, previewItems, srtContext, filteredMedia, mediaTypeFilter, openMedia, openSrtInfo, switchPreview, closePreview, retryVideoPlayback, videoPlaybackFailed });\n</script>')
 const { descriptor } = parse(source)
+const sharedSource = readFileSync('src/workspace-components/spot-identification/SharedVideoPlayer.vue', 'utf8')
+const SharedPlayer = load(compileScript(parse(sharedSource).descriptor, { id: 'shared-video-test', inlineTemplate: true }).content, {
+  vue: Vue,
+  '@/utils/video-playback': load(readFileSync('src/utils/video-playback.ts', 'utf8'), {}),
+  './VideoTelemetryOverlay.vue': { __esModule: true, default: Overlay },
+}).default
 const View = load(compileScript(descriptor, { id: 'collection-test', inlineTemplate: true }).content, {
   vue: Vue,
   '@/api/patrol': {
     getUavFlightTaskOptions: async () => ({ list: [taskA, taskB], total: 2 }),
     getFlightTaskMedia: async ({ taskId }) => ({ list: taskId === taskA.id ? [videoA, imageA, noUrlVideo, attachment] : [videoB], total: taskId === taskA.id ? 4 : 1 }),
   },
-  '@/utils/video-playback': load(readFileSync('src/utils/video-playback.ts', 'utf8'), {}),
-  '@/workspace-components/spot-identification/VideoTelemetryOverlay.vue': { __esModule: true, default: Overlay },
+  '@/workspace-components/spot-identification/SharedVideoPlayer.vue': { __esModule: true, default: SharedPlayer },
   '@/workspace-components/spot-identification/SrtInfoDialog.vue': { __esModule: true, default: SrtDialog },
 }).default
 const root = node('root'), props = Vue.reactive({ embedded: true, activeTab: 'collection' })
@@ -88,20 +93,21 @@ assert(!byClass('media-card-srt').some(item => item.text.includes('↗')))
 assert(!all(root, item => item.type === 'button').some(item => all(item, child => child !== item && child.type === 'button').length), 'Card preview and SRT actions must not be nested buttons')
 click(byClass('media-card-srt')[0]); await flush()
 assert.equal(vm.previewMedia, undefined, 'SRT action must not also open the video preview')
-assert.equal(srtInstances.at(-1).props.initialId, `${taskA.id}:${videoA.id}`)
+assert.equal(srtInstances.at(-1).props.media.id, videoA.id)
 assert.equal(srtInstances.at(-1).props.planName, taskA.name)
-assert(srtInstances.at(-1).props.media.every(item => item.taskId === taskA.id && item.type === 'video'))
+assert.equal(srtInstances.at(-1).props.media.taskId, taskA.id)
+assert.equal(srtInstances.at(-1).props.media.type, 'video')
 srtInstances.at(-1).close(); await flush()
 vm.mediaTypeFilter = 'video'; await flush()
 click(byClass('media-card-open')[0]); await flush()
 assert.equal(vm.previewMedia.id, videoA.id)
 assert.equal(vm.previewTask.id, taskA.id)
-const firstVideo = vm.videoElement
+const firstVideo = all(root, item => item.type === 'video')[0]
 assert(firstVideo)
-click(byClass('collection-telemetry-toggle')[0]); await flush()
+click(byClass('collaboration-toggle')[0]); await flush()
 assert.equal(overlayInstances.at(-1).props.media.id, videoA.id)
 assert.equal(overlayInstances.at(-1).props.media.taskId, taskA.id)
-assert.equal(overlayInstances.at(-1).props.video, firstVideo)
+assert.equal(Vue.toRaw(overlayInstances.at(-1).props.video), firstVideo)
 assert.equal(overlayInstances.at(-1).props.fullscreen, true)
 assert(overlayInstances.at(-1).props.mediaList.some(item => item.fileName.endsWith('.SRT')))
 await firstVideo.play(); await Vue.nextTick()
@@ -109,38 +115,67 @@ assert.equal(overlayInstances.at(-1).props.playbackStarted, true, 'Collection pl
 vm.switchPreview(1); await flush()
 assert.equal(vm.previewMedia.id, videoB.id)
 assert.equal(vm.previewTask.id, taskB.id, 'Switching same-name videos preserves their original task identity')
-assert.equal(vm.videoPlaybackStarted, false)
-assert.equal(vm.telemetryVisible, false)
+assert.equal(byClass('stub-overlay').length, 0)
 assert.equal(closedOverlays, 1, 'Switching video destroys the old collaboration panel')
-assert.notEqual(vm.videoElement, firstVideo)
-click(byClass('collection-telemetry-toggle')[0]); await flush()
+assert.notEqual(all(root, item => item.type === 'video')[0], firstVideo)
+click(byClass('collaboration-toggle')[0]); await flush()
 assert.equal(overlayInstances.at(-1).props.media.id, videoB.id)
 assert.equal(overlayInstances.at(-1).props.media.taskId, taskB.id)
+const secondVideo = all(root, item => item.type === 'video')[0]
 vm.openSrtInfo(videoB, taskB); await flush()
-assert.equal(vm.videoElement.pauses, 1, 'Opening SRT information pauses an existing preview')
-assert.deepEqual(srtInstances.at(-1).props.media.map(item => item.id), [videoB.id])
+assert.equal(secondVideo.pauses, 1, 'Opening SRT information pauses an existing preview')
+assert.equal(srtInstances.at(-1).props.media.id, videoB.id)
 windowListeners.get('keydown')({ key: 'ArrowLeft', preventDefault() {} })
 assert.equal(vm.previewMedia.id, videoB.id, 'Keys inside SRT dialog cannot switch the underlying video')
 srtInstances.at(-1).close(); await flush()
 overlayInstances.at(-1).close(); await flush()
-assert.equal(vm.telemetryVisible, false)
-click(byClass('collection-telemetry-toggle')[0]); await flush()
+assert.equal(byClass('stub-overlay').length, 0)
+click(byClass('collaboration-toggle')[0]); await flush()
 vm.retryVideoPlayback(); await flush()
-assert.equal(vm.telemetryVisible, false, 'Retry closes the old map and its subtitle lifecycle')
-click(byClass('collection-telemetry-toggle')[0]); await flush()
-vm.videoElement.props.onError(); await flush()
-assert.equal(vm.telemetryVisible, false)
+assert.equal(byClass('stub-overlay').length, 0, 'Retry closes the old map and its subtitle lifecycle')
+click(byClass('collaboration-toggle')[0]); await flush()
+all(root, item => item.type === 'video')[0].props.onError(); await flush()
 assert.equal(vm.videoPlaybackFailed, true)
 assert.equal(byClass('stub-overlay').length, 0, 'Playback failure destroys the old collaboration panel')
 vm.openMedia(imageA, taskA, [{ media: imageA, task: taskA }]); await flush()
 assert.equal(byClass('preview-image-stage').length, 1)
-assert.equal(byClass('collection-telemetry-toggle').length, 0, 'Image preview never offers drone-video collaboration')
+assert.equal(byClass('collaboration-toggle').length, 0, 'Image preview never offers drone-video collaboration')
 assert.equal(byClass('stub-overlay').length, 0)
 vm.openSrtInfo(noUrlVideo, taskA); await flush()
-assert.equal(srtInstances.at(-1).props.initialId, `${taskA.id}:no-url`, 'SRT uses the video ID, not its URL or thumbnail')
+assert.equal(srtInstances.at(-1).props.media.id, 'no-url', 'SRT uses the video ID, not its URL or thumbnail')
 props.activeTab = 'recognition'; await flush()
 assert.equal(vm.previewMedia, undefined)
 assert.equal(vm.srtContext, undefined)
 app.unmount()
 assert.equal(windowListeners.size, 0)
-console.log('Collection video integration: independent card actions, scoped SRT IDs, shared collaboration, play tracking, switching, image isolation and cleanup passed')
+
+const playerRoot = node('root')
+const playerProps = Vue.reactive({ media: { id: 'review-video', taskId: 'review-task', fileName: 'review.mp4' },
+  mediaList: [], src: 'https://video.test/review.mp4', autoplay: false, fullscreen: false, collaborationAvailable: false })
+const playerApp = renderer.createApp({ setup: () => () => Vue.h(SharedPlayer, { ...playerProps }) })
+playerApp.mount(playerRoot)
+await flush()
+const reviewVideo = all(playerRoot, item => item.type === 'video')[0]
+assert(reviewVideo && !reviewVideo.props.autoplay, 'Review mode keeps manual playback')
+assert.equal(all(playerRoot, item => item.props.class === 'collaboration-toggle').length, 0)
+playerProps.collaborationAvailable = true
+await flush()
+const reviewToggle = () => all(playerRoot, item => item.props.class === 'collaboration-toggle')[0]
+click(reviewToggle()); await flush()
+assert.equal(overlayInstances.at(-1).props.playbackStarted, false)
+await reviewVideo.props.onClick({ currentTarget: reviewVideo, target: reviewVideo, button: 0, detail: 1,
+  clientY: 350, defaultPrevented: false, preventDefault() { this.defaultPrevented = true } })
+await flush()
+assert.equal(reviewVideo.paused, false, 'Clicking review video starts the shared player')
+assert.equal(overlayInstances.at(-1).props.playbackStarted, true)
+playerProps.fullscreen = true
+await flush()
+assert.equal(overlayInstances.at(-1).props.fullscreen, true, 'Review fullscreen keeps the existing overlay alive')
+click(reviewToggle()); await flush()
+click(reviewToggle()); await flush()
+assert.equal(overlayInstances.at(-1).props.playbackStarted, true, 'Reopening collaboration does not reset first-play state')
+playerProps.collaborationAvailable = false
+await flush()
+assert.equal(all(playerRoot, item => item.props.class === 'stub-overlay').length, 0)
+playerApp.unmount()
+console.log('Collection and review player integration: card actions, SRT IDs, collaboration, click playback, first play, fullscreen, switching and cleanup passed')

@@ -2,9 +2,10 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { getDepartmentOptions, getMyDepartments, loginWithPassword, switchDepartment } from '@/api/auth'
+import { getCurrentUser, getDepartmentOptions, getMyDepartments, loginWithPassword, switchDepartment } from '@/api/auth'
 import { ApiBusinessError } from '@/api/client'
 import { firstAccessiblePath } from '@/utils/access-control'
+import { preferredDepartmentAdminId } from '@/utils/user-role'
 
 const router = useRouter()
 const route = useRoute()
@@ -30,26 +31,44 @@ async function submitReal() {
       || result.userInfo.deptId
       || result.userInfo.deptList.find((department) => department.isDefault)?.deptId
     user.setRealSession(result.accessToken, result.userInfo, result.expiresIn, initialDeptId)
+    // 登录响应可能只有基础用户字段，先取完整个人信息再确认部门管理员标志。
+    let resolvedUser = result.userInfo
+    try {
+      const profile = await getCurrentUser()
+      const profileDepartments = profile.deptList?.length ? profile.deptList : result.userInfo.deptList
+      resolvedUser = { ...result.userInfo, ...profile, deptList: profileDepartments.map((department) => ({
+        ...department,
+        isDeptAdmin: department.isDeptAdmin === true || result.userInfo.deptList.find((item) => String(item.deptId) === String(department.deptId))?.isDeptAdmin === true,
+      })) }
+      user.setCurrentUser(resolvedUser)
+    } catch {
+      // 个人信息接口暂不可用时，仍可沿用登录响应。
+    }
     // 补齐当前用户的全部所属部门：普通用户若归属多个部门，登录后也可切换部门身份。
-    let memberships = result.userInfo.deptList
+    let memberships = resolvedUser.deptList
     try {
       const loadedMemberships = await getMyDepartments()
       if (loadedMemberships.length) {
-        memberships = loadedMemberships
-        user.setCurrentUser({ ...result.userInfo, deptList: loadedMemberships })
+        memberships = loadedMemberships.map((department) => ({
+          ...department,
+          isDeptAdmin: department.isDeptAdmin === true || resolvedUser.deptList.find((item) => String(item.deptId) === String(department.deptId))?.isDeptAdmin === true,
+        }))
+        user.setCurrentUser({ ...resolvedUser, deptList: memberships })
       }
     } catch {
       // 部门列表暂不可用时，继续使用登录响应中的 deptList。
     }
 
     const matcher = user.organizationId === 'agriculture-rural' ? /农业农村/ : /自然资源.*规划|自然资源/
-    let scopedDeptId = memberships.find((department) => matcher.test(department.deptName))?.deptId
+    const adminDeptId = preferredDepartmentAdminId(memberships, initialDeptId)
+    let scopedDeptId = (adminDeptId
+      || (resolvedUser.role === 'DEPT_ADMIN' ? initialDeptId : memberships.find((department) => matcher.test(department.deptName))?.deptId))
       || initialDeptId
       || memberships.find((department) => department.isDefault)?.deptId
       || (memberships.length === 1 ? memberships[0]?.deptId : undefined)
 
     // 管理员无所属部门时，从全部启用部门中解析当前单位对应的真实部门 ID。
-    if (result.userInfo.role === 'ADMIN') {
+    if (resolvedUser.role === 'ADMIN') {
       try {
         const departments = await getDepartmentOptions()
         scopedDeptId = departments.find((department) => matcher.test(department.deptName))?.deptId || scopedDeptId

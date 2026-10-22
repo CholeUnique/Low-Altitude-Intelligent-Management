@@ -130,9 +130,9 @@ const renderer = Vue.createRenderer({
   patchProp(node, key, before, after) { node.props[key] = after },
 })
 const mapCalls = [], markers = [], mapHandlers = {}
-let mapCenter = [32, 119], mapOptions, pixelsPerDegree = 100000
-const map = { setView(...args) { mapCenter = args[0]; mapCalls.push(['view', ...args]); return this },
-  panTo(...args) { mapCenter = args[0]; mapCalls.push(['pan', ...args]) }, fitBounds() {}, invalidateSize() {}, stop() {},
+let mapCenter = [32, 119], mapZoom = 10, mapOptions, pixelsPerDegree = 100000
+const map = { setView(...args) { mapCenter = args[0]; mapZoom = args[1] ?? mapZoom; mapCalls.push(['view', ...args]); return this },
+  panTo(...args) { mapCenter = args[0]; mapCalls.push(['pan', ...args]) }, fitBounds(...args) { mapZoom = 12; mapCalls.push(['fitBounds', ...args]) }, getZoom: () => mapZoom, invalidateSize() {}, stop() {},
   on(name, handler) { mapHandlers[name] = handler; return this }, getSize: () => ({ x: 340, y: 200 }),
   latLngToContainerPoint: ([latitude, longitude]) => ({ x: 170 + (longitude - mapCenter[1]) * pixelsPerDegree, y: 100 + (latitude - mapCenter[0]) * pixelsPerDegree }),
   remove() { mapCalls.push(['remove']) } }
@@ -148,10 +148,10 @@ const geocodingCalls = []
 let geocodingGate
 function buildOverlay() {
   let source = readFileSync('src/workspace-components/spot-identification/VideoTelemetryOverlay.vue', 'utf8')
-  source = source.replace('</script>', 'defineExpose({ points, busy, error, sourceName, loadSrt, readVideoSrt, chooseLocal, follow, panel, panelPosition, panelSize, videoBounds, dragging, resizing, updatePanelLayout, startDrag, moveDrag, endDrag, movePanelWithKey, startResize, moveResize, endResize, scalePanel });\n</script>')
+  source = source.replace('</script>', 'defineExpose({ points, busy, error, sourceName, loadSrt, readVideoSrt, chooseLocal, follow, panel, panelPosition, panelSize, videoBounds, dragging, resizing, updatePanelLayout, startDrag, moveDrag, endDrag, movePanelWithKey, startResize, moveResize, endResize, scalePanel, showTrack, toggleFollow, showNavigationNotice });\n</script>')
   const { descriptor } = parse(source)
   return load(compileScript(descriptor, { id: 'test-overlay', inlineTemplate: true }).content.replace('import.meta.env.VITE_TIANDITU_TOKEN', "'test-map-key'"), {
-    vue: Vue, leaflet, 'leaflet/dist/leaflet.css': {}, '@/utils/video-telemetry': telemetry,
+    vue: Vue, leaflet, 'leaflet/dist/leaflet.css': {}, 'element-plus': { ElTooltip: { props: ['visible', 'placement'], setup(props, { slots }) { return () => Vue.h('div', { class: 'tooltip-stub', 'data-placement': props.placement }, [slots.default?.(), ...(props.visible ? [slots.content?.()] : [])]) } } }, '@/utils/video-telemetry': telemetry,
     '@/utils/telemetry-panel': panelUtils,
     '@/utils/telemetry-location': { createTelemetryLocationResolver: (request, publish) => locationUtils.createTelemetryLocationResolver(request, publish, { minIntervalMs: 0 }) },
     '@/api/geocoding': { getTiandituAddress: (...args) => {
@@ -189,6 +189,13 @@ assert(infoRow && locationRow)
 assert.equal(infoRow.children.filter(node => node.type === 'span').length, 3, 'Time, coordinate pair, altitude occupy three columns of one row')
 assert.match(textContent(infoRow), /119\.840000°E, 32\.470000°N/)
 assert.match(textContent(locationRow), /当前位置：江苏省泰州市海陵区示例村附近/)
+assert(findClass(locationRow, 'navigation-button'), 'The position row includes the navigation action')
+assert.equal(locationRow.props.title, undefined, 'The navigation button must not inherit a native hover title')
+assert(!textContent(locationRow).includes('该功能暂未接入'), 'Hover does not show a navigation tooltip')
+assert.equal(findClass(locationRow, 'tooltip-stub').props['data-placement'], 'top', 'The tooltip arrow is aligned above the navigation button')
+findClass(locationRow, 'navigation-button').props.onClick()
+await Vue.nextTick()
+assert.match(textContent(locationRow), /该功能暂未接入/, 'Clicking navigation shows the pending tooltip')
 assert(!findClass(root, 'telemetry-source') && !findClass(root, 'telemetry-credit'), 'Remove both lines in the red box')
 const controlsNode = findClass(root, 'telemetry-controls')
 assert(controlsNode.children.indexOf(locationRow) > controlsNode.children.indexOf(infoRow))
@@ -197,6 +204,16 @@ await seek(4.5)
 assert.deepEqual(markers.at(-1).coordinate, [32.472, 119.842], 'Actual map marker follows playback/seek')
 await seek(3)
 assert.equal(markers.at(-1).removed, true, 'Hide marker during missing GPS interval')
+await seek(4.5)
+vm.showTrack()
+await Vue.nextTick()
+assert.equal(vm.follow, false)
+assert.equal(mapZoom, 12, 'Show full track at overview zoom')
+vm.toggleFollow()
+await Vue.nextTick()
+assert.equal(vm.follow, true)
+assert.equal(mapZoom, 17, 'Following after full track restores the original close-up zoom')
+assert.deepEqual(mapCenter, [32.472, 119.842], 'Following after full track recenters on the current drone position')
 // Measure the real contained video rectangle, not player letterboxing.
 const stage = { clientWidth: 1000, clientHeight: 700, clientLeft: 0, clientTop: 0, getBoundingClientRect() { return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight } } }
 function attachPanelLayout(instance) {
@@ -472,11 +489,15 @@ backendError = { response: { status: 401 } }
 await assert.rejects(api.getFlightReviewVideoSrtFile('v'), reason => reason === backendError, 'Do not swallow authentication errors')
 
 const parent = readFileSync('src/workspace-components/spot-identification/FlightTaskReviewPanel.vue', 'utf8')
-assert.match(parent, /defineAsyncComponent\(\(\) => import\('\.\/VideoTelemetryOverlay.vue'\)\)/, 'Do not load mini map until requested')
-assert.doesNotMatch(parent, /bindVideoTelemetryClock|videoTime/, 'High-frequency playback state must not re-render the entire flight results table')
-assert.match(parent, /:video="videoElement"/)
-assert.match(parent, /:playback-started="videoPlaybackStarted"/, 'First-play status survives closing and reopening the overlay')
-assert.match(parent, /:fullscreen="mediaFullscreen"/, 'Overlay receives fullscreen mode so docking can be recalculated')
-assert.match(parent, /:key="mediaKey\(previewMedia\)" :media="previewMedia"/)
-assert.match(parent, /telemetryVisible\.value = false/, 'Switch/close resets overlay')
+const collection = readFileSync('src/views/DataResultsView.vue', 'utf8')
+const sharedPlayer = readFileSync('src/workspace-components/spot-identification/SharedVideoPlayer.vue', 'utf8')
+assert.match(sharedPlayer, /defineAsyncComponent\(\(\) => import\('\.\/VideoTelemetryOverlay.vue'\)\)/, 'Do not load mini map until requested')
+assert.match(parent, /<SharedVideoPlayer[^>]+:fullscreen="mediaFullscreen"/, 'Review player passes fullscreen mode')
+assert.match(collection, /<SharedVideoPlayer[^>]+autoplay fullscreen/, 'Collection player reuses the same component while retaining autoplay and fullscreen')
+assert.doesNotMatch(parent + collection, /<video\b/, 'Neither page maintains a separate native video player')
+assert.doesNotMatch(parent + collection, /bindVideoTelemetryClock|videoTime/, 'High-frequency playback state must not re-render the page')
+assert.match(sharedPlayer, /:video="videoElement"/)
+assert.match(sharedPlayer, /:playback-started="playbackStarted"/, 'First-play status survives closing and reopening the overlay')
+assert.match(sharedPlayer, /:fullscreen="fullscreen"/, 'Overlay receives fullscreen mode so docking can be recalculated')
+assert.match(sharedPlayer, /collaborationVisible\.value = false/, 'Unavailable collaboration closes the map')
 console.log('Video SRT parsing, smooth playback, first-play-only and paused address lookup, no resume/reopen lookup, seek cancellation, dragging, endpoints and cleanup passed.')
