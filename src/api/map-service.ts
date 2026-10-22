@@ -7,10 +7,9 @@ export interface MapServiceItem {
   type: string
   topicCode?: string | null
   dataType?: string | null
-  serviceTime?: string | null
   sort?: number
   /** 服务对应影像/数据的时间，ISO-8601 格式；列表排序优先按此时间。 */
-  serviceTime?: string
+  serviceTime?: string | null
   status: number
   preset?: number
   remark?: string
@@ -56,7 +55,6 @@ export interface MapServiceCreateInput {
   dataType?: string
   serviceTime?: string
   sort?: number
-  serviceTime?: string
   remark?: string
   /** 空数组表示所有部门均可使用。 */
   deptIds?: Array<string | number>

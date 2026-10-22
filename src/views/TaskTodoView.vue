@@ -21,7 +21,7 @@ const warnings = ref<string[]>([])
 const keyword = ref('')
 const selectedScene = ref('')
 const sceneOptions = computed(() => [...new Map(tasks.value.filter(task => task.sceneName).map(task => [task.sceneCode || task.sceneName, { code: task.sceneCode || task.sceneName, name: task.sceneName }])).values()])
-const processType = ref<TodoTaskStatus | ''>('')
+const processType = ref<TodoTaskStatus | ''>('pending')
 const deadlineSort = ref<TodoDeadlineSort>('default')
 let requestVersion = 0
 

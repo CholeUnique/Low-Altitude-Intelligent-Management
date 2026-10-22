@@ -99,7 +99,9 @@ export function c5Pattern(style: C5Style, fillOpacity = 1) {
   }
   const url=canvas.toDataURL('image/png');patterns.set(key,url);return url
 }
-export function c5Symbol(style: C5Style) {
-  return {type:'esriPFS',imageData:c5Pattern(style, .36).split(',')[1],contentType:'image/png',width:36,height:36,xscale:1,yscale:1,
+export function c5Symbol(style: C5Style, mode: 'filled' | 'boundary' = 'filled') {
+  if (mode === 'boundary') return {type:'esriSFS',style:'esriSFSNull',color:[...style.rgb,0],
+    outline:{type:'esriSLS',style:'esriSLSSolid',color:[...style.rgb,255],width:2.4}}
+  return {type:'esriPFS',imageData:c5Pattern(style).split(',')[1],contentType:'image/png',width:36,height:36,xscale:1,yscale:1,
     outline:{type:'esriSLS',style:'esriSLSSolid',color:[96,93,92,255],width:.34}}
 }

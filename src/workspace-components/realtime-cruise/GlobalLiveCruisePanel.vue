@@ -28,6 +28,23 @@ const playbackUrl = ref('')
 const playbackLoading = ref(false)
 const playbackError = ref('')
 const playbackPanel = ref<HTMLElement>()
+const playbackViewport = ref<HTMLElement>()
+// 开放组件按桌面画布排版；缩放整个 iframe，避免窄窗口截掉内部侧栏和底部控件。
+const playbackCanvasSize = {width:1920,height:1080}
+const playbackScale = ref(1)
+const playbackStageStyle = computed(() => ({width:`${playbackCanvasSize.width * playbackScale.value}px`,height:`${playbackCanvasSize.height * playbackScale.value}px`}))
+const playbackFrameStyle = computed(() => ({width:`${playbackCanvasSize.width}px`,height:`${playbackCanvasSize.height}px`,transform:`scale(${playbackScale.value})`}))
+let playbackResizeObserver: ResizeObserver | undefined
+watch(playbackViewport, element => {
+  playbackResizeObserver?.disconnect()
+  if (!element) return
+  const fit = () => {
+    if (element.clientWidth > 0 && element.clientHeight > 0) playbackScale.value = Math.min(1,element.clientWidth / playbackCanvasSize.width,element.clientHeight / playbackCanvasSize.height)
+  }
+  fit()
+  playbackResizeObserver = new ResizeObserver(fit)
+  playbackResizeObserver.observe(element)
+}, {flush:'post'})
 const playbackFullscreen = ref(false)
 const fullscreenHintVisible = ref(false)
 const previewDeviceId = ref('')
@@ -254,6 +271,7 @@ onMounted(() => {
   void loadOverview()
 })
 onBeforeUnmount(() => {
+  playbackResizeObserver?.disconnect()
   window.removeEventListener('keydown', handlePreviewKeydown)
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
   if (fullscreenHintTimer !== undefined) window.clearTimeout(fullscreenHintTimer)
@@ -301,7 +319,11 @@ watch(() => user.activeDeptId, () => void loadOverview())
       <section ref="playbackPanel" class="overview-panel map-panel" :class="{ 'is-playback-fullscreen': playbackFullscreen }">
         <div class="panel-title playback-titlebar"><button type="button" :disabled="!playbackFullscreen && (!playbackEmbedUrl || playbackLoading)" @click="showPlaybackFullscreen">{{ playbackFullscreen ? '退出全屏' : '全屏显示' }}</button></div>
         <div v-if="playbackLoading" class="playback-state"><i>↻</i><b>正在获取轨迹回放授权…</b><span>请稍候，正在加载对应飞行任务。</span></div>
-        <iframe v-else-if="playbackEmbedUrl" class="playback-frame" :src="playbackEmbedUrl" :title="`${selectedFlightTask?.name || '飞行任务'}轨迹回放`" allow="fullscreen; clipboard-read; clipboard-write; geolocation" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <div v-else-if="playbackEmbedUrl" ref="playbackViewport" class="playback-viewport">
+          <div class="playback-stage" :style="playbackStageStyle">
+            <iframe class="playback-frame" :style="playbackFrameStyle" :src="playbackEmbedUrl" :title="`${selectedFlightTask?.name || '飞行任务'}轨迹回放`" allow="fullscreen; clipboard-read; clipboard-write; geolocation" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+          </div>
+        </div>
         <div v-else class="playback-state" :class="{ error: playbackError }"><i>⌁</i><b>{{ playbackError ? '暂未进入轨迹回放' : selectedFlightTask ? '等待进入轨迹回放' : '请选择关联飞行任务' }}</b><span>{{ playbackStateText }}</span></div>
         <button v-if="playbackFullscreen" type="button" class="playback-fullscreen-exit" aria-label="退出轨迹回放全屏" title="退出全屏（Esc）" @click="showPlaybackFullscreen">退出全屏</button>
         <Transition name="fullscreen-hint"><div v-if="fullscreenHintVisible" class="fullscreen-hint">已进入全屏，按 Esc 键退出全屏</div></Transition>
@@ -353,6 +375,7 @@ watch(() => user.activeDeptId, () => void loadOverview())
 </template>
 
 <style scoped lang="scss">
+.playback-viewport{flex:1;min-width:0;min-height:0;position:relative;display:grid;place-items:center;overflow:hidden;background:#20272c}.playback-stage{position:relative;flex:none;overflow:hidden}.playback-stage>.playback-frame{position:absolute;inset:0;display:block;max-width:none;max-height:none;transform-origin:top left;border:0}
 .global-live-cruise { height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(300px, 1fr) minmax(190px, .56fr); gap: 8px; padding: 8px; background: #e8eef3; color: #1f3d52; }
 .global-live-cruise.is-fullscreen { height: 100vh; padding: 0; display: block; background: #06121c; }.fullscreen-live { position: relative; width: 100%; height: 100%; display: grid; place-items: center; background: #3f494f; }.fullscreen-screen { position: relative; width: 100%; height: 100%; overflow: hidden; background: #3f494f; }.fullscreen-screen video,.fullscreen-screen iframe { width: 100%; height: 100%; display: block; border: 0; object-fit: contain; background: #3f494f; }.fullscreen-screen footer { position: absolute; right: 0; bottom: 0; left: 0; display: flex; justify-content: space-between; padding: 11px 16px; color: #fff; background: #02101bbf; font-size: 14px; pointer-events: none; }.fullscreen-screen footer span { color: #57edb0; }.fullscreen-exit { position: absolute; z-index: 3; top: 76px; right: 22px; padding: 9px 15px; border: 1px solid #76e9fb; border-radius: 4px; color: #e9fcff; background: #073a58e8; cursor: pointer; font-size: 14px; }.fullscreen-exit:hover { background: #09618a; }.fullscreen-empty { width: 100%; height: 100%; display: grid; place-items: center; color: #dce4e8; background: #58636b; font-size: 16px; }
 .overview-actions { display: flex; align-items: center; gap: 8px; color: #6f8393; font-size: 11px; }.overview-actions button { padding: 4px 10px; border: 1px solid #1785c0; border-radius: 3px; color: #0876b6; background: #fff; cursor: pointer; }

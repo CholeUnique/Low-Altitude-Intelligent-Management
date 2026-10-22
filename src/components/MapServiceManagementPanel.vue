@@ -99,7 +99,7 @@ function resetForm() {
   Object.assign(form, { id: '', name: '', serviceUrl: '', type: '', dataType: '', topicCode: '', sort: 0, serviceTime: '', status: 1, preset: 0, remark: '', createTime: '', updateTime: '', departmentScope: 'all', deptIds: [], deptNames: [] })
 }
 
-function toDateTimeLocal(value?: string) {
+function toDateTimeLocal(value?: string | null) {
   if (!value) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''

@@ -8,7 +8,8 @@ import 'leaflet/dist/leaflet.css'
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
 import { getJiulongArcGisLayerBounds } from '@/utils/jiulong-arcgis-layers'
 import { getCustomDepartmentStatistics, type CustomStatGroup } from '@/api/business-statistics'
-import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { listEnabledMapServices, listMapServicesForDepartments, updateMapService, type MapServiceItem } from '@/api/map-service'
+import { getDepartmentList } from '@/api/account-management'
 import { useUserStore } from '@/stores/user'
 import type { DashboardMapLayer, DronePatrolRoute } from '@/types'
 import {
@@ -142,6 +143,17 @@ interface MapServiceGroup {
 }
 const requestedLayerOrder: string[] = []
 let dragOriginalStack: string[] = []
+const mapServiceOrderSaving = ref(false)
+const draggingGroupId = ref('')
+const dragGhost = ref<{ name: string; x: number; y: number; width: number; height: number }>()
+let dragPressTimer: number | undefined
+let dragPointerId: number | undefined
+let dragActive = false
+let dragGroupId = ''
+let dragStartX = 0, dragStartY = 0, dragRowX = 0, dragRowY = 0
+let dragOriginalOrder: string[] = []
+let previousUserSelect = ''
+let suppressGroupClick = false
 const pendingGroupIds = reactive(new Set<string>())
 function groupKind(group: MapServiceGroup) {
   return group.kind || (group.layers.some(item => item.arcGisGeometryType) || /矢量|农田|行政|VECTOR|FEATURE/i.test(`${group.name} ${group.source.type}`) ? 'vector' : 'imagery')
@@ -332,12 +344,10 @@ function addBaseLayers(mode: 'vector' | 'image') {
 
 function paneForMapService(service: MapServiceItem) {
   if (!map) return MAP_SERVICE_IMAGERY_PANE
-  const groupId = String(service.sourceServiceId ?? service.id)
-  const kind = service.arcGisGeometryType ? 'vector' : 'imagery'
-  const paneKey = `${groupId}:${kind}`
+  const paneKey = String(service.id)
   let paneName = mapServicePaneNames.get(paneKey)
   if (!paneName) {
-    paneName = `dashboard-service-${kind}-${++mapServicePaneSerial}`
+    paneName = `dashboard-service-${++mapServicePaneSerial}`
     const pane = map.createPane(paneName)
     pane.style.zIndex = service.arcGisGeometryType ? '335' : '235'
     pane.style.pointerEvents = 'none'

@@ -7,7 +7,8 @@ import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
 import { createMapServiceLayer, createAdministrativeBoundaryLayer, expandMapServiceSublayers, getMapServiceLayerMetadata, queryMapServiceFeatures, queryMapServiceSpatialIds, MAP_SERVICE_IMAGERY_PANE, MAP_SERVICE_VECTOR_PANE, type MapServiceLayerHandle, type MapServiceSearchGeometry } from '@/utils/map-service-layer'
-import { resolveC5Style, c5Pattern, c5Symbol, type C5Style } from '@/utils/land-survey-c5'
+import { resolveC5Style, c5Pattern, type C5Style } from '@/utils/land-survey-c5'
+import { createTopicRenderer, type TopicDisplayMode } from '@/utils/topic-renderer'
 import { NON_GRAIN, HOMESTEAD, topicRole, topicIncludes, topicBaseWhere, categoryWhere, combineWhere, type TopicRole } from '@/utils/geographic-topic'
 
 interface Category { value: string; name: string; count: number; homesteadCount: number; checked: boolean; style?: C5Style; color?: string }
@@ -19,12 +20,19 @@ const scenes = ref<SceneDictionaryItem[]>([]), sceneCode = ref('')
 const layers = ref<TopicLayer[]>([]), projects = ref<Project[]>([]), projectKey = ref('')
 const configOpen = ref(false), legendOpen = ref(true), pending = ref(false), error = ref(''), projectPending = ref(false), projectError = ref('')
 const fullscreen = ref(false)
+const businessBatchPending = ref(false)
+const displayMode = ref<TopicDisplayMode>('filled')
 const scene = computed(() => scenes.value.find(item => item.code === sceneCode.value))
 const availableLayers = computed(() => layers.value.filter(item => topicIncludes(item.role, sceneCode.value, item.service.topicCode)
   && !(sceneCode.value === HOMESTEAD && item.role === 'changes' && !item.fields.includes('2025DLTB'))))
 const legendLayers = computed(() => availableLayers.value.filter(item => item.visible && item.categories.length))
 const imageryLayers = computed(() => availableLayers.value.filter(item => item.role === 'imagery'))
 const vectorLayers = computed(() => availableLayers.value.filter(item => item.role !== 'imagery'))
+const legendCategories = computed(() => legendLayers.value.flatMap(item => item.categories.filter(category => categoryShown(item,category))))
+const legendAllSelected = computed(() => legendCategories.value.length > 0 && legendCategories.value.every(category => category.checked))
+const legendPartSelected = computed(() => !legendAllSelected.value && legendCategories.value.some(category => category.checked))
+const businessAllSelected = computed(() => vectorLayers.value.length > 0 && vectorLayers.value.every(item => item.visible))
+const businessPartSelected = computed(() => !businessAllSelected.value && vectorLayers.value.some(item => item.visible))
 const roleNames: Record<TopicRole, string> = { land:'国土调查底类', permanent:'永久基本农田', boundary:'行政边界', changes:'变化线索', facility:'项目设施', project:'项目范围', parcel:'耕地地块', imagery:'遥感影像', unconfigured:'待配置数据' }
 let map: L.Map | undefined, resizeObserver: ResizeObserver | undefined, version = 0, projectVersion = 0
 const featureCache = new Map<string, Awaited<ReturnType<typeof queryMapServiceFeatures>>>()
@@ -35,6 +43,33 @@ function expression(item: TopicLayer) {
   return combineWhere(topicBaseWhere(item.role, sceneCode.value), item.spatialWhere || '1=1', item.categoryField ? categoryWhere(item.categoryField, categories.filter(c => c.checked).map(c => c.value), categories.map(c => c.value)) : '1=1')
 }
 function applyFilter(item: TopicLayer) { item.handle?.setQueryFilter?.(expression(item)) }
+function selectLegend(mode: 'all' | 'none' | 'invert') {
+  legendLayers.value.forEach(item => {
+    item.categories.filter(category => categoryShown(item, category)).forEach(category => {
+      category.checked = mode === 'invert' ? !category.checked : mode === 'all'
+    })
+    // 一次批量操作只对每个图层提交一次筛选，避免按分类逐个重绘。
+    applyFilter(item)
+  })
+}
+async function selectBusinessLayers(mode: 'all' | 'none' | 'invert') {
+  if (businessBatchPending.value) return
+  businessBatchPending.value = true
+  const targets = vectorLayers.value.map(item => ({ item, visible:mode === 'invert' ? !item.visible : mode === 'all' }))
+  try { await Promise.all(targets.map(({item,visible}) => setVisible(item,visible))) }
+  finally { businessBatchPending.value = false }
+}
+function invertSelection(event: Event, scope: 'legend' | 'business') {
+  // 反选是一次性操作，完成后复位，允许再次点击反转当前状态。
+  ;(event.target as HTMLInputElement).checked = false
+  if (scope === 'legend') selectLegend('invert')
+  else void selectBusinessLayers('invert')
+}
+function applyDisplayMode(item: TopicLayer) {
+  if (item.role === 'boundary') { item.handle?.setFillOpacity?.(0); return }
+  item.handle?.setRenderer?.(createTopicRenderer(item.categoryField,item.categories,item.service.arcGisGeometryType,item.handle.color,displayMode.value))
+}
+watch(displayMode, () => layers.value.filter(item => item.handle && item.role !== 'imagery').forEach(applyDisplayMode))
 async function prepare(item: TopicLayer) {
   if (!map || item.handle || item.pending) return
   const request = version
@@ -62,15 +97,8 @@ async function prepare(item: TopicLayer) {
     const handle = item.role === 'boundary' ? await createAdministrativeBoundaryLayer(item.service) : await createMapServiceLayer(item.service)
     if (!current(item, request)) return
     item.handle = markRaw(handle)
-    // 业务辅助面图层也减淡，避免多层填色遮挡遥感底图。
-    handle.setFillOpacity?.(item.role === 'boundary' ? .05 : .18)
     item.categories.forEach(category => { category.color = item.role === 'project' ? '#ffca5d' : handle.categoryFilter?.values.find(value => value.value === category.value)?.color || handle.color })
-    if (item.categories.some(category => category.style)) {
-      handle.setRenderer?.({ type:'uniqueValue', field1:item.categoryField, fieldDelimiter:',', defaultSymbol:c5Symbol(resolveC5Style('')),
-        uniqueValueInfos:item.categories.map(category => ({ value:category.value, label:category.name, symbol:c5Symbol(category.style!) })) })
-    } else if (item.role === 'project') {
-      handle.setRenderer?.({ type:'simple', symbol:{ type:'esriSFS', style:'esriSFSNull', outline:{ type:'esriSLS', style:'esriSLSDash', color:[255,202,93,255], width:1.6 } } })
-    }
+    applyDisplayMode(item)
     applyFilter(item)
     if (item.visible) handle.layer.addTo(map)
     if (item.role === 'boundary' && handle.bounds?.isValid()) map.fitBounds(handle.bounds, { padding:[45,45], maxZoom:14 })
@@ -206,6 +234,14 @@ onBeforeUnmount(() => { version++; projectVersion++; document.removeEventListene
       <button class="legend-heading" :aria-expanded="legendOpen" @click="legendOpen = !legendOpen"><Collection /><b>分类与图例</b><span>{{ legendOpen ? '收起' : '展开' }}</span></button>
       <div v-if="legendOpen" class="legend-content">
         <p>分类可勾选显隐，标准颜色不可修改。</p>
+        <fieldset class="display-mode"><legend>图层显示</legend>
+          <label><input v-model="displayMode" type="radio" name="topic-display-mode" value="filled" />铺满模式</label>
+          <label><input v-model="displayMode" type="radio" name="topic-display-mode" value="boundary" />边界模式</label>
+        </fieldset>
+        <div class="selection-actions" role="group" aria-label="图例批量选择">
+          <label><input type="checkbox" :checked="legendAllSelected" :indeterminate="legendPartSelected" :disabled="pending || !legendCategories.length" @change="selectLegend(($event.target as HTMLInputElement).checked ? 'all' : 'none')" />全选</label>
+          <label><input type="checkbox" :checked="false" :disabled="pending || !legendCategories.length" @change="invertSelection($event,'legend')" />反选</label>
+        </div>
         <p v-if="sceneCode === HOMESTEAD" class="topic-note">展示调查底类为农村宅基地的图斑，不代表宅基地审批或违法认定结果。</p>
         <p v-if="!legendLayers.length && !pending">暂无已开启的分类图层，可在场景配置中选择。</p>
         <section v-for="item in legendLayers" :key="item.key" class="legend-group">
@@ -224,7 +260,14 @@ onBeforeUnmount(() => { version++; projectVersion++; document.removeEventListene
       <div class="config-body">
         <p class="topic-note">{{ scene?.description || '按当前部门权限读取可用数据。' }}下列配置用于当前地图显示，暂不写入服务管理。</p>
         <section><h3>背景影像</h3><select aria-label="背景影像" :value="imageryLayers.find(item=>item.visible)?.key || ''" @change="selectImagery(($event.target as HTMLSelectElement).value)"><option value="">仅基础底图</option><option v-for="item in imageryLayers" :key="item.key" :value="item.key">{{ item.service.name }}</option></select></section>
-        <section><h3>业务数据 <small>{{ vectorLayers.length }} 个可用图层</small></h3><div v-for="item in vectorLayers" :key="item.key" class="config-layer"><label><input :checked="item.visible" type="checkbox" @change="setVisible(item,($event.target as HTMLInputElement).checked)" /><span><b>{{ item.service.name }}</b><small>{{ roleNames[item.role] }}{{ item.categoryField ? ` · ${item.categoryField}` : '' }}</small></span><Refresh v-if="item.pending" class="pending-icon" /></label><p v-if="item.error" role="alert">{{ item.error }} <button @click="setVisible(item,true)">重试</button></p></div></section>
+        <section><h3>业务数据 <small>{{ vectorLayers.length }} 个可用图层</small></h3>
+          <div class="selection-actions" role="group" aria-label="业务数据批量选择">
+            <label><input type="checkbox" :checked="businessAllSelected" :indeterminate="businessPartSelected" :disabled="pending || businessBatchPending || !vectorLayers.length" @change="selectBusinessLayers(($event.target as HTMLInputElement).checked ? 'all' : 'none')" />全选</label>
+            <label><input type="checkbox" :checked="false" :disabled="pending || businessBatchPending || !vectorLayers.length" @change="invertSelection($event,'business')" />反选</label>
+            <small v-if="businessBatchPending" role="status">正在应用…</small>
+          </div>
+          <div v-for="item in vectorLayers" :key="item.key" class="config-layer"><label><input :checked="item.visible" :disabled="businessBatchPending" type="checkbox" @change="setVisible(item,($event.target as HTMLInputElement).checked)" /><span><b>{{ item.service.name }}</b><small>{{ roleNames[item.role] }}{{ item.categoryField ? ` · ${item.categoryField}` : '' }}</small></span><Refresh v-if="item.pending" class="pending-icon" /></label><p v-if="item.error" role="alert">{{ item.error }} <button @click="setVisible(item,true)">重试</button></p></div>
+        </section>
         <section v-if="sceneCode === NON_GRAIN"><h3>项目空间筛选</h3><select v-model="projectKey" aria-label="项目空间筛选" :disabled="projectPending || !projects.length" @change="selectProject"><option value="">全部项目范围</option><option v-for="item in projects" :key="item.key" :value="item.key">{{ item.name }}</option></select><p>{{ projectPending ? '正在查询范围内的设施…' : '按设施与项目范围相交筛选；空间相交不代表设施由该项目建设。' }}</p><p v-if="projectError" role="alert">{{ projectError }}</p><p class="topic-note">当前已发布设施缺少“是否高标项目建设”及所属项目代码等完整字段，暂不按建设归属着色。需重新发布服务后启用，不能用空间相交代替归属。</p></section>
         <section><h3>分类标准</h3><p>TD/T 1055—2019，C.5 表 C.1 / C.2。203（村庄）与 0203（橡胶园）分别保留；未列出的扩展编码使用灰色待确认图式。</p><p>专题关联优先遵守服务的 topicCode；未关联服务根据已有字段能力供当前场景使用。颜色不可在此修改。</p></section>
       </div>
@@ -233,5 +276,6 @@ onBeforeUnmount(() => { version++; projectVersion++; document.removeEventListene
 </template>
 
 <style scoped>
+.selection-actions{display:flex;align-items:center;gap:18px;margin-bottom:12px}.selection-actions label,.display-mode label{display:flex;align-items:center;gap:7px;font-size:12px;line-height:1.6;cursor:pointer}.selection-actions label:has(input:disabled){opacity:.4;cursor:not-allowed}.selection-actions small{font-size:10px;color:#83a6b3}.display-mode{display:flex;flex-wrap:wrap;gap:16px;border:0;border-bottom:1px solid #7395a229;padding:0 0 14px;margin:0 0 14px;min-width:0}.display-mode legend{font-size:11px;color:#a7c6cf;margin-bottom:10px}.display-mode input{accent-color:#39c7d5;margin:0;width:14px;height:14px}
 .geographic-topics{position:relative;height:100%;min-height:450px;overflow:hidden;background:#173340;color:#e5f2f5;font-family:inherit}.geographic-topics:fullscreen{height:100vh;width:100vw}.topic-map{position:absolute;inset:0;z-index:0}.topic-title{position:absolute;z-index:450;left:24px;top:22px;display:grid;gap:5px;pointer-events:none;text-shadow:0 2px 8px #00141e}.topic-title>span{font-size:11px;letter-spacing:3px;color:#b4e5ef}.topic-title strong{font-size:23px;line-height:1.3}.topic-title small{font-size:11px;color:#d4e9ed}.topic-tools{position:absolute;z-index:510;right:20px;top:20px;display:flex;align-items:center;gap:8px;padding:7px;border-radius:12px;background:#072634e8;box-shadow:0 8px 30px #00162140;backdrop-filter:blur(18px)}.geographic-topics button,.geographic-topics select{font:inherit;color:inherit;box-sizing:border-box}.topic-tools button,.topic-config header button{display:flex;align-items:center;justify-content:center;gap:7px;height:36px;min-width:36px;padding:0 10px;border:0;border-radius:7px;background:transparent;cursor:pointer;font-size:12px}.topic-tools button:hover,.topic-tools button.active,.topic-config header button:hover{background:#1c687d80}.geographic-topics svg{width:18px;height:18px;flex:none}.geographic-topics select{height:36px;max-width:330px;padding:0 28px 0 10px;border:1px solid #6693a04d;border-radius:7px;background:#123846;color:#e6f3f5;font-size:12px}.geographic-topics select option{background:#fff;color:#254652}.topic-status{position:absolute;z-index:520;left:50%;top:85px;transform:translateX(-50%);max-width:75%;padding:10px 16px;border-radius:8px;background:#092b3bea;font-size:12px;box-shadow:0 4px 20px #00141e40}.topic-status button{border:0;background:none;color:#62d7ed;margin-left:12px;cursor:pointer}.topic-legend{position:absolute;z-index:450;left:20px;bottom:42px;width:280px;max-height:calc(100% - 160px);display:flex;flex-direction:column;border-radius:12px;background:linear-gradient(135deg,#123744ed,#092837e6);box-shadow:0 10px 36px #00172255;backdrop-filter:blur(18px);overflow:hidden}.legend-heading{display:flex;align-items:center;gap:10px;padding:15px 16px;background:transparent;border:0;color:#e5f6fa;cursor:pointer;flex:none}.legend-heading b{font-size:13px;font-weight:600}.legend-heading span{margin-left:auto;font-size:11px;color:#82b7c5}.legend-content{padding:0 14px 14px;overflow:auto;scrollbar-width:thin;scrollbar-color:#457385 transparent}.geographic-topics p{font-size:11px;line-height:1.75;color:#a7c6cf;margin:0 0 12px}.topic-note{padding:10px 12px;border-radius:6px;background:#377b8e20}.legend-group{border-top:1px solid #7395a229;padding-top:12px;margin-top:12px}.legend-group h3{font-size:12px;line-height:1.6;margin:0 0 8px;font-weight:500;color:#d5e9ee}.topic-category{display:flex;align-items:center;gap:9px;padding:7px 4px;font-size:11px;cursor:pointer;border-radius:5px}.topic-category:hover{background:#43869c26}.geographic-topics input[type=checkbox]{width:14px;height:14px;accent-color:#39c7d5;flex:none;margin:0}.topic-category img,.source-symbol{width:26px;height:20px;border-radius:2px;object-fit:cover;flex:none;border:1px solid #c9e2e43b}.source-symbol{background:#e7a64333;box-sizing:border-box;border-color:#ebbf7380}.topic-category>span{display:flex;flex-wrap:wrap;column-gap:6px;flex:1;min-width:0;line-height:1.6}.topic-category b{font-weight:400}.topic-category small{font-size:10px;color:#eac37a;width:100%}.topic-category em{font-style:normal;font-variant-numeric:tabular-nums;color:#8cb3c0;font-size:10px}.legend-content footer{border-top:1px solid #7395a229;margin-top:12px;padding-top:12px;font-size:10px;line-height:1.8;color:#83a6b3}.topic-config{position:absolute;z-index:530;right:20px;top:82px;bottom:20px;width:350px;max-width:calc(100% - 40px);display:flex;flex-direction:column;background:linear-gradient(130deg,#103745f5,#092631f2);box-shadow:0 16px 50px #00131b66;border-radius:12px;backdrop-filter:blur(24px);overflow:hidden}.topic-config header{display:flex;align-items:center;justify-content:space-between;flex:none;padding:18px 20px;border-bottom:1px solid #7395a229}.topic-config header small{font-size:9px;letter-spacing:2px;color:#74b3c3}.topic-config h2{font-size:17px;margin:5px 0 0}.config-body{padding:18px;overflow:auto;scrollbar-width:thin;scrollbar-color:#457385 transparent}.config-body section+section{margin-top:22px}.config-body h3{font-size:13px;font-weight:500;display:flex;align-items:center;justify-content:space-between;margin:0 0 12px}.config-body h3 small{font-size:10px;color:#83a6b3}.config-body select{width:100%;max-width:none;margin-bottom:10px}.config-layer label{display:flex;gap:10px;align-items:center;padding:9px 0;cursor:pointer}.config-layer label>span{display:grid;gap:4px;flex:1;min-width:0}.config-layer b{font-size:12px;line-height:1.5;font-weight:400;overflow-wrap:anywhere}.config-layer small{font-size:10px;color:#83a6b3}.config-layer p[role=alert],p[role=alert]{color:#f1ae91}.config-layer button{border:0;background:transparent;color:#66d5ea;cursor:pointer}.topic-drawer-enter-active,.topic-drawer-leave-active{transition:opacity .2s ease,translate .2s ease}.topic-drawer-enter-from,.topic-drawer-leave-to{opacity:0;translate:15px 0}.pending-icon{animation:topic-spin 1.4s linear infinite}@keyframes topic-spin{to{rotate:360deg}}@media(prefers-reduced-motion:reduce){.topic-drawer-enter-active,.topic-drawer-leave-active{transition:none}.pending-icon{animation:none}}@media(max-width:1100px){.topic-title{top:80px;left:20px}.topic-tools{left:20px;right:20px}.topic-tools select{flex:1;min-width:0;max-width:none}.topic-legend{width:240px;max-height:calc(100% - 200px)}}
 </style>

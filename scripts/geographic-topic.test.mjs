@@ -1,14 +1,26 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
-function load(path) {
+function load(path, dependencies = {}) {
   const module = {exports:{}}
   const source = ts.transpileModule(readFileSync(path,'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText
-  new Function('module','exports',source)(module,module.exports)
+  new Function('module','exports','require',source)(module,module.exports,id => {
+    if (!(id in dependencies)) throw new Error(`Unexpected dependency ${id}`)
+    return dependencies[id]
+  })
   return module.exports
 }
 const topic = load('src/utils/geographic-topic.ts')
 const styles = load('src/utils/land-survey-c5.ts')
+const {createTopicRenderer} = load('src/utils/topic-renderer.ts', {'./land-survey-c5':styles})
+const outline=createTopicRenderer('DLBM',[{value:'0702',name:'农村宅基地',style:styles.resolveC5Style('0702')}],'esriGeometryPolygon','#112233','boundary')
+assert.equal(outline.uniqueValueInfos[0].symbol.style,'esriSFSNull')
+assert.deepEqual(outline.uniqueValueInfos[0].symbol.outline.color,[236,137,138,255],'边界使用对应分类的填充色，而非统一灰线')
+assert.equal(outline.uniqueValueInfos[0].symbol.color[3],0,'边界模式不遮挡底图')
+const filled=createTopicRenderer('',[],'esriGeometryPolygon','#112233','filled')
+assert.deepEqual(filled.symbol.color,[17,34,51,255],'铺满模式使用不透明颜色')
+const point=createTopicRenderer('',[],'esriGeometryPoint','#112233','boundary')
+assert.equal(point.symbol.color[3],0);assert.equal(point.symbol.outline.color[3],255)
 const service = {name:'普通数据',type:'ARCGIS_MAPSERVER',serviceUrl:'https://example.test/MapServer'}
 assert.equal(topic.topicRole(service,['DLBM','DLMC']),'land')
 assert.equal(topic.topicRole(service,['DLBM','DLMC','YJJBNTTBBH']),'permanent')
