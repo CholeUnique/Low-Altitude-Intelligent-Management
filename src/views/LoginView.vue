@@ -5,7 +5,7 @@ import { useUserStore } from '@/stores/user'
 import { getCurrentUser, getDepartmentOptions, getMyDepartments, loginWithPassword, switchDepartment } from '@/api/auth'
 import { ApiBusinessError } from '@/api/client'
 import { firstAccessiblePath } from '@/utils/access-control'
-import { preferredDepartmentAdminId } from '@/utils/user-role'
+import { departmentAdminFlag, preferredDepartmentAdminId } from '@/utils/user-role'
 
 const router = useRouter()
 const route = useRoute()
@@ -38,7 +38,7 @@ async function submitReal() {
       const profileDepartments = profile.deptList?.length ? profile.deptList : result.userInfo.deptList
       resolvedUser = { ...result.userInfo, ...profile, deptList: profileDepartments.map((department) => ({
         ...department,
-        isDeptAdmin: department.isDeptAdmin === true || result.userInfo.deptList.find((item) => String(item.deptId) === String(department.deptId))?.isDeptAdmin === true,
+        isDeptAdmin: departmentAdminFlag(department.isDeptAdmin) ?? departmentAdminFlag(result.userInfo.deptList.find((item) => String(item.deptId) === String(department.deptId))?.isDeptAdmin),
       })) }
       user.setCurrentUser(resolvedUser)
     } catch {
@@ -51,7 +51,7 @@ async function submitReal() {
       if (loadedMemberships.length) {
         memberships = loadedMemberships.map((department) => ({
           ...department,
-          isDeptAdmin: department.isDeptAdmin === true || resolvedUser.deptList.find((item) => String(item.deptId) === String(department.deptId))?.isDeptAdmin === true,
+          isDeptAdmin: departmentAdminFlag(department.isDeptAdmin) ?? departmentAdminFlag(resolvedUser.deptList.find((item) => String(item.deptId) === String(department.deptId))?.isDeptAdmin),
         }))
         user.setCurrentUser({ ...resolvedUser, deptList: memberships })
       }

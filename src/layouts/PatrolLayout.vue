@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { MapLocation, VideoCamera } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import { firstAccessiblePath } from '@/utils/access-control'
 
 const props = defineProps<{
   activeNode: 'route-plan' | 'live'
@@ -14,15 +16,16 @@ const props = defineProps<{
 
 const router = useRouter()
 const route = useRoute()
+const user = useUserStore()
 
 const nodes = computed(() => [
-  { key: 'route-plan' as const, label: '航线规划', path: '/patrol/route-plan', icon: MapLocation },
-  { key: 'live' as const, label: '实时巡航', path: '/patrol/live', icon: VideoCamera },
+  ...(user.hasPermission('route-planning') ? [{ key: 'route-plan' as const, label: '航线规划', path: '/patrol/route-plan', icon: MapLocation }] : []),
+  ...(user.hasPermission('live-monitoring') ? [{ key: 'live' as const, label: '实时巡航', path: '/patrol/live', icon: VideoCamera }] : []),
 ])
 
 function goBack() {
   const returnTo = typeof route.query.returnTo === 'string' ? route.query.returnTo : ''
-  router.push(returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/dashboard')
+  router.push(returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : firstAccessiblePath(user.hasPermission))
 }
 
 function goNode(path: string) {

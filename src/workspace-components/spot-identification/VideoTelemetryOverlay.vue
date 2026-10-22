@@ -31,6 +31,7 @@ const sourceName = ref('')
 const busy = ref(false)
 const error = ref('')
 const mapError = ref('')
+const mapMode = ref<'vector' | 'image'>('image')
 const follow = ref(true)
 const manualSource = ref(false)
 const candidates = computed(() => props.mediaList.filter(item => item.taskId === props.media.taskId && /\.srt$/i.test(item.fileName)))
@@ -45,6 +46,8 @@ const locationResolver = createTelemetryLocationResolver(
   state => { location.value = state },
 )
 let map: L.Map | undefined
+let baseLayer: L.TileLayer | undefined
+let labelLayer: L.TileLayer | undefined
 let marker: L.Marker | undefined
 let track: L.Polyline | undefined
 let resizeObserver: ResizeObserver | undefined
@@ -239,6 +242,27 @@ function chooseServer(event: Event) {
   if (source) { manualSource.value = true; void loadSrt(source) }
 }
 
+function tileUrl(layer: 'vec' | 'img' | 'cva' | 'cia') {
+  return `https://t{s}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}&tk=${token}`
+}
+
+function addBaseLayers() {
+  if (!map || !token) return
+  baseLayer?.remove()
+  labelLayer?.remove()
+  mapError.value = ''
+  const base = mapMode.value === 'vector' ? 'vec' : 'img'
+  const label = mapMode.value === 'vector' ? 'cva' : 'cia'
+  const options = { subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'], maxNativeZoom: 18, maxZoom: 20, attribution: '天地图' }
+  baseLayer = L.tileLayer(tileUrl(base), options).on('tileerror', () => { mapError.value = '底图加载失败，定位与轨迹仍可查看' }).addTo(map)
+  labelLayer = L.tileLayer(tileUrl(label), options).on('tileerror', () => { mapError.value = '底图加载失败，定位与轨迹仍可查看' }).addTo(map)
+}
+
+function switchBaseMap() {
+  mapMode.value = mapMode.value === 'image' ? 'vector' : 'image'
+  addBaseLayers()
+}
+
 function renderPosition(forceFollow = false) {
   if (!map) return
   if (!position.value) { marker?.remove(); marker = undefined; lastRenderedTime = undefined; if (cameraMoving) map.stop(); cameraMoving = false; return }
@@ -325,13 +349,8 @@ onMounted(() => {
   map.setView([32.4555, 119.9255], 10)
   map.on('moveend', () => { cameraMoving = false })
   map.on('dragstart', () => { follow.value = false })
-  if (token) {
-    for (const layer of ['img', 'cia']) {
-      L.tileLayer(`https://t{s}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}&tk=${token}`, {
-        subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'], maxNativeZoom: 18, maxZoom: 20, attribution: '天地图',
-      }).on('tileerror', () => { mapError.value = '底图加载失败，定位与轨迹仍可查看' }).addTo(map)
-    }
-  } else mapError.value = '未配置底图，定位与轨迹仍可查看'
+  if (token) addBaseLayers()
+  else mapError.value = '未配置底图，定位与轨迹仍可查看'
   resizeObserver = new ResizeObserver((entries) => {
     map?.invalidateSize({ pan: false })
     if (!entries?.length || entries.some(entry => entry.target === panel.value?.offsetParent || entry.target === props.video)) updatePanelLayout()
@@ -445,9 +464,10 @@ onBeforeUnmount(() => { if (navigationNoticeTimer) clearTimeout(navigationNotice
     <div class="telemetry-actions">
       <button type="button" :disabled="!points.length" :aria-pressed="follow" @click="toggleFollow">{{ follow ? '跟随中' : '跟随无人机' }}</button>
       <button type="button" :disabled="!points.length" @click="showTrack">全程轨迹</button>
-      <label class="srt-picker" :title="sourceName">{{ points.length ? '更换 SRT' : '选择 SRT' }}<input type="file" accept=".srt" aria-label="选择本地 SRT 文件" @change="chooseLocal" /></label>
+      <button type="button" :aria-label="`切换底图，当前为${mapMode === 'image' ? '影像地图' : '电子地图'}`" :title="`当前：${mapMode === 'image' ? '影像地图' : '电子地图'}；点击切换`" @click="switchBaseMap">切换底图</button>
     </div>
     <button v-if="error || manualSource" class="backend-srt-retry" type="button" :disabled="busy" @click="readVideoSrt">{{ manualSource ? '读取当前视频配套 SRT' : '重试读取配套 SRT' }}</button>
+    <label v-if="!points.length && !busy" class="backend-srt-retry local-srt-picker" :title="sourceName">选择本地 SRT<input type="file" accept=".srt" aria-label="选择本地 SRT 文件" @change="chooseLocal" /></label>
     <select v-if="candidates.length" class="server-srt" aria-label="选择任务中的 SRT" @change="chooseServer"><option value="">选择任务中的 SRT</option><option v-for="item in candidates" :key="item.id" :value="item.id">{{ item.fileName }}</option></select>
     <p v-if="mapError && points.length" class="telemetry-warning">{{ mapError }}</p>
     <p v-if="manualSource" class="telemetry-warning">请确认 SRT 与当前视频匹配；本地文件仅在浏览器中读取。</p>
@@ -460,8 +480,9 @@ onBeforeUnmount(() => { if (navigationNoticeTimer) clearTimeout(navigationNotice
 .video-telemetry{position:absolute;z-index:6;top:8px;right:8px;display:flex;flex-direction:column;width:min(340px,calc(100% - 16px));height:300px;max-height:calc(100% - 16px);overflow:hidden;box-sizing:border-box;border:1px solid #5a9aaf;border-radius:8px;color:#dff4fc;background:#102d40f5;box-shadow:0 8px 25px #00152366;font-size:11px;container-type:inline-size}
 .telemetry-header{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-bottom:1px solid #345464;cursor:grab;touch-action:none;user-select:none}.is-dragging .telemetry-header{cursor:grabbing}.telemetry-header:focus-visible{outline:2px solid #4fe2f4;outline-offset:-2px}.telemetry-header strong{font-size:13px}.drag-grip{margin-left:5px;color:#91b5c4}.telemetry-header small{display:block;margin-top:3px;color:#9ec2d2;font-size:10px}.telemetry-header button{border:0;color:#c7e6f1;background:transparent;font-size:23px;cursor:pointer}
 .telemetry-map-wrap{position:relative;flex:1;min-height:64px}.telemetry-map{height:100%;background:#263e4a}.telemetry-state{position:absolute;inset:0;z-index:500;display:grid;place-items:center;padding:20px;text-align:center;background:#102d40e8;line-height:1.8}.telemetry-gap{position:absolute;top:8px;left:8px;right:8px;z-index:500;padding:5px;background:#102d40e8;text-align:center}
-.telemetry-info{display:flex;flex-wrap:wrap;gap:5px 12px;padding:8px 10px;color:#b8dfeb;font-variant-numeric:tabular-nums}.telemetry-actions{display:flex;gap:6px;padding:0 10px 8px}.telemetry-actions button,.srt-picker{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:1;padding:5px;border:1px solid #4d7e92;border-radius:4px;color:#d3f1fc;background:#1d4356;font:inherit;cursor:pointer}.telemetry-actions button[aria-pressed=true]{border-color:#2ad3e5;color:#46dfec}.telemetry-actions button:disabled{opacity:.4;cursor:default}.srt-picker input{position:absolute;inset:0;width:100%;opacity:0;cursor:pointer}.srt-picker:focus-within{outline:2px solid #4fe2f4}.server-srt{display:block;box-sizing:border-box;width:calc(100% - 20px);margin:0 10px 8px;padding:4px;color:#d3f1fc;background:#1d4356;border:1px solid #4d7e92;border-radius:4px;font:inherit}.telemetry-source,.telemetry-warning{margin:0 10px 8px;color:#91b5c4;font-size:10px;overflow-wrap:anywhere}.telemetry-warning{color:#edcc8c}.telemetry-map :deep(.video-drone-marker){color:#fff;filter:drop-shadow(0 1px 4px #001f38)}.telemetry-map :deep(.video-drone-marker svg){width:32px;height:32px;fill:#118eb5;stroke:currentColor;stroke-width:1.7}
+.telemetry-info{display:flex;flex-wrap:wrap;gap:5px 12px;padding:8px 10px;color:#b8dfeb;font-variant-numeric:tabular-nums}.telemetry-actions{display:flex;gap:6px;padding:0 10px 8px}.telemetry-actions button{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:1;padding:5px;border:1px solid #4d7e92;border-radius:4px;color:#d3f1fc;background:#1d4356;font:inherit;cursor:pointer}.telemetry-actions button[aria-pressed=true]{border-color:#2ad3e5;color:#46dfec}.telemetry-actions button:disabled{opacity:.4;cursor:default}.server-srt{display:block;box-sizing:border-box;width:calc(100% - 20px);margin:0 10px 8px;padding:4px;color:#d3f1fc;background:#1d4356;border:1px solid #4d7e92;border-radius:4px;font:inherit}.telemetry-source,.telemetry-warning{margin:0 10px 8px;color:#91b5c4;font-size:10px;overflow-wrap:anywhere}.telemetry-warning{color:#edcc8c}.telemetry-map :deep(.video-drone-marker){color:#fff;filter:drop-shadow(0 1px 4px #001f38)}.telemetry-map :deep(.video-drone-marker svg){width:32px;height:32px;fill:#118eb5;stroke:currentColor;stroke-width:1.7}
 .backend-srt-retry{display:block;width:calc(100% - 20px);margin:0 10px 8px;padding:5px;border:1px solid #4d7e92;border-radius:4px;color:#d3f1fc;background:#1d4356;font:inherit;cursor:pointer}.backend-srt-retry:disabled{opacity:.4;cursor:default}
+.local-srt-picker{position:relative;box-sizing:border-box;text-align:center}.local-srt-picker input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.local-srt-picker:focus-within{outline:2px solid #4fe2f4}
 .telemetry-info{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;align-items:center;gap:6px;padding:9px 10px 6px;font-size:clamp(8px,2.6cqw,11px);white-space:nowrap}.telemetry-info>span:nth-child(2){text-align:center}.telemetry-info>span:last-child{text-align:right}.telemetry-location{display:flex;align-items:baseline;gap:3px;padding:0 10px 9px;color:#b8dfeb;font-size:11px;line-height:1.6}.telemetry-location>span:first-child{flex:none;color:#91b5c4}.telemetry-location>span:nth-child(2){flex:1;min-width:0;overflow-wrap:anywhere}.telemetry-location.is-unavailable{color:#edcc8c}.navigation-button{flex:none;margin-left:6px;padding:3px 8px;border:1px solid #4d7e92;border-radius:4px;color:#d3f1fc;background:#1d4356;font:inherit;cursor:pointer}.navigation-button:hover{border-color:#39bdd1;color:#55e0ed;background:#245066}.telemetry-actions{padding-bottom:10px}
 .telemetry-header{flex:none;gap:8px}.telemetry-window-actions{display:flex;align-items:center;gap:3px;flex:none}.telemetry-window-actions button{width:25px;height:28px;padding:0;font-size:19px}.telemetry-window-actions button:hover{color:#51e2f0;background:#245066;border-radius:4px}.telemetry-controls{flex:0 1 auto;min-height:0;max-height:calc(100% - 120px);overflow:auto;padding-bottom:5px;scrollbar-width:thin}.telemetry-resize-handle{position:absolute;z-index:4;bottom:0;width:19px;height:19px;padding:0;border:0;background:transparent;touch-action:none}.telemetry-resize-handle.at-left{left:0;cursor:nesw-resize}.telemetry-resize-handle.at-right{right:0;cursor:nwse-resize}.telemetry-resize-handle::after{content:'';position:absolute;bottom:3px;right:3px;width:7px;height:7px;border-bottom:2px solid #86c4d5;border-right:2px solid #86c4d5}.telemetry-resize-handle.at-left::after{right:auto;left:3px;transform:rotate(90deg)}.telemetry-resize-handle:focus-visible{outline:2px solid #4fe2f4;outline-offset:-2px}
 .telemetry-header>div:first-child{flex:1;min-width:0}.telemetry-header small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

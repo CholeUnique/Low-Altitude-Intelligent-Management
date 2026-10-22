@@ -85,7 +85,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
   <div class="non-grain-workspace">
     <section class="ng-context" aria-label="任务办理操作">
       <div class="ng-brand-area">
-        <button class="ng-back" @click="router.push('/tasks/todo')">‹ 返回任务</button>
+        <button v-if="user.hasPermission('task-todo')" class="ng-back" @click="router.push('/tasks/todo')">‹ 返回任务</button>
         <div class="ng-brand-text">
           <b>{{ defaultTemplate ? '业务办理工作台' : '耕地用途监管工作台' }}</b>
           <small :title="taskName">{{ taskName }}</small>
@@ -108,7 +108,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
       </nav>
 
       <div class="ng-header-right">
-        <div class="ng-notice-shell">
+        <div v-if="user.hasPermission('task-todo')" class="ng-notice-shell">
           <button class="ng-notice" type="button" aria-label="我的待办通知" title="前往我的待办" @click="router.push('/tasks/todo')">
             <DashboardSymbol name="notification" />
             <b>{{ noticeTasks.length }}</b>
