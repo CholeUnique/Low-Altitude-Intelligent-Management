@@ -5,8 +5,9 @@ export interface MapServiceItem {
   name: string
   serviceUrl: string
   type: string
-  topicCode?: string
-  dataType?: string
+  topicCode?: string | null
+  dataType?: string | null
+  serviceTime?: string | null
   sort?: number
   /** 服务对应影像/数据的时间，ISO-8601 格式；列表排序优先按此时间。 */
   serviceTime?: string
@@ -53,6 +54,7 @@ export interface MapServiceCreateInput {
   type?: string
   topicCode?: string
   dataType?: string
+  serviceTime?: string
   sort?: number
   serviceTime?: string
   remark?: string

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import PrimaryHeader from '@/components/PrimaryHeader.vue'
+import { useRoute } from 'vue-router'
+const route = useRoute()
 </script>
 
 <template>
   <div class="business-layout">
-    <PrimaryHeader />
+    <PrimaryHeader v-if="!route.meta.hidePrimaryHeader" />
     <div class="business-layout-content"><slot /></div>
   </div>
 </template>

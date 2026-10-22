@@ -96,6 +96,8 @@ export interface MapServiceLayerHandle {
   setFillOpacity?: (opacity: number) => void
   setAttributeFilter?: (field?: string, value?: string) => void
   definitionExpression?: () => string
+  setRenderer?: (renderer: Record<string, unknown>) => void
+  setQueryFilter?: (expression: string) => void
 }
 
 export interface MapServiceLayerOptions {
@@ -608,10 +610,86 @@ async function tmsConfig(template: string, configured: ServiceRemarkConfig): Pro
   }
 }
 
+interface RenderConsumer { resolve: (blob: Blob) => void; reject: (reason: Error) => void; cleanup: () => void }
+interface RenderJob { key: string; url: string; parameters: URLSearchParams; controller: AbortController; started: boolean; consumers: Map<symbol, RenderConsumer> }
+const renderJobs = new Map<string, RenderJob>()
+const renderQueue: RenderJob[] = []
+const renderCache = new Map<string, { blob: Blob; expires: number }>()
+let activeRenders = 0, renderCacheBytes = 0
+function drainRenderQueue() {
+  while (activeRenders < 6 && renderQueue.length) {
+    const job = renderQueue.shift()!
+    if (!job.consumers.size || job.controller.signal.aborted) continue
+    job.started = true; activeRenders++
+    void fetch(job.url, {method:'POST',body:job.parameters,signal:job.controller.signal})
+      .then(async response => {
+        if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) throw new Error('地图渲染请求失败')
+        const blob = await response.blob()
+        if (job.controller.signal.aborted) return
+        if (blob.size <= 4 * 1024 * 1024) {
+          const previous = renderCache.get(job.key)
+          if (previous) renderCacheBytes -= previous.blob.size
+          renderCache.delete(job.key)
+          renderCache.set(job.key, {blob,expires:Date.now()+180_000}); renderCacheBytes += blob.size
+          while (renderCacheBytes > 32 * 1024 * 1024 || renderCache.size > 96) {
+            const key = renderCache.keys().next().value!
+            renderCacheBytes -= renderCache.get(key)!.blob.size; renderCache.delete(key)
+          }
+        }
+        if (renderJobs.get(job.key) === job) renderJobs.delete(job.key)
+        job.consumers.forEach(consumer => { consumer.cleanup(); consumer.resolve(blob) })
+      })
+      .catch(reason => {
+        if (renderJobs.get(job.key) === job) renderJobs.delete(job.key)
+        job.consumers.forEach(consumer => { consumer.cleanup(); consumer.reject(reason) })
+      })
+      .finally(() => {
+        job.consumers.clear()
+        if (renderJobs.get(job.key) === job) renderJobs.delete(job.key)
+        activeRenders--; drainRenderQueue()
+      })
+  }
+}
+/** 动态导出 POST 不能依赖普通图片的 HTTP 缓存；共用有限队列、请求去重及有界内存缓存。 */
+export function loadMapRenderImage(url: string, parameters: URLSearchParams, signal: AbortSignal): Promise<Blob> {
+  if (signal.aborted) return Promise.reject(new DOMException('已取消地图渲染', 'AbortError'))
+  const semantic = new URLSearchParams(parameters)
+  semantic.delete('_filterRevision') // renderer / definitionExpression 已完整包含实际样式与筛选。
+  const key = `${url}?${semantic}`
+  const cached = renderCache.get(key)
+  if (cached && cached.expires > Date.now()) {
+    renderCache.delete(key); renderCache.set(key,cached)
+    return Promise.resolve(cached.blob)
+  }
+  if (cached) { renderCacheBytes -= cached.blob.size; renderCache.delete(key) }
+  let job = renderJobs.get(key)
+  if (!job) {
+    job = {key,url,parameters:new URLSearchParams(parameters),controller:new AbortController(),started:false,consumers:new Map()}
+    renderJobs.set(key,job); renderQueue.push(job)
+  }
+  const shared = job
+  return new Promise<Blob>((resolve,reject) => {
+    const id = Symbol()
+    const cancel = () => {
+      shared.consumers.delete(id); signal.removeEventListener('abort',cancel)
+      reject(new DOMException('已取消地图渲染', 'AbortError'))
+      if (!shared.consumers.size) {
+        shared.controller.abort()
+        if (renderJobs.get(key) === shared) renderJobs.delete(key)
+        if (!shared.started) { const index = renderQueue.indexOf(shared); if (index >= 0) renderQueue.splice(index,1) }
+      }
+    }
+    shared.consumers.set(id,{resolve,reject,cleanup:()=>signal.removeEventListener('abort',cancel)})
+    signal.addEventListener('abort',cancel,{once:true})
+    queueMicrotask(drainRenderQueue)
+  })
+}
+
 class ArcGisExportLayer extends L.GridLayer {
+  declare options: L.GridLayerOptions
+  private standardRenderer?: Record<string, unknown>
   private definitionExpression = '1=1'
   private filterRevision = 0
-  private zooming = false
   private strokeColor: [number, number, number, number] = [255, 59, 48, 255]
   private fillColor: [number, number, number, number] = [255, 59, 48, 64]
   private categoryFieldName = ''
@@ -628,12 +706,13 @@ class ArcGisExportLayer extends L.GridLayer {
   ) {
     super({
       pane: vectorLayerId === undefined ? MAP_SERVICE_IMAGERY_PANE : MAP_SERVICE_VECTOR_PANE,
-      tileSize: 256,
+      // 动态导出用较大的瓦片，减少每个矢量图层的服务端渲染次数。
+      tileSize: 512,
       noWrap: true,
-      keepBuffer: 3,
-      updateWhenIdle: false,
+      keepBuffer: 2,
+      updateWhenIdle: true,
       // Transparent vector tiles from two zoom levels must not be painted together.
-      updateWhenZooming: vectorLayerId === undefined,
+      updateWhenZooming: false,
     })
     if (color) this.applyColor(color)
     this.on('tileunload', (event: L.TileEvent) => {
@@ -710,6 +789,7 @@ class ArcGisExportLayer extends L.GridLayer {
   }
 
   private vectorRenderer() {
+    if (this.standardRenderer) return this.standardRenderer
     const classified = this.categoryEntries.filter((entry) => entry.value !== EMPTY_CATEGORY_VALUE)
     if (!this.categoryFieldName || !classified.length) {
       return { type: 'simple', symbol: this.vectorSymbol() }
@@ -728,12 +808,11 @@ class ArcGisExportLayer extends L.GridLayer {
   }
 
   override onAdd(map: L.Map) {
-    super.onAdd(map)
     if (this.vectorLayerId !== undefined) {
-      map.on('zoomstart', this.hideVectorTiles, this)
-      map.on('zoomend', this.finishVectorZoom, this)
-      this.on('load', this.showVectorTilesWhenReady, this)
+      this.on('loading', this.retainPreviousLevel, this)
+      this.on('load', this.commitReadyLevel, this)
     }
+    super.onAdd(map)
     return this
   }
 
@@ -741,32 +820,42 @@ class ArcGisExportLayer extends L.GridLayer {
     this.renderRequests.forEach(controller => controller.abort())
     this.renderRequests.clear()
     if (this.vectorLayerId !== undefined) {
-      map.off('zoomstart', this.hideVectorTiles, this)
-      map.off('zoomend', this.finishVectorZoom, this)
-      this.off('load', this.showVectorTilesWhenReady, this)
+      this.off('loading', this.retainPreviousLevel, this)
+      this.off('load', this.commitReadyLevel, this)
     }
-    this.zooming = false
     super.onRemove(map)
     return this
   }
 
-  private hideVectorTiles() {
-    this.zooming = true
-    const container = this.getContainer()
-    if (container) container.style.visibility = 'hidden'
+  private retainPreviousLevel() {
+    // 旧级别继续使用 Leaflet 的地理缩放变换；只隐藏未完成的新级别。
+    const state = this as unknown as { _levels: Record<string, { el: HTMLElement }>; _tileZoom: number }
+    const levels = Object.entries(state._levels || {})
+    if (levels.some(([zoom, level]) => Number(zoom) !== state._tileZoom && level.el.style.opacity !== '0')) {
+      const current = state._levels[state._tileZoom]
+      if (current) current.el.style.opacity = '0'
+    }
   }
 
-  private finishVectorZoom() {
-    this.zooming = false
-    this.showVectorTilesWhenReady()
-  }
-
-  private showVectorTilesWhenReady() {
-    // Keep the old transparent tile level hidden until the new level is complete.
-    if (this.zooming) return
+  private commitReadyLevel() {
     if (this.isLoading()) return
-    const container = this.getContainer()
-    if (container) container.style.visibility = ''
+    const state = this as unknown as { _levels: Record<string, { el: HTMLElement }>; _tileZoom: number; _tiles: Record<string, { coords: L.Coords; el: HTMLElement; loaded?: number; active: boolean }> }
+    // 整级原子切换时，取消单张瓦片的淡入，避免旧级别已隐藏、新级别仍透明。
+    Object.values(state._tiles || {}).forEach(tile => {
+      if (tile.coords.z === state._tileZoom && tile.loaded) { tile.el.style.opacity = '1'; tile.active = true }
+    })
+    Object.entries(state._levels || {}).forEach(([zoom, level]) => {
+      level.el.style.opacity = Number(zoom) === state._tileZoom ? '1' : '0'
+    })
+    this._pruneTiles()
+  }
+
+  _pruneTiles() {
+    // Leaflet 默认逐张淘汰父瓦片；整级替换完成前必须保留旧级别，否则仍会闪空。
+    const state = this as unknown as { _levels?: Record<string, { el: HTMLElement }>; _tileZoom: number }
+    if (this.vectorLayerId !== undefined && this.isLoading()
+      && Object.entries(state._levels || {}).some(([zoom, level]) => Number(zoom) !== state._tileZoom && level.el.style.opacity !== '0')) return
+    ;(L.GridLayer.prototype as unknown as { _pruneTiles: () => void })._pruneTiles.call(this)
   }
 
   override createTile(coords: L.Coords, done: L.DoneCallback) {
@@ -813,21 +902,20 @@ class ArcGisExportLayer extends L.GridLayer {
       done(new Error('地图服务影像加载失败'), tile)
     }
     const endpoint = servicePath(this.url, this.imageServer ? 'exportImage' : 'export')
-    // Hundreds of category symbols exceed proxy URL limits. Keep rendering in the POST body.
-    if (parameters.toString().length > 1800) {
-      const controller = new AbortController()
-      this.renderRequests.set(tile, controller)
-      void fetch(endpoint, { method: 'POST', body: parameters, signal: controller.signal })
-        .then(async response => {
-          if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) throw new Error('地图渲染请求失败')
-          const blob = await response.blob()
-          if (!controller.signal.aborted) tile.src = URL.createObjectURL(blob)
-        })
-        .catch(() => { if (!controller.signal.aborted) tile.onerror?.(new Event('error')) })
-        .finally(() => this.renderRequests.delete(tile))
-    } else {
-      tile.src = serviceParameters(endpoint, parameters)
-    }
+    // 所有动态导出共享并发与缓存；长分类符号同时避开 GET URL 长度限制。
+    const controller = new AbortController()
+    this.renderRequests.set(tile, controller)
+    void loadMapRenderImage(endpoint, parameters, controller.signal)
+      .then(blob => {
+        if (!controller.signal.aborted) tile.src = URL.createObjectURL(blob)
+      })
+      .catch(reason => {
+        if (controller.signal.aborted) return
+        // 兼容仅允许图片直读、不允许 CORS 的旧服务；短请求仍可直接显示。
+        if (reason instanceof TypeError && parameters.toString().length <= 1800) tile.src = serviceParameters(endpoint, parameters)
+        else tile.onerror?.(new Event('error'))
+      })
+      .finally(() => this.renderRequests.delete(tile))
     return tile
   }
 
@@ -841,6 +929,7 @@ class ArcGisExportLayer extends L.GridLayer {
     const layer = new ArcGisExportLayer(this.url, this.imageServer, this.vectorLayerId, this.vectorGeometryType)
     // 仪表盘允许按服务调整叠放顺序；筛选时的无闪烁替换层必须沿用原服务 pane。
     layer.options.pane = this.options.pane
+    layer.options.bounds = this.options.bounds
     layer.definitionExpression = expression
     layer.polygonFillAlpha = this.polygonFillAlpha
     layer.strokeColor = [...this.strokeColor]
@@ -848,7 +937,13 @@ class ArcGisExportLayer extends L.GridLayer {
     layer.categoryFieldName = this.categoryFieldName
     layer.categoryEntries = this.categoryEntries.map((entry) => ({ ...entry }))
     layer.filterRevision = this.filterRevision + 1
+    layer.standardRenderer = this.standardRenderer
     return layer
+  }
+
+  setStandardRenderer(renderer: Record<string, unknown>) {
+    this.standardRenderer = renderer
+    this.filterRevision += 1
   }
 }
 
@@ -1081,11 +1176,19 @@ class ArcGisVectorLayer extends L.LayerGroup {
     return this.definitionExpression
   }
 
-  setDefinitionExpression(expression: string) {
+  setStandardRenderer(renderer: Record<string, unknown>) {
+    if (!(this.imageLayer instanceof ArcGisExportLayer)) return
+    this.imageLayer.setStandardRenderer(renderer)
+    if (this._map) this.setDefinitionExpression(this.definitionExpression, true)
+  }
+
+  setDefinitionExpression(expression: string, force = false) {
+    if (!force && expression === this.definitionExpression) return
     this.definitionExpression = expression
     const swapSequence = ++this.filterSwapSequence
     if (this.pendingImageLayer) {
-      this.pendingImageLayer.off()
+      // 不可 off() 清空全部事件：Leaflet 的 remove 监听器负责解绑地图事件。
+      // 清空后旧层仍收到 zoom/viewreset，_map 已为空，异常会打断其他图层更新。
       if (this.hasLayer(this.pendingImageLayer)) this.removeLayer(this.pendingImageLayer)
       this.pendingImageLayer = undefined
     }
@@ -2152,6 +2255,7 @@ async function createArcGisVectorHandle(
   const filterLabel = fieldLabel(filterField)
   const objectIdFieldName = layerMetadata.fields?.find((field) => field.type === 'esriFieldTypeOID')?.name || 'OBJECTID'
   const imageLayer = new ArcGisExportLayer(url, false, layerId, layerMetadata.geometryType, color)
+  if (bounds?.isValid()) imageLayer.options.bounds = bounds
   const vectorLayer = new ArcGisVectorLayer(
     imageLayer,
     url,
@@ -2163,7 +2267,11 @@ async function createArcGisVectorHandle(
   )
   let categoryDefinition = '1=1'
   let attributeDefinition = '1=1'
-  const applyFilter = () => vectorLayer.setDefinitionExpression(categoryDefinition === '1=0' ? '1=0' : categoryDefinition === '1=1' ? attributeDefinition : attributeDefinition === '1=1' ? categoryDefinition : `(${categoryDefinition}) AND (${attributeDefinition})`)
+  let queryDefinition = '1=1'
+  const applyFilter = () => {
+    const parts = [categoryDefinition, attributeDefinition, queryDefinition]
+    vectorLayer.setDefinitionExpression(parts.includes('1=0') ? '1=0' : parts.filter(part => part !== '1=1').map(part => `(${part})`).join(' AND ') || '1=1')
+  }
   let categoryFilter: MapServiceCategoryFilter | undefined
   if (filterField?.name) {
     try {
@@ -2214,6 +2322,8 @@ async function createArcGisVectorHandle(
       return shades
     },
     setFillOpacity: opacity => vectorLayer.setFillOpacity(opacity),
+    setRenderer: renderer => vectorLayer.setStandardRenderer(renderer),
+    setQueryFilter: expression => { queryDefinition = expression || '1=1'; applyFilter() },
     setAttributeFilter: (field, value) => {
       const type = layerMetadata.fields?.find(item => item.name === field)?.type
       const numeric = type && /Integer|Double|Single|OID/.test(type) && value != null && value.trim() !== '' && Number.isFinite(Number(value))
@@ -2295,7 +2405,9 @@ async function createArcGisLayer(
       return createArcGisVectorHandle(url, layerId, layerMetadata, bounds, color)
     }
   }
-  return { layer: new ArcGisExportLayer(url, imageServer), bounds }
+  const layer = new ArcGisExportLayer(url, imageServer)
+  if (bounds?.isValid()) layer.options.bounds = bounds
+  return { layer, bounds }
 }
 
 export async function createMapServiceLayer(service: MapServiceItem, color?: string, options: MapServiceLayerOptions = {}): Promise<MapServiceLayerHandle> {
@@ -2336,7 +2448,7 @@ export async function createMapServiceLayer(service: MapServiceItem, color?: str
  * 将动态 ArcGIS MapServer 中的矢量子图层展开为独立的图层管理条目。
  * 缓存影像、ImageServer 以及没有多个矢量子图层的服务保持原有名称和条目数量。
  */
-export async function expandMapServiceSublayers(service: MapServiceItem): Promise<MapServiceItem[]> {
+export async function expandMapServiceSublayers(service: MapServiceItem, strict = false): Promise<MapServiceItem[]> {
   const url = serviceRoot(service.serviceUrl)
   const type = normalizedType(service.type)
   if (taizhouForwarderTemplate(url) || ogcProtocol(service) || hasTileTemplate(leafletWmtsTemplate(url)) || isTileRequestUrl(url)) return [service]
@@ -2345,17 +2457,23 @@ export async function expandMapServiceSublayers(service: MapServiceItem): Promis
   try {
     const metadata = await loadArcGisMetadata(url)
     if (metadata.singleFusedMapCache) return [service]
-    const layers = (await Promise.all((metadata.layers || []).slice(0, 50).map(async (definition) => {
-      const layerId = Number(definition.id)
-      if (!Number.isFinite(layerId)) return undefined
-      try {
-        const layerMetadata = await loadArcGisJson<ArcGisLayerMetadata>(servicePath(url, String(layerId)))
-        if (!layerMetadata.geometryType) return undefined
-        return { id: layerId, name: definition.name || `子图层${layerId}`, geometryType: layerMetadata.geometryType }
-      } catch {
-        return undefined
+    const definitions = metadata.layers || []
+    const expanded: Array<{ id: number; name: string; geometryType: string } | undefined> = new Array(definitions.length)
+    let cursor = 0
+    await Promise.all(Array.from({ length: Math.min(3, definitions.length) }, async () => {
+      while (cursor < definitions.length) {
+        const index = cursor++
+        const definition = definitions[index]!
+        const layerId = Number(definition.id)
+        if (!Number.isFinite(layerId)) continue
+        try {
+          const read = () => loadArcGisJson<ArcGisLayerMetadata>(servicePath(url, String(layerId)))
+          const layerMetadata = await read().catch(() => read())
+          if (layerMetadata.geometryType) expanded[index] = { id: layerId, name: definition.name || `子图层${layerId}`, geometryType: layerMetadata.geometryType }
+        } catch { /* 保留其他可用子图层，不把单个失败扩散到整个服务。 */ }
       }
-    }))).filter((layer): layer is { id: number; name: string; geometryType: string } => Boolean(layer))
+    }))
+    const layers = expanded.filter((layer): layer is { id: number; name: string; geometryType: string } => Boolean(layer))
 
     if (layers.length <= 1) {
       const layer = layers[0]
@@ -2369,8 +2487,61 @@ export async function expandMapServiceSublayers(service: MapServiceItem): Promis
       arcGisLayerId: layer.id,
       arcGisGeometryType: layer.geometryType,
     }))
-  } catch {
+  } catch (reason) {
+    if (strict) throw reason
     return [service]
+  }
+}
+
+/** 预检只读取服务定义及轻量查询；不下载完整要素或自动显示图层。 */
+export async function probeMapService(service: MapServiceItem): Promise<void> {
+  const url = serviceRoot(service.serviceUrl)
+  if (service.arcGisGeometryType && service.arcGisLayerId !== undefined) {
+    const response = await loadArcGisJson<{ count?: number }>(serviceParameters(servicePath(url, `${service.arcGisLayerId}/query`), new URLSearchParams({
+      where: '1=1', returnCountOnly: 'true', f: 'json',
+    })))
+    if (!Number.isFinite(response.count) || response.count! < 0) throw new Error('图层服务未返回有效的要素统计')
+    return
+  }
+  // Capabilities、ArcGIS 元数据、TMS 描述等会在创建句柄时校验；句柄不加入地图。
+  const handle = await createMapServiceLayer(service)
+  const layer = handle.layer
+  let sample: string | undefined
+  if (layer instanceof ArcGisExportLayer && handle.bounds?.isValid()) {
+    sample = serviceParameters(servicePath(url, /ImageServer/i.test(url) || /IMAGESERVER/.test(normalizedType(service.type)) ? 'exportImage' : 'export'), new URLSearchParams({
+      bbox: handle.bounds.toBBoxString(), bboxSR: '4326', imageSR: '3857', size: '32,32', format: 'png32', transparent: 'true', f: 'image',
+    }))
+  }
+  // 模板瓦片服务可能没有元数据接口，使用其覆盖范围内的一张样本瓦片验证。
+  if (layer instanceof L.TileLayer && hasTileTemplate(leafletWmtsTemplate(url)) && handle.bounds?.isValid()) {
+    const center = handle.bounds.getCenter()
+    const zoom = Math.max(layer.options.minZoom || 0, layer.options.minNativeZoom || 0, Math.min(layer.options.maxNativeZoom || 12, 12))
+    const point = L.CRS.EPSG3857.latLngToPoint(center, zoom).divideBy(256).floor()
+    sample = leafletWmtsTemplate(url).replace('{s}', '0').replace('{z}', String(zoom)).replace('{x}', String(point.x)).replace('{y}', String(normalizedType(service.type).includes('TMS') ? 2 ** zoom - 1 - point.y : point.y))
+  }
+  if (sample) {
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), 8000)
+    try {
+      const response = await fetch(sample, { signal: controller.signal })
+      // 稀疏缓存的中心瓦片可能不存在；404/204 表示该位置无数据，不能据此隐藏整个服务。
+      if (response.status === 404 || response.status === 204) return
+      if (!response.ok) throw serviceResponseError(response.status)
+      if (!response.headers.get('content-type')?.startsWith('image/')) throw new Error('服务未返回有效的影像响应')
+      return
+    } catch (reason) {
+      if (controller.signal.aborted) throw new Error('样本瓦片读取超时')
+      if (!(reason instanceof TypeError)) throw reason
+      // 不允许 CORS 读取的影像，仍可通过浏览器图片请求验证。
+    } finally { window.clearTimeout(timer) }
+    await new Promise<void>((resolve, reject) => {
+      const image = new Image()
+      const timer = window.setTimeout(() => finish(new Error('样本瓦片读取超时')), 8000)
+      const finish = (reason?: Error) => { window.clearTimeout(timer); image.onload = null; image.onerror = null; if (reason) reject(reason); else resolve() }
+      image.onload = () => finish()
+      image.onerror = () => finish(new Error('样本瓦片不可用'))
+      image.src = sample
+    })
   }
 }
 
@@ -2442,6 +2613,34 @@ function cachedLayerMetadata(url: string, layerId: number) {
   layerFieldCache.set(key, request)
   request.catch(() => layerFieldCache.delete(key))
   return request
+}
+
+export async function getMapServiceLayerMetadata(service: MapServiceItem) {
+  if (service.arcGisLayerId === undefined) throw new Error('服务没有可查询的矢量子图层')
+  return cachedLayerMetadata(serviceRoot(service.serviceUrl), service.arcGisLayerId)
+}
+
+/** 专题按字段读取完整结果，复用 ID 分批机制，不受旧服务 1000 条上限影响。 */
+export async function queryMapServiceFeatures(service: MapServiceItem, fields: string[], where = '1=1', geometry = false) {
+  const metadata = await getMapServiceLayerMetadata(service)
+  const knownFields = new Set((metadata.fields || []).map(field => field.name))
+  if (fields.some(field => !knownFields.has(field))) throw new Error('所选字段不存在于当前图层')
+  const parameters = new URLSearchParams({ where, outFields: fields.join(','), returnGeometry: String(geometry), outSR: '4326' })
+  const result = await queryAllFeatures(servicePath(serviceRoot(service.serviceUrl), `${service.arcGisLayerId}/query`), parameters)
+  return { features: result.features || [], objectIdField: metadata.fields?.find(field => field.type === 'esriFieldTypeOID')?.name || 'OBJECTID' }
+}
+
+export async function queryMapServiceSpatialIds(service: MapServiceItem, geometries: MapServiceSearchGeometry[]) {
+  const ids = new Set<string | number>()
+  for (const geometry of geometries) {
+    const result = await queryArcGis(servicePath(serviceRoot(service.serviceUrl), `${service.arcGisLayerId}/query`), new URLSearchParams({
+      where: '1=1', returnIdsOnly: 'true', returnGeometry: 'false', geometry: JSON.stringify(geometry),
+      geometryType: 'esriGeometryPolygon', inSR: '4326', spatialRel: 'esriSpatialRelIntersects',
+    }))
+    if (!result.objectIds) throw new Error('服务未返回空间查询结果')
+    result.objectIds.forEach(id => ids.add(id))
+  }
+  return [...ids]
 }
 
 function extendFeatureBounds(bounds: L.LatLngBounds, geometry?: MapServiceSearchGeometry) {

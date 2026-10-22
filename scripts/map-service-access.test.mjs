@@ -97,4 +97,12 @@ globalThis.fetch = async (url, options) => {
   return response({ objectIds: [1] })
 }
 assert.deepEqual(await internals.queryArcGis(expectedQuery, new URLSearchParams({ where: '1=1' })), { objectIds: [1] })
+const emptyVector = { id: 'empty', name: '空图层', serviceUrl: root, type: 'ARCGIS_MAPSERVER', arcGisLayerId: 2, arcGisGeometryType: 'esriGeometryPolygon' }
+globalThis.fetch = async () => response({ count: 0 })
+await api.probeMapService(emptyVector)
+globalThis.fetch = async () => response({})
+await assert.rejects(api.probeMapService(emptyVector), /有效的要素统计/)
+globalThis.fetch = async () => response({}, 503)
+await assert.rejects(api.probeMapService(emptyVector))
+await assert.rejects(api.expandMapServiceSublayers({ ...emptyVector, arcGisLayerId: undefined }, true), /503/)
 console.log('map-service-access: JSON/CORS/JSONP, auth errors, tile templates and authenticated child URLs passed')
