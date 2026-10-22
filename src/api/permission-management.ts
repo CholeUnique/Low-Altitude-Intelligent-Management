@@ -71,9 +71,9 @@ export async function getPermissionMenuTree() {
   return (result || []).map(normalizeMenuNode)
 }
 
-export async function getUserDepartmentPermissions(userId: string, deptId?: string) {
+export async function getUserDepartmentPermissions(userId?: string, deptId?: string) {
   const result = await apiClient.post<never, UserDepartmentPermission[]>('/v1/perm/user/perm/list', {
-    userId,
+    ...(userId ? { userId } : {}),
     ...(deptId ? { deptId } : {}),
   })
   return (result || []).map(normalizePermission)

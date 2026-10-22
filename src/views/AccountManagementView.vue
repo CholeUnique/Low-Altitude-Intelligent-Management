@@ -31,7 +31,7 @@ import SceneManagementPanel from '@/components/SceneManagementPanel.vue'
 import StatusConfirmDialog from '@/components/StatusConfirmDialog.vue'
 import type { CurrentUser } from '@/types'
 import { formatBeijingDateTime } from '@/utils/date-time'
-import { canDepartmentAdminManageUser, hasDepartmentAdminRole, hasVerifiedDepartmentRole, isDepartmentAdmin as isDepartmentAdminInDept, mergeUserDepartmentIdentity, needsDepartmentRoleLookup, userRoleLabel } from '@/utils/user-role'
+import { canDepartmentAdminManageUser, departmentAdminFlag, hasDepartmentAdminRole, isDepartmentAdmin as isDepartmentAdminInDept, mergeUserDepartmentIdentity, needsDepartmentRoleLookup, userRoleLabel } from '@/utils/user-role'
 
 type Section = 'profile' | 'users' | 'departments' | 'scenes' | 'permissions' | 'metadata' | 'map-services'
 type EditorMode = 'add' | 'edit' | 'view'
@@ -116,7 +116,7 @@ async function loadProfile() {
     const cachedDepartments = userStore.currentUser?.deptList || []
     profile.deptList = (profile.deptList.length ? profile.deptList : cachedDepartments).map((department) => ({
       ...department,
-      isDeptAdmin: department.isDeptAdmin ?? cachedDepartments.find((item) => String(item.deptId) === String(department.deptId))?.isDeptAdmin,
+      isDeptAdmin: departmentAdminFlag(department.isDeptAdmin) ?? departmentAdminFlag(cachedDepartments.find((item) => String(item.deptId) === String(department.deptId))?.isDeptAdmin),
     }))
     userStore.setCurrentUser(profile)
     fillProfile(profile)
@@ -234,7 +234,6 @@ const userFilters = reactive<{ keyword: string; role: 'ADMIN' | 'USER' | ''; sta
   defaultDeptId: '',
 })
 const users = ref<CurrentUser[]>([])
-const unverifiedUserIds = ref<Set<string>>(new Set())
 const userTotal = ref(0)
 const userPageNum = ref(1)
 const userPageSize = ref(10)
@@ -260,20 +259,19 @@ async function loadUsers() {
     const resolved = await Promise.all((result.records || []).map(async (record) => {
       const row = normalizeUser(record)
       if (!needsDepartmentRoleLookup(row, isDepartmentAdmin.value)) {
-        return { row, verified: true }
+        return row
       }
       try {
         const detail = normalizeUser(await getUserDetail(row.id, isAdmin.value ? undefined : userStore.activeDeptId))
         const merged = mergeUserDepartmentIdentity(row, detail)
-        return { row: merged, verified: hasVerifiedDepartmentRole(detail) }
+        return merged
       } catch {
-        return { row, verified: false }
+        return row
       }
     }))
     if (loadId !== userLoadId) return
     // 后端按当前部门返回可见用户；不要在部门树尚未加载完时再次误过滤。
-    users.value = resolved.map(({ row }) => row)
-    unverifiedUserIds.value = new Set(resolved.filter(({ verified }) => !verified).map(({ row }) => String(row.id)))
+    users.value = resolved
     userTotal.value = Number(result.total || 0)
     userPageNum.value = Number(result.pageNum || userPageNum.value)
   } catch (error) {
@@ -380,7 +378,7 @@ function fillUserForm(value: CurrentUser & { remark?: string }) {
     role: value.role === 'ADMIN' ? 'ADMIN' : hasDepartmentAdminRole(value) ? 'DEPT_ADMIN' : 'USER',
     status: value.status ?? 1,
     deptIdList,
-    deptAdminIds: (value.deptList || []).filter((item) => item.isDeptAdmin).map((item) => String(item.deptId)),
+    deptAdminIds: (value.deptList || []).filter((item) => departmentAdminFlag(item.isDeptAdmin) === true).map((item) => String(item.deptId)),
     // 只回填真正属于该用户的默认部门，并统一为字符串，避免 Long/字符串比较失败。
     defaultDeptId: deptIdList.includes(normalizedDefaultDeptId) ? normalizedDefaultDeptId : '',
     remark: value.remark || '',
@@ -446,12 +444,12 @@ async function confirmNewDepartmentAdmin(created: CurrentUser | null | undefined
   if (!userId) throw new Error('账号已创建，但接口未返回用户 ID，无法设置部门管理员；请刷新用户列表后编辑该账号')
   let detail = await getUserDetail(userId)
   for (const deptId of deptIds) {
-    if ((detail.deptList || []).some((item) => String(item.deptId) === deptId && item.isDeptAdmin === true)) continue
+    if ((detail.deptList || []).some((item) => String(item.deptId) === deptId && departmentAdminFlag(item.isDeptAdmin) === true)) continue
     await setUserDepartmentAdmin({ deptId, userId, flag: 1 })
     detail = await getUserDetail(userId)
   }
   const verified = await getUserDetail(userId)
-  const missing = deptIds.filter((deptId) => !(verified.deptList || []).some((item) => String(item.deptId) === deptId && item.isDeptAdmin === true))
+  const missing = deptIds.filter((deptId) => !(verified.deptList || []).some((item) => String(item.deptId) === deptId && departmentAdminFlag(item.isDeptAdmin) === true))
   if (missing.length) throw new Error('账号已创建，但部门管理员标记未写入；请检查后端 /user/dept-admin/set 接口与所属部门配置')
 }
 
@@ -868,7 +866,7 @@ onMounted(loadProfile)
                   <tr v-else-if="!users.length"><td colspan="7" class="empty-cell">暂无符合条件的用户</td></tr>
                   <tr v-for="row in users" v-else :key="row.id">
                     <td><strong>{{ row.realName || row.nickname || row.username }}</strong><small>@{{ row.username }}</small></td>
-                    <td><span class="tag">{{ String(row.id) === String(userStore.currentUser?.id) ? roleName : hasDepartmentAdminRole(row) ? '部门管理员' : unverifiedUserIds.has(String(row.id)) ? '部门身份未提供' : userRoleLabel(row) }}</span></td>
+                    <td><span class="tag">{{ String(row.id) === String(userStore.currentUser?.id) ? roleName : userRoleLabel(row) }}</span></td>
                     <td>{{ row.deptName || row.department || '-' }}</td>
                     <td>{{ row.phone || row.email || '-' }}</td>
                     <td><span class="status" :class="row.status === 0 ? 'status--off' : 'status--on'">{{ row.status === 0 ? '禁用' : '启用' }}</span></td>

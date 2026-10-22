@@ -1,8 +1,15 @@
 import type { CurrentUser, UserDepartment } from '@/types'
 
+/** 兼容后端将布尔标志序列化为 0/1 或字符串的部署版本。 */
+export function departmentAdminFlag(value: unknown): boolean | undefined {
+  if (value === true || value === 1 || value === '1' || value === 'true') return true
+  if (value === false || value === 0 || value === '0' || value === 'false') return false
+  return undefined
+}
+
 export function preferredDepartmentAdminId(departments: UserDepartment[], initialDeptId?: string): string | undefined {
-  const selected = departments.find((department) => String(department.deptId) === String(initialDeptId) && department.isDeptAdmin === true)
-    || departments.find((department) => department.isDeptAdmin === true)
+  const selected = departments.find((department) => String(department.deptId) === String(initialDeptId) && departmentAdminFlag(department.isDeptAdmin) === true)
+    || departments.find((department) => departmentAdminFlag(department.isDeptAdmin) === true)
   return selected ? String(selected.deptId) : undefined
 }
 
@@ -11,14 +18,14 @@ export function isDepartmentAdmin(user: CurrentUser | null | undefined, activeDe
   if (!user || user.role === 'ADMIN') return false
   if (!activeDeptId) return false
   const membership = (user.deptList || []).find((dept) => String(dept.deptId) === String(activeDeptId))
-  if (membership?.isDeptAdmin === true) return true
+  if (departmentAdminFlag(membership?.isDeptAdmin) === true) return true
   // 旧会话没有部门管理员标志时，只在其自身当前部门兼容旧 role，不能跨部门继承管理权。
-  return membership?.isDeptAdmin == null && user.role === 'DEPT_ADMIN'
+  return departmentAdminFlag(membership?.isDeptAdmin) == null && user.role === 'DEPT_ADMIN'
     && String(user.deptId || user.defaultDeptId || '') === String(activeDeptId)
 }
 
 export function hasDepartmentAdminRole(user: CurrentUser | null | undefined): boolean {
-  return !!user && user.role !== 'ADMIN' && (user.role === 'DEPT_ADMIN' || (user.deptList || []).some((dept) => dept.isDeptAdmin === true))
+  return !!user && user.role !== 'ADMIN' && (user.role === 'DEPT_ADMIN' || (user.deptList || []).some((dept) => departmentAdminFlag(dept.isDeptAdmin) === true))
 }
 
 /** 分页结果若未带 isDeptAdmin，就不能据此断定目标是普通用户。 */
@@ -26,7 +33,7 @@ export function hasVerifiedDepartmentRole(user: CurrentUser | null | undefined):
   if (!user) return false
   if (user.role === 'ADMIN' || user.role === 'DEPT_ADMIN') return true
   return Array.isArray(user.deptList) && user.deptList.length > 0
-    && user.deptList.every((dept) => typeof dept.isDeptAdmin === 'boolean')
+    && user.deptList.every((dept) => departmentAdminFlag(dept.isDeptAdmin) !== undefined)
 }
 
 /** 管理员视角的 false 也可能只是分页接口的缺省值，需尝试用详情复核。 */
@@ -39,7 +46,7 @@ export function mergeUserDepartmentIdentity(row: CurrentUser, detail: CurrentUse
   for (const dept of detail.deptList || []) {
     const id = String(dept.deptId)
     departmentsById.set(id, { ...departmentsById.get(id), ...dept,
-      isDeptAdmin: dept.isDeptAdmin ?? departmentsById.get(id)?.isDeptAdmin })
+      isDeptAdmin: departmentAdminFlag(dept.isDeptAdmin) ?? departmentAdminFlag(departmentsById.get(id)?.isDeptAdmin) })
   }
   return { ...row, ...detail, deptList: [...departmentsById.values()] }
 }

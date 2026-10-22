@@ -191,7 +191,7 @@ onMounted(() => void loadTaskContext())
 
   <div v-else-if="!workspaceConfig" class="workspace workspace-empty">
     <section class="workspace-context" aria-label="工作台操作">
-      <div class="workspace-brand" @click="$router.push('/dashboard')">
+      <div class="workspace-brand" :class="{ 'workspace-brand--linked': user.hasPermission('unit-overview') }" @click="user.hasPermission('unit-overview') && $router.push('/dashboard')">
 
         <div>
           <b :title="`${currentScene?.name || '场景作业'}工作台`">{{ currentScene?.shortName || currentScene?.name || '场景作业' }}工作台</b>
@@ -204,7 +204,7 @@ onMounted(() => void loadTaskContext())
       <div class="empty-card">
         <h2>该场景工作台正在建设</h2>
         <p>当前仅开放林业执法监管场景的治理流程配置，其他场景将按业务配置逐步接入。</p>
-        <el-button type="primary" @click="$router.push('/dashboard')">返回运行中枢</el-button>
+        <el-button v-if="user.hasPermission('unit-overview')" type="primary" @click="$router.push('/dashboard')">返回运行中枢</el-button>
       </div>
     </main>
   </div>
@@ -212,10 +212,10 @@ onMounted(() => void loadTaskContext())
   <div v-else v-workbench-validation class="workspace">
     <section class="workspace-context" aria-label="工作台操作">
       <div class="workspace-return">
-        <el-button class="workspace-return-button" @click="$router.push('/tasks/todo')">‹ 返回任务</el-button>
+        <el-button v-if="user.hasPermission('task-todo')" class="workspace-return-button" @click="$router.push('/tasks/todo')">‹ 返回任务</el-button>
       </div>
 
-      <div class="workspace-brand workspace-brand--moved" @click="$router.push('/dashboard')">
+      <div class="workspace-brand workspace-brand--moved" :class="{ 'workspace-brand--linked': user.hasPermission('unit-overview') }" @click="user.hasPermission('unit-overview') && $router.push('/dashboard')">
 
         <div>
           <b :title="`${workspaceConfig.name}工作台`">{{ currentScene?.shortName || workspaceConfig.name }}工作台</b>
@@ -306,8 +306,8 @@ onMounted(() => void loadTaskContext())
   display: flex;
   align-items: center;
   gap: 10px;
-  cursor: pointer;
 }
+.workspace-brand--linked { cursor: pointer; }
 .workspace-brand--moved {
   position: absolute;
   left: 122px;

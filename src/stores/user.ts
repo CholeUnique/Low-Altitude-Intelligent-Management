@@ -129,13 +129,13 @@ export const useUserStore = defineStore('user', () => {
 
   function clearMenuPermissions() {
     menuPermissions.value = []
-    permissionsLoaded.value = currentUser.value?.role === 'ADMIN' || isActiveDepartmentAdmin.value
+    permissionsLoaded.value = currentUser.value?.role === 'ADMIN'
     permissionsError.value = ''
     permissionsRequest = undefined
   }
 
   async function ensureMenuPermissions(force = false) {
-    if (currentUser.value?.role === 'ADMIN' || isActiveDepartmentAdmin.value) {
+    if (currentUser.value?.role === 'ADMIN') {
       permissionsLoaded.value = true
       permissionsError.value = ''
       return
@@ -147,7 +147,8 @@ export const useUserStore = defineStore('user', () => {
     permissionsRequest = (async () => {
       try {
         if (!userId || !deptId) throw new Error('当前账号缺少用户或部门信息，无法读取功能权限。')
-        const result = await getUserDepartmentPermissions(userId, deptId)
+        // 本人权限查询不传 userId；部门管理员也按当前部门实际授权菜单展示入口。
+        const result = await getUserDepartmentPermissions(undefined, deptId)
         const current = result.find((item) => item.deptId === String(deptId))
         menuPermissions.value = current?.menus || []
         permissionsError.value = ''
@@ -163,7 +164,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function hasPermission(key: AppPermissionKey) {
-    if (currentUser.value?.role === 'ADMIN' || isActiveDepartmentAdmin.value) return true
+    if (currentUser.value?.role === 'ADMIN') return true
     const aliases = new Set(permissionAliases[key].map(normalizePermissionToken))
     return menuPermissions.value.some((menu) => aliases.has(normalizePermissionToken(menu.code)) || aliases.has(normalizePermissionToken(menu.name)))
   }

@@ -18,6 +18,7 @@ import { useUserStore } from '@/stores/user'
 import type { CurrentUser } from '@/types'
 import { formatBeijingDateTime } from '@/utils/date-time'
 import StatusConfirmDialog from '@/components/StatusConfirmDialog.vue'
+import MetadataManagementPanel from '@/components/MetadataManagementPanel.vue'
 
 type EditorMode = 'add' | 'edit' | 'view'
 
@@ -28,6 +29,7 @@ const assignees = ref<BizSceneAssignee[]>([])
 const users = ref<CurrentUser[]>([])
 const departments = ref<DepartmentInfo[]>([])
 const selectedDeptId = ref('')
+const abnormalScene = ref<BizSceneDto | null>(null)
 const departmentSceneCounts = ref<Record<string, number>>({})
 const loading = ref(false)
 const busy = ref(false)
@@ -133,8 +135,23 @@ function departmentOptionLabel(department: DepartmentInfo) {
 }
 
 async function changeDepartment() {
+  abnormalScene.value = null
   users.value = []
   await loadScenes()
+}
+
+function openAbnormalTypes(scene: BizSceneDto) {
+  if (isDepartmentAdmin.value && String(scene.deptId || selectedDeptId.value) !== String(userStore.activeDeptId)) {
+    return showError(new Error('只能维护当前部门场景的异常类型'))
+  }
+  abnormalScene.value = scene
+}
+
+function openEditorAbnormalTypes() {
+  const scene = scenes.value.find((item) => String(item.id) === sceneForm.id)
+  if (!scene) return showError(new Error('请先保存场景，再维护异常类型'))
+  editorOpen.value = false
+  openAbnormalTypes(scene)
 }
 
 async function resetFilters() {
@@ -328,18 +345,20 @@ onMounted(() => void loadInitial())
     <div v-if="errorMessage" class="scene-message scene-message--error">{{ errorMessage }}<button type="button" @click="errorMessage = ''">×</button></div>
 
     <div class="scene-heading">
-      <div><h2>场景管理</h2><p>维护业务场景、运行状态及任务初始派发负责人</p></div>
-      <button class="scene-button scene-button--primary" type="button" @click="openEditor('add')">＋ 新增场景</button>
+      <div><h2>{{ abnormalScene ? '场景异常类型' : '场景管理' }}</h2><p>{{ abnormalScene ? `当前场景：${abnormalScene.sceneName}（${abnormalScene.sceneCode}）` : '维护业务场景、运行状态及任务初始派发负责人' }}</p></div>
+      <button v-if="abnormalScene" class="scene-button scene-button--ghost" type="button" @click="abnormalScene = null">← 返回场景列表</button>
+      <button v-else class="scene-button scene-button--primary" type="button" @click="openEditor('add')">＋ 新增场景</button>
     </div>
 
-    <section class="scene-summary">
+    <MetadataManagementPanel v-if="abnormalScene" :key="abnormalScene.sceneCode" :scene-code="abnormalScene.sceneCode" :scene-name="abnormalScene.sceneName" />
+    <section v-if="!abnormalScene" class="scene-summary">
       <article><i>景</i><div><span>场景总数</span><b>{{ totalCount }}</b><small>{{ selectedDepartment?.name || '当前部门' }}全部场景</small></div></article>
       <article><i>启</i><div><span>已启用</span><b>{{ enabledCount }}</b><small>当前可用于业务任务</small></div></article>
       <article><i>治</i><div><span>治理场景</span><b>{{ governanceCount }}</b><small>需要后续治理闭环</small></div></article>
       <article><i>人</i><div><span>已配置负责人</span><b>{{ configuredCount }}</b><small>已设置初始派发人员</small></div></article>
     </section>
 
-    <section class="scene-panel">
+    <section v-if="!abnormalScene" class="scene-panel">
       <form class="scene-filters" @submit.prevent="loadScenes">
         <label class="department-filter"><span>管理部门</span><select v-model="selectedDeptId" :disabled="isDepartmentAdmin || loading || !departments.length" @change="changeDepartment"><option value="" disabled>{{ departments.length ? '请选择管理部门' : '暂无可选部门' }}</option><option v-for="item in sortedDepartments" :key="String(item.id)" :value="String(item.id)">{{ departmentOptionLabel(item) }}</option></select></label>
         <label class="keyword-filter"><span>场景关键字</span><input v-model.trim="filters.keyword" placeholder="搜索场景名称或编码"></label>
@@ -362,7 +381,7 @@ onMounted(() => void loadInitial())
               <td>{{ row.sort ?? 0 }}</td>
               <td><span class="scene-status" :class="row.status === 1 ? 'scene-status--on' : 'scene-status--off'">{{ row.status === 1 ? '启用' : '停用' }}</span></td>
               <td>{{ formatTime(row.updateTime || row.createTime) }}</td>
-              <td class="scene-actions"><button type="button" @click="openEditor('view', row)">详情</button><button type="button" @click="openEditor('edit', row)">编辑</button><button type="button" @click="openAssigneeEditor(row)">配置负责人</button><button type="button" @click="toggleScene(row)">{{ row.status === 1 ? '停用' : '启用' }}</button><button class="danger" type="button" @click="removeScene(row)">删除</button></td>
+              <td class="scene-actions"><button type="button" @click="openEditor('view', row)">详情</button><button type="button" @click="openEditor('edit', row)">编辑</button><button type="button" @click="openAbnormalTypes(row)">异常类型</button><button type="button" @click="openAssigneeEditor(row)">配置负责人</button><button type="button" @click="toggleScene(row)">{{ row.status === 1 ? '停用' : '启用' }}</button><button class="danger" type="button" @click="removeScene(row)">删除</button></td>
             </tr>
           </tbody>
         </table>
@@ -399,6 +418,11 @@ onMounted(() => void loadInitial())
             <p>配置统计指标字典和成果类型字典；留空时由后端使用空字典。</p>
             <textarea v-model="sceneForm.metricJson" :disabled="editorMode === 'view'" rows="8" spellcheck="false" placeholder='{ "metrics": [], "resultTypes": [] }'></textarea>
           </section>
+          <section class="scene-form-section scene-abnormal-entry">
+            <div><h3><span>04</span>异常类型元数据</h3><p>维护当前场景专属的异常类型及条目，供图斑识别和业务表单使用。</p></div>
+            <button v-if="editorMode !== 'add'" class="scene-button scene-button--ghost" type="button" @click="openEditorAbnormalTypes">管理异常类型 →</button>
+            <small v-else>保存场景后即可配置</small>
+          </section>
           <div v-if="editorMode === 'view'" class="scene-audit"><span>创建时间：{{ formatTime(sceneForm.createTime) }}</span><span>更新时间：{{ formatTime(sceneForm.updateTime) }}</span></div>
           <div class="scene-form-actions"><button class="scene-button scene-button--ghost" type="button" @click="editorOpen = false">{{ editorMode === 'view' ? '关闭' : '取消' }}</button><button v-if="editorMode !== 'view'" class="scene-button scene-button--primary" type="submit" :disabled="busy">{{ busy ? '保存中…' : '保存场景' }}</button></div>
         </form>
@@ -422,7 +446,7 @@ onMounted(() => void loadInitial())
 </template>
 
 <style scoped>
-.scene-management{color:#dceef5}.scene-heading{min-height:54px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between}.scene-heading h2,.scene-heading p{margin:0}.scene-heading h2{color:#fff;font-size:25px}.scene-heading p{margin-top:6px;color:#75a2b4;font-size:14px}.scene-button{min-height:40px;padding:0 17px;border-radius:3px;font-size:14px;cursor:pointer}.scene-button:disabled{opacity:.55;cursor:not-allowed}.scene-button--primary{color:#fff;background:linear-gradient(135deg,#1488b5,#16a9c6);border:1px solid #42cbe9}.scene-button--primary:hover{filter:brightness(1.12)}.scene-button--ghost{color:#a8d8e8;background:#0a2738;border:1px solid #276781}.scene-button--ghost:hover{color:#fff;border-color:#3aa9d0}
+.scene-management{color:#dceef5}.scene-heading{min-height:54px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between}.scene-heading h2,.scene-heading p{margin:0}.scene-heading h2{color:#fff;font-size:25px}.scene-heading p{margin-top:6px;color:#75a2b4;font-size:14px}.scene-button{min-height:40px;padding:0 17px;border-radius:3px;font-size:14px;cursor:pointer}.scene-button:disabled{opacity:.55;cursor:not-allowed}.scene-button--primary{color:#fff;background:linear-gradient(135deg,#1488b5,#16a9c6);border:1px solid #42cbe9}.scene-button--primary:hover{filter:brightness(1.12)}.scene-button--ghost{color:#a8d8e8;background:#0a2738;border:1px solid #276781}.scene-button--ghost:hover{color:#fff;border-color:#3aa9d0}.scene-abnormal-entry{display:flex;align-items:center;justify-content:space-between;gap:18px}.scene-abnormal-entry p{margin:8px 0 0;color:#79a1b1;font-size:12px}.scene-abnormal-entry small{color:#6e9bad;font-size:12px}.scene-abnormal-entry .scene-button{flex:none}
 .scene-summary{margin-bottom:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}.scene-summary article{min-height:98px;padding:15px 17px;display:flex;align-items:center;gap:13px;background:linear-gradient(135deg,#0d2d41,#0a2435);border:1px solid #1b536b;border-radius:6px;box-shadow:0 9px 22px #00121d35}.scene-summary i{width:46px;height:46px;display:grid;place-items:center;flex:0 0 auto;color:#92efff;background:#0d526b;border:1px solid #2685a3;border-radius:50%;font-size:17px;font-style:normal}.scene-summary div{min-width:0}.scene-summary span,.scene-summary b,.scene-summary small{display:block}.scene-summary span{color:#80a9b8;font-size:12px}.scene-summary b{margin:3px 0;color:#f0fbff;font-size:25px}.scene-summary small{overflow:hidden;color:#5f8b9d;font-size:11px;text-overflow:ellipsis;white-space:nowrap}
 .scene-panel{overflow:hidden;background:#0b2638e8;border:1px solid #1b536b;border-radius:6px;box-shadow:0 12px 30px #00121d44}.scene-filters{padding:14px 15px;display:grid;grid-template-columns:minmax(220px,250px) minmax(280px,400px) minmax(210px,1fr) minmax(200px,1fr) auto;gap:11px;align-items:end;background:#0d2d41;border-bottom:1px solid #1b536b}.scene-filters label span{margin-bottom:6px;display:block;color:#7ea6b6;font-size:12px}.scene-filters input,.scene-filters select,.scene-form input,.scene-form select,.scene-form textarea,.assignee-form select{width:100%;min-height:40px;padding:0 11px;box-sizing:border-box;color:#e9f8fc;background:#071d2b;border:1px solid #20546a;border-radius:3px;outline:none;font-size:13px}.scene-filters input:focus,.scene-filters select:focus,.scene-form input:focus,.scene-form select:focus,.scene-form textarea:focus,.assignee-form select:focus{border-color:#37b7df;box-shadow:0 0 0 2px #1683aa22}.scene-filters>div{display:flex;gap:8px}.department-filter select{border-color:#287794;background:#0a2a3b}
 .scene-table-wrap{overflow:auto}.scene-table-wrap table{width:100%;min-width:1320px;border-collapse:collapse;font-size:13px}.scene-table-wrap th{height:44px;padding:0 12px;color:#78a7b8;background:#081f2e;text-align:left;font-weight:500;white-space:nowrap}.scene-table-wrap td{height:62px;padding:9px 12px;color:#c4dae3;border-top:1px solid #153d50}.scene-table-wrap tbody tr:hover{background:#0f3043}.scene-table-wrap td strong,.scene-table-wrap td small{display:block}.scene-table-wrap td strong{color:#edfaff;font-weight:500}.scene-table-wrap td small{margin-top:4px;color:#668d9d;font-size:11px}.scene-category,.scene-status,.scene-governance{padding:4px 8px;border-radius:3px;white-space:nowrap}.scene-category{color:#7adcf6;background:#0b4c65}.scene-status--on,.scene-governance.on{color:#79e5c4;background:#174a43}.scene-status--off{color:#e9a4ad;background:#512b34}.scene-governance{color:#91aab4;background:#223743}.scene-actions{min-width:270px;white-space:nowrap}.scene-actions button{padding:3px 5px;color:#68c7e6;background:transparent;border:0;font-size:12px;cursor:pointer}.scene-actions button:hover{color:#fff;text-decoration:underline}.scene-actions button.danger{color:#ef8794}.scene-empty{height:260px!important;color:#6f98a8!important;text-align:center}.scene-panel>footer{height:46px;padding:0 15px;display:flex;align-items:center;gap:15px;color:#83a7b5;border-top:1px solid #1b536b;font-size:12px}.scene-panel>footer span{color:#5e8797}

@@ -199,7 +199,8 @@ const sceneTaskChartItems = computed(() => {
 })
 const hoveredSceneTask = computed(() => sceneTaskChartItems.value.find((item) => item.id === hoveredSceneTaskId.value))
 function openSceneTaskList(sceneId: string) {
-  router.push({ name: 'tasks', query: { sceneId } })
+  if (!user.hasPermission('task-list')) return
+  router.push({ name: 'task-list', query: { sceneId } })
 }
 
 function openFleetOverview() {
@@ -611,6 +612,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <dl class="metric-legend task-state-legend"><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd>{{ item.count }}</dd></div></dl></div>
                 <div class="scene-task-legend" aria-label="场景任务数图例">
                   <button
+                    v-if="user.hasPermission('task-list')"
                     v-for="item in sceneTaskChartItems"
                     :key="item.id"
                     type="button"
@@ -621,6 +623,11 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                     <span>{{ item.name }}</span>
                     <strong>{{ item.taskCount }}</strong>
                   </button>
+                  <div v-for="item in sceneTaskChartItems" v-else :key="item.id" class="scene-task-legend__static">
+                    <i :style="{ backgroundColor: item.color, boxShadow: `0 0 7px ${item.color}` }"></i>
+                    <span>{{ item.name }}</span>
+                    <strong>{{ item.taskCount }}</strong>
+                  </div>
                 </div>
               </div>
               <div v-else class="float-empty">暂无场景任务数据</div>
