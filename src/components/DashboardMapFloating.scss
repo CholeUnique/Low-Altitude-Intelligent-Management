@@ -9,9 +9,7 @@
   --map-gold: #f0f8ff;
   background: #061625;
 }
-.dashboard-map--floating :deep(.leaflet-tile-pane) { filter:brightness(.66) saturate(.78) contrast(1.12); }
-/* Remote-sensing and business imagery use separate service panes and keep their original colors. */
-.dashboard-map--floating :deep(.leaflet-administrative-boundaries-pane .hailing-boundary-glow) { filter:drop-shadow(0 0 3px #36d8ff) drop-shadow(0 0 8px #0b98dd90); }
+/* Keep map tiles and overlay imagery at their original colors. */
 .dashboard-map--floating .left-map-rail { top:var(--cockpit-edge,20px);bottom:22px;left:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);width:clamp(240px,16vw,280px);max-width:none;transition:left .52s cubic-bezier(.22,1,.36,1); }
 .layer-panel-reveal { display:contents; }
 .dashboard-map--floating .layer-panel-stack {

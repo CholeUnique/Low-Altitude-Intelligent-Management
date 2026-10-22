@@ -4,6 +4,7 @@ import { getOrganization, getRole, portalData } from '@/mocks/portal'
 import type { CurrentUser, OrganizationId, RoleId } from '@/types'
 import { getUserDepartmentPermissions, type PermissionMenuItem } from '@/api/permission-management'
 import { normalizePermissionToken, permissionAliases, type AppPermissionKey } from '@/utils/access-control'
+import { isDepartmentAdmin } from '@/utils/user-role'
 
 export const useUserStore = defineStore('user', () => {
   // 用户不再可选择 Mock 身份。升级前遗留的 Mock 会话一律清理，避免它绕过真实登录。
@@ -45,10 +46,8 @@ export const useUserStore = defineStore('user', () => {
     // 兼容旧会话或后端未返回 deptList 的情况，至少保留当前部门。
     return matched.length ? matched : [organization.value]
   })
-  // 管理员可切换全部部门；普通用户只有归属多个部门时才可切换。
-  const canSwitchDepartment = computed(() => (
-    currentUser.value?.role === 'ADMIN' || availableOrganizations.value.length > 1
-  ))
+  const isActiveDepartmentAdmin = computed(() => isDepartmentAdmin(currentUser.value, activeDeptId.value))
+  const canSwitchDepartment = computed(() => currentUser.value?.role === 'ADMIN' || availableOrganizations.value.length > 1)
   const role = computed(() => getRole(roleId.value))
   const name = computed(() => currentUser.value?.realName || currentUser.value?.nickname || currentUser.value?.username || `${organization.value.shortName}${role.value.name}`)
   const permissions = computed(() => role.value.permissions)
@@ -67,7 +66,7 @@ export const useUserStore = defineStore('user', () => {
     expiresAt.value = Date.now() + expiresIn * 1000
     authMode.value = 'real'
     clearMenuPermissions()
-    roleId.value = userInfo.role === 'ADMIN' ? 'admin' : 'staff'
+    roleId.value = userInfo.role === 'ADMIN' || isDepartmentAdmin(userInfo, deptId) ? 'admin' : 'staff'
     const initialOrganization = organizationFromDepartmentName(
       userInfo.deptName || userInfo.deptList?.find((department) => department.deptId === deptId)?.deptName,
     )
@@ -89,16 +88,23 @@ export const useUserStore = defineStore('user', () => {
     expiresAt.value = Date.now() + expiresIn * 1000
     authMode.value = 'real'
     clearMenuPermissions()
+    roleId.value = currentUser.value?.role === 'ADMIN' || isDepartmentAdmin(currentUser.value, deptId) ? 'admin' : 'staff'
+    const nextDepartment = currentUser.value?.deptList?.find((department) => String(department.deptId) === String(deptId))
+    const nextOrganization = organizationFromDepartmentName(nextDepartment?.deptName)
+    if (nextOrganization) organizationId.value = nextOrganization
     localStorage.setItem('access_token', accessToken)
     localStorage.setItem('token_expires_at', String(expiresAt.value))
     localStorage.setItem('auth_mode', 'real')
+    localStorage.setItem('role_id', roleId.value)
+    if (nextOrganization) localStorage.setItem('organization_id', nextOrganization)
     if (deptId) localStorage.setItem('active_dept_id', deptId)
     else localStorage.removeItem('active_dept_id')
   }
 
   function setCurrentUser(userInfo: CurrentUser) {
     currentUser.value = userInfo
-    roleId.value = userInfo.role === 'ADMIN' ? 'admin' : 'staff'
+    clearMenuPermissions()
+    roleId.value = userInfo.role === 'ADMIN' || isDepartmentAdmin(userInfo, activeDeptId.value) ? 'admin' : 'staff'
     localStorage.setItem('current_user', JSON.stringify(userInfo))
     localStorage.setItem('role_id', roleId.value)
   }
@@ -123,13 +129,13 @@ export const useUserStore = defineStore('user', () => {
 
   function clearMenuPermissions() {
     menuPermissions.value = []
-    permissionsLoaded.value = currentUser.value?.role === 'ADMIN'
+    permissionsLoaded.value = currentUser.value?.role === 'ADMIN' || isActiveDepartmentAdmin.value
     permissionsError.value = ''
     permissionsRequest = undefined
   }
 
   async function ensureMenuPermissions(force = false) {
-    if (currentUser.value?.role === 'ADMIN') {
+    if (currentUser.value?.role === 'ADMIN' || isActiveDepartmentAdmin.value) {
       permissionsLoaded.value = true
       permissionsError.value = ''
       return
@@ -157,7 +163,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function hasPermission(key: AppPermissionKey) {
-    if (currentUser.value?.role === 'ADMIN') return true
+    if (currentUser.value?.role === 'ADMIN' || isActiveDepartmentAdmin.value) return true
     const aliases = new Set(permissionAliases[key].map(normalizePermissionToken))
     return menuPermissions.value.some((menu) => aliases.has(normalizePermissionToken(menu.code)) || aliases.has(normalizePermissionToken(menu.name)))
   }
@@ -176,6 +182,7 @@ export const useUserStore = defineStore('user', () => {
     roleId,
     organization,
     canSwitchDepartment,
+    isActiveDepartmentAdmin,
     availableOrganizations,
     role,
     name,

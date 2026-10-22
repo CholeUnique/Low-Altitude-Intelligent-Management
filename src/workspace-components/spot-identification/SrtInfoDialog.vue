@@ -4,11 +4,10 @@ import { getFlightReviewVideoSrtFile, type FlightReviewMedia } from '@/api/fligh
 import { decodeVideoSrt, formatTelemetryCoordinates } from '@/utils/video-telemetry'
 import { formatSrtTime, inspectSrt, srtAltitudePath, srtField, type SrtDocument } from '@/utils/srt-inspector'
 
-const props = defineProps<{ planName: string; media: FlightReviewMedia[]; initialId: string }>()
+const props = defineProps<{ planName: string; media: FlightReviewMedia }>()
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLElement>()
 const closeButton = ref<HTMLButtonElement>()
-const selectedId = ref(props.initialId)
 const expanded = ref(false)
 const tab = ref<'overview' | 'records' | 'raw'>('overview')
 const busy = ref(false)
@@ -28,7 +27,7 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined
 let downloadUrl = ''
 let previousFocus: HTMLElement | null = null
 const key = (item: FlightReviewMedia) => `${item.taskId}:${item.id}`
-const activeMedia = computed(() => props.media.find(item => key(item) === selectedId.value) || props.media[0])
+const activeMedia = computed(() => props.media)
 const data = computed(() => srtDoc.value)
 const gpsRate = computed(() => data.value?.records.length ? Math.round(data.value.gpsCount / data.value.records.length * 1000) / 10 : 0)
 const altitudePath = computed(() => data.value ? srtAltitudePath(data.value) : '')
@@ -122,10 +121,9 @@ onBeforeUnmount(() => {
     <div class="srt-backdrop" :class="{ 'is-expanded': expanded }" @click.self="emit('close')">
       <section ref="dialog" class="srt-dialog" role="dialog" aria-modal="true" aria-labelledby="srt-dialog-title" @keydown.stop>
         <header class="srt-header">
-          <div class="srt-heading"><span class="srt-emblem" aria-hidden="true">SRT</span><div><span class="srt-eyebrow">FLIGHT TELEMETRY · 飞行遥测档案</span><h2 id="srt-dialog-title">SRT 信息</h2><p>{{ planName }}</p></div></div>
+          <div class="srt-heading"><div><h2 id="srt-dialog-title">SRT 信息</h2><p>{{ planName }}</p></div></div>
           <div class="srt-header-actions"><button type="button" :disabled="!file || busy" @click="download">↓ 下载原始 SRT</button><button type="button" :aria-label="expanded ? '还原 SRT 窗口' : '展开 SRT 窗口'" @click="expanded = !expanded">⛶</button><button ref="closeButton" type="button" aria-label="关闭 SRT 信息" @click="emit('close')">×</button></div>
         </header>
-        <div class="srt-source-bar"><div><span class="source-dot" /><strong>数据源</strong><select v-model="selectedId" aria-label="选择视频的 SRT"><option v-for="item in media" :key="key(item)" :value="key(item)">{{ item.fileName }}</option></select></div></div>
         <nav class="srt-tabs" role="tablist" aria-label="SRT 信息视图"><button type="button" role="tab" :aria-selected="tab === 'overview'" @click="tab = 'overview'">数据总览</button><button type="button" role="tab" :aria-selected="tab === 'records'" @click="tab = 'records'">字幕记录 <span v-if="data">{{ data.records.length.toLocaleString() }}</span></button><button type="button" role="tab" :aria-selected="tab === 'raw'" @click="tab = 'raw'">原始全文</button></nav>
         <div v-if="busy" class="srt-state" role="status"><span class="srt-spinner" /><h3>正在读取飞行遥测</h3><p>读取当前视频的完整 SRT 文件…</p></div>
         <div v-else-if="error && !raw" class="srt-state is-error" role="status"><span class="state-symbol">!</span><h3>暂时无法读取 SRT</h3><p>{{ error }}</p><button type="button" @click="load">重新读取</button></div>
@@ -162,22 +160,16 @@ onBeforeUnmount(() => {
 <style scoped>
 .srt-backdrop{position:fixed;inset:0;z-index:1300;display:grid;place-items:center;padding:28px;background:#061b2cbf;backdrop-filter:blur(5px);font-family:"Microsoft YaHei",Arial,sans-serif}
 .srt-dialog{width:min(1320px,100%);height:min(850px,calc(100dvh - 56px));display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;border:1px solid #cfdee6;border-radius:14px;background:#f3f7fa;color:#294c60;box-shadow:0 28px 100px #00131e70}
-.srt-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex:none;padding:20px 24px;background:linear-gradient(110deg,#102f46,#15506a);color:#fff}
-.srt-heading{display:flex;align-items:center;gap:15px;min-width:0}
-.srt-emblem{display:grid;place-items:center;width:54px;height:54px;flex:none;border:1px solid #70d4e55c;border-radius:12px;background:linear-gradient(135deg,#2d9eb449,#37cabb13);color:#8fe9ed;font-size:15px;font-weight:800;letter-spacing:1px}
-.srt-eyebrow{font-size:12px;letter-spacing:1.3px;color:#7ec8d9}
-.srt-heading h2{margin:5px 0;font-size:23px;font-weight:650;letter-spacing:1px}
+.srt-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex:none;padding:19px 24px;background:linear-gradient(110deg,#102f46,#15506a);color:#fff}
+.srt-heading{min-width:0}
+.srt-heading h2{margin:0 0 5px;font-size:23px;font-weight:650;letter-spacing:1px}
 .srt-heading p{margin:0;color:#b1cbd7;font-size:14px;overflow-wrap:anywhere}
 .srt-header-actions{display:flex;align-items:center;gap:8px;flex:none}
 .srt-header-actions button{padding:8px 11px;border:1px solid #92b9cc4d;border-radius:6px;color:#deeff6;background:#ffffff0b;cursor:pointer;font-size:14px}
 .srt-header-actions button:last-child{font-size:24px;line-height:20px}
 .srt-header-actions button:hover{background:#ffffff20}
 .srt-header-actions button:disabled{opacity:.4;cursor:default}
-.srt-source-bar{display:flex;align-items:center;justify-content:space-between;gap:15px;flex:none;padding:12px 24px;border-bottom:1px solid #dce6ed;background:#fff;font-size:14px}
-.srt-source-bar>div{display:flex;align-items:center;gap:9px;min-width:0}
-.source-dot,.srt-footer i{width:6px;height:6px;display:inline-block;border-radius:50%;background:#20b7b5}
-.srt-source-bar strong{white-space:nowrap}
-.srt-source-bar select{min-width:200px;max-width:560px;width:40vw;padding:7px 10px;border:1px solid #d7e4ec;border-radius:6px;color:#315a70;background:#f4f9fc;font:inherit}
+.srt-footer i{width:6px;height:6px;display:inline-block;border-radius:50%;background:#20b7b5}
 .srt-tabs{display:flex;gap:26px;flex:none;padding:0 24px;border-bottom:1px solid #dce6ed;background:#fff}
 .srt-tabs button{position:relative;min-height:47px;padding:0 2px;border:0;color:#7a92a0;background:none;font-size:14px;cursor:pointer}
 .srt-tabs button[aria-selected=true]{color:#138ba8;font-weight:700}
@@ -278,7 +270,7 @@ onBeforeUnmount(() => {
 @media(max-width:950px){.srt-backdrop{padding:12px}
 .srt-dialog{height:calc(100dvh - 24px)}
 .srt-header{padding:15px}
-.srt-source-bar,.srt-tabs{padding-left:15px;padding-right:15px}
+.srt-tabs{padding-left:15px;padding-right:15px}
 .srt-overview,.srt-records,.srt-raw{padding:15px}
 .srt-stat-grid{grid-template-columns:1fr 1fr}
 .srt-overview-grid{grid-template-columns:1fr}
@@ -286,8 +278,7 @@ onBeforeUnmount(() => {
 .srt-header-actions button:first-child{font-size:12px;padding:7px}
 .srt-heading h2{font-size:19px}
 }
-@media(max-width:680px){.srt-eyebrow{font-size:12px;letter-spacing:.3px}
-.srt-emblem{display:none}
+@media(max-width:680px){
 .srt-heading p{max-width:200px}
 .srt-header-actions{gap:3px}
 .records-layout{display:flex;flex-direction:column;overflow:auto}
@@ -295,7 +286,6 @@ onBeforeUnmount(() => {
 .records-table-scroll{max-height:320px}
 .record-inspector{flex:none;overflow:visible}
 .srt-records{overflow:hidden}
-.srt-source-bar select{min-width:0;width:60vw}
 .records-toolbar{flex-wrap:wrap}
 .record-search{flex-basis:100%}
 .srt-footer>span:last-child{display:none}
@@ -307,8 +297,6 @@ onBeforeUnmount(() => {
 /* Hover backgrounds are dark globally; keep all SRT selectors legible. */
 .srt-dialog select:not(:disabled):hover,.srt-dialog select:focus{color:#fff!important;background-color:#052c48!important}
 .srt-dialog select option{color:#315a70;background:#fff}
-.srt-source-bar>div{flex:1}
-.srt-source-bar select{flex:1;min-width:0;width:100%;max-width:none;min-height:40px}
 .srt-dialog{font-size:14px;line-height:1.55}
 .records-toolbar{flex-wrap:wrap}
 .record-search{height:40px;min-width:240px}
@@ -319,5 +307,5 @@ onBeforeUnmount(() => {
 .record-field-grid dt small{color:#6e8797}
 .srt-tabs button{min-height:48px}
 .srt-records,.srt-overview,.srt-raw{overflow-anchor:none}
-@media(max-width:680px){.srt-eyebrow{display:none}.srt-header-actions button:first-child{font-size:12px}.srt-raw>div{flex-wrap:wrap}}
+@media(max-width:680px){.srt-header-actions button:first-child{font-size:12px}.srt-raw>div{flex-wrap:wrap}}
 </style>

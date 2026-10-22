@@ -3,9 +3,8 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallo
 import { getFlightTaskMedia, getUavFlightTaskOptions, type UavFlightTaskOption } from '@/api/patrol'
 import type { FlightReviewMedia } from '@/api/flight-review'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
-import { toggleVideoSurfacePlayback } from '@/utils/video-playback'
+import SharedVideoPlayer from '@/workspace-components/spot-identification/SharedVideoPlayer.vue'
 
-const VideoTelemetryOverlay = defineAsyncComponent(() => import('@/workspace-components/spot-identification/VideoTelemetryOverlay.vue'))
 const SrtInfoDialog = defineAsyncComponent(() => import('@/workspace-components/spot-identification/SrtInfoDialog.vue'))
 
 type DataTab = 'collection' | 'recognition'
@@ -32,18 +31,9 @@ const pageSize = ref(40)
 const previewMedia = ref<LiveMediaItem>()
 const previewTask = ref<UavFlightTaskOption>()
 const previewItems = ref<CollectionMediaEntry[]>([])
-const videoElement = ref<HTMLVideoElement>()
-const videoPlaybackStarted = ref(false)
-const telemetryVisible = ref(false)
-const videoInteractionError = ref('')
-const srtContext = shallowRef<{ planName: string; media: FlightReviewMedia[]; initialId: string }>()
-watch(videoElement, (video, _previous, onCleanup) => {
-  videoPlaybackStarted.value = !!video && (!video.paused || video.played.length > 0)
-  if (!video || videoPlaybackStarted.value) return
-  const markStarted = () => { videoPlaybackStarted.value = true }
-  video.addEventListener('play', markStarted, { once: true })
-  onCleanup(() => video.removeEventListener('play', markStarted))
-}, { flush: 'sync' })
+const videoPlayer = ref<InstanceType<typeof SharedVideoPlayer>>()
+const videoPlayerVersion = ref(0)
+const srtContext = shallowRef<{ planName: string; media: FlightReviewMedia }>()
 const previewIndex = ref(-1)
 const previewScale = ref(1)
 const previewOffsetX = ref(0)
@@ -108,18 +98,9 @@ function taskReviewMedia(task: UavFlightTaskOption) {
 }
 function openSrtInfo(media: LiveMediaItem, task: UavFlightTaskOption) {
   if (!isVideoMedia(media)) return
-  videoElement.value?.pause()
-  const videos = (mediaByTask.value[task.id]?.all || []).filter(isVideoMedia)
-  if (!videos.some(item => item.id === media.id)) videos.unshift(media)
-  srtContext.value = { planName: task.name, media: videos.map(item => toReviewMedia(item, task)), initialId: `${task.id}:${media.id}` }
+  videoPlayer.value?.pause()
+  srtContext.value = { planName: task.name, media: toReviewMedia(media, task) }
 }
-async function togglePreviewVideo(event: MouseEvent) {
-  const video = videoElement.value
-  videoInteractionError.value = ''
-  try { await toggleVideoSurfacePlayback(event) }
-  catch { if (video && videoElement.value === video) videoInteractionError.value = '视频暂时无法播放，请使用底部播放按钮重试。' }
-}
-
 function mediaExtension(media: LiveMediaItem) {
   const name = media.name.split(/[?#]/)[0]?.trim() || ''
   return name.match(/\.([^.]+)$/)?.[1]?.toUpperCase() || ''
@@ -201,8 +182,7 @@ function resetPreviewTransform() {
   previewPointerId = undefined
 }
 function resetVideoPlayback() {
-  telemetryVisible.value = false
-  videoInteractionError.value = ''
+  videoPlayerVersion.value += 1
   window.clearTimeout(videoLoadTimer)
   videoPlaybackReady.value = false
   videoPlaybackFailed.value = false
@@ -254,7 +234,6 @@ function markVideoReady() {
   videoFailureReason.value = ''
 }
 function markVideoFailed() {
-  telemetryVisible.value = false
   window.clearTimeout(videoLoadTimer)
   videoPlaybackReady.value = false
   videoPlaybackFailed.value = true
@@ -395,10 +374,7 @@ onBeforeUnmount(() => {
       <button class="preview-close" title="退出全屏（Esc）" aria-label="退出全屏" @click="closePreview"><span>×</span><em>退出全屏</em></button>
       <button class="preview-nav preview-prev" title="上一张（← / ↑）" aria-label="上一张" @click.stop="switchPreview(-1)">‹</button>
       <section v-if="isVideoMedia(previewMedia)" class="preview-video-stage" @click.stop>
-        <video v-if="previewMedia.originalUrl && !videoPlaybackFailed" ref="videoElement" :key="`${previewTask?.id}:${previewMedia.id}:${videoFailureReason}`" :src="previewMedia.originalUrl" controls controlslist="nofullscreen" autoplay playsinline preload="auto" @loadeddata="markVideoReady" @canplay="markVideoReady" @playing="markVideoReady" @error="markVideoFailed" @click="togglePreviewVideo" />
-        <button v-if="previewMedia.originalUrl && !videoPlaybackFailed" type="button" class="collection-telemetry-toggle" :aria-pressed="telemetryVisible" @click.stop="telemetryVisible = !telemetryVisible">⌖ {{ telemetryVisible ? '关闭协同展示' : '协同展示' }}</button>
-        <VideoTelemetryOverlay v-if="telemetryVisible && previewReviewMedia && videoElement && !videoPlaybackFailed" :key="`${previewReviewMedia.taskId}:${previewReviewMedia.id}`" :media="previewReviewMedia" :media-list="previewTaskMedia" :video="videoElement" :playback-started="videoPlaybackStarted" :fullscreen="true" @close="telemetryVisible = false" />
-        <span v-if="videoInteractionError" class="video-interaction-error" role="status">{{ videoInteractionError }}</span>
+        <SharedVideoPlayer v-if="previewMedia.originalUrl && previewReviewMedia && !videoPlaybackFailed" ref="videoPlayer" :key="`${previewTask?.id}:${previewMedia.id}:${videoPlayerVersion}`" :media="previewReviewMedia" :media-list="previewTaskMedia" :src="previewMedia.originalUrl" autoplay fullscreen @ready="markVideoReady" @error="markVideoFailed" />
         <div v-if="previewMedia.originalUrl && !videoPlaybackReady && !videoPlaybackFailed" class="video-loading"><i></i><span>正在读取原视频…</span></div>
         <section v-if="videoPlaybackFailed || !previewMedia.originalUrl" class="hevc-notice">
           <i>!</i>
@@ -425,7 +401,7 @@ onBeforeUnmount(() => {
       <button class="preview-nav preview-next" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
       <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small></footer>
     </div>
-    <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" :initial-id="srtContext.initialId" @close="srtContext = undefined" />
+    <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" @close="srtContext = undefined" />
   </div>
 </template>
 
@@ -526,10 +502,6 @@ onBeforeUnmount(() => {
 .preview-image-stage img { width:auto; height:auto; max-width:100%; max-height:100%; border-radius:3px; object-fit:contain; box-shadow:0 16px 55px #000b; transform-origin:center; transition:transform .08s ease-out; will-change:transform; pointer-events:none; }
 .preview-image-stage.dragging img { transition:none; }
 .preview-video-stage { position:relative; width:calc(100vw - 220px); height:calc(100vh - 162px); display:flex; align-items:center; justify-content:center; overflow:hidden; background:#02060a; box-shadow:0 16px 55px #000b; }
-.preview-video-stage video { width:100%; height:100%; display:block; background:#000; object-fit:contain; }
-.collection-telemetry-toggle { position:absolute; z-index:3; top:6px; left:6px; padding:8px 12px; border:1px solid #7fdde8aa; border-radius:5px; color:#e6fbff; background:#0c344be6; font-size:12px; font-weight:700; cursor:pointer; }
-.collection-telemetry-toggle:hover,.collection-telemetry-toggle[aria-pressed=true] { background:#147c9d; }
-.video-interaction-error { position:absolute; z-index:3; bottom:72px; left:50%; max-width:calc(100% - 32px); transform:translateX(-50%); padding:8px 12px; border-radius:5px; color:#fff; background:#102d40e8; font-size:13px; pointer-events:none; }
 .video-loading { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:#b9c8d5; background:#07111ddd; font-size:13px; pointer-events:none; }
 .video-loading i { width:32px; height:32px; border:3px solid #648399; border-top-color:#58c7ff; border-radius:50%; animation:video-loading-spin .8s linear infinite; }
 .preview-video-download { position:absolute; z-index:3; top:16px; right:16px; display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 14px; color:#fff; border:1px solid #72c9f7; border-radius:5px; background:#126eaaeb; box-shadow:0 5px 15px #0005; font-size:12px; font-weight:600; text-decoration:none; }

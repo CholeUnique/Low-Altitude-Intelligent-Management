@@ -81,8 +81,13 @@ router.beforeEach(async (to) => {
     const path = firstAllowedPath(taskPermissionOrder, user.hasPermission)
     if (path && path !== to.path) return path
   }
-  if (to.name === 'account-management' && to.params.section !== 'profile' && user.currentUser?.role !== 'ADMIN') {
-    return { name: 'forbidden', query: { from: to.fullPath } }
+  if (to.name === 'account-management') {
+    const section = String(to.params.section || 'profile')
+    const role = user.currentUser?.role
+    if (section !== 'profile' && role !== 'ADMIN'
+      && !(user.isActiveDepartmentAdmin && ['users', 'departments', 'scenes', 'permissions'].includes(section))) {
+      return { name: 'forbidden', query: { from: to.fullPath } }
+    }
   }
   const permission = requiredPermission(to)
   if (permission && !user.hasPermission(permission)) {

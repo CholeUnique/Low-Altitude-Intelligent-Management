@@ -25,6 +25,8 @@ class Bounds {
   getNorth() { return Math.max(...this.points.map(point => point.lat)) }
   getSouthWest() { return { lng: this.getWest(), lat: this.getSouth() } }
   getNorthEast() { return { lng: this.getEast(), lat: this.getNorth() } }
+  getCenter() { return { lng: (this.getWest() + this.getEast()) / 2, lat: (this.getSouth() + this.getNorth()) / 2 } }
+  contains(point) { return point.lng >= this.getWest() && point.lng <= this.getEast() && point.lat >= this.getSouth() && point.lat <= this.getNorth() }
 }
 
 export function harness() {
@@ -35,6 +37,12 @@ export function harness() {
     constructor(options) { this.options = options; this._map = { unproject }; this.listeners = new Map(); this.events = [] }
     on(name, callback) { this.listeners.set(name, callback); return this }
     fire(name, event) { this.events.push({ name, ...event }); this.listeners.get(name)?.(event) }
+    _isValidTile(coords) { return coords.x >= 0 && coords.y >= 0 }
+    _tileCoordsToBounds(coords) {
+      const nw = this._map.unproject({ x: coords.x * 256, y: coords.y * 256 }, coords.z)
+      const se = this._map.unproject({ x: (coords.x + 1) * 256, y: (coords.y + 1) * 256 }, coords.z)
+      return new Bounds([nw, se])
+    }
     onAdd(map) { this._map = map; return this }
     onRemove() { this._map = undefined; return this }
     getTileSize() { return { x: this.options.tileSize || 256, y: this.options.tileSize || 256 } }
@@ -71,7 +79,7 @@ export function harness() {
   } }
   const source = ts.transpileModule(readFileSync('src/utils/map-service-layer.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const module = { exports: {} }
-  const internals = new Function('require', 'module', 'exports', `${source}\nreturn {MatrixTileLayer, AdvertisedTileLayer, OgcWmsTileLayer, drawTileTriangle, resolveWmts, resolveWms, projectionWkid};`)(id => {
+  const internals = new Function('require', 'module', 'exports', `${source}\nreturn {MatrixTileLayer, CoverageAwareArcGisTileLayer, AdvertisedTileLayer, OgcWmsTileLayer, drawTileTriangle, resolveWmts, resolveWms, projectionWkid};`)(id => {
     if (id === 'leaflet') return { default: L }
     if (id === 'proj4') return { default: proj4 }
     throw new Error(`Unexpected dependency ${id}`)

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import L from 'leaflet'
+import { ElTooltip } from 'element-plus'
 import 'leaflet/dist/leaflet.css'
 import { getFlightReviewSrtFile, getFlightReviewVideoSrtFile, type FlightReviewMedia } from '@/api/flight-review'
 import { getTiandituAddress } from '@/api/geocoding'
@@ -18,6 +19,8 @@ const panelSize = ref<TelemetryPanelSize>()
 const videoBounds = shallowRef<TelemetryPanelBounds>()
 const dragging = ref(false)
 const resizing = ref(false)
+const navigationNoticePending = ref(false)
+let navigationNoticeTimer: ReturnType<typeof setTimeout> | undefined
 const panelStyle = computed(() => ({
   ...(panelPosition.value ? { left: `${panelPosition.value.left}px`, top: `${panelPosition.value.top}px`, right: 'auto', bottom: 'auto' } : {}),
   ...(panelSize.value ? { width: `${panelSize.value.width}px`, height: `${panelSize.value.height}px` } : {}),
@@ -57,6 +60,7 @@ let cameraMoving = false
 let lastRenderedTime: number | undefined
 let playbackActive = false
 let playbackLocationTime: number | undefined
+let trackReturnZoom: number | undefined
 
 /** 仅首次点击播放时查询一次；SRT 尚未就绪时保留首次播放的媒体时刻。 */
 function queryPlaybackLocation() {
@@ -263,14 +267,40 @@ function renderPosition(forceFollow = false) {
 
 function showTrack() {
   if (!map || !track) return
+  if (trackReturnZoom === undefined) trackReturnZoom = map.getZoom()
   follow.value = false
   map.stop()
   map.fitBounds(track.getBounds(), { padding: [22, 22], maxZoom: 18, animate: false })
 }
 
+function toggleFollow() {
+  if (follow.value) {
+    follow.value = false
+    return
+  }
+  const point = position.value || points.value[0]
+  const returnZoom = trackReturnZoom
+  trackReturnZoom = undefined
+  follow.value = true
+  if (!map || !point) return
+  map.stop()
+  cameraMoving = false
+  map.setView([point.latitude, point.longitude], returnZoom ?? Math.max(map.getZoom(), 17), { animate: false })
+}
+
+function showNavigationNotice() {
+  if (navigationNoticeTimer) clearTimeout(navigationNoticeTimer)
+  navigationNoticePending.value = true
+  navigationNoticeTimer = setTimeout(() => {
+    navigationNoticePending.value = false
+    navigationNoticeTimer = undefined
+  }, 3000)
+}
+
 function renderTrack() {
   track?.remove()
   track = undefined
+  trackReturnZoom = undefined
   if (!map) return
   if (!points.value.length) { renderPosition(); return }
   // 限制小窗路线绘制量；同步定位仍使用全部原始记录，不跨越缺失区间连线。
@@ -395,7 +425,7 @@ watch(() => props.video, video => {
   }
 }, { immediate: true, flush: 'post' })
 watch(() => props.fullscreen, async () => { await nextTick(); updatePanelLayout(true) }, { flush: 'post' })
-onBeforeUnmount(() => { endDrag(); endResize(); releaseVideoClock?.(); locationResolver.dispose(); resetRequest(); resizeObserver?.disconnect(); map?.remove() })
+onBeforeUnmount(() => { if (navigationNoticeTimer) clearTimeout(navigationNoticeTimer); endDrag(); endResize(); releaseVideoClock?.(); locationResolver.dispose(); resetRequest(); resizeObserver?.disconnect(); map?.remove() })
 </script>
 
 <template>
@@ -411,9 +441,9 @@ onBeforeUnmount(() => { endDrag(); endResize(); releaseVideoClock?.(); locationR
       <span>{{ formatTelemetryCoordinates(position) }}</span>
       <span>相对高度 {{ position?.relativeAltitude !== undefined ? `${position.relativeAltitude.toFixed(1)} m` : '—' }}</span>
     </div>
-    <div class="telemetry-location" :class="{ 'is-unavailable': location.status === 'error' }" :title="location.text" aria-live="polite"><span>{{ locationLabel }}</span><span>{{ location.text }}</span></div>
+    <div class="telemetry-location" :class="{ 'is-unavailable': location.status === 'error' }" aria-live="polite"><span>{{ locationLabel }}</span><span :title="location.text">{{ location.text }}</span><ElTooltip popper-class="navigation-pending-tooltip" :visible="navigationNoticePending" :teleported="false" :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }" placement="top" effect="light"><template #content><div class="navigation-tooltip-card" role="status"><strong>该功能暂未接入</strong></div></template><button type="button" class="navigation-button" aria-label="导航" @click="showNavigationNotice">导航</button></ElTooltip></div>
     <div class="telemetry-actions">
-      <button type="button" :disabled="!points.length" :aria-pressed="follow" @click="follow = !follow">{{ follow ? '跟随中' : '跟随无人机' }}</button>
+      <button type="button" :disabled="!points.length" :aria-pressed="follow" @click="toggleFollow">{{ follow ? '跟随中' : '跟随无人机' }}</button>
       <button type="button" :disabled="!points.length" @click="showTrack">全程轨迹</button>
       <label class="srt-picker" :title="sourceName">{{ points.length ? '更换 SRT' : '选择 SRT' }}<input type="file" accept=".srt" aria-label="选择本地 SRT 文件" @change="chooseLocal" /></label>
     </div>
@@ -432,7 +462,8 @@ onBeforeUnmount(() => { endDrag(); endResize(); releaseVideoClock?.(); locationR
 .telemetry-map-wrap{position:relative;flex:1;min-height:64px}.telemetry-map{height:100%;background:#263e4a}.telemetry-state{position:absolute;inset:0;z-index:500;display:grid;place-items:center;padding:20px;text-align:center;background:#102d40e8;line-height:1.8}.telemetry-gap{position:absolute;top:8px;left:8px;right:8px;z-index:500;padding:5px;background:#102d40e8;text-align:center}
 .telemetry-info{display:flex;flex-wrap:wrap;gap:5px 12px;padding:8px 10px;color:#b8dfeb;font-variant-numeric:tabular-nums}.telemetry-actions{display:flex;gap:6px;padding:0 10px 8px}.telemetry-actions button,.srt-picker{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:1;padding:5px;border:1px solid #4d7e92;border-radius:4px;color:#d3f1fc;background:#1d4356;font:inherit;cursor:pointer}.telemetry-actions button[aria-pressed=true]{border-color:#2ad3e5;color:#46dfec}.telemetry-actions button:disabled{opacity:.4;cursor:default}.srt-picker input{position:absolute;inset:0;width:100%;opacity:0;cursor:pointer}.srt-picker:focus-within{outline:2px solid #4fe2f4}.server-srt{display:block;box-sizing:border-box;width:calc(100% - 20px);margin:0 10px 8px;padding:4px;color:#d3f1fc;background:#1d4356;border:1px solid #4d7e92;border-radius:4px;font:inherit}.telemetry-source,.telemetry-warning{margin:0 10px 8px;color:#91b5c4;font-size:10px;overflow-wrap:anywhere}.telemetry-warning{color:#edcc8c}.telemetry-map :deep(.video-drone-marker){color:#fff;filter:drop-shadow(0 1px 4px #001f38)}.telemetry-map :deep(.video-drone-marker svg){width:32px;height:32px;fill:#118eb5;stroke:currentColor;stroke-width:1.7}
 .backend-srt-retry{display:block;width:calc(100% - 20px);margin:0 10px 8px;padding:5px;border:1px solid #4d7e92;border-radius:4px;color:#d3f1fc;background:#1d4356;font:inherit;cursor:pointer}.backend-srt-retry:disabled{opacity:.4;cursor:default}
-.telemetry-info{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;align-items:center;gap:6px;padding:9px 10px 6px;font-size:clamp(8px,2.6cqw,11px);white-space:nowrap}.telemetry-info>span:nth-child(2){text-align:center}.telemetry-info>span:last-child{text-align:right}.telemetry-location{display:flex;align-items:baseline;gap:3px;padding:0 10px 9px;color:#b8dfeb;font-size:11px;line-height:1.6}.telemetry-location>span:first-child{flex:none;color:#91b5c4}.telemetry-location>span:last-child{min-width:0;overflow-wrap:anywhere}.telemetry-location.is-unavailable{color:#edcc8c}.telemetry-actions{padding-bottom:10px}
+.telemetry-info{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;align-items:center;gap:6px;padding:9px 10px 6px;font-size:clamp(8px,2.6cqw,11px);white-space:nowrap}.telemetry-info>span:nth-child(2){text-align:center}.telemetry-info>span:last-child{text-align:right}.telemetry-location{display:flex;align-items:baseline;gap:3px;padding:0 10px 9px;color:#b8dfeb;font-size:11px;line-height:1.6}.telemetry-location>span:first-child{flex:none;color:#91b5c4}.telemetry-location>span:nth-child(2){flex:1;min-width:0;overflow-wrap:anywhere}.telemetry-location.is-unavailable{color:#edcc8c}.navigation-button{flex:none;margin-left:6px;padding:3px 8px;border:1px solid #4d7e92;border-radius:4px;color:#d3f1fc;background:#1d4356;font:inherit;cursor:pointer}.navigation-button:hover{border-color:#39bdd1;color:#55e0ed;background:#245066}.telemetry-actions{padding-bottom:10px}
 .telemetry-header{flex:none;gap:8px}.telemetry-window-actions{display:flex;align-items:center;gap:3px;flex:none}.telemetry-window-actions button{width:25px;height:28px;padding:0;font-size:19px}.telemetry-window-actions button:hover{color:#51e2f0;background:#245066;border-radius:4px}.telemetry-controls{flex:0 1 auto;min-height:0;max-height:calc(100% - 120px);overflow:auto;padding-bottom:5px;scrollbar-width:thin}.telemetry-resize-handle{position:absolute;z-index:4;bottom:0;width:19px;height:19px;padding:0;border:0;background:transparent;touch-action:none}.telemetry-resize-handle.at-left{left:0;cursor:nesw-resize}.telemetry-resize-handle.at-right{right:0;cursor:nwse-resize}.telemetry-resize-handle::after{content:'';position:absolute;bottom:3px;right:3px;width:7px;height:7px;border-bottom:2px solid #86c4d5;border-right:2px solid #86c4d5}.telemetry-resize-handle.at-left::after{right:auto;left:3px;transform:rotate(90deg)}.telemetry-resize-handle:focus-visible{outline:2px solid #4fe2f4;outline-offset:-2px}
 .telemetry-header>div:first-child{flex:1;min-width:0}.telemetry-header small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.navigation-tooltip-card{padding:9px 12px;border-radius:7px;background:linear-gradient(135deg,#fff,#fff5f6);font-family:"Microsoft YaHei",sans-serif}.navigation-tooltip-card strong{display:block;color:#c43b4d;font-size:12px;line-height:1.4;white-space:nowrap}
 </style>

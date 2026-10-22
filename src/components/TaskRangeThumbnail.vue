@@ -72,7 +72,7 @@ onMounted(() => {
   }).setView([32.49, 119.85], 16)
   if (token) {
     L.tileLayer(tileUrl('img'), { subdomains, maxNativeZoom: 18, maxZoom: 22, noWrap: true }).addTo(map)
-    L.tileLayer(tileUrl('cia'), { subdomains, maxNativeZoom: 18, maxZoom: 22, noWrap: true, opacity: .78 }).addTo(map)
+    L.tileLayer(tileUrl('cia'), { subdomains, maxNativeZoom: 18, maxZoom: 22, noWrap: true }).addTo(map)
   } else {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxNativeZoom: 19, maxZoom: 22 }).addTo(map)
   }

@@ -12,6 +12,8 @@ export interface UserDepartment {
   deptName: string
   deptCode?: string
   isDefault?: boolean
+  isDeptAdmin?: boolean
+  deptRole?: string
 }
 
 export interface CurrentUser {

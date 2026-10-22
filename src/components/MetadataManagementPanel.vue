@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import StatusConfirmDialog from '@/components/StatusConfirmDialog.vue'
 import {
   addMetadataItem,
   addMetadataType,
@@ -187,14 +188,39 @@ async function submitType() {
   }
 }
 
-async function toggleType(row: MetadataType) {
-  const next = row.status === 0 ? 1 : 0
-  if (!window.confirm(`确认${next ? '启用' : '停用'}元数据类型“${row.name}”吗？`)) return
+type StatusTarget =
+  | { kind: 'type'; row: MetadataType; nextStatus: 0 | 1 }
+  | { kind: 'item'; row: MetadataItem; nextStatus: 0 | 1 }
+
+const statusTarget = ref<StatusTarget | null>(null)
+const statusBusy = ref(false)
+const statusSubject = computed(() => statusTarget.value?.kind === 'type' ? '元数据类型' : '元数据条目')
+
+function toggleType(row: MetadataType) {
+  statusTarget.value = { kind: 'type', row, nextStatus: row.status === 0 ? 1 : 0 }
+}
+
+async function confirmStatusChange() {
+  const target = statusTarget.value
+  if (!target || statusBusy.value) return
+  statusBusy.value = true
   try {
-    await updateMetadataTypeStatus(String(row.id), next)
-    showSuccess(`元数据类型已${next ? '启用' : '停用'}`)
-    await loadTypes()
-  } catch (error) { showError(error) }
+    if (target.kind === 'type') {
+      await updateMetadataTypeStatus(String(target.row.id), target.nextStatus)
+      showSuccess(`元数据类型已${target.nextStatus ? '启用' : '停用'}`)
+      await loadTypes()
+    } else {
+      await updateMetadataItemStatus(String(target.row.id), target.nextStatus)
+      showSuccess(`元数据条目已${target.nextStatus ? '启用' : '停用'}`)
+      await loadItems()
+    }
+    statusTarget.value = null
+  } catch (error) {
+    statusTarget.value = null
+    showError(error)
+  } finally {
+    statusBusy.value = false
+  }
 }
 
 async function removeType(row: MetadataType) {
@@ -251,14 +277,8 @@ async function submitItem() {
   }
 }
 
-async function toggleItem(row: MetadataItem) {
-  const next = row.status === 0 ? 1 : 0
-  if (!window.confirm(`确认${next ? '启用' : '停用'}元数据条目“${row.name}”吗？`)) return
-  try {
-    await updateMetadataItemStatus(String(row.id), next)
-    showSuccess(`元数据条目已${next ? '启用' : '停用'}`)
-    await loadItems()
-  } catch (error) { showError(error) }
+function toggleItem(row: MetadataItem) {
+  statusTarget.value = { kind: 'item', row, nextStatus: row.status === 0 ? 1 : 0 }
 }
 
 async function removeItem(row: MetadataItem) {
@@ -362,6 +382,8 @@ onMounted(() => void loadTypes(false))
         </form>
       </section>
     </div>
+
+    <StatusConfirmDialog :open="!!statusTarget" :action="statusTarget?.nextStatus === 1 ? 'enable' : 'disable'" :subject="statusSubject" :target="statusTarget?.row.name || ''" :description="statusTarget?.nextStatus === 1 ? `${statusSubject}启用后将重新出现在相关业务的可选项中。` : `${statusSubject}停用后将不再作为可用选项；原有配置及历史数据不会删除。`" :busy="statusBusy" @cancel="statusTarget = null" @confirm="confirmStatusChange" />
 
     <div v-if="itemEditorOpen" class="metadata-modal-mask" @mousedown.self="itemEditorOpen = false">
       <section class="metadata-modal"><header><div><h2>{{ itemEditorTitle }}</h2><p>{{ selectedType?.name }} · 条目配置</p></div><button @click="itemEditorOpen = false">×</button></header>

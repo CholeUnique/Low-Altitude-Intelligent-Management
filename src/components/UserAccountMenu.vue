@@ -44,7 +44,7 @@ async function logout() {
     <div v-if="open" class="account-dropdown" role="menu">
       <p>{{ user.currentUser?.username || user.name }}</p>
       <button class="account-dropdown__manage" type="button" role="menuitem" @click="openAccountManagement">
-        {{ user.currentUser?.role === 'ADMIN' ? '后台管理' : '修改资料' }}
+        {{ user.currentUser?.role === 'ADMIN' || user.isActiveDepartmentAdmin ? '后台管理' : '修改资料' }}
       </button>
       <button class="account-dropdown__logout" type="button" role="menuitem" :disabled="loggingOut" @click="logout">{{ loggingOut ? '正在退出…' : '退出系统' }}</button>
     </div>

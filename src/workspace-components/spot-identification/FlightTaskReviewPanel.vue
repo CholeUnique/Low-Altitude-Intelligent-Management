@@ -15,10 +15,9 @@ import {
   type FlightReviewPage,
 } from '@/api/flight-review'
 import { useUserStore } from '@/stores/user'
-import { toggleVideoSurfacePlayback } from '@/utils/video-playback'
 import SpotUploadDialog from './SpotUploadDialog.vue'
+import SharedVideoPlayer from './SharedVideoPlayer.vue'
 
-const VideoTelemetryOverlay = defineAsyncComponent(() => import('./VideoTelemetryOverlay.vue'))
 const SrtInfoDialog = defineAsyncComponent(() => import('./SrtInfoDialog.vue'))
 
 interface PlanRow {
@@ -58,19 +57,8 @@ const pageSize = ref(16)
 const detailPlanId = ref('')
 const previewMediaId = ref('')
 const mediaFullscreen = ref(false)
-const telemetryVisible = ref(false)
-const videoElement = ref<HTMLVideoElement>()
-const videoPlaybackStarted = ref(false)
-// 记录当前视频是否已经开始过播放，关闭/重开协同面板不会把恢复播放当成首次。
-watch(videoElement, (video, _previous, onCleanup) => {
-  videoPlaybackStarted.value = !!video && (!video.paused || video.played.length > 0)
-  if (!video || videoPlaybackStarted.value) return
-  const markStarted = () => { videoPlaybackStarted.value = true }
-  video.addEventListener('play', markStarted, { once: true })
-  onCleanup(() => video.removeEventListener('play', markStarted))
-}, { flush: 'sync' })
-const previewPlaybackError = ref('')
-const srtContext = shallowRef<{ planName: string; media: FlightReviewMedia[]; initialId: string }>()
+const videoPlayer = ref<InstanceType<typeof SharedVideoPlayer>>()
+const srtContext = shallowRef<{ planName: string; media: FlightReviewMedia }>()
 const previewState = ref<'loading' | 'ready' | 'error'>('loading')
 const previewFailure = ref<'missing' | 'unsupported' | 'timeout' | 'image' | 'video'>('missing')
 const previewImageUrl = ref('')
@@ -172,8 +160,6 @@ function handlePreviewImageError() {
   markPreviewFailed('image')
 }
 async function initializePreview() {
-  previewPlaybackError.value = ''
-  telemetryVisible.value = false
   const version = ++previewRequestVersion
   previewAbortController?.abort()
   previewAbortController = undefined
@@ -257,15 +243,6 @@ async function downloadPreviewMedia() {
 function enterMediaFullscreen() {
   if (previewState.value === 'ready') mediaFullscreen.value = true
 }
-async function togglePreviewVideo(event: MouseEvent) {
-  const video = videoElement.value
-  previewPlaybackError.value = ''
-  try {
-    await toggleVideoSurfacePlayback(event)
-  } catch {
-    if (video && videoElement.value === video) previewPlaybackError.value = '视频暂时无法播放，请使用底部播放按钮重试。'
-  }
-}
 function switchDetailMedia(step: number) {
   const items = detailMedia.value
   const index = items.findIndex((item) => mediaKey(item) === previewMediaId.value)
@@ -283,7 +260,6 @@ function handleDetailKeydown(event: KeyboardEvent) {
 }
 function closeDetail() {
   srtContext.value = undefined
-  telemetryVisible.value = false
   previewRequestVersion += 1
   mediaFullscreen.value = false
   detailPlanId.value = ''
@@ -522,8 +498,8 @@ function openSrtInfo(row: PlanRow, selected?: FlightReviewMedia) {
   const videos = row.media.filter(item => mediaKind(item) === 'video')
   const initial = selected || videos[0]
   if (!initial) return
-  videoElement.value?.pause()
-  srtContext.value = { planName: row.plan.name || '未命名计划', media: videos, initialId: mediaKey(initial) }
+  videoPlayer.value?.pause()
+  srtContext.value = { planName: row.plan.name || '未命名计划', media: initial }
 }
 function csvCell(value: string | number) {
   const safe = String(value).replace(/^[\s]*[=+@-]/, (prefix) => `'${prefix}`)
@@ -618,7 +594,7 @@ function exportList() {
           <main>
             <template v-if="previewMedia">
               <div class="media-stage" :class="{ 'can-expand': previewState === 'ready' && mediaKind(previewMedia) === 'image' }">
-                <video v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" ref="videoElement" :key="mediaKey(previewMedia)" :src="previewMedia.originalUrl" controls controlslist="nofullscreen" playsinline preload="auto" @loadeddata="markPreviewReady" @canplay="markPreviewReady" @playing="markPreviewReady" @error="markPreviewFailed('video')" @click="togglePreviewVideo" />
+                <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailRow.media" :src="previewMedia.originalUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
                 <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error' && previewImageUrl" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" @load="markPreviewReady" @error="handlePreviewImageError" @click="enterMediaFullscreen" />
                 <div v-if="previewState === 'loading'" class="preview-loading" role="status">正在读取{{ mediaKind(previewMedia) === 'video' ? '视频' : '图片' }}…</div>
                 <section v-if="previewState === 'error'" class="preview-unavailable" role="status">
@@ -628,11 +604,8 @@ function exportList() {
                   <small v-if="downloadError" class="download-error">{{ downloadError }}</small><small v-else-if="!previewMedia.localFileUrl && !previewMedia.originalUrl">后端未提供原文件地址，暂无法下载。</small>
                 </section>
                 <button v-if="previewState === 'ready' && !mediaFullscreen" type="button" class="expand-preview" @click="enterMediaFullscreen">⛶ 全屏查看</button>
-                <button v-if="mediaKind(previewMedia) === 'video' && previewState === 'ready'" type="button" class="telemetry-toggle" :aria-pressed="telemetryVisible" @click.stop="telemetryVisible = !telemetryVisible">⌖ {{ telemetryVisible ? '关闭协同展示' : '协同展示' }}</button>
-                <VideoTelemetryOverlay v-if="telemetryVisible && mediaKind(previewMedia) === 'video' && previewState === 'ready'" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailRow.media" :video="videoElement" :playback-started="videoPlaybackStarted" :fullscreen="mediaFullscreen" @close="telemetryVisible = false" />
                 <button v-if="mediaFullscreen && detailMedia.length > 1" type="button" class="fullscreen-nav previous" aria-label="上一个文件" title="上一项（← / ↑）" @click="switchDetailMedia(-1)">‹</button>
                 <button v-if="mediaFullscreen && detailMedia.length > 1" type="button" class="fullscreen-nav next" aria-label="下一个文件" title="下一项（→ / ↓）" @click="switchDetailMedia(1)">›</button>
-                <span v-if="previewPlaybackError" class="video-playback-notice" role="status">{{ previewPlaybackError }}</span>
               </div>
               <footer><span :title="previewMedia.fileName">{{ display(previewMedia.fileName) }}<small v-if="mediaFullscreen">　{{ previewOrdinal }} / {{ detailMedia.length }} · 方向键切换 · Esc 退出</small><small v-else-if="imageFallbackUsed && previewState === 'ready'">　未提供原图或原图无法加载，当前显示缩略图</small><small v-if="downloadError" class="download-error">　{{ downloadError }}</small></span><button v-if="previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></footer>
             </template>
@@ -642,7 +615,7 @@ function exportList() {
       </section>
     </div>
     <SpotUploadDialog v-if="uploadVisible" @close="uploadVisible = false" @uploaded="handleSpotUploaded" />
-    <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" :initial-id="srtContext.initialId" @close="srtContext = undefined" />
+    <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" @close="srtContext = undefined" />
   </div>
 </template>
 
@@ -716,12 +689,10 @@ function exportList() {
 .detail-body aside button.unavailable { opacity: .7; }
 .detail-body aside button small em { color: #b77352; font-style: normal; }
 .detail-body main { align-items: stretch; justify-content: stretch; background: #132836; }
-.media-stage { position: relative; flex: 1; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #142936; }
-.detail-body main .media-stage img,
-.detail-body main .media-stage video { display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
+.media-stage { position: relative; flex: 1; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding-right: 12px; box-sizing: border-box; background: #142936; }
+.media-stage :deep(.shared-video-player) { right: 12px; width: auto; }
+.detail-body main .media-stage img { display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
 .media-stage.can-expand img { cursor: zoom-in; }
-.media-stage video { cursor: pointer; }
-.video-playback-notice { position:absolute;left:50%;bottom:72px;z-index:2;max-width:calc(100% - 32px);transform:translateX(-50%);padding:8px 12px;border-radius:5px;color:#fff;background:#102d40e8;font-size:13px;pointer-events:none; }
 .preview-loading { position: absolute; inset: 0; display: grid; place-items: center; color: #d7e8ee; background: #152b35aa; font-size: 13px; pointer-events: none; }
 .preview-unavailable { max-width: 430px; margin: 20px; padding: 26px 30px; border: 1px solid #d2e3e8; border-radius: 10px; color: #345568; background: #f7fbfc; box-shadow: 0 12px 32px #071d2a55; text-align: center; }
 .preview-unavailable__icon { width: 36px; height: 36px; display: grid; place-items: center; margin: 0 auto 12px; border-radius: 50%; color: #b26c36; background: #fff0d9; font-size: 21px; font-weight: 700; }
@@ -736,8 +707,6 @@ function exportList() {
 .preview-unavailable small.download-error { color: #b04747; }
 .expand-preview { position: absolute; z-index: 2; top: 6px; right: 6px; padding: 8px 12px; border: 1px solid #e6f4f9aa; border-radius: 5px; color: #fff; background: #0c344bc7; font-size: 12px; font-weight: 700; cursor: pointer; }
 .expand-preview:hover { background: #147c9d; }
-.telemetry-toggle { position: absolute; z-index: 3; top: 6px; left: 6px; padding: 8px 12px; border: 1px solid #7fdde8aa; border-radius: 5px; color: #e6fbff; background: #0c344be6; font-size: 12px; font-weight: 700; cursor: pointer; }
-.telemetry-toggle:hover,.telemetry-toggle[aria-pressed="true"] { background: #147c9d; }
 .detail-media-item{position:relative;border-bottom:1px solid #e2ebef}.detail-media-item.is-selected{background:#e6f5f9}.detail-body aside .media-preview-choice{border-bottom:0}.detail-body aside .has-srt .media-preview-choice small{box-sizing:border-box;padding-right:60px}.detail-body aside .media-srt-button{position:absolute;right:6px;bottom:7px;width:auto;margin:0;padding:2px 5px;border:1px solid #b6dbe5;border-radius:4px;background:#edf9fc;color:#1685a3;font-size:9px;line-height:12px;white-space:nowrap}.detail-body aside .media-srt-button:hover{background:#d5f0f6}.row-actions{flex-wrap:wrap}
 .detail-body main footer { margin-top: 0; }
 .detail-body main footer small { color: #8199a5; font-size: 11px; }
