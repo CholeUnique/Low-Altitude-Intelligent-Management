@@ -63,7 +63,7 @@ async function prepare(item: TopicLayer) {
     if (!current(item, request)) return
     item.handle = markRaw(handle)
     // 业务辅助面图层也减淡，避免多层填色遮挡遥感底图。
-    handle.setFillOpacity?.(item.role === 'boundary' ? .03 : .12)
+    handle.setFillOpacity?.(item.role === 'boundary' ? .05 : .18)
     item.categories.forEach(category => { category.color = item.role === 'project' ? '#ffca5d' : handle.categoryFilter?.values.find(value => value.value === category.value)?.color || handle.color })
     if (item.categories.some(category => category.style)) {
       handle.setRenderer?.({ type:'uniqueValue', field1:item.categoryField, fieldDelimiter:',', defaultSymbol:c5Symbol(resolveC5Style('')),
