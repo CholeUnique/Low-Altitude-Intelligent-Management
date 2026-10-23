@@ -48,7 +48,7 @@ const monthTitle = computed(() => `${cursor.value.getFullYear()} 年 ${cursor.va
 const availableStatuses = computed(() => [...new Set(plans.value.map((plan) => plan.status).filter((value): value is number => value !== undefined))].sort((a, b) => a - b))
 const availableDevices = computed(() => [...new Set(plans.value.map((plan) => plan.sn).filter((value): value is string => Boolean(value)))].sort())
 const filteredPlans = computed(() => plans.value.filter((plan) => {
-  const search = `${plan.title} ${plan.area} ${plan.sn || ''} ${plan.deviceType || ''}`.toLowerCase()
+  const search = `${plan.title} ${plan.planTitle || ''} ${plan.area} ${plan.sn || ''} ${plan.deviceType || ''}`.toLowerCase()
   return (!keyword.value.trim() || search.includes(keyword.value.trim().toLowerCase()))
     && (statusFilter.value === '' || plan.status === statusFilter.value)
     && (!deviceFilter.value || plan.sn === deviceFilter.value)
@@ -189,7 +189,7 @@ watch(() => user.activeDeptId, () => void loadPlans())
         <div class="toolbar-title"><b>飞行排期</b><span>查看每日计划与执行进度</span></div>
         <div class="month-switch"><button type="button" aria-label="上个月" @click="moveMonth(-1)">‹</button><b>{{ monthTitle }}</b><button type="button" aria-label="下个月" @click="moveMonth(1)">›</button><button type="button" class="today" @click="goToday">今天</button></div>
       </div>
-      <div class="filters"><input v-model="keyword" aria-label="搜索飞行计划" placeholder="搜索计划、航线或设备" /><label>状态<select v-model="statusFilter"><option value="">全部状态</option><option v-for="status in availableStatuses" :key="status" :value="status">{{ statusLabel(status) }}</option></select></label><label>设备<select v-model="deviceFilter"><option value="">全部设备</option><option v-for="device in availableDevices" :key="device" :value="device">{{ device }}</option></select></label><div class="mode-switch"><button type="button" :class="{ active: displayMode === 'calendar' }" @click="displayMode = 'calendar'">日历</button><button type="button" :class="{ active: displayMode === 'list' }" @click="displayMode = 'list'">列表</button></div></div>
+      <div class="filters"><input v-model="keyword" aria-label="搜索飞行任务或计划" placeholder="搜索任务、计划、航线或设备" /><label>状态<select v-model="statusFilter"><option value="">全部状态</option><option v-for="status in availableStatuses" :key="status" :value="status">{{ statusLabel(status) }}</option></select></label><label>设备<select v-model="deviceFilter"><option value="">全部设备</option><option v-for="device in availableDevices" :key="device" :value="device">{{ device }}</option></select></label><div class="mode-switch"><button type="button" :class="{ active: displayMode === 'calendar' }" @click="displayMode = 'calendar'">日历</button><button type="button" :class="{ active: displayMode === 'list' }" @click="displayMode = 'list'">列表</button></div></div>
     </section>
 
     <div v-if="warning" class="data-warning" role="status">{{ warning }}</div>
@@ -211,7 +211,7 @@ watch(() => user.activeDeptId, () => void loadPlans())
         <div class="daily-list">
           <article v-for="plan in selectedPlans" :key="plan.id">
             <div class="daily-list__top"><time>{{ planTime(plan) }}</time><em :class="statusTone(plan.status)">{{ statusLabel(plan.status, plan.statusText) }}</em></div>
-            <b>{{ plan.title }}</b><span>{{ plan.area }}</span><small>{{ plan.sn || '未返回设备 SN' }}<template v-if="plan.deviceType"> · {{ plan.deviceType }}</template></small>
+            <b>{{ plan.title }}</b><span v-if="plan.planTitle && plan.planTitle !== plan.title">所属计划：{{ plan.planTitle }}</span><span>{{ plan.area }}</span><small>{{ plan.sn || '未返回设备 SN' }}<template v-if="plan.deviceType"> · {{ plan.deviceType }}</template></small>
           </article>
           <div v-if="!selectedPlans.length" class="empty"><i>◇</i><b>当天没有飞行安排</b><span>选择其他日期查看对应计划</span></div>
         </div>
@@ -219,7 +219,7 @@ watch(() => user.activeDeptId, () => void loadPlans())
       </aside>
     </section>
 
-    <section v-else class="plan-list-panel"><header><span>计划名称</span><span>执行时间</span><span>航线</span><span>设备</span><span>状态</span></header><div><article v-for="plan in filteredPlans" :key="plan.id"><span><b>{{ plan.title }}</b><small>{{ plan.taskId ? `任务 ID：${plan.taskId}` : `计划 ID：${plan.planId}` }}</small></span><span>{{ plan.date || '日期未返回' }} {{ planTime(plan) }}</span><span>{{ plan.area }}</span><span>{{ plan.sn || '-' }}<small>{{ plan.deviceType || '' }}</small></span><span><em :class="statusTone(plan.status)">{{ statusLabel(plan.status, plan.statusText) }}</em></span></article><div v-if="!filteredPlans.length" class="empty">暂无符合条件的飞行排期</div></div></section>
+    <section v-else class="plan-list-panel"><header><span>任务 / 计划名称</span><span>执行时间</span><span>航线</span><span>设备</span><span>状态</span></header><div><article v-for="plan in filteredPlans" :key="plan.id"><span><b>{{ plan.title }}</b><small v-if="plan.planTitle && plan.planTitle !== plan.title">所属计划：{{ plan.planTitle }}</small><small>{{ plan.taskId ? `任务 ID：${plan.taskId}` : `计划 ID：${plan.planId}` }}</small></span><span>{{ plan.date || '日期未返回' }} {{ planTime(plan) }}</span><span>{{ plan.area }}</span><span>{{ plan.sn || '-' }}<small>{{ plan.deviceType || '' }}</small></span><span><em :class="statusTone(plan.status)">{{ statusLabel(plan.status, plan.statusText) }}</em></span></article><div v-if="!filteredPlans.length" class="empty">暂无符合条件的飞行排期</div></div></section>
   </div>
 </template>
 

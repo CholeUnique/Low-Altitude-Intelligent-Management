@@ -7,6 +7,15 @@
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; min-width: 0; min-height: 100%; }
 body { margin: 0; min-height: 100vh; background: #f3f6f9; }
+/* 后台管理各页面的悬浮反馈保持内容居中，关闭按钮使用右侧预留空间。 */
+#app :is(.management-content > .message, .scene-message, .permission-message, .metadata-message, .service-message) {
+  width: max-content;
+  min-width: 160px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding-inline: 40px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
 button, input { font: inherit; }
 /* 所有可操作按钮/菜单提供一致的悬停反馈；具体模块可用更高优先级样式覆盖颜色。 */
 button:not(:disabled), select:not(:disabled), [role="button"] { transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, filter .16s ease, transform .16s ease; }

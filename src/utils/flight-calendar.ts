@@ -3,6 +3,7 @@ import type { FlightPlanItem } from '@/mocks/route-planning'
 export interface FlightCalendarItem extends FlightPlanItem {
   planId?: string
   taskId?: string
+  planTitle?: string
   statusText?: string
 }
 
@@ -60,7 +61,8 @@ export function toFlightCalendarItems(plans: FlightPlanItem[], tasks: FlightTask
       date: scheduledAt.slice(0, 10),
       start: scheduledAt.slice(11, 16) || '--:--',
       end: executionDateTime(task.endTime).slice(11, 16),
-      title: text(task.planName) || plan?.title || text(task.name) || `飞行任务 ${index + 1}`,
+      title: text(task.name) || text(task.planName) || plan?.title || `飞行任务 ${index + 1}`,
+      planTitle: text(task.planName) || plan?.title || undefined,
       area: text(task.waylineName) || plan?.area || '-',
       routeId: text(task.waylineId) || plan?.routeId || '',
       sn: text(task.sn) || text(task.droneSn) || plan?.sn,

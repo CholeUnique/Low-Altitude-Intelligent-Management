@@ -582,7 +582,7 @@ function exportList() {
 
     <div v-if="detailRow" class="detail-backdrop" :class="{ 'is-fullscreen': mediaFullscreen }" @click.self="closeDetail">
       <section class="detail-dialog" :class="{ 'is-fullscreen': mediaFullscreen }" role="dialog" aria-modal="true" aria-label="飞行成果详情">
-        <header><div><span>飞行成果</span><h2>{{ display(detailRow.plan.name) }}</h2><small>计划 ID：{{ detailRow.plan.id }} · {{ detailRow.tasks.length }} 个飞行任务 · {{ detailRow.media.length }} 个文件</small></div><button type="button" aria-label="关闭" @click="closeDetail">×</button></header>
+        <header><div class="detail-heading"><h2>飞行成果</h2><div class="detail-heading__summary"><strong>{{ display(detailRow.plan.name) }}</strong><small>计划 ID：{{ detailRow.plan.id }} · {{ detailRow.tasks.length }} 个飞行任务 · {{ detailRow.media.length }} 个文件</small></div></div><button type="button" aria-label="关闭" @click="closeDetail">×</button></header>
         <button v-if="mediaFullscreen" class="fullscreen-exit" type="button" aria-label="退出全屏" title="退出全屏（Esc）" @click="mediaFullscreen = false">× <span>退出全屏</span></button>
         <div class="detail-body">
           <aside aria-label="成果文件列表">
@@ -729,5 +729,16 @@ function exportList() {
 .fullscreen-nav { position: absolute; z-index: 4; top: 50%; width: 44px; height: 52px; border: 1px solid #ffffff66; border-radius: 7px; color: #fff; background: #0b3449b8; font-size: 35px; line-height: 1; transform: translateY(-50%); cursor: pointer; }
 .fullscreen-nav:hover { background: #187f9f; }
 .fullscreen-nav.previous { left: 24px; }.fullscreen-nav.next { right: 24px; }
-@media(max-width:800px) { .detail-backdrop:not(.is-fullscreen) { padding: 8px; } .detail-body { grid-template-columns: 180px minmax(0,1fr); } .preview-unavailable { margin: 12px; padding: 18px; } .fullscreen-nav.previous { left: 8px; } .fullscreen-nav.next { right: 8px; } }
+.detail-dialog>header { gap: 18px; }
+.detail-heading { display: flex; flex: 1; min-width: 0; align-items: center; gap: 22px; }
+.detail-heading h2 { flex: none; margin: 0; color: #24495c; font-size: 22px; line-height: 1.3; }
+.detail-heading__summary { display: flex; min-width: 0; flex-direction: column; gap: 5px; padding-left: 22px; border-left: 1px solid #dce8ed; }
+.detail-heading__summary strong { overflow: hidden; color: #31566b; font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.detail-dialog .detail-heading__summary small { overflow: hidden; color: #8197a4; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.detail-dialog>header button { flex: none; }
+.detail-dialog:not(.is-fullscreen) .media-stage::after { position: absolute; z-index: 1; top: 0; right: 0; bottom: 0; width: 12px; background: #fff; content: ''; pointer-events: none; }
+.media-stage .expand-preview { right: 12px; }
+.detail-dialog.is-fullscreen .media-stage { padding-right: 0; }
+.detail-dialog.is-fullscreen .media-stage :deep(.shared-video-player) { right: 0; width: 100%; }
+@media(max-width:800px) { .detail-backdrop:not(.is-fullscreen) { padding: 8px; } .detail-body { grid-template-columns: 180px minmax(0,1fr); } .detail-heading { gap: 12px; } .detail-heading h2 { font-size: 18px; } .detail-heading__summary { gap: 3px; padding-left: 12px; } .detail-heading__summary strong { font-size: 14px; } .detail-dialog .detail-heading__summary small { font-size: 10px; } .preview-unavailable { margin: 12px; padding: 18px; } .fullscreen-nav.previous { left: 8px; } .fullscreen-nav.next { right: 8px; } }
 </style>

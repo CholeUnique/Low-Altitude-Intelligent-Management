@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { getUserPage } from '@/api/account-management'
+import { getUserDetail, getUserPage } from '@/api/account-management'
 import {
   getPermissionMenuTree,
   getUserDepartmentPermissions,
@@ -12,8 +12,10 @@ import {
 } from '@/api/permission-management'
 import type { CurrentUser } from '@/types'
 import { useUserStore } from '@/stores/user'
+import { canDepartmentAdminManageUser, hasDepartmentAdminRole, isDepartmentAdmin as isDepartmentAdminInDept, mergeUserDepartmentIdentity, needsDepartmentRoleLookup, userRoleLabel } from '@/utils/user-role'
 
 const userStore = useUserStore()
+const isSystemAdmin = computed(() => userStore.currentUser?.role === 'ADMIN')
 const isDepartmentAdmin = computed(() => userStore.isActiveDepartmentAdmin)
 
 const users = ref<CurrentUser[]>([])
@@ -29,6 +31,8 @@ const permissionLoading = ref(false)
 const submitting = ref(false)
 const notice = ref('')
 const errorMessage = ref('')
+let userLoadVersion = 0
+let permissionLoadVersion = 0
 
 const selectedUser = computed(() => users.value.find((item) => String(item.id) === selectedUserId.value))
 const selectedDepartment = computed(() => permissions.value.find((item) => item.deptId === selectedDeptId.value))
@@ -80,27 +84,50 @@ function normalizeUser(value: CurrentUser): CurrentUser {
   }
 }
 
+function canAssignPermissions(user: CurrentUser | undefined) {
+  if (!user || user.role === 'ADMIN') return false
+  if (isSystemAdmin.value) return true
+  if (!isDepartmentAdmin.value || user.role !== 'USER' || hasDepartmentAdminRole(user)) return false
+  const deptId = String(userStore.activeDeptId || '')
+  return Boolean(deptId) && canDepartmentAdminManageUser(user, String(userStore.currentUser?.id || ''), [deptId])
+}
+
 async function loadUsers() {
+  const version = ++userLoadVersion
+  ++permissionLoadVersion
+  permissionLoading.value = false
   userLoading.value = true
   try {
-    const result = await getUserPage({ pageNum: 1, pageSize: 100, keyword: userKeyword.value.trim(), role: 'USER', deptId: isDepartmentAdmin.value ? userStore.activeDeptId : undefined })
-    // 管理员天然拥有全部权限，不进入部门权限分配范围。即使后端忽略角色筛选，前端也会再次过滤。
-    users.value = (result.records || []).map(normalizeUser).filter((item) => item.role === 'USER'
-      && (!isDepartmentAdmin.value || (item.deptList || []).some((dept) => String(dept.deptId) === String(userStore.activeDeptId))
-        || String(item.deptId || item.defaultDeptId || '') === String(userStore.activeDeptId)))
+    const deptId = isDepartmentAdmin.value ? userStore.activeDeptId : undefined
+    const result = await getUserPage({ pageNum: 1, pageSize: 100, keyword: userKeyword.value.trim(), role: isSystemAdmin.value ? '' : 'USER', deptId })
+    // 与用户管理页使用同一身份来源：role=USER 还可能是部门管理员。
+    const resolved = await Promise.all((result.records || []).map(async (record) => {
+      const row = normalizeUser(record)
+      if (!needsDepartmentRoleLookup(row, isDepartmentAdmin.value)) return row
+      try {
+        const detail = normalizeUser(await getUserDetail(row.id, deptId))
+        return mergeUserDepartmentIdentity(row, detail)
+      } catch {
+        return row
+      }
+    }))
+    if (version !== userLoadVersion) return
+    users.value = resolved.filter(canAssignPermissions)
     if (!users.value.some((item) => String(item.id) === selectedUserId.value)) {
       selectedUserId.value = users.value[0] ? String(users.value[0].id) : ''
     }
     if (selectedUserId.value) await loadPermissions()
     else clearPermissionState()
   } catch (error) {
-    showError(error)
+    if (version === userLoadVersion) showError(error)
   } finally {
-    userLoading.value = false
+    if (version === userLoadVersion) userLoading.value = false
   }
 }
 
 function clearPermissionState() {
+  ++permissionLoadVersion
+  permissionLoading.value = false
   permissions.value = []
   selectedDeptId.value = ''
   baselineMenuIds.value = new Set()
@@ -121,9 +148,12 @@ function mergeUserDepartments(result: UserDepartmentPermission[]) {
 
 async function loadPermissions(preferredDeptId = selectedDeptId.value) {
   if (!selectedUserId.value) return clearPermissionState()
+  const version = ++permissionLoadVersion
+  const userId = selectedUserId.value
   permissionLoading.value = true
   try {
-    const result = await getUserDepartmentPermissions(selectedUserId.value, isDepartmentAdmin.value ? userStore.activeDeptId : undefined)
+    const result = await getUserDepartmentPermissions(userId, isDepartmentAdmin.value ? userStore.activeDeptId : undefined)
+    if (version !== permissionLoadVersion || userId !== selectedUserId.value) return
     permissions.value = mergeUserDepartments(isDepartmentAdmin.value ? result.filter((item) => item.deptId === String(userStore.activeDeptId)) : result)
     const defaultDeptId = String(selectedUser.value?.defaultDeptId || selectedUser.value?.deptId || '')
     selectedDeptId.value = permissions.value.some((item) => item.deptId === preferredDeptId)
@@ -133,15 +163,17 @@ async function loadPermissions(preferredDeptId = selectedDeptId.value) {
         : permissions.value[0]?.deptId || ''
     resetDraft()
   } catch (error) {
-    clearPermissionState()
-    showError(error)
+    if (version === permissionLoadVersion) {
+      clearPermissionState()
+      showError(error)
+    }
   } finally {
-    permissionLoading.value = false
+    if (version === permissionLoadVersion) permissionLoading.value = false
   }
 }
 
 async function selectUser(user: CurrentUser) {
-  if (user.role === 'ADMIN') return
+  if (!canAssignPermissions(user)) return
   if (String(user.id) === selectedUserId.value) return
   selectedUserId.value = String(user.id)
   selectedDeptId.value = ''
@@ -191,8 +223,8 @@ function togglePermission(menuId: string) {
 }
 
 function mutationPayload(menuIds: string[]) {
-  if (!selectedUser.value || selectedUser.value.role !== 'USER' || (isDepartmentAdmin.value && selectedDeptId.value !== String(userStore.activeDeptId))) {
-    throw new Error('管理员默认拥有全部权限，无需进行权限分配')
+  if (!canAssignPermissions(selectedUser.value) || !selectedDeptId.value || (isDepartmentAdmin.value && selectedDeptId.value !== String(userStore.activeDeptId))) {
+    throw new Error('无权为该用户配置所属部门权限')
   }
   return {
     userId: selectedUserId.value,
@@ -259,13 +291,13 @@ onMounted(async () => {
     <div v-if="errorMessage" class="permission-message permission-message--error">{{ errorMessage }}<button type="button" @click="errorMessage = ''">×</button></div>
 
     <div class="permission-heading">
-      <div><h2>权限管理</h2><p>为普通用户按所属部门配置功能访问权限；管理员默认拥有全部权限，无需单独分配</p></div>
+      <div><h2>权限管理</h2><p>按所属部门配置功能访问权限；部门管理员只能管理本部门普通用户，不能管理同级管理员</p></div>
       <button class="button button--ghost" type="button" :disabled="permissionLoading" @click="loadPermissions()">刷新权限</button>
     </div>
 
     <div class="permission-layout">
       <section class="user-card">
-        <header><div><h3>选择普通用户</h3><span>{{ users.length }} 人</span></div></header>
+        <header><div><h3>{{ isSystemAdmin ? '选择用户' : '选择普通用户' }}</h3><span>{{ users.length }} 人</span></div></header>
         <form class="user-search" @submit.prevent="loadUsers"><input v-model.trim="userKeyword" placeholder="搜索账号、姓名或手机号"><button type="submit">查询</button></form>
         <div class="user-list">
           <div v-if="userLoading" class="permission-empty">正在加载用户…</div>
@@ -273,14 +305,14 @@ onMounted(async () => {
           <button v-for="user in users" v-else :key="user.id" type="button" :class="{ active: String(user.id) === selectedUserId }" @click="selectUser(user)">
             <span class="user-avatar">{{ (user.realName || user.nickname || user.username || '用').slice(0, 1) }}</span>
             <span class="user-info"><strong>{{ user.realName || user.nickname || user.username }}</strong><small>@{{ user.username }}</small></span>
-            <span class="user-role">普通用户</span>
+            <span class="user-role">{{ userRoleLabel(user) }}</span>
           </button>
         </div>
       </section>
 
       <section class="permission-card">
         <header class="selected-user-header">
-          <div v-if="selectedUser"><span class="selected-avatar">{{ (selectedUser.realName || selectedUser.nickname || selectedUser.username).slice(0, 1) }}</span><div><h3>{{ selectedUser.realName || selectedUser.nickname || selectedUser.username }}</h3><p>@{{ selectedUser.username }} · 普通用户</p></div></div>
+          <div v-if="selectedUser"><span class="selected-avatar">{{ (selectedUser.realName || selectedUser.nickname || selectedUser.username).slice(0, 1) }}</span><div><h3>{{ selectedUser.realName || selectedUser.nickname || selectedUser.username }}</h3><p>@{{ selectedUser.username }} · {{ userRoleLabel(selectedUser) }}</p></div></div>
           <div v-else><div><h3>请选择用户</h3><p>选择用户后可查询和配置部门权限</p></div></div>
           <span v-if="selectedUser" class="department-count">{{ permissions.length }} 个所属部门</span>
         </header>
@@ -291,7 +323,7 @@ onMounted(async () => {
         <template v-else>
           <div class="department-tabs" role="tablist" aria-label="所属部门">
             <button v-for="dept in permissions" :key="dept.deptId" type="button" :class="{ active: dept.deptId === selectedDeptId }" :disabled="isDepartmentAdmin" @click="selectDepartment(dept.deptId)">
-              <span>{{ dept.deptName || `部门 ${dept.deptId}` }}</span><small>{{ dept.deptRole || '部门成员' }}</small>
+              <span>{{ dept.deptName || `部门 ${dept.deptId}` }}</span><small>{{ isDepartmentAdminInDept(selectedUser, dept.deptId) ? '部门管理员' : '普通用户' }}</small>
             </button>
           </div>
 
