@@ -24,6 +24,14 @@ assert.deepEqual(october13Events.map((event) => event.start), ['12:42', '13:30']
 assert.ok(october13Events.every((event) => event.date === '2026-10-13'))
 assert.equal(october13Events.length, 2, '已有飞行任务时不能再重复显示一条计划')
 
+const namedTask = toFlightCalendarItems([october13Plan], [{
+  id: 'named-task', planId: october13Plan.id, name: '巡检执行第 2 架次',
+  planName: october13Plan.title, executeTime: '2026-10-13T14:00:00', status: 6,
+}])[0]
+assert.equal(namedTask.title, '巡检执行第 2 架次', '有任务名称时应优先展示任务名称')
+assert.equal(namedTask.planTitle, october13Plan.title, '所属计划名称应作为辅助信息保留')
+assert.equal(october13Events[0].title, october13Plan.title, '任务名称缺失时应回退到计划名称')
+
 const unscheduled = toFlightCalendarItems([october13Plan], [])
 assert.equal(unscheduled[0].date, '', '不能把计划创建时间当作飞行日期')
 const orphan = toFlightCalendarItems([{ ...october13Plan, date: '2026-10-14' }], [])
