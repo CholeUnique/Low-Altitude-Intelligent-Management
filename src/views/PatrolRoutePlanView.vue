@@ -3,8 +3,6 @@ import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import PatrolLayout from '@/layouts/PatrolLayout.vue'
 import RouteFlightPlanPanel from '@/workspace-components/route-flight-plan/RouteFlightPlanPanel.vue'
-import { getTask } from '@/mocks/portal'
-import { isMockMode } from '@/api/client'
 import { getGovernanceTaskDetail, toPatrolTask } from '@/api/governance-task'
 import type { PortalTask } from '@/types'
 
@@ -18,10 +16,6 @@ async function loadTask() {
   task.value = undefined
   taskError.value = ''
   if (!taskId) return
-  if (isMockMode()) {
-    task.value = getTask(taskId)
-    return
-  }
   taskLoading.value = true
   try {
     const detail = await getGovernanceTaskDetail(taskId)
