@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { getFlightPlans, getFlightTaskPage } from '@/api/patrol'
-import { isMockMode } from '@/api/client'
 import { useUserStore } from '@/stores/user'
 import type { FlightPlanItem } from '@/mocks/route-planning'
 import { toFlightCalendarItems } from '@/utils/flight-calendar'
@@ -148,10 +147,9 @@ async function loadPlans() {
   error.value = ''
   warning.value = ''
   try {
-    const mock = isMockMode()
     const [planResult, taskResult] = await Promise.allSettled([
       loadAllPlans(user.activeDeptId),
-      mock ? Promise.resolve([] as FlightTaskRecord[]) : loadAllTasks(user.activeDeptId),
+      loadAllTasks(user.activeDeptId),
     ])
     if (sequence !== loadSequence) return
     if (planResult.status === 'rejected' && taskResult.status === 'rejected') {

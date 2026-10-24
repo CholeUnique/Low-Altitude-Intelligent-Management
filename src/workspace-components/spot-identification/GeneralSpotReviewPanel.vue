@@ -549,7 +549,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
         <header><b>问题图斑列表</b><span>{{ filtered.length }} / {{ visibleRecords.length }} 处</span></header>
         <div class="filters"><input v-model="keyword" placeholder="搜索图斑编号、名称或类型" /><div><select v-model="typeFilter"><option value="">全部类型</option><option v-for="item in abnormalTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select><select v-model="statusFilter"><option value="">全部状态</option><option v-for="item in statuses" :key="item.value" :value="item.value">{{ item.label }}</option></select></div></div>
         <div class="spot-scroll">
-          <button v-for="(item,index) in filtered" :key="item.id" class="spot-row" :class="{ active: active?.id === item.id, checked: selectedIds.includes(item.id) }" @click="selectSpot(item.id)">
+          <button
+            v-for="(item,index) in filtered"
+            :key="item.id"
+            class="spot-row"
+            :class="{ active: active?.id === item.id, checked: selectedIds.includes(item.id) }"
+            :title="'图斑名称：' + (item.title || '-') + '\n图斑编号：' + (item.spotNo || '#' + item.id)"
+            @click="selectSpot(item.id)"
+          >
             <input type="checkbox" :checked="selectedIds.includes(item.id)" :disabled="!canSelect(item)" @click.stop="toggleSelection(item)" />
             <i>{{ index + 1 }}</i><span><b>{{ item.title }}</b><small>图斑 {{ item.spotNo }} · {{ item.abnormalTypeDesc }}</small><small v-if="item.sourceTaskName" class="source-task">来源任务：{{ item.sourceTaskName }}</small></span><em :class="`status-${item.handleStatus}`">{{ statusLabel(item.handleStatus) }}</em>
           </button>

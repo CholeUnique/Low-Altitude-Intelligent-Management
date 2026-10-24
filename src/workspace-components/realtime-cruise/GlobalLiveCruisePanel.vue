@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { LiveStream } from '@/adapters/dasFly'
-import { isMockMode } from '@/api/client'
 import { getLiveStreams, getRoutes, getUavComponentUrl, getUavFlightTaskOptions, type UavFlightTaskOption } from '@/api/patrol'
 import { useUserStore } from '@/stores/user'
-import { getTasks } from '@/mocks/portal'
-import { createRoutesForTask, type FlightRoute } from '@/mocks/route-planning'
+import type { FlightRoute } from '@/mocks/route-planning'
 
 const props = withDefaults(defineProps<{ fullscreen?: boolean; initialDeviceId?: string }>(), { fullscreen: false, initialDeviceId: '' })
 const emit = defineEmits<{ 'exit-fullscreen': [] }>()
@@ -39,7 +37,12 @@ watch(playbackViewport, element => {
   playbackResizeObserver?.disconnect()
   if (!element) return
   const fit = () => {
-    if (element.clientWidth > 0 && element.clientHeight > 0) playbackScale.value = Math.min(1,element.clientWidth / playbackCanvasSize.width,element.clientHeight / playbackCanvasSize.height)
+    if (element.clientWidth > 0 && element.clientHeight > 0) {
+      playbackScale.value = Math.min(
+        element.clientWidth / playbackCanvasSize.width,
+        element.clientHeight / playbackCanvasSize.height,
+      )
+    }
   }
   fit()
   playbackResizeObserver = new ResizeObserver(fit)
@@ -81,22 +84,6 @@ const playbackStateText = computed(() => playbackError.value
   || (selectedFlightTask.value
     ? `已选择“${selectedFlightTask.value.name}”，点击右上角“进入轨迹回放”加载对应开放组件。`
     : '请选择具有有效飞行任务 ID 的任务，确认后将进入对应的开放组件。'))
-
-function mockStreams(mockRoutes: FlightRoute[]): LiveStream[] {
-  const devices = new Map<string, FlightRoute>()
-  mockRoutes.forEach((route) => {
-    if (!devices.has(route.aircraft)) devices.set(route.aircraft, route)
-  })
-  return [...devices.values()].map((route, index) => ({
-    id: `mock-live-${index + 1}`,
-    flightId: route.taskId,
-    aircraftId: `UAV-D3-${String(index + 1).padStart(3, '0')}`,
-    aircraftName: route.aircraft,
-    status: index === 0 ? 'ONLINE' : 'STARTING',
-    protocol: 'HLS',
-    playUrl: '',
-  }))
-}
 
 function prepareFlightTasks(items: UavFlightTaskOption[]) {
   return items.filter((item) => Boolean(item.id?.trim())).map<PlaybackFlightTask>((item) => ({
@@ -142,21 +129,14 @@ async function loadOverview() {
   loading.value = true
   error.value = ''
   try {
-    if (isMockMode()) {
-      const mockTasks = getTasks(user.organizationId)
-      routes.value = mockTasks.flatMap((task) => createRoutesForTask(task))
-      streams.value = mockStreams(routes.value)
-      flightTasks.value = prepareFlightTasks((await getUavFlightTaskOptions({ pageNum: 1, pageSize: 200 })).list)
-    } else {
-      const [routePage, streamPage, flightTaskPage] = await Promise.all([
-        getRoutes({ pageNum: 1, pageSize: 500 }),
-        getLiveStreams(),
-        getUavFlightTaskOptions({ pageNum: 1, pageSize: 200 }),
-      ])
-      routes.value = routePage.list
-      streams.value = streamPage.list
-      flightTasks.value = prepareFlightTasks(flightTaskPage.list)
-    }
+    const [routePage, streamPage, flightTaskPage] = await Promise.all([
+      getRoutes({ pageNum: 1, pageSize: 500 }),
+      getLiveStreams(),
+      getUavFlightTaskOptions({ pageNum: 1, pageSize: 200 }),
+    ])
+    routes.value = routePage.list
+    streams.value = streamPage.list
+    flightTasks.value = prepareFlightTasks(flightTaskPage.list)
     const preferredDeviceId = props.initialDeviceId.trim()
     if (preferredDeviceId && streams.value.some((item) => item.id === preferredDeviceId)) activeDeviceId.value = preferredDeviceId
     else if (!activeDeviceId.value || !streams.value.some((item) => item.id === activeDeviceId.value)) activeDeviceId.value = streams.value[0]?.id || ''
@@ -317,12 +297,12 @@ watch(() => user.activeDeptId, () => void loadOverview())
       </aside>
 
       <section ref="playbackPanel" class="overview-panel map-panel" :class="{ 'is-playback-fullscreen': playbackFullscreen }">
-        <div class="panel-title playback-titlebar"><button type="button" :disabled="!playbackFullscreen && (!playbackEmbedUrl || playbackLoading)" @click="showPlaybackFullscreen">{{ playbackFullscreen ? '退出全屏' : '全屏显示' }}</button></div>
         <div v-if="playbackLoading" class="playback-state"><i>↻</i><b>正在获取轨迹回放授权…</b><span>请稍候，正在加载对应飞行任务。</span></div>
         <div v-else-if="playbackEmbedUrl" ref="playbackViewport" class="playback-viewport">
           <div class="playback-stage" :style="playbackStageStyle">
             <iframe class="playback-frame" :style="playbackFrameStyle" :src="playbackEmbedUrl" :title="`${selectedFlightTask?.name || '飞行任务'}轨迹回放`" allow="fullscreen; clipboard-read; clipboard-write; geolocation" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
           </div>
+          <button v-if="!playbackFullscreen" type="button" class="playback-fullscreen-toggle" aria-label="全屏显示轨迹回放" title="全屏显示" @click="showPlaybackFullscreen">全屏显示</button>
         </div>
         <div v-else class="playback-state" :class="{ error: playbackError }"><i>⌁</i><b>{{ playbackError ? '暂未进入轨迹回放' : selectedFlightTask ? '等待进入轨迹回放' : '请选择关联飞行任务' }}</b><span>{{ playbackStateText }}</span></div>
         <button v-if="playbackFullscreen" type="button" class="playback-fullscreen-exit" aria-label="退出轨迹回放全屏" title="退出全屏（Esc）" @click="showPlaybackFullscreen">退出全屏</button>
@@ -383,14 +363,13 @@ watch(() => user.activeDeptId, () => void loadOverview())
 .overview-main { min-height: 0; display: grid; grid-template-columns: 250px minmax(420px, 1fr) 270px; gap: 8px; }
 .overview-panel { overflow: hidden; border: 1px solid #d5e0e8; border-radius: 6px; background: #fff; box-shadow: 0 2px 8px #1c3b5210; }.device-panel, .route-panel { display: flex; flex-direction: column; min-height: 0; }.map-panel { position: relative; display: flex; flex-direction: column; min-height: 0; }
 .panel-title { height: 34px; flex: 0 0 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; color: #1f3d52; border-bottom: 1px solid #e6eef3; font-size: 12px; font-weight: 700; }.panel-title span { color: #7a8f9e; font-size: 10px; font-weight: 500; }
-.playback-titlebar { gap: 14px; }.playback-titlebar button { margin-left: auto; }.playback-titlebar button { min-height: 28px; flex: 0 0 auto; padding: 0 11px; color: #0876b6; background: #fff; border: 1px solid #1785c0; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; }.playback-titlebar button:hover { color: #fff; background: #168fc2; }.playback-titlebar button:disabled { color: #9aaab2; background: #f1f4f5; border-color: #d2dce1; cursor: not-allowed; }
+.playback-fullscreen-toggle { position: absolute; z-index: 6; top: 10px; right: 10px; min-height: 34px; padding: 0 13px; color: #eefaff; background: #10445fe8; border: 1px solid #54b6d8; border-radius: 5px; box-shadow: 0 4px 14px #00142199; cursor: pointer; font-size: 13px; font-weight: 700; }.playback-fullscreen-toggle:hover,.playback-fullscreen-toggle:focus-visible { color: #fff; background: #168fc2; outline: 2px solid #a2efff; outline-offset: 2px; }
 .route-panel-title { height: 48px; flex-basis: 48px; padding-inline: 13px; }.route-panel-title b { color: #123b54; font-size: 18px; letter-spacing: .2px; }.route-panel-title button { min-height: 32px; padding: 0 12px; color: #fff; background: #168fc2; border: 1px solid #34acd5; border-radius: 5px; box-shadow: 0 2px 7px #168fc22c; cursor: pointer; font-size: 13px; font-weight: 600; }.route-panel-title button:hover { background: #0879aa; }.route-panel-title button:disabled { cursor: wait; opacity: .65; }
 .panel-tip { margin: 0; padding: 8px 10px; color: #7a8f9e; border-bottom: 1px solid #eef3f6; font-size: 10px; }
 .flight-task-search { height: 40px; flex: 0 0 40px; box-sizing: border-box; margin: 10px 11px; padding: 0 12px; color: #294b5d; background: #f9fcfd; border: 1px solid #c8dbe4; border-radius: 5px; outline: none; font-size: 14px; }.flight-task-search:hover,.flight-task-search:focus { border-color: #168fc2; box-shadow: 0 0 0 2px #168fc21c; }.flight-task-search:focus::placeholder { color: transparent; }
 .device-row, .route-row { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 0; border-bottom: 1px solid #eef3f6; color: #385669; background: #fff; text-align: left; cursor: pointer; }.device-row:hover, .route-row:hover, .device-row.active, .route-row.active { background: #e9f7ff; }.device-row.active, .route-row.active { box-shadow: inset 3px 0 #168bd0; }.device-row > span, .route-row > span { min-width: 0; flex: 1; }.device-row b, .route-row b, .device-row small, .route-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.device-row b, .route-row b { color: #1f3d52; font-size: 12px; }.device-row small, .route-row small { margin-top: 3px; color: #7a8f9e; font-size: 10px; }.device-row em, .route-row em { color: #0b81bd; font-style: normal; font-size: 10px; }.device-row i { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #98a8b4; }.device-row i.online { background: #20bd70; box-shadow: 0 0 7px #20bd7090; }.device-row i.starting { background: #e6a72c; }.selected-device { margin: auto 8px 8px; padding: 9px; border-radius: 4px; color: #427084; background: #f0f8fc; font-size: 10px; }.selected-device b, .selected-device span, .selected-device small { display: block; }.selected-device span { margin: 3px 0; color: #0b6f9a; font-size: 12px; font-weight: 700; }
-.playback-frame { width: 100%; min-height: 0; flex: 1; border: 0; background: #51585d; }.playback-state { min-height: 0; flex: 1; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 28px; color: #eef3f5; background: #666d72; text-align: center; }.playback-state i { width: 48px; height: 48px; display: grid; place-items: center; color: #eef4f6; border: 1px solid #aab3b8; border-radius: 50%; font-size: 25px; font-style: normal; }.playback-state b { font-size: 16px; }.playback-state span { max-width: none; color: #d5dcdf; font-size: 12px; line-height: 1.7; white-space: nowrap; }.playback-state.error { background: #69686a; }.playback-state.error i { color: #ffd0d0; border-color: #d7abab; }.map-panel:fullscreen { width: 100vw; height: 100vh; border: 0; border-radius: 0; background: #20272c; }.map-panel:fullscreen .panel-title { height: 48px; flex-basis: 48px; padding-inline: 18px; color: #eefaff; background: #082b42; border-color: #174d68; font-size: 16px; }.map-panel:fullscreen .playback-titlebar button { min-height: 34px; color: #eefaff; background: #10445f; border-color: #54b6d8; }.map-panel:fullscreen .playback-titlebar button:hover { background: #168fc2; }.fullscreen-hint { position: absolute; z-index: 5; top: 64px; left: 50%; padding: 10px 18px; color: #fff; background: #092d46e8; border: 1px solid #54d5ee; border-radius: 5px; box-shadow: 0 7px 22px #0007; font-size: 14px; transform: translateX(-50%); pointer-events: none; }.fullscreen-hint-enter-active,.fullscreen-hint-leave-active { transition: opacity .2s, transform .2s; }.fullscreen-hint-enter-from,.fullscreen-hint-leave-to { opacity: 0; transform: translate(-50%,-7px); }
-.map-panel:fullscreen .playback-titlebar { display: none; }
-.playback-fullscreen-exit { position: absolute; z-index: 6; top: 64px; right: 18px; min-height: 34px; padding: 0 13px; color: #eefaff; background: #10445fe8; border: 1px solid #54b6d8; border-radius: 5px; box-shadow: 0 4px 14px #00142199; cursor: pointer; font-size: 13px; font-weight: 700; }
+.playback-frame { width: 100%; min-height: 0; flex: 1; border: 0; background: #51585d; }.playback-state { min-height: 0; flex: 1; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 28px; color: #eef3f5; background: #666d72; text-align: center; }.playback-state i { width: 48px; height: 48px; display: grid; place-items: center; color: #eef4f6; border: 1px solid #aab3b8; border-radius: 50%; font-size: 25px; font-style: normal; }.playback-state b { font-size: 16px; }.playback-state span { max-width: none; color: #d5dcdf; font-size: 12px; line-height: 1.7; white-space: nowrap; }.playback-state.error { background: #69686a; }.playback-state.error i { color: #ffd0d0; border-color: #d7abab; }.map-panel:fullscreen { width: 100vw; height: 100vh; border: 0; border-radius: 0; background: #20272c; }.map-panel:fullscreen .playback-viewport { width: 100vw; height: 100vh; flex: none; }.fullscreen-hint { position: absolute; z-index: 5; top: 18px; left: 50%; padding: 10px 18px; color: #fff; background: #092d46e8; border: 1px solid #54d5ee; border-radius: 5px; box-shadow: 0 7px 22px #0007; font-size: 14px; transform: translateX(-50%); pointer-events: none; }.fullscreen-hint-enter-active,.fullscreen-hint-leave-active { transition: opacity .2s, transform .2s; }.fullscreen-hint-enter-from,.fullscreen-hint-leave-to { opacity: 0; transform: translate(-50%,-7px); }
+.playback-fullscreen-exit { position: absolute; z-index: 6; top: 58px; right: 18px; min-height: 34px; padding: 0 13px; color: #eefaff; background: #10445fe8; border: 1px solid #54b6d8; border-radius: 5px; box-shadow: 0 4px 14px #00142199; cursor: pointer; font-size: 13px; font-weight: 700; }
 .playback-fullscreen-exit:hover,.playback-fullscreen-exit:focus-visible { color: #fff; background: #168fc2; outline: 2px solid #a2efff; outline-offset: 2px; }
 .route-panel { overflow-y: auto; }.route-row { flex: 0 0 auto; }.route-row em { min-width: 20px; height: 20px; display: grid; place-items: center; border-radius: 10px; color: #0876b6; background: #e3f3fc; font-weight: 700; }.flight-task-row { align-items: flex-start; }.flight-task-row span small+small { margin-top: 2px; color: #4c91ad; }.flight-task-row em { width: auto; min-width: 44px; height: auto; min-height: 22px; padding: 2px 6px; border-radius: 11px; text-align: center; white-space: nowrap; }.flight-task-row.checking,.flight-task-row.unavailable,.flight-task-row.checking:hover,.flight-task-row.unavailable:hover { box-shadow: none; cursor: not-allowed; }.flight-task-row.checking { background: #f5f8fa; opacity: .72; }.flight-task-row.unavailable { background: #f5f5f5; opacity: .62; }.flight-task-row.unavailable b,.flight-task-row.unavailable small { color: #89979e; }.flight-task-row.unavailable em { color: #a85b61; background: #f5e5e7; }.flight-task-row.checking em { color: #728a96; background: #e8eef1; }.flight-task-row .unavailable-reason { color: #b06a6f!important; white-space: normal; line-height: 1.35; }.empty-state { padding: 24px 10px; color: #91a4b0; text-align: center; font-size: 12px; }
 .video-wall-panel { min-height: 0; display: flex; flex-direction: column; }.video-wall-title { justify-content: flex-start; gap: 18px; }.video-wall-title > span { margin-left: auto; }.video-wall { min-height: 0; flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 8px; overflow: auto; }.video-screen { position: relative; min-height: 125px; overflow: hidden; padding: 0; border: 2px solid transparent; border-radius: 5px; background: #082e47; cursor: pointer; transform: translateY(0); transition: transform .18s, border-color .18s, box-shadow .18s; }.video-screen:hover,.video-screen:focus-visible { z-index: 2; border-color: #49d9f2; box-shadow: 0 10px 22px #06304b55, 0 0 0 2px #11baf038; outline: none; transform: translateY(-5px); }.video-screen.active { border-color: #11baf0; box-shadow: 0 0 0 2px #11baf040; }.video-screen video, .video-screen iframe { width: 100%; height: 100%; border: 0; background: #061724; object-fit: cover; pointer-events: none; }.video-placeholder { height: 100%; min-height: 121px; display: grid; place-content: center; gap: 5px; color: #9fd7e8; background: linear-gradient(145deg, #154764, #06243a); }.video-placeholder i { color: #39cde1; font-size: 28px; font-style: normal; }.video-placeholder span { color: #f2d86d; font-size: 11px; }.video-placeholder small { color: #74b6ca; font-size: 10px; }.video-screen footer { position: absolute; right: 0; bottom: 0; left: 0; display: flex; justify-content: space-between; padding: 6px 8px; color: #fff; background: #061724bf; font-size: 10px; pointer-events: none; }.video-screen footer span.online { color: #55ecae; }.video-screen footer span.starting { color: #f3cb5d; }.video-empty { flex: 1; display: grid; place-items: center; color: #91a4b0; font-size: 12px; }

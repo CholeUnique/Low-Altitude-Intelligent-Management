@@ -599,7 +599,14 @@ onBeforeUnmount(() => {
           <select v-model="handleStatus"><option value="">全部处置状态</option><option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select>
         </div>
         <div class="spot-scroll">
-          <button v-for="(item, index) in filtered" :key="item.id" class="spot-item" :class="{ active: item.id === active?.id }" @click="selectSpot(item.id)">
+          <button
+            v-for="(item, index) in filtered"
+            :key="item.id"
+            class="spot-item"
+            :class="{ active: item.id === active?.id }"
+            :title="'图斑名称：' + (item.title || '-') + '\n图斑编号：' + (item.spotNo || '#' + item.id)"
+            @click="selectSpot(item.id)"
+          >
             <i>{{ index + 1 }}</i>
             <span><b>{{ item.title }}</b><small>图斑 {{ item.spotNo || `#${item.id}` }} · {{ item.abnormalTypeDesc }}</small><small v-if="item.sourceTaskName" class="source-task">来源任务：{{ item.sourceTaskName }}</small></span>
             <em :class="`status-${item.handleStatus}`">{{ statusLabel(item.handleStatus) }}</em>
