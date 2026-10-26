@@ -4,6 +4,7 @@ import { getFlightTaskMedia, getUavFlightTaskOptions, type UavFlightTaskOption }
 import type { FlightReviewMedia } from '@/api/flight-review'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
 import SharedVideoPlayer from '@/workspace-components/spot-identification/SharedVideoPlayer.vue'
+import PhotoLocationOverlay from '@/workspace-components/spot-identification/PhotoLocationOverlay.vue'
 
 const SrtInfoDialog = defineAsyncComponent(() => import('@/workspace-components/spot-identification/SrtInfoDialog.vue'))
 
@@ -91,7 +92,8 @@ const previewTaskMedia = computed(() => previewTask.value ? taskReviewMedia(prev
 
 function toReviewMedia(media: LiveMediaItem, task: UavFlightTaskOption): FlightReviewMedia {
   return { id: media.id, taskId: task.id, fileName: media.name, type: isVideoMedia(media) ? 'video' : media.mediaType || 'image',
-    thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: '', shootTime: media.capturedAt }
+    thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: '', shootTime: media.capturedAt,
+    longitude: media.longitude, latitude: media.latitude }
 }
 function taskReviewMedia(task: UavFlightTaskOption) {
   return (mediaByTask.value[task.id]?.all || []).map(media => toReviewMedia(media, task))
@@ -397,6 +399,7 @@ onBeforeUnmount(() => {
         @dblclick="resetPreviewTransform"
       >
         <img :src="previewMedia.originalUrl || previewMedia.thumbnail" :alt="previewMedia.name" :style="previewImageStyle" draggable="false" />
+        <PhotoLocationOverlay v-if="previewReviewMedia?.longitude !== undefined && previewReviewMedia.latitude !== undefined" :key="previewReviewMedia.id" :media="previewReviewMedia" />
       </div>
       <button class="preview-nav preview-next" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
       <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small></footer>

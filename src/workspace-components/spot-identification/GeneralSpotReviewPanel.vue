@@ -9,10 +9,11 @@ import {
   type TaskAbnormal,
 } from '@/api/governance-task'
 import {
+  getRecognitionSpotDetail,
   getRecognitionSpotPage,
+  getRecognitionSpotTypes,
   ignoreRecognitionSpots,
   revokeRecognitionSpots,
-  type RecognitionAbnormalType,
   type RecognitionSpotItem,
 } from '@/api/recognition-spot'
 import { ApiBusinessError } from '@/api/client'
@@ -21,6 +22,7 @@ import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { assignNonGrainReview, getNonGrainReviewerId, isNonGrainScene } from '@/api/non-grain-assignment'
 import type { MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
+import { useSpotAddress } from '@/composables/useSpotAddress'
 import SpotDistributionMap from './SpotDistributionMap.vue'
 import type { ComparisonPeriod, SynchronizedMapView } from './SpotDistributionMap.vue'
 
@@ -36,6 +38,8 @@ interface ReviewSpot extends RecognitionSpotItem {
 
 const loading = ref(false)
 const loadError = ref('')
+const detailLoading = ref(false)
+const detailError = ref('')
 const mapFullscreen = ref(false)
 const records = ref<ReviewSpot[]>([])
 const keyword = ref('')
@@ -78,14 +82,7 @@ const synchronizedMapView = ref<SynchronizedMapView>()
 const periods = ref(2)
 const activeImageIndex = ref(0)
 
-const abnormalTypes: Array<{ value: RecognitionAbnormalType; label: string }> = [
-  { value: 'ILLEGAL_OCCUPY', label: '违法占用' },
-  { value: 'FOREST_DAMAGE', label: '林地破坏' },
-  { value: 'NON_GRAIN', label: '耕地非粮化' },
-  { value: 'ABANDONED', label: '土地撂荒' },
-  { value: 'ILLEGAL_BUILD', label: '违法建设' },
-  { value: 'OTHER', label: '其他' },
-]
+const abnormalTypes = ref<Array<{ value: string; label: string }>>([])
 const statuses = [
   { value: 0, label: '待核查' },
   { value: 1, label: '核查中' },
@@ -117,6 +114,10 @@ const activeSceneName = computed(() => {
   if (!item) return '-'
   return item.sourceSceneName || scenes.value.find((scene) => scene.code === item.sceneCode)?.name || item.sceneCode || '-'
 })
+const { spotAddress, spotAddressLoading, spotAddressError } = useSpotAddress(
+  () => active.value?.longitude,
+  () => active.value?.latitude,
+)
 const selectedSceneName = computed(() => {
   const item = selected.value[0]
   if (!item) return '-'
@@ -163,6 +164,9 @@ const comparisonPeriods = computed<ComparisonPeriod[]>(() => {
 
 function statusLabel(value: number) {
   return statuses.find((item) => item.value === value)?.label || '未知状态'
+}
+function spotSourceLabel(value: string) {
+  return ({ MANUAL_UPLOAD: '文件上传', MANUAL_DRAW: '手工绘制', API_IMPORT: '接口导入', TASK_ABNORMAL: '任务识别' } as Record<string, string>)[value] || value
 }
 function formatTime(value?: string) {
   return value ? value.replace('T', ' ').slice(0, 16) : '-'
@@ -334,8 +338,48 @@ async function loadTaskSpots(task: GovernanceTask): Promise<ReviewSpot[]> {
 }
 
 let spotLoadVersion = 0
+let detailRequestVersion = 0
+async function loadSpotDetail(id: string) {
+  const summary = records.value.find((item) => item.id === id)
+  const version = ++detailRequestVersion
+  detailError.value = ''
+  if (!summary?.fromRecognitionApi) {
+    detailLoading.value = false
+    return
+  }
+  detailLoading.value = true
+  try {
+    const detail = await getRecognitionSpotDetail({ id, deptId: summary.deptId || user.activeDeptId || undefined })
+    if (version !== detailRequestVersion || active.value?.id !== id) return
+    const index = records.value.findIndex((item) => item.id === id)
+    if (index < 0) return
+    const current = records.value[index]!
+    records.value[index] = {
+      ...current,
+      ...detail,
+      fromRecognitionApi: true,
+      sourceTaskId: current.sourceTaskId,
+      sourceTaskName: current.sourceTaskName,
+      sourceDeptName: current.sourceDeptName,
+      sourceSceneName: current.sourceSceneName,
+      derivedTaskId: detail.taskId,
+    }
+  } catch (error) {
+    if (version !== detailRequestVersion || active.value?.id !== id) return
+    detailError.value = error instanceof ApiBusinessError && error.code === '10107'
+      ? '当前账号无权读取该图斑详情，暂显示列表摘要。'
+      : error instanceof Error ? `${error.message}，暂显示列表摘要。` : '图斑详情读取失败，暂显示列表摘要。'
+  } finally {
+    if (version === detailRequestVersion) detailLoading.value = false
+  }
+}
+
 async function loadSpots(preferredSpotNo?: string) {
   const version = ++spotLoadVersion
+  const previousActiveId = activeId.value
+  detailRequestVersion += 1
+  detailLoading.value = false
+  detailError.value = ''
   const deptId = user.activeDeptId
   loading.value = true
   loadError.value = ''
@@ -347,8 +391,14 @@ async function loadSpots(preferredSpotNo?: string) {
     ])
     if (version !== spotLoadVersion) return
     scenes.value = sceneList.filter((scene) => scene.enabled)
-    const taskSpotResults = await Promise.allSettled(tasks.map(loadTaskSpots))
+    const [taskSpotResults, sceneTypeResults] = await Promise.all([
+      Promise.allSettled(tasks.map(loadTaskSpots)),
+      Promise.allSettled(scenes.value.map((scene) => getRecognitionSpotTypes(scene.code))),
+    ])
     if (version !== spotLoadVersion) return
+    abnormalTypes.value = [...new Map(sceneTypeResults.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
+      .map((item) => [item.code, { value: item.code, label: item.name }])).values()]
+    if (typeFilter.value && !abnormalTypes.value.some((item) => item.value === typeFilter.value)) typeFilter.value = ''
     const taskSpots = taskSpotResults.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
     const recognitionById = new Map(recognitionSpots.map((item) => [item.id, item]))
     const merged = new Map<string, ReviewSpot>()
@@ -373,12 +423,15 @@ async function loadSpots(preferredSpotNo?: string) {
     })
     const all = [...merged.values()].sort((left, right) => (right.foundTime || right.createTime || '').localeCompare(left.foundTime || left.createTime || ''))
     records.value = all
-    activeId.value = all.find((item) => item.spotNo === preferredSpotNo)?.id
+    const nextActiveId = all.find((item) => item.spotNo === preferredSpotNo)?.id
       || (all.some((item) => item.id === activeId.value) ? activeId.value : all[0]?.id || '')
+    activeId.value = nextActiveId
+    if (nextActiveId && nextActiveId === previousActiveId) void loadSpotDetail(nextActiveId)
     selectedIds.value = selectedIds.value.filter((id) => all.some((item) => item.id === id && item.handleStatus === 0 && !item.derivedTaskId))
   } catch (error) {
     if (version !== spotLoadVersion) return
     records.value = []
+    abnormalTypes.value = []
     loadError.value = error instanceof Error ? error.message : '疑似异常图斑加载失败。'
   } finally {
     if (version === spotLoadVersion) loading.value = false
@@ -510,9 +563,10 @@ async function createSelectedTasks() {
 watch(filtered, (items) => {
   if (!items.some((item) => item.id === activeId.value)) activeId.value = items[0]?.id || ''
 })
-watch(activeId, () => {
+watch(activeId, (id) => {
   activeImageIndex.value = 0
   periods.value = displayableImagery.value.length >= 2 ? 2 : 1
+  if (id) void loadSpotDetail(id)
 })
 watch(() => displayableImagery.value.length, (count) => {
   periods.value = count >= 2 ? 2 : 1
@@ -528,7 +582,10 @@ watch(() => user.activeDeptId, () => {
   operationError.value = ''
   void loadSpots()
 }, { immediate: true })
-onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenKeydown))
+onBeforeUnmount(() => {
+  detailRequestVersion += 1
+  window.removeEventListener('keydown', handleMapFullscreenKeydown)
+})
 </script>
 
 <template>
@@ -579,9 +636,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
             <span>当前对比：{{ active?.title || '未选择图斑' }}</span>
           </div>
           <div class="imagery-list">
-            <button v-for="(service, index) in displayableImagery" :key="service.id" class="image-card" :class="{ active: activeImageIndex === index, displayed: isImageDisplayed(index) }" @click="selectImage(index)">
+            <button v-for="(service, index) in displayableImagery" :key="service.id" class="image-card" :class="{ active: activeImageIndex === index, displayed: isImageDisplayed(index) }" :title="`第 ${index + 1} 期 · ${service.name}`" @click="selectImage(index)">
               <SpotDistributionMap v-if="activeAsTaskAbnormal" class="image-card-map" :spot="activeAsTaskAbnormal" :period="imageryThumbnailPeriod(service, index)" thumbnail />
-              <b>第 {{ index + 1 }} 期影像</b><small>{{ service.name }}</small>
+              <div class="image-card-caption"><b>第 {{ index + 1 }} 期影像</b><small>{{ service.name }}</small></div>
             </button>
             <div v-if="!displayableImagery.length" class="imagery-empty">该图斑暂未关联多期影像服务</div>
           </div>
@@ -604,8 +661,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
           </div>
         </section>
         <section class="spot-detail panel">
-          <header><b>异常图斑详细信息</b></header>
-          <template v-if="active"><dl><div><dt>图斑编号</dt><dd>{{ active.spotNo }}</dd></div><div><dt>异常类型</dt><dd>{{ active.abnormalTypeDesc }}</dd></div><div><dt>处置状态</dt><dd>{{ statusLabel(active.handleStatus) }}</dd></div><div><dt>所属场景</dt><dd>{{ activeSceneName }}</dd></div><div><dt>面积</dt><dd>{{ active.area === undefined ? '-' : `${active.area} ㎡` }}</dd></div><div><dt>发现时间</dt><dd>{{ formatTime(active.foundTime) }}</dd></div><div><dt>关联影像</dt><dd>{{ displayableImagery.length }} 期</dd></div><div><dt>来源任务</dt><dd>{{ active.sourceTaskName || '通用识别图斑' }}</dd></div></dl><p>{{ active.description || '暂无异常图斑描述。' }}</p></template>
+          <header><b>异常图斑详细信息</b><span v-if="detailLoading">正在读取…</span></header>
+          <p v-if="detailError" class="detail-load-error" role="alert">{{ detailError }}</p>
+          <template v-if="active">
+            <dl>
+              <div><dt>图斑编号</dt><dd>{{ active.spotNo || `#${active.id}` }}</dd></div>
+              <div><dt>图斑名称</dt><dd>{{ active.title }}</dd></div>
+              <div><dt>所属场景</dt><dd>{{ activeSceneName || '未返回' }}</dd></div>
+              <div v-if="active.spotSource"><dt>图斑来源</dt><dd>{{ spotSourceLabel(active.spotSource) }}</dd></div>
+              <div><dt>关联任务</dt><dd>{{ active.sourceTaskName || active.derivedTaskId || active.taskId || '-' }}</dd></div>
+              <div><dt>异常类型</dt><dd>{{ active.abnormalTypeDesc }}</dd></div>
+              <div><dt>面积</dt><dd>{{ active.area == null ? '-' : `${active.area} ㎡` }}</dd></div>
+              <div v-if="active.longitude !== undefined && active.latitude !== undefined"><dt>中心坐标</dt><dd>{{ active.longitude.toFixed(6) }}，{{ active.latitude.toFixed(6) }}</dd></div>
+              <div v-if="active.longitude !== undefined && active.latitude !== undefined"><dt>图斑地址</dt><dd :class="{ 'address-loading': spotAddressLoading, 'address-error': spotAddressError }">{{ spotAddress }}</dd></div>
+              <div><dt>处置状态</dt><dd>{{ statusLabel(active.handleStatus) }}</dd></div>
+              <div><dt>发现时间</dt><dd>{{ formatTime(active.foundTime) }}</dd></div>
+              <div v-if="active.createTime"><dt>创建时间</dt><dd>{{ formatTime(active.createTime) }}</dd></div>
+              <div v-if="active.updateTime"><dt>更新时间</dt><dd>{{ formatTime(active.updateTime) }}</dd></div>
+              <div><dt>关联影像</dt><dd>{{ displayableImagery.length ? `${displayableImagery.length} 项` : '未关联' }}</dd></div>
+            </dl>
+            <p>{{ active.description || '暂无异常图斑描述。' }}</p>
+          </template>
           <div v-else class="empty">请选择问题图斑</div>
         </section>
       </aside>
@@ -1000,11 +1076,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 
 .image-card {
   position: relative;
+  isolation: isolate;
   flex: 0 0 180px;
   height: 112px;
   min-width: 0;
   overflow: hidden;
-  padding: 9px;
+  padding: 0;
   color: #f4fcff;
   background: linear-gradient(135deg, #276c80, #17445b);
   border: 1px solid transparent;
@@ -1027,30 +1104,42 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 
 .image-card-map {
   position: absolute;
+  z-index: 0;
   inset: 0;
   display: block;
   opacity: .82;
   pointer-events: none;
 }
 
-.image-card b,
-.image-card small {
-  position: relative;
-  z-index: 1;
+.image-card-caption {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  min-width: 0;
+  padding: 20px 9px 8px;
+  color: #fff;
+  background: linear-gradient(180deg, transparent, #061f2ddd);
+  pointer-events: none;
+}
+
+.image-card-caption b,
+.image-card-caption small {
   display: block;
   overflow: hidden;
+  margin: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-shadow: 0 1px 2px #002030;
 }
 
-.image-card b {
-  margin-top: 48px;
+.image-card-caption b {
   font-size: 14px;
 }
 
-.image-card small {
-  margin-top: 4px;
+.image-card-caption small {
+  margin-top: 3px;
   font-size: 12px;
 }
 
@@ -1229,5 +1318,44 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleMapFullscreenK
 .spot-action-dialog--ignore > footer .spot-action-dialog__confirm { border-color: #607e8b; background: #607e8b; }
 .spot-action-dialog--revoke > footer .spot-action-dialog__confirm { border-color: #b96051; background: #b96051; }
 .spot-action-dialog > footer button:disabled { opacity: .48; cursor: not-allowed; }
+.spot-detail > .detail-load-error { margin: 10px 14px 0; padding: 8px 10px; color: #a33d49; background: #fff0f2; border-radius: 4px; }
+
+/* 与场景异常识别页保持一致的字号层级，避免大屏下文字过小。 */
+.panel > header b,
+.analysis > header b { font-size: 17px; }
+.panel > header span,
+.analysis-title-hint { font-size: 13px; }
+.filters input,
+.filters select {
+  height: 38px;
+  font-size: 13px;
+}
+.spot-row { min-height: 70px; padding-block: 11px; }
+.spot-row > i { font-size: 14px; }
+.spot-row b { font-size: 15px; }
+.spot-row small { font-size: 12px; }
+.spot-row em { padding: 5px 7px; font-size: 12px; }
+.empty { font-size: 14px; }
+.map-header-actions > span,
+.map-header-actions > button,
+.period-bar button,
+.period-bar > span { font-size: 13px; }
+.period-bar button { height: 32px; }
+.spot-detail dl div {
+  padding-block: 10px;
+  font-size: 14px;
+}
+.spot-detail > p {
+  padding: 12px;
+  font-size: 13px;
+}
+.spot-detail dd.address-loading { color: #5f8495; font-weight: 500; }
+.spot-detail dd.address-error { color: #b14c58; font-weight: 500; }
+.spot-action-card > header b { font-size: 15px; }
+.spot-action-card__hint,
+.spot-action-button { font-size: 13px; }
+.stat-grid span,
+.stat-grid small { font-size: 13px; }
+.stat-grid .heading-actions button { font-size: 14px; }
 
 </style>

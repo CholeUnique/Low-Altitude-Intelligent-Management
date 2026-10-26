@@ -2,13 +2,13 @@ import { apiClient } from './client'
 import type { MapServiceItem } from './map-service'
 import type { TaskGeometryFeatureCollection } from './governance-task'
 
-export type RecognitionAbnormalType =
-  | 'ILLEGAL_OCCUPY'
-  | 'FOREST_DAMAGE'
-  | 'NON_GRAIN'
-  | 'ABANDONED'
-  | 'ILLEGAL_BUILD'
-  | 'OTHER'
+/** 异常类型由后端按场景动态配置，不在前端限定固定枚举。 */
+export type RecognitionAbnormalType = string
+
+export interface RecognitionAbnormalTypeOption {
+  code: string
+  name: string
+}
 
 export interface RecognitionSpotAddInput {
   deptId?: string
@@ -107,6 +107,11 @@ export interface RecognitionSpotItem {
   updateTime?: string
 }
 
+export interface RecognitionSpotDetailQuery {
+  id: string
+  deptId?: string
+}
+
 export interface RecognitionSpotPage {
   records: RecognitionSpotItem[]
   total: number
@@ -183,6 +188,11 @@ function normalizeSpot(item: RecognitionSpotDto): RecognitionSpotItem {
   }
 }
 
+/** 读取指定启用场景当前可用的异常类型，供手工圈画、核查筛选和线下上传使用。 */
+export function getRecognitionSpotTypes(sceneCode: string) {
+  return apiClient.post<never, RecognitionAbnormalTypeOption[]>('/v1/biz/recognition/spot/type/list', { sceneCode })
+}
+
 /** 手工圈画并新增识别图斑。 */
 export async function addRecognitionSpot(input: RecognitionSpotAddInput) {
   return apiClient.post<never, RecognitionSpotCreateResult>('/v1/biz/recognition/spot/add', input)
@@ -211,6 +221,12 @@ export async function getRecognitionSpotPage(query: RecognitionSpotPageQuery): P
     pageNum: Number(page.pageNum) || query.pageNum,
     pageSize: Number(page.pageSize) || query.pageSize,
   }
+}
+
+/** 按图斑 ID 读取完整详情；分页记录只用于列表摘要，详情面板应使用此接口的数据。 */
+export async function getRecognitionSpotDetail(query: RecognitionSpotDetailQuery): Promise<RecognitionSpotItem> {
+  const item = await apiClient.post<never, RecognitionSpotDto>('/v1/biz/recognition/spot/detail', query)
+  return normalizeSpot(item)
 }
 
 /** 待人工审核（-1）的识别图斑审核通过后转为待核查（0）。 */

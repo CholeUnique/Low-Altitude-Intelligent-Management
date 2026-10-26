@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElTooltip } from 'element-plus'
-import { addRecognitionSpot } from '@/api/recognition-spot'
+import { addRecognitionSpot, getRecognitionSpotTypes } from '@/api/recognition-spot'
 import type { RecognitionAbnormalType, RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import type { MapServiceItem } from '@/api/map-service'
 import type { SceneDictionaryItem } from '@/api/scene'
@@ -31,15 +31,10 @@ const emit = defineEmits<{
   created: [result: RecognitionSpotCreateResult]
 }>()
 
-const abnormalTypes: Array<{ value: RecognitionAbnormalType; label: string }> = [
-  { value: 'ILLEGAL_OCCUPY', label: '违法占用' },
-  { value: 'FOREST_DAMAGE', label: '林地破坏' },
-  { value: 'NON_GRAIN', label: '耕地非粮化' },
-  { value: 'ABANDONED', label: '土地撂荒' },
-  { value: 'ILLEGAL_BUILD', label: '违法建设' },
-  { value: 'OTHER', label: '其他' },
-]
-
+const abnormalTypes = ref<Array<{ value: RecognitionAbnormalType; label: string }>>([])
+const abnormalTypesLoading = ref(false)
+const abnormalTypesError = ref('')
+let abnormalTypesRequestVersion = 0
 const abnormalType = ref<RecognitionAbnormalType | ''>('')
 const selectedSceneCode = ref('')
 const title = ref('')
@@ -75,6 +70,26 @@ const drawStatus = computed(() => {
   return '请在左侧任一影像窗口绘制边界'
 })
 
+async function loadAbnormalTypes() {
+  const requestVersion = ++abnormalTypesRequestVersion
+  const sceneCode = selectedSceneCode.value
+  abnormalTypes.value = []
+  abnormalType.value = ''
+  abnormalTypesError.value = ''
+  if (!sceneCode) return
+  abnormalTypesLoading.value = true
+  try {
+    const options = await getRecognitionSpotTypes(sceneCode)
+    if (requestVersion !== abnormalTypesRequestVersion) return
+    abnormalTypes.value = (options || []).map((item) => ({ value: item.code, label: item.name }))
+    if (!abnormalTypes.value.length) abnormalTypesError.value = '当前场景暂无可用异常类型，请先在后台场景管理中配置。'
+  } catch (error) {
+    if (requestVersion === abnormalTypesRequestVersion) abnormalTypesError.value = error instanceof Error ? error.message : '异常类型读取失败。'
+  } finally {
+    if (requestVersion === abnormalTypesRequestVersion) abnormalTypesLoading.value = false
+  }
+}
+
 function geometryGeojson() {
   const ring = props.coordinates.map((point) => [...point] as [number, number])
   ring.push([...ring[0]!] as [number, number])
@@ -83,6 +98,8 @@ function geometryGeojson() {
 
 function validate() {
   if (!selectedSceneCode.value) return '请选择所属场景。'
+  if (abnormalTypesLoading.value) return '正在读取当前场景的异常类型。'
+  if (abnormalTypesError.value) return abnormalTypesError.value
   if (!abnormalType.value) return '请选择异常类型。'
   if (!title.value.trim()) return '请填写图斑标题。'
   if (!selectedMapServiceIds.value.length) return '请至少选择一个参考影像地图服务。'
@@ -124,17 +141,28 @@ watch(() => props.sceneCode, () => {
   selectedSceneCode.value = props.scenes.some((scene) => scene.code === props.sceneCode) ? props.sceneCode : ''
   abnormalType.value = ''; title.value = ''; description.value = ''; foundTime.value = ''; submitError.value = ''; submitSuccess.value = ''
 })
+watch(selectedSceneCode, () => void loadAbnormalTypes())
 watch(() => props.scenes, (items) => {
   if (items.some((scene) => scene.code === selectedSceneCode.value)) return
   selectedSceneCode.value = items.some((scene) => scene.code === props.sceneCode) ? props.sceneCode : ''
 }, { immediate: true, deep: true })
 watch([() => props.initialMapServiceIds, () => props.mapServices], () => {
   const availableIds = new Set(props.mapServices.map((service) => String(service.id)))
-  selectedMapServiceIds.value = props.initialMapServiceIds.filter((id) => availableIds.has(String(id)))
+  selectedMapServiceIds.value = [...new Map(props.initialMapServiceIds
+    .filter((id) => availableIds.has(String(id)))
+    .map((id) => [String(id), id])).values()]
 }, { immediate: true, deep: true })
 
 function notifyMapServiceSelection() {
   emit('map-service-selection-change', [...selectedMapServiceIds.value])
+}
+
+function toggleMapServiceSelection(serviceId: string | number, checked: boolean) {
+  const normalizedId = String(serviceId)
+  const next = selectedMapServiceIds.value.filter((id) => String(id) !== normalizedId)
+  if (checked) next.push(serviceId)
+  selectedMapServiceIds.value = next
+  notifyMapServiceSelection()
 }
 </script>
 
@@ -169,13 +197,13 @@ function notifyMapServiceSelection() {
         <button class="finish" type="button" :disabled="!boundaryReady" @click="emit('finish-drawing')">完成绘制</button>
       </div>
       <label class="field field--wide"><span>所属场景 <em>*</em></span><select v-model="selectedSceneCode"><option value="" disabled>请选择所属场景</option><option v-for="scene in scenes" :key="scene.id" :value="scene.code">{{ scene.name }}</option></select></label>
-      <label class="field"><span>异常类型 <em>*</em></span><select v-model="abnormalType"><option value="" disabled>请选择异常类型</option><option v-for="item in abnormalTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+      <label class="field"><span>异常类型 <em>*</em></span><select v-model="abnormalType" :disabled="!selectedSceneCode || abnormalTypesLoading"><option value="" disabled>{{ abnormalTypesLoading ? '正在读取异常类型…' : '请选择异常类型' }}</option><option v-for="item in abnormalTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select><small v-if="abnormalTypesError" class="field-error">{{ abnormalTypesError }}</small></label>
       <label class="field"><span>发现时间</span><SpotDateTimePicker v-model="foundTime" placeholder="选择时间" compact /></label>
       <label class="field field--wide"><span>图斑标题 <em>*</em></span><input v-model="title" maxlength="100" placeholder="请输入图斑标题" /></label>
       <fieldset class="reference-services field--wide">
         <legend>参考影像地图服务 <em>*</em></legend>
         <div v-if="mapServices.length" class="reference-service-list">
-          <label v-for="service in mapServices" :key="service.id"><input v-model="selectedMapServiceIds" type="checkbox" :value="service.id" @change="notifyMapServiceSelection" /><span :title="service.name">{{ service.name }}</span></label>
+          <label v-for="service in mapServices" :key="service.id"><input type="checkbox" :checked="selectedMapServiceIds.some((id) => String(id) === String(service.id))" @change="toggleMapServiceSelection(service.id, ($event.target as HTMLInputElement).checked)" /><span :title="service.name">{{ service.name }}</span><small v-if="selectedMapServiceIds.some((id) => String(id) === String(service.id))">第 {{ selectedMapServiceIds.findIndex((id) => String(id) === String(service.id)) + 1 }} 期</small></label>
         </div>
         <small v-else>暂无已启用的影像地图服务</small>
       </fieldset>
@@ -193,7 +221,8 @@ function notifyMapServiceSelection() {
 .ai-tooltip-card{padding:9px 12px;border-radius:7px;background:linear-gradient(135deg,#fff,#f3fafc);font-family:"Microsoft YaHei",sans-serif}.ai-tooltip-card strong{display:block;color:#173f57;font-size:12px;line-height:1.4;white-space:nowrap}.ai-tooltip-card.is-pending{background:linear-gradient(135deg,#fff,#fff5f6)}.ai-tooltip-card.is-pending strong{color:#c43b4d}
 .manual-spot-form{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-content:start;gap:12px;padding:15px;overflow-x:hidden;overflow-y:auto;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#8aa9b7 #edf4f7}.manual-spot-form::-webkit-scrollbar{width:8px}.manual-spot-form::-webkit-scrollbar-track{background:#edf4f7}.manual-spot-form::-webkit-scrollbar-thumb{background:#8aa9b7;border:2px solid #edf4f7;border-radius:8px}.manual-spot-form::-webkit-scrollbar-thumb:hover{background:#668b9c}.field--wide{grid-column:1/-1}.field{min-width:0;display:flex;flex-direction:column;gap:6px}.field>span{color:#486879;font-size:13px;font-weight:700}.field em{color:#d84a59;font-style:normal}.field input,.field select,.field textarea{width:100%;min-width:0;box-sizing:border-box;color:#294b5d;background:#fff;border:1px solid #c6d9e3;border-radius:5px;outline:none;font:inherit;font-size:13px}.field input,.field select{height:40px;padding:0 10px}.field textarea{height:72px;padding:10px;resize:none;line-height:1.5}.field input:focus,.field select:focus,.field textarea:focus{border-color:#1597bc;box-shadow:0 0 0 2px #1597bc1b}.field input:disabled{color:#567180;background:#edf3f6}.field select:hover,.field select:focus{color:#fff;background:#075273}.field select option{color:#38586a;background:#fff}
 .field input:focus::placeholder,.field textarea:focus::placeholder{color:transparent}
-.reference-services{min-width:0;margin:0;padding:10px 11px;border:1px solid #c6d9e3;border-radius:5px}.reference-services legend{padding:0 4px;color:#486879;font-size:13px;font-weight:700}.reference-services em{color:#d84a59;font-style:normal}.reference-services>small{color:#718d9b;font-size:12px}.reference-service-list{max-height:112px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;overflow:auto}.reference-service-list label{min-width:0;display:flex;align-items:center;gap:8px;color:#38596a;font-size:12px;line-height:1.4;cursor:pointer}.reference-service-list input{flex:none;width:15px;height:15px;margin:0;accent-color:#168eb3}.reference-service-list span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.field-error{color:#b84450;font-size:11px;line-height:1.4}
+.reference-services{min-width:0;margin:0;padding:10px 11px;border:1px solid #c6d9e3;border-radius:5px}.reference-services legend{padding:0 4px;color:#486879;font-size:13px;font-weight:700}.reference-services em{color:#d84a59;font-style:normal}.reference-services>small{color:#718d9b;font-size:12px}.reference-service-list{max-height:112px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;overflow:auto}.reference-service-list label{min-width:0;display:flex;align-items:center;gap:8px;color:#38596a;font-size:12px;line-height:1.4;cursor:pointer}.reference-service-list input{flex:none;width:15px;height:15px;margin:0;accent-color:#168eb3}.reference-service-list span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-service-list small{flex:none;padding:2px 5px;color:#087b9d;background:#e5f5f9;border-radius:3px;font-size:10px}
 .geometry-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:9px;padding:11px;background:#edf5f8;border:1px dashed #8fb9ca;border-radius:6px}.geometry-card.ready{background:#e8f7f1;border-color:#55b18f}.geometry-card.drawing{background:#e8f5fb;border-color:#1598bd;box-shadow:0 0 0 2px #1598bd12}.geometry-card b,.geometry-card small{display:block}.geometry-card b{color:#244b5e;font-size:13px}.geometry-card small{margin-top:4px;color:#718994;font-size:12px;line-height:1.35}.geometry-card .drawing-tip{color:#d84a59}.geometry-card button,.drawing-actions button,.submit-button{border:0;border-radius:5px;cursor:pointer}.geometry-card button{min-width:58px;padding:8px 10px;color:#fff;background:#168eb3;font-size:12px;font-weight:700}.geometry-card button.cancel{background:#6e8390}.geometry-card button:disabled,.drawing-actions button:disabled,.submit-button:disabled{cursor:not-allowed;opacity:.48}
 .drawing-actions{display:flex;gap:7px}.drawing-actions button{min-height:34px;padding:0 10px;color:#466776;background:#fff;border:1px solid #bfd3dc;font-size:12px}.drawing-actions button.finish{margin-left:auto;color:#fff;background:#168eb3;border-color:#168eb3}.submit-message{grid-column:1/-1;margin:0;padding:9px 10px;border-radius:4px;font-size:12px;line-height:1.5;word-break:break-all}.submit-message--error{color:#b84450;background:#fff0f2}.submit-message--success{color:#167254;background:#e4f6ef}.submit-button{height:42px;color:#fff;background:linear-gradient(135deg,#159ac0,#08779c);box-shadow:0 4px 10px #08779c32;font-size:14px;font-weight:800}.submit-button:hover:not(:disabled){background:linear-gradient(135deg,#1089ad,#05688a)}
 @media(max-width:1180px){.manual-spot-form{grid-template-columns:1fr;padding:10px}.field--wide{grid-column:auto}.field textarea{height:52px}}

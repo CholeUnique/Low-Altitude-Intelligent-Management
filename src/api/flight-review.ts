@@ -42,6 +42,8 @@ export interface FlightReviewMedia {
   localFileUrl: string
   fileSize?: number
   shootTime: string
+  longitude?: number
+  latitude?: number
 }
 
 export interface FlightReviewPage<T> {
@@ -53,6 +55,12 @@ export interface FlightReviewPage<T> {
 function value(record: RawRecord, key: string): string {
   const item = record[key]
   return item === null || item === undefined ? '' : String(item).trim()
+}
+
+function coordinate(record: RawRecord, keys: string[], limit: number): number | undefined {
+  const raw = keys.map((key) => record[key]).find((item) => item !== null && item !== undefined && item !== '')
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && Math.abs(parsed) <= limit ? parsed : undefined
 }
 
 function page<T>(raw: RawPage, map: (record: RawRecord) => T): FlightReviewPage<T> {
@@ -106,6 +114,8 @@ export async function getFlightReviewMedia(taskId: string, pageNum: number) {
     localFileUrl: value(item, 'localFileUrl'),
     fileSize: item.fileSize === null || item.fileSize === undefined ? undefined : Number(item.fileSize),
     shootTime: value(item, 'shootTime'),
+    longitude: coordinate(item, ['longitude', 'lng', 'lon'], 180),
+    latitude: coordinate(item, ['latitude', 'lat'], 90),
   }))
 }
 
