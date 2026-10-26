@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
-import { getMetadataOptions, type MetadataOption } from '@/api/metadata'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { inspectMapService } from '@/utils/map-service-layer'
 import { ApiBusinessError } from '@/api/client'
 import {
   confirmRecognitionSpotUpload,
+  getRecognitionSpotTypes,
   previewRecognitionSpotUpload,
   type RecognitionSpotCreateResult,
   type RecognitionSpotUploadPreviewResult,
@@ -30,7 +30,6 @@ const typeMappings = ref<Record<string, string>>(Object.create(null))
 const abnormalTypes = ref<Array<{ value: string; label: string }>>([])
 const abnormalTypesLoading = ref(false)
 const abnormalTypesError = ref('')
-const abnormalTypeSource = ref('')
 let abnormalTypesRequestVersion = 0
 const busy = computed(() => previewing.value || uploading.value)
 const fileNames = computed(() => files.value.map((file) => file.name).join('、'))
@@ -43,17 +42,10 @@ const form = reactive({
   description: '',
   foundTime: '',
 })
-function flattenMetadataOptions(options: MetadataOption[]): Array<{ value: string; label: string }> {
-  return options.flatMap((option) => option.children?.length
-    ? flattenMetadataOptions(option.children)
-    : option.code ? [{ value: option.code, label: option.name }] : [])
-}
-
 async function loadAbnormalTypes() {
   const requestVersion = ++abnormalTypesRequestVersion
   const sceneCode = form.sceneCode
   abnormalTypes.value = []
-  abnormalTypeSource.value = ''
   abnormalTypesError.value = ''
   if (!sceneCode) {
     abnormalTypesLoading.value = false
@@ -61,20 +53,9 @@ async function loadAbnormalTypes() {
   }
   abnormalTypesLoading.value = true
   try {
-    const sceneTypeCode = `ABNORMAL_TYPE_${sceneCode}`
-    let options: MetadataOption[]
-    let source = sceneTypeCode
-    try {
-      options = await getMetadataOptions(sceneTypeCode)
-    } catch (reason) {
-      // 只有“类型不存在”才使用公共字典；专属类型存在但无启用项时应阻止导入。
-      if (!(reason instanceof ApiBusinessError && reason.code === '10401')) throw reason
-      options = await getMetadataOptions('ABNORMAL_TYPE')
-      source = 'ABNORMAL_TYPE'
-    }
+    const options = await getRecognitionSpotTypes(sceneCode)
     if (requestVersion !== abnormalTypesRequestVersion) return
-    abnormalTypes.value = [...new Map(flattenMetadataOptions(options).map((item) => [item.value, item])).values()]
-    abnormalTypeSource.value = source
+    abnormalTypes.value = [...new Map((options || []).map((item) => [item.code, { value: item.code, label: item.name }])).values()]
     if (!abnormalTypes.value.length) abnormalTypesError.value = '当前场景没有可用的异常类型元数据，请先在元数据管理中配置。'
   } catch (reason) {
     if (requestVersion === abnormalTypesRequestVersion) abnormalTypesError.value = reason instanceof Error ? reason.message : '异常类型元数据读取失败。'
@@ -228,7 +209,7 @@ function close() { if (!busy.value) emit('close') }
         <section v-if="previewResult" class="preview-panel wide" aria-label="图斑解析预览">
           <div class="preview-heading"><div><b>解析预览</b><small>共 {{ previewResult.featureCount }} 条要素，以下最多展示前 50 条；批次有效期为 30 分钟。</small></div><span>尚未入库</span></div>
           <label class="type-field"><span>违法类型来源字段 *</span><select v-model="typeField"><option value="" disabled>请选择包含类型信息的属性字段</option><option v-for="field in previewResult.fields" :key="field.name" :value="field.name">{{ field.name }}{{ field.type ? ` · ${field.type}` : '' }}（{{ field.distinctValues?.length || 0 }} 种取值）</option></select></label>
-          <div v-if="selectedField" class="mapping-panel"><strong>逐项确认类型映射</strong><small>该字段的每个不同取值都必须映射，未完成时不能入库。类型来自{{ abnormalTypeSource === 'ABNORMAL_TYPE' ? '公共' : '当前场景' }}元数据。</small>
+          <div v-if="selectedField" class="mapping-panel"><strong>逐项确认类型映射</strong><small>该字段的每个不同取值都必须映射，未完成时不能入库。类型来自当前场景的可用异常类型配置。</small>
             <p v-if="abnormalTypesLoading" class="mapping-empty">正在读取当前场景的异常类型…</p>
             <p v-else-if="abnormalTypesError" class="mapping-empty">{{ abnormalTypesError }}</p>
             <p v-if="!distinctValues.length" class="mapping-empty">此字段没有可映射的取值，请选择其他字段。</p>

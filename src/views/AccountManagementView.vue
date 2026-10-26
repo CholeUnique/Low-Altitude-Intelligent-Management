@@ -728,10 +728,30 @@ async function selectSection(section: Section) {
   })
 }
 
+const abnormalSceneId = computed(() => route.name === 'account-scene-abnormal-types'
+  ? String(route.params.sceneId || '')
+  : '')
+
+async function openSceneAbnormalTypes(sceneId: string) {
+  await router.push({
+    name: 'account-scene-abnormal-types',
+    params: { sceneId },
+    query: route.query,
+  })
+}
+
+async function closeSceneAbnormalTypes() {
+  await router.push({
+    name: 'account-management',
+    params: { section: 'scenes' },
+    query: route.query,
+  })
+}
+
 const validSections = new Set<Section>(['profile', 'users', 'departments', 'scenes', 'permissions', 'metadata', 'map-services'])
 
 async function syncSectionFromRoute() {
-  const routeSection = String(route.params.section || 'profile') as Section
+  const routeSection = (route.name === 'account-scene-abnormal-types' ? 'scenes' : String(route.params.section || 'profile')) as Section
   const nextSection = validSections.has(routeSection) ? routeSection : 'profile'
   if (!allowedSections.value.includes(nextSection)) {
     await router.replace({
@@ -755,7 +775,7 @@ async function syncSectionFromRoute() {
   }
 }
 
-watch([() => route.params.section, isAdmin, isDepartmentAdmin], () => void syncSectionFromRoute(), { immediate: true })
+watch([() => route.name, () => route.params.section, isAdmin, isDepartmentAdmin], () => void syncSectionFromRoute(), { immediate: true })
 
 onMounted(loadProfile)
 </script>
@@ -909,7 +929,12 @@ onMounted(loadProfile)
           </section>
         </template>
 
-        <SceneManagementPanel v-else-if="activeSection === 'scenes' && canManageDepartment" />
+        <SceneManagementPanel
+          v-else-if="activeSection === 'scenes' && canManageDepartment"
+          :abnormal-scene-id="abnormalSceneId"
+          @open-abnormal-types="openSceneAbnormalTypes"
+          @close-abnormal-types="closeSceneAbnormalTypes"
+        />
         <PermissionManagementPanel v-else-if="activeSection === 'permissions' && canManageDepartment" />
         <MetadataManagementPanel v-else-if="activeSection === 'metadata' && isAdmin" />
         <MapServiceManagementPanel v-else-if="activeSection === 'map-services' && isAdmin" />

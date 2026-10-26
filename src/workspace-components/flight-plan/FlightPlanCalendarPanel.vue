@@ -26,6 +26,9 @@ const statusMeta: Record<number, { label: string; tone: string }> = {
   2: { label: '已完成', tone: 'done' },
   3: { label: '已取消', tone: 'cancelled' },
   4: { label: '执行失败', tone: 'failed' },
+  5: { label: '已挂起', tone: 'suspended' },
+  6: { label: '部分执行', tone: 'partial' },
+  7: { label: '执行终止', tone: 'terminated' },
 }
 
 function dateKey(value: Date) {
@@ -208,7 +211,7 @@ watch(() => user.activeDeptId, () => void loadPlans())
         <header><div><span>当日飞行</span><b>{{ selectedDateLabel.date }} <small>{{ selectedDateLabel.weekday }}</small></b></div><em>{{ selectedPlans.length }} 架次</em></header>
         <div class="daily-list">
           <article v-for="plan in selectedPlans" :key="plan.id">
-            <div class="daily-list__top"><time>{{ planTime(plan) }}</time><em :class="statusTone(plan.status)">{{ statusLabel(plan.status, plan.statusText) }}</em></div>
+            <div class="daily-list__top"><time>{{ planTime(plan) }}</time><em :class="statusTone(plan.status)" :title="plan.statusDetail || ''">{{ statusLabel(plan.status, plan.statusText) }}</em></div>
             <b>{{ plan.title }}</b><span v-if="plan.planTitle && plan.planTitle !== plan.title">所属计划：{{ plan.planTitle }}</span><span>{{ plan.area }}</span><small>{{ plan.sn || '未返回设备 SN' }}<template v-if="plan.deviceType"> · {{ plan.deviceType }}</template></small>
           </article>
           <div v-if="!selectedPlans.length" class="empty"><i>◇</i><b>当天没有飞行安排</b><span>选择其他日期查看对应计划</span></div>
@@ -217,7 +220,7 @@ watch(() => user.activeDeptId, () => void loadPlans())
       </aside>
     </section>
 
-    <section v-else class="plan-list-panel"><header><span>任务 / 计划名称</span><span>执行时间</span><span>航线</span><span>设备</span><span>状态</span></header><div><article v-for="plan in filteredPlans" :key="plan.id"><span><b>{{ plan.title }}</b><small v-if="plan.planTitle && plan.planTitle !== plan.title">所属计划：{{ plan.planTitle }}</small><small>{{ plan.taskId ? `任务 ID：${plan.taskId}` : `计划 ID：${plan.planId}` }}</small></span><span>{{ plan.date || '日期未返回' }} {{ planTime(plan) }}</span><span>{{ plan.area }}</span><span>{{ plan.sn || '-' }}<small>{{ plan.deviceType || '' }}</small></span><span><em :class="statusTone(plan.status)">{{ statusLabel(plan.status, plan.statusText) }}</em></span></article><div v-if="!filteredPlans.length" class="empty">暂无符合条件的飞行排期</div></div></section>
+    <section v-else class="plan-list-panel"><header><span>任务 / 计划名称</span><span>执行时间</span><span>航线</span><span>设备</span><span>状态</span></header><div><article v-for="plan in filteredPlans" :key="plan.id"><span><b>{{ plan.title }}</b><small v-if="plan.planTitle && plan.planTitle !== plan.title">所属计划：{{ plan.planTitle }}</small><small>{{ plan.taskId ? `任务 ID：${plan.taskId}` : `计划 ID：${plan.planId}` }}</small></span><span>{{ plan.date || '日期未返回' }} {{ planTime(plan) }}</span><span>{{ plan.area }}</span><span>{{ plan.sn || '-' }}<small>{{ plan.deviceType || '' }}</small></span><span><em :class="statusTone(plan.status)" :title="plan.statusDetail || ''">{{ statusLabel(plan.status, plan.statusText) }}</em></span></article><div v-if="!filteredPlans.length" class="empty">暂无符合条件的飞行排期</div></div></section>
   </div>
 </template>
 
@@ -300,6 +303,12 @@ watch(() => user.activeDeptId, () => void loadPlans())
 .daily-list .daily-list__top>em.pending{color:#916f23;background:#fff3d4}
 .daily-list .daily-list__top>em.running{color:#157a91;background:#ddf3f8}
 .daily-list .daily-list__top>em.done{color:#1c785b;background:#def5ea}
+.day-cell>i.terminated{color:#8b6570;background:#f5e9ed;border-color:#b78191}
+.day-cell>i.suspended{color:#816f43;background:#f5f0e3;border-color:#aa9362}
+.day-cell>i.partial{color:#806124;background:#fff0cf;border-color:#d6a33d}
+.daily-list .daily-list__top>em.failed,.daily-list .daily-list__top>em.terminated,.plan-list-panel em.failed,.plan-list-panel em.terminated{color:#9a4050;background:#f8e3e8}
+.daily-list .daily-list__top>em.suspended,.plan-list-panel em.suspended{color:#7d6939;background:#f4eedc}
+.daily-list .daily-list__top>em.partial,.plan-list-panel em.partial{color:#85621e;background:#fff0cb}
 .daily-panel>footer{padding:11px 15px;color:#728c99;background:#f7fafb;font-size:11px}
 .daily-list .empty{display:flex;min-height:260px;flex-direction:column;align-items:center;justify-content:center;gap:7px;text-align:center}
 .daily-list .empty i{display:grid;width:46px;height:46px;place-items:center;margin-bottom:3px;border:1px solid #d6e9ee;border-radius:50%;color:#3a9fba;background:#edf8fa;font-size:24px;font-style:normal}

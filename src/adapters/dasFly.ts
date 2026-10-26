@@ -239,14 +239,20 @@ export function toFlightTaskDetail(payload: unknown): Partial<LiveCruiseSnapshot
 
 export function toMediaList(payload: unknown): { list: LiveMediaItem[]; total: number } {
   const records = asRecords(payload)
-  const list = records.map((item, index) => ({
-    id: String(item.id ?? item.mediaId ?? `MEDIA-${index + 1}`),
-    name: String(item.fileName ?? item.name ?? `IMG_${index + 1}.JPG`),
-    capturedAt: String(item.shootTime ?? item.capturedAt ?? item.createTime ?? '').replace('T', ' ').slice(0, 19) || '--',
-    thumbnail: String(item.thumbnailUrl ?? item.previewUrl ?? ''),
-    originalUrl: item.originalUrl ? String(item.originalUrl) : undefined,
-    mediaType: item.type ? String(item.type) : undefined,
-  }))
+  const list = records.map((item, index) => {
+    const longitude = Number(item.longitude ?? item.lng ?? item.lon)
+    const latitude = Number(item.latitude ?? item.lat)
+    return {
+      id: String(item.id ?? item.mediaId ?? `MEDIA-${index + 1}`),
+      name: String(item.fileName ?? item.name ?? `IMG_${index + 1}.JPG`),
+      capturedAt: String(item.shootTime ?? item.capturedAt ?? item.createTime ?? '').replace('T', ' ').slice(0, 19) || '--',
+      thumbnail: String(item.thumbnailUrl ?? item.previewUrl ?? ''),
+      originalUrl: item.originalUrl ? String(item.originalUrl) : undefined,
+      mediaType: item.type ? String(item.type) : undefined,
+      longitude: Number.isFinite(longitude) && Math.abs(longitude) <= 180 ? longitude : undefined,
+      latitude: Number.isFinite(latitude) && Math.abs(latitude) <= 90 ? latitude : undefined,
+    }
+  })
   return { list, total: totalOf(payload, list.length) }
 }
 

@@ -35,6 +35,7 @@ const router = createRouter({
     { path: '/workspace/:sceneId/:taskId?', name: 'workspace', component: () => import('@/views/WorkspaceView.vue'), meta: { title: '场景作业工作台', hidePrimaryHeader: true } },
     { path: '/algorithms', name: 'algorithms', component: () => import('@/views/AlgorithmRepositoryView.vue'), meta: { title: '算法能力仓库' } },
     { path: '/account-management', redirect: (to) => ({ name: 'account-management', params: { section: 'profile' }, query: to.query }) },
+    { path: '/account-management/scenes/:sceneId/abnormal-types', name: 'account-scene-abnormal-types', component: () => import('@/views/AccountManagementView.vue'), meta: { title: '场景异常类型', hidePrimaryHeader: true } },
     { path: '/account-management/:section(profile|users|departments|scenes|permissions|metadata|map-services)', name: 'account-management', component: () => import('@/views/AccountManagementView.vue'), meta: { title: '后台管理', hidePrimaryHeader: true } },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],
@@ -81,8 +82,8 @@ router.beforeEach(async (to) => {
     const path = firstAllowedPath(taskPermissionOrder, user.hasPermission)
     if (path && path !== to.path) return path
   }
-  if (to.name === 'account-management') {
-    const section = String(to.params.section || 'profile')
+  if (to.name === 'account-management' || to.name === 'account-scene-abnormal-types') {
+    const section = to.name === 'account-scene-abnormal-types' ? 'scenes' : String(to.params.section || 'profile')
     const role = user.currentUser?.role
     if (section !== 'profile' && role !== 'ADMIN'
       && !(user.isActiveDepartmentAdmin && ['users', 'departments', 'scenes', 'permissions'].includes(section))) {

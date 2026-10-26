@@ -17,6 +17,7 @@ import {
 import { useUserStore } from '@/stores/user'
 import SpotUploadDialog from './SpotUploadDialog.vue'
 import SharedVideoPlayer from './SharedVideoPlayer.vue'
+import PhotoLocationOverlay from './PhotoLocationOverlay.vue'
 
 const SrtInfoDialog = defineAsyncComponent(() => import('./SrtInfoDialog.vue'))
 
@@ -242,6 +243,10 @@ async function downloadPreviewMedia() {
 }
 function enterMediaFullscreen() {
   if (previewState.value === 'ready') mediaFullscreen.value = true
+}
+function toggleMediaFullscreen() {
+  if (previewState.value !== 'ready') return
+  mediaFullscreen.value = !mediaFullscreen.value
 }
 function switchDetailMedia(step: number) {
   const items = detailMedia.value
@@ -583,7 +588,6 @@ function exportList() {
     <div v-if="detailRow" class="detail-backdrop" :class="{ 'is-fullscreen': mediaFullscreen }" @click.self="closeDetail">
       <section class="detail-dialog" :class="{ 'is-fullscreen': mediaFullscreen }" role="dialog" aria-modal="true" aria-label="飞行成果详情">
         <header><div class="detail-heading"><h2>飞行成果</h2><div class="detail-heading__summary"><strong>{{ display(detailRow.plan.name) }}</strong><small>计划 ID：{{ detailRow.plan.id }} · {{ detailRow.tasks.length }} 个飞行任务 · {{ detailRow.media.length }} 个文件</small></div></div><button type="button" aria-label="关闭" @click="closeDetail">×</button></header>
-        <button v-if="mediaFullscreen" class="fullscreen-exit" type="button" aria-label="退出全屏" title="退出全屏（Esc）" @click="mediaFullscreen = false">× <span>退出全屏</span></button>
         <div class="detail-body">
           <aside aria-label="成果文件列表">
             <div v-for="item in detailMedia" :key="mediaKey(item)" class="detail-media-item" :class="{ 'is-selected': previewMedia && mediaKey(previewMedia) === mediaKey(item), 'has-srt': mediaKind(item) === 'video' }"><button type="button" class="media-preview-choice" :class="{ selected: previewMedia && mediaKey(previewMedia) === mediaKey(item), unavailable: mediaRank(item) >= 2 }" @click="previewMediaId = mediaKey(item)">
@@ -596,6 +600,11 @@ function exportList() {
               <div class="media-stage" :class="{ 'can-expand': previewState === 'ready' && mediaKind(previewMedia) === 'image' }">
                 <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailRow.media" :src="previewMedia.originalUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
                 <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error' && previewImageUrl" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" @load="markPreviewReady" @error="handlePreviewImageError" @click="enterMediaFullscreen" />
+                <PhotoLocationOverlay v-if="mediaKind(previewMedia) === 'image' && previewState === 'ready' && previewMedia.longitude !== undefined && previewMedia.latitude !== undefined" :key="`location:${mediaKey(previewMedia)}`" :media="previewMedia" :fullscreen="mediaFullscreen" />
+                <button v-if="previewState === 'ready'" class="fullscreen-toggle" type="button" :aria-label="mediaFullscreen ? '退出全屏' : '进入全屏'" :title="mediaFullscreen ? '退出全屏' : '进入全屏'" @click="toggleMediaFullscreen">
+                  <svg v-if="!mediaFullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5m13 5h5v-5" /></svg>
+                  <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                </button>
                 <div v-if="previewState === 'loading'" class="preview-loading" role="status">正在读取{{ mediaKind(previewMedia) === 'video' ? '视频' : '图片' }}…</div>
                 <section v-if="previewState === 'error'" class="preview-unavailable" role="status">
                   <span class="preview-unavailable__icon">!</span>
@@ -603,7 +612,6 @@ function exportList() {
                   <div><button type="button" @click="initializePreview">重新尝试</button><button v-if="previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></div>
                   <small v-if="downloadError" class="download-error">{{ downloadError }}</small><small v-else-if="!previewMedia.localFileUrl && !previewMedia.originalUrl">后端未提供原文件地址，暂无法下载。</small>
                 </section>
-                <button v-if="previewState === 'ready' && !mediaFullscreen" type="button" class="expand-preview" @click="enterMediaFullscreen">⛶ 全屏查看</button>
                 <button v-if="mediaFullscreen && detailMedia.length > 1" type="button" class="fullscreen-nav previous" aria-label="上一个文件" title="上一项（← / ↑）" @click="switchDetailMedia(-1)">‹</button>
                 <button v-if="mediaFullscreen && detailMedia.length > 1" type="button" class="fullscreen-nav next" aria-label="下一个文件" title="下一项（→ / ↓）" @click="switchDetailMedia(1)">›</button>
               </div>
@@ -705,8 +713,9 @@ function exportList() {
 .preview-unavailable button.preview-download:disabled { opacity: .65; cursor: wait; }
 .preview-unavailable small { display: block; margin-top: 12px; color: #8499a4; font-size: 11px; }
 .preview-unavailable small.download-error { color: #b04747; }
-.expand-preview { position: absolute; z-index: 2; top: 6px; right: 6px; padding: 8px 12px; border: 1px solid #e6f4f9aa; border-radius: 5px; color: #fff; background: #0c344bc7; font-size: 12px; font-weight: 700; cursor: pointer; }
-.expand-preview:hover { background: #147c9d; }
+.fullscreen-toggle { position: absolute; z-index: 9; top: 12px; right: 20px; display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 1px solid #8eb9c9; border-radius: 4px; color: #dff4fc; background: #0b3449e8; box-shadow: 0 3px 10px #00152355; cursor: pointer; }
+.fullscreen-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.fullscreen-toggle:hover { border-color: #4ed6e8; color: #fff; background: #187f9f; }
 .detail-media-item{position:relative;border-bottom:1px solid #e2ebef}.detail-media-item.is-selected{background:#e6f5f9}.detail-body aside .media-preview-choice{border-bottom:0}.detail-body aside .has-srt .media-preview-choice small{box-sizing:border-box;padding-right:60px}.detail-body aside .media-srt-button{position:absolute;right:6px;bottom:7px;width:auto;margin:0;padding:2px 5px;border:1px solid #b6dbe5;border-radius:4px;background:#edf9fc;color:#1685a3;font-size:9px;line-height:12px;white-space:nowrap}.detail-body aside .media-srt-button:hover{background:#d5f0f6}.row-actions{flex-wrap:wrap}
 .detail-body main footer { margin-top: 0; }
 .detail-body main footer small { color: #8199a5; font-size: 11px; }
@@ -723,9 +732,7 @@ function exportList() {
 .detail-dialog.is-fullscreen .media-stage img { cursor: default; }
 .detail-dialog.is-fullscreen .detail-body main footer { border-color: #203949; color: #e6f4f8; background: #102735; }
 .detail-dialog.is-fullscreen .detail-body main footer small { color: #a8c0cb; }
-.fullscreen-exit { position: absolute; z-index: 5; top: 16px; right: 20px; display: flex; align-items: center; gap: 7px; padding: 7px 12px; border: 1px solid #ffffff65; border-radius: 6px; color: #fff; background: #0b3449cc; font-size: 24px; line-height: 1; cursor: pointer; }
-.fullscreen-exit span { font-size: 13px; font-weight: 700; }
-.fullscreen-exit:hover { background: #187f9f; }
+.detail-dialog.is-fullscreen .fullscreen-toggle { position: fixed; top: 14px; right: 16px; }
 .fullscreen-nav { position: absolute; z-index: 4; top: 50%; width: 44px; height: 52px; border: 1px solid #ffffff66; border-radius: 7px; color: #fff; background: #0b3449b8; font-size: 35px; line-height: 1; transform: translateY(-50%); cursor: pointer; }
 .fullscreen-nav:hover { background: #187f9f; }
 .fullscreen-nav.previous { left: 24px; }.fullscreen-nav.next { right: 24px; }
@@ -737,7 +744,6 @@ function exportList() {
 .detail-dialog .detail-heading__summary small { overflow: hidden; color: #8197a4; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .detail-dialog>header button { flex: none; }
 .detail-dialog:not(.is-fullscreen) .media-stage::after { position: absolute; z-index: 1; top: 0; right: 0; bottom: 0; width: 12px; background: #fff; content: ''; pointer-events: none; }
-.media-stage .expand-preview { right: 12px; }
 .detail-dialog.is-fullscreen .media-stage { padding-right: 0; }
 .detail-dialog.is-fullscreen .media-stage :deep(.shared-video-player) { right: 0; width: 100%; }
 @media(max-width:800px) { .detail-backdrop:not(.is-fullscreen) { padding: 8px; } .detail-body { grid-template-columns: 180px minmax(0,1fr); } .detail-heading { gap: 12px; } .detail-heading h2 { font-size: 18px; } .detail-heading__summary { gap: 3px; padding-left: 12px; } .detail-heading__summary strong { font-size: 14px; } .detail-dialog .detail-heading__summary small { font-size: 10px; } .preview-unavailable { margin: 12px; padding: 18px; } .fullscreen-nav.previous { left: 8px; } .fullscreen-nav.next { right: 8px; } }

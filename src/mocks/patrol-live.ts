@@ -17,6 +17,8 @@ export interface LiveMediaItem {
   thumbnail: string
   originalUrl?: string
   mediaType?: string
+  longitude?: number
+  latitude?: number
 }
 
 export interface LiveEventItem {
