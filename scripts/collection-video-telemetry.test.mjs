@@ -16,6 +16,7 @@ function load(source, dependencies) {
 globalThis.Document = class {}
 globalThis.ShadowRoot = class {}
 globalThis.document = { activeElement: null }
+globalThis.ResizeObserver = class { observe() {} disconnect() {} }
 const windowListeners = new Map()
 globalThis.window = { setTimeout, clearTimeout, innerWidth: 1600, innerHeight: 900,
   addEventListener: (name, handler) => windowListeners.set(name, handler), removeEventListener: name => windowListeners.delete(name) }
@@ -53,6 +54,7 @@ const SrtDialog = Vue.defineComponent({ props: ['planName', 'media'], emits: ['c
   srtInstances.push({ props, close: () => emit('close') })
   return () => Vue.h('section', { class: 'stub-srt-dialog' })
 } })
+const PhotoLocation = Vue.defineComponent({ props: ['media', 'fullscreen'], setup: () => () => Vue.h('section', { class: 'stub-photo-location' }) })
 const taskA = { id: '210987654321000001', name: '采集任务 A', createTime: '2026-10-13 13:00', deviceName: '设备 A', waylineName: '' }
 const taskB = { id: '210987654321000002', name: '采集任务 B', createTime: '2026-10-12 13:00', deviceName: '设备 B', waylineName: '' }
 const videoA = { id: '310987654321000001', name: 'DJI_SAME.mp4', capturedAt: '2026-10-13 13:34:12', thumbnail: '/a.jpg', originalUrl: 'https://video.test/a.mp4', mediaType: 'video' }
@@ -73,10 +75,13 @@ const SharedPlayer = load(compileScript(parse(sharedSource).descriptor, { id: 's
 const View = load(compileScript(descriptor, { id: 'collection-test', inlineTemplate: true }).content, {
   vue: Vue,
   '@/api/patrol': {
+    getUavMediaSummary: async () => ({ photoCount: 1, videoCount: 3 }),
     getUavFlightTaskOptions: async () => ({ list: [taskA, taskB], total: 2 }),
     getFlightTaskMedia: async ({ taskId }) => ({ list: taskId === taskA.id ? [videoA, imageA, noUrlVideo, attachment] : [videoB], total: taskId === taskA.id ? 4 : 1 }),
   },
+  '@/utils/collection-media-pager': load(readFileSync('src/utils/collection-media-pager.ts', 'utf8'), {}),
   '@/workspace-components/spot-identification/SharedVideoPlayer.vue': { __esModule: true, default: SharedPlayer },
+  '@/workspace-components/spot-identification/PhotoLocationOverlay.vue': { __esModule: true, default: PhotoLocation },
   '@/workspace-components/spot-identification/SrtInfoDialog.vue': { __esModule: true, default: SrtDialog },
 }).default
 const root = node('root'), props = Vue.reactive({ embedded: true, activeTab: 'collection' })

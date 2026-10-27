@@ -4,6 +4,8 @@ import type { LiveStream } from '@/adapters/dasFly'
 import { getLiveStreams, getRoutes, getUavComponentUrl, getUavFlightTaskOptions, type UavFlightTaskOption } from '@/api/patrol'
 import { useUserStore } from '@/stores/user'
 import type { FlightRoute } from '@/mocks/route-planning'
+import { componentSelectionState } from '@/utils/uav-component-capabilities'
+import { useComponentFeedback } from '@/workspace-components/shared/component-feedback'
 
 const props = withDefaults(defineProps<{ fullscreen?: boolean; initialDeviceId?: string }>(), { fullscreen: false, initialDeviceId: '' })
 const emit = defineEmits<{ 'exit-fullscreen': [] }>()
@@ -14,8 +16,8 @@ const error = ref('')
 const routes = ref<FlightRoute[]>([])
 const streams = ref<LiveStream[]>([])
 type PlaybackFlightTask = UavFlightTaskOption & {
-  availability: 'checking' | 'available' | 'unavailable'
-  componentUrl?: string
+  availability: 'available' | 'unavailable'
+  targetId?: string
   unavailableReason?: string
 }
 const flightTasks = ref<PlaybackFlightTask[]>([])
@@ -25,6 +27,7 @@ const flightTaskKeyword = ref('')
 const playbackUrl = ref('')
 const playbackLoading = ref(false)
 const playbackError = ref('')
+const showComponentError = useComponentFeedback()
 const playbackPanel = ref<HTMLElement>()
 const playbackViewport = ref<HTMLElement>()
 // 开放组件按桌面画布排版；缩放整个 iframe，避免窄窗口截掉内部侧栏和底部控件。
@@ -51,7 +54,8 @@ watch(playbackViewport, element => {
 const playbackFullscreen = ref(false)
 const fullscreenHintVisible = ref(false)
 const previewDeviceId = ref('')
-let flightTaskValidationVersion = 0
+let overviewRequestVersion = 0
+let playbackRequestVersion = 0
 let fullscreenHintTimer: ReturnType<typeof window.setTimeout> | undefined
 
 const selectedDevice = computed(() => streams.value.find((item) => item.id === activeDeviceId.value))
@@ -63,7 +67,7 @@ const filteredFlightTasks = computed(() => {
   const source = keyword
     ? flightTasks.value.filter((item) => `${item.name}${item.waylineName}${item.deviceName}${item.id}${item.status}${item.unavailableReason || ''}`.toLowerCase().includes(keyword))
     : flightTasks.value
-  const rank = { available: 0, checking: 1, unavailable: 2 }
+  const rank = { available: 0, unavailable: 1 }
   return [...source].sort((left, right) => rank[left.availability] - rank[right.availability])
 })
 const playbackEmbedUrl = computed(() => {
@@ -88,52 +92,25 @@ const playbackStateText = computed(() => playbackError.value
 function prepareFlightTasks(items: UavFlightTaskOption[]) {
   return items.filter((item) => Boolean(item.id?.trim())).map<PlaybackFlightTask>((item) => ({
     ...item,
-    availability: 'checking',
+    ...componentSelectionState(item.componentCapabilities?.trajectoryPlayback),
   }))
 }
 
-function updateFlightTask(id: string, patch: Partial<PlaybackFlightTask>) {
-  flightTasks.value = flightTasks.value.map((item) => item.id === id ? { ...item, ...patch } : item)
-}
-
-async function validateFlightTasks(items: PlaybackFlightTask[], version: number) {
-  let nextIndex = 0
-  async function worker() {
-    while (nextIndex < items.length) {
-      const task = items[nextIndex++]
-      if (!task || version !== flightTaskValidationVersion) return
-      try {
-        const componentUrl = await getUavComponentUrl('TRAJECTORY_PLAYBACK', { flightTaskId: task.id })
-        if (version !== flightTaskValidationVersion) return
-        updateFlightTask(task.id, { availability: 'available', componentUrl, unavailableReason: undefined })
-      } catch (reason) {
-        if (version !== flightTaskValidationVersion) return
-        const unavailableReason = reason instanceof Error ? reason.message : '无法获取轨迹回放授权。'
-        updateFlightTask(task.id, { availability: 'unavailable', componentUrl: undefined, unavailableReason })
-        if (selectedFlightTaskId.value === task.id) selectedFlightTaskId.value = ''
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(4, items.length) }, () => worker()))
-  if (version !== flightTaskValidationVersion) return
-  const firstAvailable = filteredFlightTasks.value.find((item) => item.availability === 'available')
-  const currentAvailable = flightTasks.value.some((item) => item.id === selectedFlightTaskId.value && item.availability === 'available')
-  if (!currentAvailable && firstAvailable) {
-    selectedFlightTaskId.value = firstAvailable.id
-    await enterTrajectoryPlayback()
-  }
-}
-
 async function loadOverview() {
-  const validationVersion = ++flightTaskValidationVersion
+  const requestVersion = ++overviewRequestVersion
+  playbackRequestVersion++
+  playbackLoading.value = false
+  playbackUrl.value = ''
+  playbackError.value = ''
   loading.value = true
   error.value = ''
   try {
     const [routePage, streamPage, flightTaskPage] = await Promise.all([
-      getRoutes({ pageNum: 1, pageSize: 500 }),
+      getRoutes({ pageNum: 1, pageSize: 200 }),
       getLiveStreams(),
       getUavFlightTaskOptions({ pageNum: 1, pageSize: 200 }),
     ])
+    if (requestVersion !== overviewRequestVersion) return
     routes.value = routePage.list
     streams.value = streamPage.list
     flightTasks.value = prepareFlightTasks(flightTaskPage.list)
@@ -141,25 +118,25 @@ async function loadOverview() {
     if (preferredDeviceId && streams.value.some((item) => item.id === preferredDeviceId)) activeDeviceId.value = preferredDeviceId
     else if (!activeDeviceId.value || !streams.value.some((item) => item.id === activeDeviceId.value)) activeDeviceId.value = streams.value[0]?.id || ''
     if (previewDeviceId.value && !streams.value.some((item) => item.id === previewDeviceId.value)) previewDeviceId.value = ''
-    if (selectedFlightTaskId.value && !flightTasks.value.some((task) => task.id === selectedFlightTaskId.value)) {
+    if (selectedFlightTaskId.value && !flightTasks.value.some((task) => task.id === selectedFlightTaskId.value && task.availability === 'available')) {
       selectedFlightTaskId.value = ''
       playbackUrl.value = ''
     }
-    void validateFlightTasks([...flightTasks.value], validationVersion)
   } catch (reason) {
+    if (requestVersion !== overviewRequestVersion) return
     routes.value = []
     streams.value = []
     flightTasks.value = []
     error.value = reason instanceof Error ? reason.message : '实时巡航数据加载失败'
   } finally {
-    loading.value = false
+    if (requestVersion === overviewRequestVersion) loading.value = false
   }
 }
 
 async function selectFlightTask(taskId: string) {
   const task = flightTasks.value.find((item) => item.id === taskId)
   if (task?.availability !== 'available') return
-  if (selectedFlightTaskId.value === taskId && playbackEmbedUrl.value) return
+  if (selectedFlightTaskId.value === taskId && (playbackEmbedUrl.value || playbackLoading.value)) return
   playbackUrl.value = ''
   selectedFlightTaskId.value = taskId
   playbackError.value = ''
@@ -167,22 +144,23 @@ async function selectFlightTask(taskId: string) {
 }
 
 async function enterTrajectoryPlayback() {
+  const requestVersion = ++playbackRequestVersion
   playbackUrl.value = ''
   playbackError.value = ''
   const task = selectedFlightTask.value
-  if (!task?.id?.trim() || task.availability !== 'available') {
+  if (!task?.targetId || task.availability !== 'available') {
     playbackError.value = '请选择具有有效飞行任务 ID 的任务，确认后将进入对应的开放组件。'
     return
   }
   playbackLoading.value = true
   try {
-    playbackUrl.value = task.componentUrl || await getUavComponentUrl('TRAJECTORY_PLAYBACK', { flightTaskId: task.id })
+    const url = await getUavComponentUrl('TRAJECTORY_PLAYBACK', { flightTaskId: task.targetId })
+    if (requestVersion === playbackRequestVersion) playbackUrl.value = url
   } catch (reason) {
-    playbackError.value = reason instanceof Error ? reason.message : '轨迹回放开放组件加载失败，请重新选择飞行任务后重试。'
-    updateFlightTask(task.id, { availability: 'unavailable', componentUrl: undefined, unavailableReason: playbackError.value })
-    selectedFlightTaskId.value = ''
+    if (requestVersion !== playbackRequestVersion) return
+    showComponentError(reason instanceof Error ? reason.message : '轨迹回放开放组件加载失败，请重试。')
   } finally {
-    playbackLoading.value = false
+    if (requestVersion === playbackRequestVersion) playbackLoading.value = false
   }
 }
 
@@ -251,6 +229,8 @@ onMounted(() => {
   void loadOverview()
 })
 onBeforeUnmount(() => {
+  overviewRequestVersion++
+  playbackRequestVersion++
   playbackResizeObserver?.disconnect()
   window.removeEventListener('keydown', handlePreviewKeydown)
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
@@ -312,8 +292,8 @@ watch(() => user.activeDeptId, () => void loadOverview())
       <aside class="overview-panel route-panel">
         <div class="panel-title route-panel-title"><b>选择任务航线</b><span>{{ flightTasks.filter(item => item.availability === 'available').length }} 条可用</span></div>
         <input v-model="flightTaskKeyword" class="flight-task-search" placeholder="搜索任务名称、航线、设备或 ID" />
-        <button v-for="task in filteredFlightTasks" :key="task.id" type="button" class="route-row flight-task-row" :class="{ active: selectedFlightTaskId === task.id, checking: task.availability === 'checking', unavailable: task.availability === 'unavailable' }" :disabled="task.availability !== 'available'" :title="task.unavailableReason || ''" @click="selectFlightTask(task.id)">
-          <span><b>{{ task.name }}</b><small>{{ task.waylineName || '未关联航线' }} · {{ task.deviceName || '未关联设备' }}</small><small>飞行任务 ID：{{ task.id }}</small><small v-if="task.availability === 'unavailable'" class="unavailable-reason">{{ task.unavailableReason || '该任务无法进入轨迹回放' }}</small></span><em>{{ task.availability === 'checking' ? '验证中' : task.availability === 'unavailable' ? '不可用' : (task.status || '可用') }}</em>
+        <button v-for="task in filteredFlightTasks" :key="task.id" type="button" class="route-row flight-task-row" :class="{ active: selectedFlightTaskId === task.id, unavailable: task.availability === 'unavailable' }" :disabled="task.availability !== 'available'" :title="task.unavailableReason || ''" @click="selectFlightTask(task.id)">
+          <span><b>{{ task.name }}</b><small>{{ task.waylineName || '未关联航线' }} · {{ task.deviceName || '未关联设备' }}</small><small>飞行任务 ID：{{ task.id }}</small><small v-if="task.availability === 'unavailable'" class="unavailable-reason">{{ task.unavailableReason || '该任务无法进入轨迹回放' }}</small></span><em>{{ task.availability === 'unavailable' ? '不可用' : '可用' }}</em>
         </button>
         <div v-if="loading" class="empty-state">正在读取飞行任务…</div>
         <div v-else-if="!filteredFlightTasks.length" class="empty-state">{{ flightTaskKeyword ? '没有匹配的飞行任务' : '暂无可选择飞行任务' }}</div>

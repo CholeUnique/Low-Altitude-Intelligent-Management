@@ -28,6 +28,7 @@ import MetadataManagementPanel from '@/components/MetadataManagementPanel.vue'
 import MapServiceManagementPanel from '@/components/MapServiceManagementPanel.vue'
 import PermissionManagementPanel from '@/components/PermissionManagementPanel.vue'
 import SceneManagementPanel from '@/components/SceneManagementPanel.vue'
+import ManagementNavIcon from '@/components/ManagementNavIcon.vue'
 import StatusConfirmDialog from '@/components/StatusConfirmDialog.vue'
 import type { CurrentUser } from '@/types'
 import { formatBeijingDateTime } from '@/utils/date-time'
@@ -798,26 +799,26 @@ onMounted(loadProfile)
       <aside class="management-sidebar">
         <p class="sidebar-caption">账户与组织</p>
         <button type="button" :class="{ active: activeSection === 'profile' }" @click="selectSection('profile')">
-          <span>◎</span><i>个人资料</i>
+          <ManagementNavIcon name="profile" /><i>个人资料</i>
         </button>
         <button v-if="canManageDepartment" type="button" :class="{ active: activeSection === 'users' }" @click="selectSection('users')">
-          <span>♙</span><i>用户管理</i>
+          <ManagementNavIcon name="users" /><i>用户管理</i>
         </button>
         <button v-if="canManageDepartment" type="button" :class="{ active: activeSection === 'departments' }" @click="selectSection('departments')">
-          <span>◇</span><i>部门管理</i>
+          <ManagementNavIcon name="departments" /><i>部门管理</i>
         </button>
         <button v-if="canManageDepartment" type="button" :class="{ active: activeSection === 'scenes' }" @click="selectSection('scenes')">
-          <span>◫</span><i>场景管理</i>
+          <ManagementNavIcon name="scenes" /><i>场景管理</i>
         </button>
         <button v-if="canManageDepartment" type="button" :class="{ active: activeSection === 'permissions' }" @click="selectSection('permissions')">
-          <span>▣</span><i>权限管理</i>
+          <ManagementNavIcon name="permissions" /><i>权限管理</i>
         </button>
         <p v-if="isAdmin" class="sidebar-caption sidebar-caption--resource">资源管理</p>
         <button v-if="isAdmin" type="button" :class="{ active: activeSection === 'metadata' }" @click="selectSection('metadata')">
-          <span>▦</span><i>元数据管理</i>
+          <ManagementNavIcon name="metadata" /><i>元数据管理</i>
         </button>
         <button v-if="isAdmin" type="button" :class="{ active: activeSection === 'map-services' }" @click="selectSection('map-services')">
-          <span>▤</span><i>地图服务管理</i>
+          <ManagementNavIcon name="map-services" /><i>地图服务管理</i>
         </button>
       </aside>
 
@@ -1104,6 +1105,9 @@ onMounted(loadProfile)
 .back-button { min-height: 40px; font-size: 14px; }
 .account-summary { font-size: 14px; }
 .sidebar-caption { font-size: 13px; }
+.management-sidebar > button .management-nav-icon { width: 22px; height: 22px; flex: 0 0 22px; color: #69b9d2; transition: color .18s ease; }
+.management-sidebar > button:hover .management-nav-icon,
+.management-sidebar > button.active .management-nav-icon { color: #69dfff; }
 .management-sidebar > button i { font-size: 16px; }
 .sidebar-user small,.sidebar-user span { font-size: 12px; }.sidebar-user strong { font-size: 15px; }
 .page-heading h2 { font-size: 25px; }.page-heading p { font-size: 14px; }

@@ -301,8 +301,8 @@ export async function getUavFlightSummary(): Promise<UavFlightSummary> {
   }
 }
 
-export async function getUavMediaSummary(): Promise<UavMediaSummary> {
-  const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/statistics/media-summary', {})
+export async function getUavMediaSummary(deptId?: string): Promise<UavMediaSummary> {
+  const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/statistics/media-summary', { deptId })
   const item = data || {}
   return {
     totalCount: optionalNumber(item.totalCount),

@@ -102,8 +102,8 @@ export async function getFlightReviewTasks(deptId: string | undefined, pageNum: 
   }))
 }
 
-export async function getFlightReviewMedia(taskId: string, pageNum: number) {
-  const data = await apiClient.post<never, RawPage>('/v1/uav/flight-task/media/page', { taskId, pageNum, pageSize: 200 })
+export async function getFlightReviewMedia(taskId: string, pageNum: number, pageSize = 200, deptId?: string) {
+  const data = await apiClient.post<never, RawPage>('/v1/uav/flight-task/media/page', { taskId, pageNum, pageSize, deptId })
   return page(data, (item): FlightReviewMedia => ({
     id: value(item, 'id'),
     taskId,
