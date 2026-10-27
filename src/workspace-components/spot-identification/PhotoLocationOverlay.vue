@@ -5,7 +5,7 @@ import { ElTooltip } from 'element-plus'
 import 'leaflet/dist/leaflet.css'
 import type { FlightReviewMedia } from '@/api/flight-review'
 import { getTiandituAddress } from '@/api/geocoding'
-import { fitTelemetryPanelSize, placeTelemetryPanel, resizeTelemetryPanel, type TelemetryPanelBounds, type TelemetryPanelSize } from '@/utils/telemetry-panel'
+import { containedVideoBounds, fitTelemetryPanelSize, placeTelemetryPanel, resizeTelemetryPanel, type TelemetryPanelBounds, type TelemetryPanelSize } from '@/utils/telemetry-panel'
 
 const props = defineProps<{ media: FlightReviewMedia; fullscreen?: boolean }>()
 const panel = ref<HTMLElement>()
@@ -19,6 +19,7 @@ const imageBounds = shallowRef<TelemetryPanelBounds>()
 const dragging = ref(false)
 const resizing = ref(false)
 const navigationNoticePending = ref(false)
+const placementReady = ref(false)
 const panelStyle = computed(() => ({
   ...(panelPosition.value ? { left: `${panelPosition.value.left}px`, top: `${panelPosition.value.top}px`, right: 'auto' } : {}),
   ...(panelSize.value ? { width: `${panelSize.value.width}px`, height: `${panelSize.value.height}px` } : {}),
@@ -45,22 +46,14 @@ function updatePlacement(resetAnchor = false) {
   const parent = panel.value?.parentElement
   const image = parent?.querySelector(':scope > img') as HTMLImageElement | null
   if (!parent || !image?.naturalWidth || !image.naturalHeight) return
-  const styles = getComputedStyle(parent)
-  const paddingLeft = Number.parseFloat(styles.paddingLeft) || 0
-  const paddingRight = Number.parseFloat(styles.paddingRight) || 0
-  const paddingTop = Number.parseFloat(styles.paddingTop) || 0
-  const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0
-  const availableWidth = Math.max(0, parent.clientWidth - paddingLeft - paddingRight)
-  const availableHeight = Math.max(0, parent.clientHeight - paddingTop - paddingBottom)
-  const scale = Math.min(availableWidth / image.naturalWidth, availableHeight / image.naturalHeight)
-  const renderedWidth = image.naturalWidth * scale
-  const renderedHeight = image.naturalHeight * scale
-  const bounds = {
-    left: paddingLeft + Math.max(0, (availableWidth - renderedWidth) / 2),
-    top: paddingTop + Math.max(0, (availableHeight - renderedHeight) / 2),
-    width: renderedWidth,
-    height: renderedHeight,
-  }
+  if (!image.clientWidth || !image.clientHeight) return
+  // 图片的缩放、平移只改变内容；面板始终约束在未变换的可视图片区域内。
+  const bounds = containedVideoBounds({
+    left: image.offsetLeft,
+    top: image.offsetTop,
+    width: image.clientWidth,
+    height: image.clientHeight,
+  }, image.naturalWidth, image.naturalHeight)
   const changed = !imageBounds.value || Object.keys(bounds).some(key => Math.abs(bounds[key as keyof TelemetryPanelBounds] - imageBounds.value![key as keyof TelemetryPanelBounds]) > .5)
   if (resetAnchor || changed) { endDrag(); endResize() }
   imageBounds.value = bounds
@@ -68,9 +61,10 @@ function updatePlacement(resetAnchor = false) {
   const size = fitTelemetryPanelSize(preferredSize || { width: 340, height: 300 }, bounds)
   panelSize.value = size
   const desired = anchored || !panelPosition.value
-    ? { left: bounds.left + bounds.width - size.width - 10, top: bounds.top + (props.fullscreen ? 10 : 48) }
+    ? { left: bounds.left + bounds.width - size.width - 10, top: bounds.top + 10 }
     : panelPosition.value
   panelPosition.value = placeTelemetryPanel(desired.left, desired.top, size, bounds)
+  placementReady.value = true
 }
 
 function handlePlacementImageLoad() {
@@ -219,7 +213,7 @@ function renderLocation() {
       }),
     }).addTo(map)
   } else marker.setLatLng(coordinate)
-  map.setView(coordinate, 17, { animate: false })
+  map.setView(coordinate, 14, { animate: false })
   nextTick(() => map?.invalidateSize({ pan: false }))
 }
 
@@ -255,6 +249,13 @@ watch(() => [props.media.id, props.media.longitude, props.media.latitude], () =>
   nextTick(() => updatePlacement(true))
 })
 watch(() => props.fullscreen, async () => {
+  endDrag()
+  endResize()
+  preferredSize = undefined
+  anchored = true
+  panelPosition.value = undefined
+  panelSize.value = undefined
+  placementReady.value = false
   await nextTick()
   updatePlacement(true)
 }, { flush: 'post' })
@@ -272,7 +273,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section ref="panel" class="photo-location" :class="{ 'is-dragging': dragging, 'is-resizing': resizing }" :style="panelStyle" aria-label="拍摄位置" @pointerdown.stop @wheel.stop @dblclick.stop @click.stop @keydown.stop>
+  <section ref="panel" class="photo-location" :class="{ 'is-dragging': dragging, 'is-resizing': resizing, 'is-positioned': placementReady }" :style="panelStyle" aria-label="拍摄位置" @pointerdown.stop @wheel.stop @dblclick.stop @click.stop @keydown.stop>
     <header tabindex="0" aria-label="拖动拍摄位置窗口，或使用方向键移动" title="按住标题栏拖动" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag" @keydown="movePanelWithKey"><strong>拍摄位置 <span class="drag-grip" aria-hidden="true">⠿</span></strong></header>
     <div class="photo-location__map-wrap">
       <div ref="mapElement" class="photo-location__map" />
@@ -288,7 +289,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.photo-location{position:absolute;z-index:7;top:12px;right:12px;display:flex;width:min(340px,calc(100% - 24px));height:300px;overflow:hidden;box-sizing:border-box;flex-direction:column;border:1px solid #5a9aaf;border-radius:8px;color:#dff4fc;background:#102d40f5;box-shadow:0 8px 25px #00152366;font-size:11px;pointer-events:auto}
+.photo-location{position:absolute;z-index:7;top:12px;right:12px;display:flex;width:min(340px,calc(100% - 24px));height:300px;overflow:hidden;visibility:hidden;box-sizing:border-box;flex-direction:column;border:1px solid #5a9aaf;border-radius:8px;color:#dff4fc;background:#102d40f5;box-shadow:0 8px 25px #00152366;font-size:11px;pointer-events:auto}.photo-location.is-positioned{visibility:visible}
 .photo-location header{display:flex;flex:none;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid #345464;cursor:grab;touch-action:none;user-select:none}.photo-location.is-dragging header{cursor:grabbing}.photo-location header:focus-visible{outline:2px solid #4fe2f4;outline-offset:-2px}
 .photo-location header strong{display:block;font-size:13px}
 .drag-grip{margin-left:5px;color:#91b5c4}

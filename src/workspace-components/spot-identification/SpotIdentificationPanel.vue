@@ -63,6 +63,11 @@ const pendingReview = ref<{ id: string; spotNo: string; title: string; deptId: s
 const reviewBusy = ref(false)
 const reviewError = ref('')
 const reviewMessage = ref('')
+watch(reviewMessage, (message, _previous, onCleanup) => {
+  if (!message) return
+  const timer = window.setTimeout(() => { reviewMessage.value = '' }, 3000)
+  onCleanup(() => window.clearTimeout(timer))
+})
 type SpotAction = 'ignore' | 'revoke'
 type PendingSpotAction = { kind: SpotAction; id: string; spotNo: string; title: string; deptId: string; handleStatus: number }
 const pendingSpotAction = ref<PendingSpotAction>()
@@ -654,6 +659,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="governance-page spot-page">
+    <Teleport to="body">
+      <div v-if="reviewMessage" class="review-success-toast" role="status">{{ reviewMessage }}</div>
+    </Teleport>
     <aside class="left-column">
       <section class="panel spot-list">
         <div class="panel-title"><span>问题图斑列表</span><small>{{ filtered.length }} / {{ records.length }} 处</small></div>
@@ -748,7 +756,6 @@ onBeforeUnmount(() => {
           <button class="detail-action detail-action--ignore" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('ignore')">忽略图斑</button>
           <button class="detail-action detail-action--revoke" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('revoke')">撤销图斑</button>
         </div>
-        <p v-if="reviewMessage" class="review-feedback review-feedback--success" role="status">{{ reviewMessage }}</p>
         <p v-if="reviewError && !pendingReview" class="review-feedback review-feedback--error" role="alert">{{ reviewError }}</p>
         <p v-if="detailError" class="review-feedback review-feedback--error" role="alert">{{ detailError }}</p>
         <template v-if="active">
@@ -938,7 +945,27 @@ onBeforeUnmount(() => {
 .detail-action:focus-visible { outline: 2px solid #08799d; outline-offset: 2px; }
 .detail-action:disabled { color: #91a7b2; background: #edf3f5; border-color: #d6e2e8; cursor: not-allowed; }
 .detail > p.review-feedback { margin: 9px 14px 0; padding: 8px 10px; font-size: 12px; }
-.detail > p.review-feedback--success { color: #147254; background: #e4f6ef; }
+.review-success-toast {
+  position: fixed;
+  top: 82px;
+  left: 50%;
+  z-index: 3200;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(560px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 11px 40px;
+  transform: translateX(-50%);
+  border: 1px solid #42c9a8;
+  border-radius: 4px;
+  background: #167b6a;
+  box-shadow: 0 10px 30px #00131faa;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
 .detail > p.review-feedback--error { color: #b63f4d; background: #ffedf0; }
 .review-mask { position: fixed; z-index: 4300; inset: 0; display: grid; place-items: center; padding: 20px; background: #10243199; backdrop-filter: blur(2px); }
 .review-dialog { width: min(420px, calc(100vw - 40px)); overflow: hidden; color: #29475a; background: #fff; border: 1px solid #b9d1dc; border-radius: 8px; box-shadow: 0 18px 46px #102a3d66; }

@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallo
 import { ElTooltip } from 'element-plus'
 import { Calendar, FolderOpened, Picture, VideoCamera } from '@element-plus/icons-vue'
 import { isMockMode } from '@/api/client'
+import { getUavMediaSummary, type UavMediaSummary } from '@/api/patrol'
 import type { RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import {
   getFlightReviewMedia,
@@ -35,6 +36,8 @@ interface PlanRow {
   otherCount: number
   mediaFailed: boolean
   mediaPending: boolean
+  fileCount?: number
+  countFailed: boolean
 }
 
 const user = useUserStore()
@@ -45,6 +48,15 @@ const failedMediaTasks = ref<string[]>([])
 const completedMediaTaskIds = ref<string[]>([])
 const loading = ref(false)
 const mediaLoading = ref(false)
+const taskMediaTotals = ref<Record<string, number>>({})
+const failedCountTasks = ref<string[]>([])
+const departmentMediaSummary = ref<UavMediaSummary>({})
+const summaryFailed = ref(false)
+const openingPlanId = ref('')
+const exporting = ref(false)
+const actionError = ref('')
+let pendingMedia = new Map<string, Promise<void>>()
+let pendingCounts = new Map<string, Promise<void>>()
 const error = ref('')
 const planKeyword = ref('')
 const routeTypeFilter = ref('')
@@ -58,6 +70,10 @@ const pageSize = ref(16)
 const detailPlanId = ref('')
 const previewMediaId = ref('')
 const mediaFullscreen = ref(false)
+const previewImageScale = ref(1)
+const previewImageOffsetX = ref(0)
+const previewImageOffsetY = ref(0)
+const previewImageDragging = ref(false)
 const videoPlayer = ref<InstanceType<typeof SharedVideoPlayer>>()
 const srtContext = shallowRef<{ planName: string; media: FlightReviewMedia }>()
 const previewState = ref<'loading' | 'ready' | 'error'>('loading')
@@ -79,6 +95,64 @@ let previewAbortController: AbortController | undefined
 let previewObjectUrl = ''
 let previewFileBlob: Blob | undefined
 let previewFileKey = ''
+let previewImagePointerId: number | undefined
+let previewImageDragStartX = 0
+let previewImageDragStartY = 0
+let previewImageDragOriginX = 0
+let previewImageDragOriginY = 0
+
+const previewImageStyle = computed(() => ({
+  transform: `translate3d(${previewImageOffsetX.value}px, ${previewImageOffsetY.value}px, 0) scale(${previewImageScale.value})`,
+}))
+
+function resetPreviewImageTransform() {
+  previewImageScale.value = 1
+  previewImageOffsetX.value = 0
+  previewImageOffsetY.value = 0
+  previewImageDragging.value = false
+  previewImagePointerId = undefined
+}
+
+function zoomPreviewImage(event: WheelEvent) {
+  if (!previewMedia.value || mediaKind(previewMedia.value) !== 'image' || previewState.value !== 'ready') return
+  event.preventDefault()
+  const stage = event.currentTarget as HTMLElement
+  const rect = stage.getBoundingClientRect()
+  const oldScale = previewImageScale.value
+  const nextScale = Math.min(8, Math.max(1, oldScale * (event.deltaY < 0 ? 1.15 : 1 / 1.15)))
+  if (nextScale === oldScale) return
+  const relativeX = event.clientX - (rect.left + rect.width / 2)
+  const relativeY = event.clientY - (rect.top + rect.height / 2)
+  previewImageOffsetX.value = relativeX - (relativeX - previewImageOffsetX.value) * (nextScale / oldScale)
+  previewImageOffsetY.value = relativeY - (relativeY - previewImageOffsetY.value) * (nextScale / oldScale)
+  previewImageScale.value = nextScale
+  if (nextScale === 1) resetPreviewImageTransform()
+}
+
+function startPreviewImageDrag(event: PointerEvent) {
+  if (previewImageScale.value <= 1 || event.button !== 0 || (event.target as HTMLElement).closest('button')) return
+  previewImagePointerId = event.pointerId
+  previewImageDragging.value = true
+  previewImageDragStartX = event.clientX
+  previewImageDragStartY = event.clientY
+  previewImageDragOriginX = previewImageOffsetX.value
+  previewImageDragOriginY = previewImageOffsetY.value
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
+
+function movePreviewImageDrag(event: PointerEvent) {
+  if (!previewImageDragging.value || previewImagePointerId !== event.pointerId) return
+  previewImageOffsetX.value = previewImageDragOriginX + event.clientX - previewImageDragStartX
+  previewImageOffsetY.value = previewImageDragOriginY + event.clientY - previewImageDragStartY
+}
+
+function endPreviewImageDrag(event: PointerEvent) {
+  if (previewImagePointerId !== event.pointerId) return
+  previewImageDragging.value = false
+  previewImagePointerId = undefined
+  const stage = event.currentTarget as HTMLElement
+  if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId)
+}
 
 function showAiPendingNotice(planId: string) {
   if (aiNoticeTimer) clearTimeout(aiNoticeTimer)
@@ -241,9 +315,6 @@ async function downloadPreviewMedia() {
     downloadBusy.value = false
   }
 }
-function enterMediaFullscreen() {
-  if (previewState.value === 'ready') mediaFullscreen.value = true
-}
 function toggleMediaFullscreen() {
   if (previewState.value !== 'ready') return
   mediaFullscreen.value = !mediaFullscreen.value
@@ -320,9 +391,20 @@ function publishTaskMedia(taskId: string, media: FlightReviewMedia[], version: n
 }
 
 async function loadTaskMedia(taskId: string, version: number) {
+  if (completedMediaTaskIds.value.includes(taskId) && !failedMediaTasks.value.includes(taskId)) return
+  const existing = pendingMedia.get(taskId)
+  if (existing) return existing
+  const pending = readTaskMedia(taskId, version)
+  pendingMedia.set(taskId, pending)
+  try { await pending } finally { if (pendingMedia.get(taskId) === pending) pendingMedia.delete(taskId) }
+}
+
+async function readTaskMedia(taskId: string, version: number) {
+  const deptId = user.activeDeptId
   try {
-    const first = await getFlightReviewMedia(taskId, 1)
+    const first = await getFlightReviewMedia(taskId, 1, 200, deptId)
     if (version !== loadVersion) return
+    taskMediaTotals.value = { ...taskMediaTotals.value, [taskId]: first.total }
     publishTaskMedia(taskId, first.records, version)
     const pageCount = Math.ceil(first.total / first.pageSize)
     if (pageCount > 1) {
@@ -333,7 +415,7 @@ async function loadTaskMedia(taskId: string, version: number) {
         while (nextPage <= pageCount && version === loadVersion && !pageFailed) {
           const pageNum = nextPage++
           try {
-            const result = await getFlightReviewMedia(taskId, pageNum)
+            const result = await getFlightReviewMedia(taskId, pageNum, 200, deptId)
             remaining[pageNum - 2] = result.records
           } catch (error) {
             pageFailed = true
@@ -346,11 +428,63 @@ async function loadTaskMedia(taskId: string, version: number) {
       if (version !== loadVersion) return
       publishTaskMedia(taskId, [...first.records, ...remaining.flat()], version)
     }
+    failedMediaTasks.value = failedMediaTasks.value.filter(id => id !== taskId)
   } catch {
     if (version !== loadVersion) return
     failedMediaTasks.value = [...failedMediaTasks.value, taskId]
   } finally {
-    if (version === loadVersion) completedMediaTaskIds.value = [...completedMediaTaskIds.value, taskId]
+    if (version === loadVersion && !completedMediaTaskIds.value.includes(taskId)) completedMediaTaskIds.value = [...completedMediaTaskIds.value, taskId]
+  }
+}
+
+async function forEachTask(taskList: FlightReviewTask[], version: number, read: (task: FlightReviewTask) => Promise<void>) {
+  let index = 0
+  await Promise.all(Array.from({ length: Math.min(3, taskList.length) }, async () => {
+    while (version === loadVersion && index < taskList.length) {
+      const task = taskList[index++]
+      if (task) await read(task)
+    }
+  }))
+}
+
+async function loadVisibleCounts() {
+  const version = loadVersion
+  const deptId = user.activeDeptId
+  await forEachTask(pageRows.value.flatMap(row => row.tasks), version, async task => {
+    if (taskMediaTotals.value[task.id] !== undefined) return
+    const existing = pendingCounts.get(task.id)
+    if (existing) return existing
+    const pending = (async () => {
+      try {
+        // 仅取一条记录，数量直接用后端 total；不遍历素材分页。
+        const result = await getFlightReviewMedia(task.id, 1, 1, deptId)
+        if (version === loadVersion) taskMediaTotals.value = { ...taskMediaTotals.value, [task.id]: result.total }
+      } catch {
+        if (version === loadVersion && !failedCountTasks.value.includes(task.id)) failedCountTasks.value.push(task.id)
+      }
+    })()
+    pendingCounts.set(task.id, pending)
+    try { await pending } finally { if (pendingCounts.get(task.id) === pending) pendingCounts.delete(task.id) }
+  })
+}
+
+async function loadDepartmentSummary(version: number) {
+  try {
+    const result = await getUavMediaSummary(user.activeDeptId)
+    if (version === loadVersion) departmentMediaSummary.value = result
+  } catch { if (version === loadVersion) summaryFailed.value = true }
+}
+
+let classificationVersion = 0
+async function loadFilteredMedia() {
+  const version = loadVersion
+  const classification = ++classificationVersion
+  if (!resultTypeFilter.value || loading.value) { mediaLoading.value = false; return }
+  mediaLoading.value = true
+  try {
+    await forEachTask(baseFilteredRows.value.flatMap(row => row.tasks), version, task => loadTaskMedia(task.id, version))
+  } finally {
+    if (version === loadVersion && classification === classificationVersion) mediaLoading.value = false
   }
 }
 
@@ -363,6 +497,14 @@ async function loadData() {
   mediaByTask.value = {}
   failedMediaTasks.value = []
   completedMediaTaskIds.value = []
+  taskMediaTotals.value = {}
+  failedCountTasks.value = []
+  departmentMediaSummary.value = {}
+  summaryFailed.value = false
+  actionError.value = ''
+  openingPlanId.value = ''
+  pendingMedia = new Map()
+  pendingCounts = new Map()
   mediaPreviewStatus.value = {}
   loading.value = true
   mediaLoading.value = false
@@ -374,6 +516,7 @@ async function loadData() {
   }
   try {
     const deptId = user.activeDeptId
+    void loadDepartmentSummary(version)
     const [planList, taskList] = await Promise.all([
       readAll((pageNum) => getFlightReviewPlans(deptId, pageNum)),
       readAll((pageNum) => getFlightReviewTasks(deptId, pageNum)),
@@ -383,24 +526,8 @@ async function loadData() {
     const planIds = new Set(plans.value.map((plan) => plan.id))
     tasks.value = taskList.filter((task) => task.id && planIds.has(task.planId))
     loading.value = false
-    mediaLoading.value = true
-    const latestTaskTime = new Map<string, string>()
-    tasks.value.forEach((task) => {
-      if (task.endTime > (latestTaskTime.get(task.planId) || '')) latestTaskTime.set(task.planId, task.endTime)
-    })
-    const prioritizedPlans = [...plans.value].sort((left, right) =>
-      (latestTaskTime.get(right.id) || '').localeCompare(latestTaskTime.get(left.id) || '') || left.name.localeCompare(right.name))
-    const planRank = new Map(prioritizedPlans.map((plan, index) => [plan.id, index]))
-    const taskQueue = [...tasks.value].sort((left, right) =>
-      (planRank.get(left.planId) ?? Infinity) - (planRank.get(right.planId) ?? Infinity))
-    let nextTask = 0
-    async function scanTasks() {
-      while (nextTask < taskQueue.length && version === loadVersion) {
-        const task = taskQueue[nextTask++]
-        if (task) await loadTaskMedia(task.id, version)
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(3, taskQueue.length) }, () => scanTasks()))
+    void loadVisibleCounts()
+    void loadFilteredMedia()
   } catch (reason) {
     if (version !== loadVersion) return
     plans.value = []
@@ -409,7 +536,6 @@ async function loadData() {
   } finally {
     if (version === loadVersion) {
       loading.value = false
-      mediaLoading.value = false
     }
   }
 }
@@ -436,19 +562,20 @@ const rows = computed<PlanRow[]>(() => plans.value.map((plan) => {
     otherCount: counts.other,
     mediaFailed: linkedTasks.some((task) => failedMediaTasks.value.includes(task.id)),
     mediaPending: linkedTasks.some((task) => !completedMediaTaskIds.value.includes(task.id)),
+    fileCount: linkedTasks.every(task => taskMediaTotals.value[task.id] !== undefined)
+      ? linkedTasks.reduce((sum, task) => sum + taskMediaTotals.value[task.id]!, 0) : undefined,
+    countFailed: linkedTasks.some(task => failedCountTasks.value.includes(task.id)),
   }
 }).sort((left, right) => {
-  if (!mediaLoading.value) {
-    const mediaRank = (row: PlanRow) => row.media.length ? 2 : row.mediaFailed ? 1 : 0
-    const resultOrder = mediaRank(right) - mediaRank(left)
-    if (resultOrder) return resultOrder
-  }
+  // 排序仅依据任务信息，避免素材陆续加载后记录跨页跳动。
   return right.completedAt.localeCompare(left.completedAt) || left.plan.name.localeCompare(right.plan.name)
 }))
 const routeTypes = computed(() => [...new Set(rows.value.map((row) => row.routeType).filter(Boolean))])
 const taskTypes = computed(() => [...new Set(rows.value.map((row) => row.taskType).filter(Boolean))])
 const devices = computed(() => [...new Set(rows.value.map((row) => row.device).filter(Boolean))])
-const filteredRows = computed(() => rows.value.filter((row) => {
+const baseFilteredRows = computed(() => rows.value.filter((row) => {
+  // 只有全部关联任务都确认没有素材时才排除；未知或查询失败不能当成零。
+  if (row.fileCount === 0) return false
   const query = planKeyword.value.trim().toLowerCase()
   if (query && !`${row.plan.name} ${row.plan.id} ${row.plan.waylineName}`.toLowerCase().includes(query)) return false
   if (routeTypeFilter.value && row.routeType !== routeTypeFilter.value) return false
@@ -457,23 +584,28 @@ const filteredRows = computed(() => rows.value.filter((row) => {
   const completedDate = row.completedAt.slice(0, 10)
   if (startDate.value && (!completedDate || completedDate < startDate.value)) return false
   if (endDate.value && (!completedDate || completedDate > endDate.value)) return false
+  return true
+}))
+const filteredRows = computed(() => baseFilteredRows.value.filter(row => {
   if (resultTypeFilter.value === 'image' && !row.imageCount) return false
   if (resultTypeFilter.value === 'video' && !row.videoCount) return false
   if (resultTypeFilter.value === 'other' && !row.otherCount) return false
   return true
 }))
-const totalImages = computed(() => filteredRows.value.reduce((sum, row) => sum + row.imageCount, 0))
-const totalVideos = computed(() => filteredRows.value.reduce((sum, row) => sum + row.videoCount, 0))
-const totalMedia = computed(() => filteredRows.value.reduce((sum, row) => sum + row.media.length, 0))
-const mediaComplete = computed(() => !mediaLoading.value && failedMediaTasks.value.length === 0)
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / pageSize.value)))
 const pageRows = computed(() => filteredRows.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
+watch(pageCount, count => { currentPage.value = Math.min(currentPage.value, count) })
 const detailRow = computed(() => rows.value.find((row) => row.plan.id === detailPlanId.value))
 const detailMedia = computed(() => [...(detailRow.value?.media || [])].sort((left, right) => mediaRank(left) - mediaRank(right)))
 const previewMedia = computed(() => detailMedia.value.find((item) => mediaKey(item) === previewMediaId.value) || detailMedia.value[0])
 const previewOrdinal = computed(() => previewMedia.value ? detailMedia.value.findIndex((item) => mediaKey(item) === mediaKey(previewMedia.value!)) + 1 : 0)
-watch(() => previewMedia.value ? `${mediaKey(previewMedia.value)}|${previewMedia.value.localFileUrl}|${previewMedia.value.originalUrl}|${previewMedia.value.thumbnailUrl}` : '', () => { void initializePreview() })
+watch(() => previewMedia.value ? `${mediaKey(previewMedia.value)}|${previewMedia.value.localFileUrl}|${previewMedia.value.originalUrl}|${previewMedia.value.thumbnailUrl}` : '', () => { resetPreviewImageTransform(); void initializePreview() })
+watch(mediaFullscreen, resetPreviewImageTransform)
 watch([planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, startDate, endDate, resultTypeFilter, pageSize], () => { currentPage.value = 1 })
+watch(() => loading.value || resultTypeFilter.value ? '' : pageRows.value.map(row => row.plan.id).join(','), key => {
+  if (key) void loadVisibleCounts()
+})
+watch([resultTypeFilter, planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, startDate, endDate], () => { void loadFilteredMedia() })
 watch(() => user.activeDeptId, () => { void loadData() }, { immediate: true })
 onMounted(() => window.addEventListener('keydown', handleDetailKeydown))
 onBeforeUnmount(() => {
@@ -495,9 +627,25 @@ function resetFilters() {
   endDate.value = ''
   resultTypeFilter.value = ''
 }
-function openDetail(row: PlanRow) {
-  detailPlanId.value = row.plan.id
-  previewMediaId.value = detailMedia.value[0] ? mediaKey(detailMedia.value[0]) : ''
+async function openDetail(row: PlanRow) {
+  if (openingPlanId.value) return
+  const version = loadVersion
+  openingPlanId.value = row.plan.id
+  actionError.value = ''
+  try {
+    await forEachTask(row.tasks, version, task => loadTaskMedia(task.id, version))
+    if (version !== loadVersion) return
+    if (row.tasks.some(task => failedMediaTasks.value.includes(task.id))) {
+      actionError.value = '该计划部分成果读取失败，请点击“查看成果”重试。'
+      return
+    }
+    if (!rows.value.find(item => item.plan.id === row.plan.id)?.media.length) {
+      actionError.value = '该计划暂无成果文件。'
+      return
+    }
+    detailPlanId.value = row.plan.id
+    previewMediaId.value = detailMedia.value[0] ? mediaKey(detailMedia.value[0]) : ''
+  } finally { if (version === loadVersion) openingPlanId.value = '' }
 }
 function openSrtInfo(row: PlanRow, selected?: FlightReviewMedia) {
   const videos = row.media.filter(item => mediaKind(item) === 'video')
@@ -510,8 +658,24 @@ function csvCell(value: string | number) {
   const safe = String(value).replace(/^[\s]*[=+@-]/, (prefix) => `'${prefix}`)
   return `"${safe.replace(/"/g, '""')}"`
 }
-function exportList() {
-  if (!filteredRows.value.length || !mediaComplete.value) return
+async function exportList() {
+  if (!baseFilteredRows.value.length || exporting.value) return
+  const version = loadVersion
+  const exportPlans = [...baseFilteredRows.value]
+  const filterSnapshot = JSON.stringify([planKeyword.value, routeTypeFilter.value, taskTypeFilter.value, deviceFilter.value, startDate.value, endDate.value, resultTypeFilter.value])
+  exporting.value = true
+  actionError.value = ''
+  try {
+    await forEachTask(exportPlans.flatMap(row => row.tasks), version, task => loadTaskMedia(task.id, version))
+    if (version !== loadVersion) return
+    if (filterSnapshot !== JSON.stringify([planKeyword.value, routeTypeFilter.value, taskTypeFilter.value, deviceFilter.value, startDate.value, endDate.value, resultTypeFilter.value])) {
+      actionError.value = '筛选条件已变化，请重新导出清单。'
+      return
+    }
+    if (exportPlans.some(row => row.tasks.some(task => failedMediaTasks.value.includes(task.id)))) {
+      actionError.value = '部分成果读取失败，未导出不完整的清单，请重试。'
+      return
+    }
   const headers = ['飞行计划', '计划ID', '关联需求工单', '航线类型', '任务类型', '执行设备SN', '完成时间', '时长(分钟)', '图片', '视频', '其他文件']
   const content = [headers, ...filteredRows.value.map((row) => [
     row.plan.name, row.plan.id, '--', routeTypeLabel(row.routeType), taskTypeLabel(row.taskType), display(row.device),
@@ -523,6 +687,7 @@ function exportList() {
   link.download = 'AI线索发现清单.csv'
   link.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } finally { exporting.value = false }
 }
 </script>
 
@@ -544,8 +709,8 @@ function exportList() {
 
     <section class="summary-grid">
       <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><Calendar /></i><div><span>飞行计划</span><strong>{{ loading ? '—' : filteredRows.length }}</strong><small>当前筛选结果</small></div></article>
-      <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><Picture /></i><div><span>图片文件</span><strong>{{ completedMediaTaskIds.length ? totalImages.toLocaleString() : '—' }}</strong><small>{{ mediaLoading ? '已读取部分，持续更新' : failedMediaTasks.length ? '部分任务读取失败' : '来自关联飞行任务' }}</small></div></article>
-      <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><VideoCamera /></i><div><span>视频文件</span><strong>{{ completedMediaTaskIds.length ? totalVideos.toLocaleString() : '—' }}</strong><small>{{ mediaLoading ? '已读取部分，持续更新' : failedMediaTasks.length ? '部分任务读取失败' : '来自关联飞行任务' }}</small></div></article>
+      <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><Picture /></i><div><span>图片文件</span><strong>{{ departmentMediaSummary.photoCount?.toLocaleString() ?? '—' }}</strong><small>{{ summaryFailed ? '部门素材统计读取失败' : '当前部门素材统计，不随列表筛选变化' }}</small></div></article>
+      <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><VideoCamera /></i><div><span>视频文件</span><strong>{{ departmentMediaSummary.videoCount?.toLocaleString() ?? '—' }}</strong><small>{{ summaryFailed ? '部门素材统计读取失败' : '当前部门素材统计，不随列表筛选变化' }}</small></div></article>
       <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="2.75" y="2.75" width="18.5" height="18.5" rx="2" /><path d="M12 2.75v18.5M2.75 12h18.5" opacity=".55" /><path d="m4.5 9 3-3 3.2 2.2m3.2 9.4 2.2-2.1 3.2 1" opacity=".8" /><path d="m4.5 19.5 3.2-4.2 2.8-1.6 3.2-3.5 5.8-5.7" stroke-width="2" /></svg></i><div><span>正射成果</span><strong>--</strong><small>待后端提供成果关联</small></div></article>
       <div class="summary-actions">
         <button type="button" class="summary-upload-button" @click="uploadVisible = true">线下AI识别结果上传</button>
@@ -554,34 +719,35 @@ function exportList() {
     <p v-if="uploadMessage" class="upload-success" role="status">{{ uploadMessage }}</p>
 
     <section class="result-panel panel">
-      <header><div><h2>全部飞行结果</h2><span>已载入计划 · {{ filteredRows.length }} 条</span><span v-if="mediaLoading" class="loading-note">正在读取成果文件 · {{ completedMediaTaskIds.length }}/{{ tasks.length }} 个任务</span></div><button type="button" class="outline-button" :disabled="!filteredRows.length || !mediaComplete" @click="exportList">导出清单</button></header>
+      <header><div><h2>全部飞行结果</h2><span>已载入计划 · {{ filteredRows.length }} 条</span><span v-if="mediaLoading" class="loading-note">正在读取成果文件 · {{ completedMediaTaskIds.length }}/{{ tasks.length }} 个任务</span></div><button type="button" class="outline-button" :disabled="loading || exporting || !baseFilteredRows.length" @click="exportList">{{ exporting ? '正在生成…' : '导出清单' }}</button></header>
       <div v-if="error" class="state error"><strong>成果读取失败</strong><span>{{ error }}</span><button type="button" @click="loadData">重新加载</button></div>
       <div v-else-if="loading" class="state">正在读取飞行计划与任务…</div>
       <div v-else-if="!filteredRows.length" class="state">{{ mediaLoading && resultTypeFilter ? '正在读取符合条件的成果…' : '当前条件下暂无飞行计划' }}</div>
       <template v-else>
+        <div v-if="actionError" class="warning" role="alert">{{ actionError }}</div>
         <div v-if="failedMediaTasks.length" class="warning">{{ failedMediaTasks.length }} 个飞行任务的素材未能读取；相关数量可能不完整，可重新加载。</div>
         <div class="table-scroll"><table><thead><tr><th>飞行计划 / 结果目录</th><th>关联需求工单</th><th>航线类型</th><th>任务类型</th><th>执行设备</th><th>完成时间</th><th>时长</th><th>成果文件</th><th>操作</th></tr></thead><tbody>
           <tr v-for="row in pageRows" :key="row.plan.id">
             <td><div class="plan-cell"><span class="folder-icon" aria-hidden="true"><FolderOpened /></span><div><b :title="row.plan.name">{{ display(row.plan.name) }}</b><small>计划 ID：{{ row.plan.id }}</small><small v-if="row.tasks.length">{{ row.tasks.length }} 个关联飞行任务</small></div></div></td>
             <td class="muted">--</td><td><span class="soft-tag">{{ routeTypeLabel(row.routeType) }}</span></td><td>{{ taskTypeLabel(row.taskType) }}</td><td>{{ display(row.device) }}<small v-if="row.plan.deviceType" class="cell-sub">{{ row.plan.deviceType }}</small></td><td>{{ dateTime(row.completedAt) }}</td><td>{{ row.durationMinutes === undefined ? '--' : `${row.durationMinutes} min` }}</td>
-            <td><div v-if="row.mediaFailed && !row.media.length" class="media-count failed">素材读取失败</div><div v-else-if="!row.media.length" class="muted">{{ row.mediaPending ? '读取中…' : '--' }}</div><div v-else class="media-count"><span v-if="row.imageCount">图 {{ row.imageCount }}</span><span v-if="row.videoCount">视 {{ row.videoCount }}</span><span v-if="row.otherCount">其他 {{ row.otherCount }}</span><span v-if="row.mediaPending">统计中…</span><span v-else-if="row.mediaFailed" class="failed">部分读取失败</span></div></td>
+            <td><div v-if="row.mediaFailed && !row.media.length" class="media-count failed">素材读取失败</div><div v-else-if="!row.media.length" class="muted">{{ row.fileCount === undefined ? (row.countFailed ? '数量读取失败' : '数量读取中…') : row.fileCount ? `${row.fileCount} 个文件` : '--' }}</div><div v-else class="media-count"><span v-if="row.imageCount">图 {{ row.imageCount }}</span><span v-if="row.videoCount">视 {{ row.videoCount }}</span><span v-if="row.otherCount">其他 {{ row.otherCount }}</span><span v-if="row.mediaPending">统计中…</span><span v-else-if="row.mediaFailed" class="failed">部分读取失败</span></div></td>
             <td><div class="row-actions">
-              <button class="view-button" type="button" :disabled="!row.media.length" @click="openDetail(row)">查看成果</button>
+              <button class="view-button" type="button" :disabled="!!openingPlanId || row.fileCount === 0" @click="openDetail(row)">{{ openingPlanId === row.plan.id ? '正在读取…' : '查看成果' }}</button>
               <ElTooltip
                 :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }"
                 placement="top-end"
                 effect="light"
                 trigger="click"
                 :visible="aiNoticePlanId === String(row.plan.id)"
-                :disabled="!row.media.length"
+                :disabled="row.fileCount === 0"
               >
                 <template #content><div class="ai-upload-tooltip is-pending" role="status"><strong>AI模型暂未在线接入</strong></div></template>
-                <button class="view-button" type="button" :disabled="!row.media.length" :aria-label="`${display(row.plan.name)}：AI识别`" @click="showAiPendingNotice(String(row.plan.id))">AI识别</button>
+                <button class="view-button" type="button" :disabled="row.fileCount === 0" :aria-label="`${display(row.plan.name)}：AI识别`" @click="showAiPendingNotice(String(row.plan.id))">AI识别</button>
               </ElTooltip>
             </div></td>
           </tr>
         </tbody></table></div>
-        <footer><span>共 {{ filteredRows.length }} 条计划 · {{ mediaLoading ? `已读取 ${completedMediaTaskIds.length}/${tasks.length} 个任务成果` : failedMediaTasks.length ? '部分素材读取失败' : `已读取 ${totalMedia.toLocaleString()} 个文件` }}</span><div><button type="button" :disabled="currentPage <= 1" @click="currentPage--">‹</button><b>{{ currentPage }} / {{ pageCount }}</b><button type="button" :disabled="currentPage >= pageCount" @click="currentPage++">›</button><select v-model.number="pageSize" aria-label="每页条数"><option :value="8">8 条/页</option><option :value="16">16 条/页</option><option :value="32">32 条/页</option></select></div></footer>
+        <footer><span>共 {{ filteredRows.length }} 条计划 · {{ mediaLoading ? `已读取 ${completedMediaTaskIds.length}/${tasks.length} 个任务成果` : failedMediaTasks.length ? '部分素材读取失败' : '成果文件按需读取' }}</span><div><button type="button" :disabled="currentPage <= 1" @click="currentPage--">‹</button><b>{{ currentPage }} / {{ pageCount }}</b><button type="button" :disabled="currentPage >= pageCount" @click="currentPage++">›</button><select v-model.number="pageSize" aria-label="每页条数"><option :value="8">8 条/页</option><option :value="16">16 条/页</option><option :value="32">32 条/页</option></select></div></footer>
       </template>
     </section>
 
@@ -597,9 +763,9 @@ function exportList() {
           </aside>
           <main>
             <template v-if="previewMedia">
-              <div class="media-stage" :class="{ 'can-expand': previewState === 'ready' && mediaKind(previewMedia) === 'image' }">
+              <div class="media-stage" :class="{ 'can-expand': previewState === 'ready' && mediaKind(previewMedia) === 'image', 'image-zoomed': previewImageScale > 1, 'image-dragging': previewImageDragging }" @wheel="zoomPreviewImage" @pointerdown="startPreviewImageDrag" @pointermove="movePreviewImageDrag" @pointerup="endPreviewImageDrag" @pointercancel="endPreviewImageDrag" @dblclick="resetPreviewImageTransform">
                 <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailRow.media" :src="previewMedia.originalUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
-                <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error' && previewImageUrl" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" @load="markPreviewReady" @error="handlePreviewImageError" @click="enterMediaFullscreen" />
+                <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error' && previewImageUrl" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" :style="previewImageStyle" draggable="false" @load="markPreviewReady" @error="handlePreviewImageError" />
                 <PhotoLocationOverlay v-if="mediaKind(previewMedia) === 'image' && previewState === 'ready' && previewMedia.longitude !== undefined && previewMedia.latitude !== undefined" :key="`location:${mediaKey(previewMedia)}`" :media="previewMedia" :fullscreen="mediaFullscreen" />
                 <button v-if="previewState === 'ready'" class="fullscreen-toggle" type="button" :aria-label="mediaFullscreen ? '退出全屏' : '进入全屏'" :title="mediaFullscreen ? '退出全屏' : '进入全屏'" @click="toggleMediaFullscreen">
                   <svg v-if="!mediaFullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5m13 5h5v-5" /></svg>
@@ -699,8 +865,12 @@ function exportList() {
 .detail-body main { align-items: stretch; justify-content: stretch; background: #132836; }
 .media-stage { position: relative; flex: 1; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding-right: 12px; box-sizing: border-box; background: #142936; }
 .media-stage :deep(.shared-video-player) { right: 12px; width: auto; }
-.detail-body main .media-stage img { display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
-.media-stage.can-expand img { cursor: zoom-in; }
+.detail-dialog:not(.is-fullscreen) .media-stage :deep(.collaboration-toggle) { box-sizing: border-box; height: 32px; display: flex; align-items: center; }
+.detail-body main .media-stage img { display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; transform-origin: center; transition: transform .08s ease-out; will-change: transform; pointer-events: none; user-select: none; }
+.media-stage.can-expand { cursor: zoom-in; touch-action: none; user-select: none; }
+.media-stage.can-expand.image-zoomed { cursor: grab; }
+.media-stage.can-expand.image-dragging { cursor: grabbing; }
+.media-stage.image-dragging img { transition: none; }
 .preview-loading { position: absolute; inset: 0; display: grid; place-items: center; color: #d7e8ee; background: #152b35aa; font-size: 13px; pointer-events: none; }
 .preview-unavailable { max-width: 430px; margin: 20px; padding: 26px 30px; border: 1px solid #d2e3e8; border-radius: 10px; color: #345568; background: #f7fbfc; box-shadow: 0 12px 32px #071d2a55; text-align: center; }
 .preview-unavailable__icon { width: 36px; height: 36px; display: grid; place-items: center; margin: 0 auto 12px; border-radius: 50%; color: #b26c36; background: #fff0d9; font-size: 21px; font-weight: 700; }
@@ -729,10 +899,9 @@ function exportList() {
 .detail-dialog.is-fullscreen .detail-body { grid-template-columns: minmax(0,1fr); }
 .detail-dialog.is-fullscreen .detail-body main { background: #081822; }
 .detail-dialog.is-fullscreen .media-stage { background: #081822; }
-.detail-dialog.is-fullscreen .media-stage img { cursor: default; }
 .detail-dialog.is-fullscreen .detail-body main footer { border-color: #203949; color: #e6f4f8; background: #102735; }
 .detail-dialog.is-fullscreen .detail-body main footer small { color: #a8c0cb; }
-.detail-dialog.is-fullscreen .fullscreen-toggle { position: fixed; top: 14px; right: 16px; }
+.detail-dialog.is-fullscreen .fullscreen-toggle { position: fixed; top: 14px; right: 14px; }
 .fullscreen-nav { position: absolute; z-index: 4; top: 50%; width: 44px; height: 52px; border: 1px solid #ffffff66; border-radius: 7px; color: #fff; background: #0b3449b8; font-size: 35px; line-height: 1; transform: translateY(-50%); cursor: pointer; }
 .fullscreen-nav:hover { background: #187f9f; }
 .fullscreen-nav.previous { left: 24px; }.fullscreen-nav.next { right: 24px; }

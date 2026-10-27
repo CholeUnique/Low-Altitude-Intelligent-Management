@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, ref, watch } from 'vue'
+import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { FlightReviewMedia } from '@/api/flight-review'
 import { toggleVideoSurfacePlayback } from '@/utils/video-playback'
 
@@ -16,9 +16,38 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ ready: []; error: [] }>()
 
 const videoElement = ref<HTMLVideoElement>()
+const playerElement = ref<HTMLElement>()
+const collaborationStyle = ref(props.fullscreen ? { left: '6px', top: '6px' } : { left: '20px', top: '12px' })
+let playerResizeObserver: ResizeObserver | undefined
 const playbackStarted = ref(false)
 const collaborationVisible = ref(false)
 const playbackError = ref('')
+
+function updateCollaborationPosition() {
+  if (!props.fullscreen) {
+    collaborationStyle.value = { left: '20px', top: '12px' }
+    return
+  }
+  const video = videoElement.value
+  const player = playerElement.value
+  if (!video?.videoWidth || !video.videoHeight || !player?.clientWidth || !player.clientHeight) return
+  const scale = Math.min(player.clientWidth / video.videoWidth, player.clientHeight / video.videoHeight)
+  collaborationStyle.value = {
+    left: `${(player.clientWidth - video.videoWidth * scale) / 2 + 6}px`,
+    top: `${(player.clientHeight - video.videoHeight * scale) / 2 + 6}px`,
+  }
+}
+
+onMounted(() => {
+  playerResizeObserver = new ResizeObserver(updateCollaborationPosition)
+  if (playerElement.value) playerResizeObserver.observe(playerElement.value)
+  updateCollaborationPosition()
+})
+onBeforeUnmount(() => playerResizeObserver?.disconnect())
+watch(() => props.fullscreen, async () => {
+  await nextTick()
+  updateCollaborationPosition()
+})
 
 // The initial play belongs to the video element, even if the map is opened later.
 watch(videoElement, (video, _previous, onCleanup) => {
@@ -45,10 +74,10 @@ defineExpose({ pause })
 </script>
 
 <template>
-  <div class="shared-video-player">
+  <div ref="playerElement" class="shared-video-player">
     <video ref="videoElement" :src="src" controls controlslist="nofullscreen" :autoplay="autoplay" playsinline preload="auto"
-      @loadeddata="emit('ready')" @canplay="emit('ready')" @playing="emit('ready')" @error="emit('error')" @click="togglePlayback" />
-    <button v-if="collaborationAvailable" type="button" class="collaboration-toggle" :aria-pressed="collaborationVisible"
+      @loadedmetadata="updateCollaborationPosition" @resize="updateCollaborationPosition" @loadeddata="emit('ready')" @canplay="emit('ready')" @playing="emit('ready')" @error="emit('error')" @click="togglePlayback" />
+    <button v-if="collaborationAvailable" type="button" class="collaboration-toggle" :style="collaborationStyle" :aria-pressed="collaborationVisible"
       @click.stop="collaborationVisible = !collaborationVisible">⌖ {{ collaborationVisible ? '关闭协同展示' : '协同展示' }}</button>
     <VideoTelemetryOverlay v-if="collaborationAvailable && collaborationVisible && videoElement" :key="`${media.taskId}:${media.id}`"
       :media="media" :media-list="mediaList" :video="videoElement" :playback-started="playbackStarted"

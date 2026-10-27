@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { Connection, EditPen, Promotion, VideoCamera } from '@element-plus/icons-vue'
 import type { PortalTask } from '@/types'
 import { ApiBusinessError } from '@/api/client'
+import { componentSelectionState } from '@/utils/uav-component-capabilities'
+import { useComponentFeedback } from '@/workspace-components/shared/component-feedback'
 import {
   getFlightPlanDetail,
   getFlightPlans,
@@ -94,23 +96,20 @@ type OpenComponentSelection = {
   id: string
   title: string
   detail: string
-  state: string
   waylineId?: string
   flightTaskId?: string
   unavailableReason?: string
-  availability?: 'checking' | 'available' | 'unavailable'
-  componentUrl?: string
+  availability: 'available' | 'unavailable'
 }
 const componentSelectorVisible = ref(false)
 const componentSelectorLoading = ref(false)
 const componentSelectorError = ref('')
-const componentSelectorActionError = ref('')
+const showComponentError = useComponentFeedback()
 const componentSelectorKeyword = ref('')
 const componentSelectorItems = ref<OpenComponentSelection[]>([])
 const selectedComponentSelectionId = ref('')
 let componentSelectorRequestVersion = 0
 let patrolDataPromise: Promise<void> | null = null
-const unavailableComponentSelections = new Map<string, string>()
 const taskReferenceType = computed(() => String(props.task?.refType || 'NONE').toUpperCase())
 const taskReferenceId = computed(() => props.task?.refId || '')
 const isTaskPlanBound = computed(() => Boolean(props.task && taskReferenceType.value === 'PLAN' && taskReferenceId.value))
@@ -160,80 +159,40 @@ async function loadDasFlyComponentUrl(target: { waylineId?: string; flightTaskId
 }
 
 function routeSelections(source: FlightRoute[]): OpenComponentSelection[] {
-  return source.filter((route) => Boolean(route.id)).map((route) => ({
-    id: `wayline:${route.id}`,
-    title: route.name,
-    detail: `${route.routeTypeLabel} · ${route.area || '未填写区域'} · 航线 ID：${route.id}`,
-    state: route.status,
-    waylineId: route.id,
-    availability: 'checking',
-  }))
+  return source.filter((route) => Boolean(route.id)).map((route) => {
+    const capability = componentSelectionState(route.componentCapabilities?.waylineEdit)
+    return {
+      id: `wayline:${route.id}`,
+      title: route.name,
+      detail: `${route.routeTypeLabel} · ${route.area || '未填写区域'} · 航线 ID：${route.id}`,
+      waylineId: capability.targetId,
+      ...capability,
+    }
+  })
 }
 
 function flightTaskSelections(source: UavFlightTaskOption[]): OpenComponentSelection[] {
-  return source.filter((task) => Boolean(task.id)).map((task) => ({
-    id: `flight:${task.id}`,
-    title: task.name,
-    detail: `${task.waylineName} · ${task.deviceName} · 飞行任务 ID：${task.id}`,
-    state: task.status,
-    flightTaskId: task.id,
-    waylineId: task.waylineId || undefined,
-    availability: 'checking',
-  }))
-}
-
-function componentAuthorizationError(type: UavOpenComponentType, error: unknown) {
-  const label = type === 'WAYLINE_EDIT' ? '编辑航线' : '虚拟座舱'
-  return error instanceof ApiBusinessError
-    ? `后端生成${label}授权地址失败（错误码 ${error.code}）：${error.message}`
-    : error instanceof Error ? `${label}地址验证失败：${error.message}` : `${label}地址验证失败。`
-}
-
-function updateComponentSelection(id: string, patch: Partial<OpenComponentSelection>) {
-  componentSelectorItems.value = componentSelectorItems.value.map((item) => item.id === id
-    ? { ...item, ...patch }
-    : item)
-}
-
-async function validateComponentSelections(items: OpenComponentSelection[], type: UavOpenComponentType, requestVersion: number) {
-  let nextIndex = 0
-  async function worker() {
-    while (nextIndex < items.length) {
-      const item = items[nextIndex++]
-      if (!item || requestVersion !== componentSelectorRequestVersion) return
-      try {
-        const url = await getUavComponentUrl(type, { waylineId: item.waylineId, flightTaskId: item.flightTaskId })
-        if (requestVersion !== componentSelectorRequestVersion) return
-        // items 是赋给 ref 之前的原始对象；直接修改它不会触发 Vue 重新渲染。
-        // 使用新对象替换响应式列表中的对应项，确保“验证中”立即切换为最终状态。
-        updateComponentSelection(item.id, {
-          componentUrl: url,
-          unavailableReason: undefined,
-          availability: 'available',
-        })
-      } catch (error) {
-        if (requestVersion !== componentSelectorRequestVersion) return
-        const reason = componentAuthorizationError(type, error)
-        unavailableComponentSelections.set(`${type}:${item.flightTaskId || item.waylineId || item.id}`, reason)
-        updateComponentSelection(item.id, {
-          componentUrl: undefined,
-          unavailableReason: reason,
-          availability: 'unavailable',
-        })
-      }
+  return source.filter((task) => Boolean(task.id)).map((task) => {
+    const capability = componentSelectionState(task.componentCapabilities?.cockpit)
+    return {
+      id: `flight:${task.id}`,
+      title: task.name,
+      detail: `${task.waylineName} · ${task.deviceName} · 飞行任务 ID：${task.id}`,
+      flightTaskId: capability.targetId,
+      ...capability,
     }
-  }
-  await Promise.all(Array.from({ length: Math.min(4, items.length) }, () => worker()))
+  })
 }
 
 async function openComponentSelector(type: UavOpenComponentType) {
+  dasFlyEmbedRequestVersion++
+  dasFlyEmbedLoading.value = false
   activeOpenComponentType.value = type
   dasFlyComponentUrl.value = ''
   dasFlyEmbedError.value = ''
   componentSelectorVisible.value = true
   componentSelectorLoading.value = true
   componentSelectorError.value = ''
-  componentSelectorActionError.value = ''
   componentSelectorKeyword.value = ''
   componentSelectorItems.value = []
   selectedComponentSelectionId.value = ''
@@ -244,15 +203,14 @@ async function openComponentSelector(type: UavOpenComponentType) {
       // 等待本组件的首轮真实数据初始化，避免读取尚未替换的临时状态或重复请求。
       if (patrolDataPromise) await patrolDataPromise
       if (requestVersion !== componentSelectorRequestVersion) return
-      let source = routes.value
-      if (!source.length) source = (await getRoutes({ pageNum: 1, pageSize: 200, projectId: selectedProjectId.value || undefined })).list
+      const source = props.task ? routes.value
+        : (await getRoutes({ pageNum: 1, pageSize: 200, projectId: selectedProjectId.value || undefined })).list
       const items = routeSelections(source)
       if (!items.length) throw new Error('未查询到可编辑的航线，请先创建或同步航线。')
       if (requestVersion === componentSelectorRequestVersion) {
         componentSelectorItems.value = items
         componentSelectorLoading.value = false
       }
-      await validateComponentSelections(items, type, requestVersion)
     } else {
       const result = await getUavFlightTaskOptions({ pageNum: 1, pageSize: 200, projectId: selectedProjectId.value || undefined })
       const items = flightTaskSelections(result.list)
@@ -261,7 +219,6 @@ async function openComponentSelector(type: UavOpenComponentType) {
         componentSelectorItems.value = items
         componentSelectorLoading.value = false
       }
-      await validateComponentSelections(items, type, requestVersion)
     }
   } catch (error) {
     if (requestVersion === componentSelectorRequestVersion) componentSelectorError.value = error instanceof Error ? error.message : '选择数据加载失败，请重试。'
@@ -272,11 +229,12 @@ async function openComponentSelector(type: UavOpenComponentType) {
 
 /** 切换开放组件时关闭选择层，并废弃尚未返回的选项请求。 */
 function dismissComponentSelector() {
+  dasFlyEmbedRequestVersion++
+  dasFlyEmbedLoading.value = false
   componentSelectorRequestVersion += 1
   componentSelectorVisible.value = false
   componentSelectorLoading.value = false
   componentSelectorError.value = ''
-  componentSelectorActionError.value = ''
   componentSelectorKeyword.value = ''
   componentSelectorItems.value = []
   selectedComponentSelectionId.value = ''
@@ -313,27 +271,23 @@ function openCockpit() {
 defineExpose({ openFlightPlanCreate, openWaylineCreate, openWaylineEdit, openCockpit })
 
 async function confirmComponentSelection() {
+  if (dasFlyEmbedLoading.value) return
+  const requestVersion = componentSelectorRequestVersion
   const selected = componentSelectorItems.value.find((item) => item.id === selectedComponentSelectionId.value)
   if (!selected || selected.availability !== 'available') {
     componentSelectorError.value = '请先选择一条记录。'
     return
   }
-  componentSelectorActionError.value = ''
-  if (selected.componentUrl) {
-    dasFlyComponentUrl.value = selected.componentUrl
-    dasFlyEmbedError.value = ''
-    dismissComponentSelector()
-    return
-  }
   const result = await loadDasFlyComponentUrl({ waylineId: selected.waylineId, flightTaskId: selected.flightTaskId })
+  if (requestVersion !== componentSelectorRequestVersion) return
   if (result.ok) {
     dismissComponentSelector()
     return
   }
   const reason = result.error || '当前飞行任务无法生成开放组件授权地址。'
-  componentSelectorActionError.value = `${selected.title}：${reason}`
-  if (result.backendRejected && selected.flightTaskId) {
-    unavailableComponentSelections.set(`${activeOpenComponentType.value}:${selected.flightTaskId}`, reason)
+  showComponentError(`${selected.title}：${reason}`)
+  if (result.backendRejected) {
+    selected.availability = 'unavailable'
     selected.unavailableReason = reason
     selectedComponentSelectionId.value = ''
   }
@@ -464,6 +418,10 @@ async function loadScopedPatrolData() {
 
 watch(() => props.task?.id, () => void refreshPatrolData(), { immediate: true })
 watch(useDasFlyEmbed, () => void loadDasFlyComponentUrl(), { immediate: true })
+onBeforeUnmount(() => {
+  componentSelectorRequestVersion++
+  dasFlyEmbedRequestVersion++
+})
 
 const activeRoute = computed(() => routes.value.find((item) => item.id === activeRouteId.value) || routes.value[0])
 const filteredRoutes = computed(() =>
@@ -514,7 +472,7 @@ async function loadRouteDetail(id: string) {
     const detail = await getRouteDetail(id)
     if (!detail) return
     const index = routes.value.findIndex((item) => item.id === id)
-    if (index >= 0) routes.value[index] = { ...routes.value[index]!, ...detail }
+    if (index >= 0) routes.value[index] = { ...routes.value[index]!, ...detail, componentCapabilities: detail.componentCapabilities ?? routes.value[index]!.componentCapabilities }
   } catch (error) {
     routeError.value = error instanceof Error ? error.message : '航线详情加载失败。'
   }
@@ -560,7 +518,6 @@ async function selectPlan(id: string) {
             <button type="button" aria-label="关闭选择面板" @click="dismissComponentSelector">×</button>
           </header>
           <input v-model="componentSelectorKeyword" class="component-selector__search" placeholder="搜索名称、区域、设备或 ID" />
-          <p v-if="componentSelectorActionError" class="component-selector__action-error">{{ componentSelectorActionError }}</p>
           <div v-if="componentSelectorLoading" class="component-selector__state">正在读取可选择记录…</div>
           <div v-else-if="componentSelectorError" class="component-selector__state is-error">
             <span>{{ componentSelectorError }}</span>
@@ -571,12 +528,13 @@ async function selectPlan(id: string) {
               v-for="item in filteredComponentSelectorItems"
               :key="item.id"
               type="button"
-              :class="{ active: item.id === selectedComponentSelectionId, unavailable: item.availability === 'unavailable', checking: item.availability === 'checking' }"
+              :class="{ active: item.id === selectedComponentSelectionId, unavailable: item.availability === 'unavailable' }"
               :disabled="item.availability !== 'available' || dasFlyEmbedLoading"
+              :title="item.unavailableReason || ''"
               @click="selectedComponentSelectionId = item.id"
             >
-              <span><b>{{ item.title }}</b><small>{{ item.detail }}</small><small v-if="item.availability === 'checking'" class="checking-reason">正在验证开放组件授权…</small></span>
-              <em>{{ item.availability === 'checking' ? '验证中' : item.availability === 'unavailable' ? '不可用' : item.state }}</em>
+              <span><b>{{ item.title }}</b><small>{{ item.detail }}</small><small v-if="item.unavailableReason" class="unavailable-reason">{{ item.unavailableReason }}</small></span>
+              <em>{{ item.availability === 'unavailable' ? '不可用' : '可用' }}</em>
             </button>
             <div v-if="!filteredComponentSelectorItems.length" class="component-selector__state">没有匹配的记录。</div>
           </div>
@@ -1079,7 +1037,6 @@ th { color: #6f8393; background: #f7fafc; }
   .das-fly-component-nav__item { grid-template-columns: 1fr; justify-items: center; min-height: 44px; padding: 6px; }
   .das-fly-component-nav__item span { display: none; }
 }
-.component-selector .component-selector__action-error { margin: -4px 0 0; padding: 9px 11px; color: #ffd0d4; background: #8b25344d; border: 1px solid #d8586880; border-radius: 4px; font-size: 12px; line-height: 1.5; }
 .component-selector__list>button.unavailable { color: #688895; background: #071b2c; cursor: not-allowed; opacity: .72; }
 .component-selector__list>button.unavailable:hover { background: #071b2c; }
 .component-selector__list>button.unavailable b { color: #7e9aa5; }
