@@ -325,8 +325,8 @@ async function openItemEditor(mode: EditorMode, row?: MetadataItem) {
 
 async function submitItem() {
   if (!selectedType.value || (isSceneScoped.value && selectedType.value.code !== scopedTypeCode.value)) return showError(new Error('只能维护当前场景的异常类型条目'))
-  const codePattern = isSceneScoped.value ? /^[A-Z0-9_]{1,50}$/ : /^[a-zA-Z0-9]{1,50}$/
-  if (!(isSceneScoped.value && itemEditorMode.value === 'edit') && !codePattern.test(itemForm.code)) return showError(new Error(isSceneScoped.value ? '异常类型编码需为 1–50 位大写字母、数字或下划线' : '条目编码需为 1–50 位字母或数字'))
+  const codePattern = isSceneScoped.value ? /^[A-Z0-9_]{1,50}$/ : /^[a-zA-Z0-9_]{1,50}$/
+  if (!(isSceneScoped.value && itemEditorMode.value === 'edit') && !codePattern.test(itemForm.code)) return showError(new Error(isSceneScoped.value ? '异常类型编码需为 1–50 位大写字母、数字或下划线' : '条目编码需为 1–50 位字母、数字或下划线'))
   if (!itemForm.name.trim()) return showError(new Error('请输入条目名称'))
   busy.value = true
   try {

@@ -7,6 +7,7 @@ export interface MapServiceItem {
   type: string
   topicCode?: string | null
   dataType?: string | null
+  regionCode?: string | null
   sort?: number
   /** 服务对应影像/数据的时间，ISO-8601 格式；列表排序优先按此时间。 */
   serviceTime?: string | null
@@ -29,6 +30,7 @@ export interface MapServiceListQuery {
   status?: 0 | 1
   topicCode?: string
   dataType?: string
+  regionCode?: string
 }
 
 export interface MapServiceTypeOption {
@@ -43,6 +45,23 @@ export interface MapServiceTypeOptions {
   dataTypes: MapServiceTypeOption[]
 }
 
+export interface MapServiceRegionNode {
+  code: string | null
+  name: string
+  level: number
+  serviceCount: number
+  children?: MapServiceRegionNode[]
+}
+export interface MapServiceRegionGroup {
+  dataType: string
+  dataTypeName: string
+  totalCount: number
+  roots: MapServiceRegionNode[]
+}
+export function getMapServiceRegionTree(query: { deptId?: string | number; dataType?: string; status?: 0 | 1 } = {}) {
+  return apiClient.post<never, MapServiceRegionGroup[]>('/v1/map/service/region/tree', query)
+}
+
 export function getMapServiceTypeOptions() {
   return apiClient.post<never, MapServiceTypeOptions>('/v1/map/service/type/options', {})
 }
@@ -53,6 +72,7 @@ export interface MapServiceCreateInput {
   type?: string
   topicCode?: string
   dataType?: string
+  regionCode?: string
   serviceTime?: string
   sort?: number
   remark?: string
