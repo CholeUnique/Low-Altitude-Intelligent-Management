@@ -10,6 +10,7 @@ export interface GovernanceTask {
   sceneCode: string
   sceneName: string
   name: string
+  sourceAbnormalId?: string
   deptId?: string
   deptName: string
   refType: string
@@ -245,6 +246,7 @@ interface BizTaskDto {
   sceneCode?: string
   sceneName?: string
   name?: string
+  sourceAbnormalId?: string | number
   deptId?: string | number
   deptName?: string
   refType?: string
@@ -435,6 +437,7 @@ function toGovernanceTask(item: BizTaskDto): GovernanceTask {
     sceneCode: item.sceneCode || '',
     sceneName: item.sceneName || '未配置场景',
     name: item.name || '未命名任务',
+    sourceAbnormalId: optionalValue(item.sourceAbnormalId),
     deptId: optionalValue(item.deptId),
     deptName: item.deptName || '-',
     refType: item.refType || 'NONE',

@@ -44,6 +44,22 @@ export interface MetadataOption {
   children?: MetadataOption[]
 }
 
+export interface SceneAbnormalTypeMeta {
+  sceneCode: string
+  typeCode: string
+  typeExists: boolean
+  items: MetadataItem[]
+  effectiveOptions: Array<{ code: string; name: string }>
+}
+
+export interface SceneAbnormalTypeInput {
+  sceneCode: string
+  code: string
+  name: string
+  sort?: number
+  remark?: string
+}
+
 export interface MetadataTypeInput {
   code: string
   name: string
@@ -120,4 +136,25 @@ export function updateMetadataItemStatus(id: string, status: number) {
 
 export function deleteMetadataItem(id: string) {
   return apiClient.post<never, void>('/v1/metadata/item/delete', { id })
+}
+
+/** 场景异常类型专用接口。类型池由后端按 sceneCode 自动创建并校验部门管理员权限。 */
+export function getSceneAbnormalTypes(sceneCode: string) {
+  return apiClient.post<never, SceneAbnormalTypeMeta>('/v1/metadata/abnormal-type/list', { sceneCode })
+}
+
+export function addSceneAbnormalType(input: SceneAbnormalTypeInput) {
+  return apiClient.post<never, { code: string; name: string }>('/v1/metadata/abnormal-type/item/add', input)
+}
+
+export function updateSceneAbnormalType(input: Pick<MetadataItemInput, 'name' | 'sort' | 'remark'> & { id: string }) {
+  return apiClient.post<never, void>('/v1/metadata/abnormal-type/item/update', input)
+}
+
+export function updateSceneAbnormalTypeStatus(id: string, status: number) {
+  return apiClient.post<never, void>('/v1/metadata/abnormal-type/item/status', { id, status })
+}
+
+export function deleteSceneAbnormalType(id: string) {
+  return apiClient.post<never, void>('/v1/metadata/abnormal-type/item/delete', { id })
 }

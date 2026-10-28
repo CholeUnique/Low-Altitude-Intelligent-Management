@@ -27,8 +27,8 @@ const routeAction = computed<RouteAction>(() => routeActions.includes(route.quer
 const routeSubItems = computed(() => [
   { key: 'create' as const, icon: CirclePlus, label: '创建航线' },
   { key: 'edit' as const, icon: EditPen, label: '编辑航线' },
-  { key: 'cockpit' as const, icon: Monitor, label: '虚拟座舱' },
   ...(user.hasPermission('flight-plan') ? [{ key: 'plan' as const, icon: Promotion, label: '计划起飞' }] : []),
+  { key: 'cockpit' as const, icon: Monitor, label: '虚拟座舱' },
 ])
 const routeFlightPlanPanel = ref<InstanceType<typeof RouteFlightPlanPanel>>()
 

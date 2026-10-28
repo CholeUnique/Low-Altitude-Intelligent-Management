@@ -15,7 +15,7 @@ import { HIGH_STANDARD_TOPIC_ID, useGeographicTopicsStore } from '@/stores/geogr
 
 type RecognitionMode = 'spots' | 'algorithms' | 'data'
 type DataTab = 'collection' | 'recognition' | 'topics'
-type RecognitionAnalysisMode = 'flight' | 'scene' | 'general'
+type RecognitionAnalysisMode = 'flight' | 'scene' | 'task-review'
 
 const route = useRoute()
 const router = useRouter()
@@ -40,14 +40,16 @@ const mode = computed<RecognitionMode>(() => recognitionModes.includes(route.par
 const recognitionAnalysisItems = [
   { key: 'flight' as const, label: 'AI线索发现', disabled: false },
   { key: 'scene' as const, label: '场景异常识别', disabled: false },
-  { key: 'general' as const, label: '核查任务研判', disabled: false },
+  { key: 'task-review' as const, label: '核查任务研判', disabled: false },
 ]
 const firstRecognitionMode: RecognitionAnalysisMode = 'flight'
 function recognitionModeFromRoute(): RecognitionAnalysisMode {
-  const queryMode = typeof route.query.analysis === 'string' ? route.query.analysis : ''
+  const rawQueryMode = typeof route.query.analysis === 'string' ? route.query.analysis : ''
+  const queryMode = rawQueryMode === 'general' ? 'task-review' : rawQueryMode
   return recognitionAnalysisItems.find((item) => item.key === queryMode && !item.disabled)?.key || firstRecognitionMode
 }
-const activeDataTab = computed<DataTab>(() => dataNavItems.find(item => item.key === route.query.dataTab && !item.disabled)?.key || 'collection')
+// 兼容主分支已有的 analysis 链接；新版专题导航使用独立的 dataTab 参数。
+const activeDataTab = computed<DataTab>(() => dataNavItems.find(item => item.key === (route.query.dataTab ?? route.query.analysis) && !item.disabled)?.key || 'collection')
 const activeRecognitionMode = ref<RecognitionAnalysisMode>(recognitionModeFromRoute())
 const governanceTasks = ref<GovernanceTask[]>([])
 const tasks = ref<PortalTask[]>([])
@@ -82,6 +84,7 @@ async function loadTasks() {
 }
 function setMode(nextMode: RecognitionMode) { if (mode.value !== nextMode) void router.push({ name: 'recognition', params: { tab: nextMode } }) }
 function setDataTab(tab: DataTab) {
+  if (!dataNavItems.some(item => item.key === tab && !item.disabled)) return
   if (tab === 'topics' && activeDataTab.value === 'topics') { topicsExpanded.value = !topicsExpanded.value; return }
   topicsExpanded.value = true
   void router.push({name:'recognition',params:{tab:'data'},query:{dataTab:tab,...(tab === 'topics' ? {topic:selectedTopic.value.id} : {})}})
@@ -120,7 +123,11 @@ function setRecognitionMode(nextMode: RecognitionAnalysisMode) {
   }
 }
 watch([mode, () => route.query.analysis], ([nextMode]) => {
-  if (nextMode === 'spots') activeRecognitionMode.value = recognitionModeFromRoute()
+  if (nextMode === 'spots') {
+    const resolved = recognitionModeFromRoute()
+    activeRecognitionMode.value = resolved
+    if (route.query.analysis !== resolved) void router.replace({ name:'recognition', params:{ tab:'spots' }, query:{ ...route.query, analysis:resolved } })
+  }
 }, { immediate: true })
 onMounted(() => void loadTasks())
 </script>
@@ -151,7 +158,7 @@ onMounted(() => void loadTasks())
       </nav></aside>
       <section class="recognition-content">
         <SpotIdentificationPanel v-if="mode === 'spots' && activeRecognitionMode === 'scene'" :task="selected" :tasks="governanceTasks" :selected-task-id="selectedId" :task-loading="loading" :task-error="error" :scene-name="selected?.sceneId" :node="spotNode" @select-task="selectedId = $event" />
-        <GeneralSpotReviewPanel v-else-if="mode === 'spots' && activeRecognitionMode === 'general'" />
+        <GeneralSpotReviewPanel v-else-if="mode === 'spots' && activeRecognitionMode === 'task-review'" />
         <FlightTaskReviewPanel v-else-if="mode === 'spots' && activeRecognitionMode === 'flight'" />
         <AlgorithmRepositoryView v-else-if="mode === 'algorithms'" embedded />
         <GeographicTopicsView v-else-if="activeDataTab === 'topics'" :topic="selectedTopic" />

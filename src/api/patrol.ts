@@ -1,8 +1,6 @@
 import type { LiveStream } from '@/adapters/dasFly'
 import type { FlightRoute } from '@/mocks/route-planning'
-import { createFlightPlans, createRoutesForTask } from '@/mocks/route-planning'
-import { createLiveCruiseSnapshot } from '@/mocks/patrol-live'
-import { apiClient, isMockMode } from '@/api/client'
+import { apiClient } from '@/api/client'
 import {
   toFlightPlanList,
   toFlightTaskDetail,
@@ -127,7 +125,6 @@ export interface UavComponentTarget {
 }
 
 export async function getUavComponentUrl(type: UavOpenComponentType, target: UavComponentTarget = {}): Promise<string> {
-  if (isMockMode()) throw new Error('Mock 模式不调用低空大师开放组件接口。')
   const request: Record<string, string | number> = { type }
   if (type === 'WAYLINE_EDIT') {
     if (target.waylineId === undefined || target.waylineId === '') throw new Error('编辑航线必须选择有效航线。')
@@ -145,18 +142,11 @@ export async function getUavComponentUrl(type: UavOpenComponentType, target: Uav
 
 /** 航线规划的项目下拉选项。 */
 export async function getUavProjectOptions(): Promise<PatrolProjectOption[]> {
-  if (isMockMode()) return []
   const data = await apiClient.post('/v1/uav/project/options', {})
   return toProjectOptions(data)
 }
 
 export async function getRoutes(params: PageQuery = {}) {
-  if (isMockMode()) {
-    return {
-      list: createRoutesForTask(),
-      total: 2,
-    }
-  }
   const data = await apiClient.post('/v1/uav/wayline/page', params)
   return toRouteList(data)
 }
@@ -207,7 +197,6 @@ function summarizeDeviceCameras(value: unknown) {
 }
 
 export async function getUavDeviceOptions(): Promise<UavDeviceOption[]> {
-  if (isMockMode()) return []
   const data = await apiClient.post<never, { records?: Array<Record<string, unknown>> }>('/v1/uav/device/page', {
     pageNum: 1,
     pageSize: 200,
@@ -238,7 +227,6 @@ export async function getUavDeviceOptions(): Promise<UavDeviceOption[]> {
 
 /** 单架设备的真实飞行统计，距离和时长沿用后端的米、秒单位。 */
 export async function getUavDeviceFlightStatistics(sn: string): Promise<UavDeviceFlightStatistic[]> {
-  if (isMockMode()) return []
   const data = await apiClient.post<never, Array<Record<string, unknown>> | null>('/v1/uav/device/statistics', { sn })
   return (Array.isArray(data) ? data : []).map((item) => ({
     id: item.id == null ? undefined : String(item.id),
@@ -261,7 +249,6 @@ function optionalNumber(value: unknown) {
 
 /** 设备最新物模型；位置、电量和速度均来自后端真实状态接口。 */
 export async function getUavDeviceState(sn: string): Promise<UavDeviceState> {
-  if (isMockMode()) return { deviceSn: sn }
   const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/device/state', { sn })
   const item = data || {}
   const longitude = optionalNumber(item.longitude ?? item.lng ?? item.lon)
@@ -282,7 +269,6 @@ export async function getUavDeviceState(sn: string): Promise<UavDeviceState> {
 
 /** 设备 HMS 告警；维保字段后端未提供，页面保持 --。 */
 export async function getUavDeviceAlarms(sn: string): Promise<{ list: UavDeviceAlarm[]; total: number }> {
-  if (isMockMode()) return { list: [], total: 0 }
   const data = await apiClient.post<never, { records?: Array<Record<string, unknown>>; total?: number | string }>('/v1/uav/device/hms/page', {
     sn,
     pageNum: 1,
@@ -304,7 +290,6 @@ export async function getUavDeviceAlarms(sn: string): Promise<{ list: UavDeviceA
 }
 
 export async function getUavFlightSummary(): Promise<UavFlightSummary> {
-  if (isMockMode()) return {}
   const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/statistics/flight-summary', {})
   const item = data || {}
   return {
@@ -316,9 +301,8 @@ export async function getUavFlightSummary(): Promise<UavFlightSummary> {
   }
 }
 
-export async function getUavMediaSummary(): Promise<UavMediaSummary> {
-  if (isMockMode()) return {}
-  const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/statistics/media-summary', {})
+export async function getUavMediaSummary(deptId?: string): Promise<UavMediaSummary> {
+  const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/statistics/media-summary', { deptId })
   const item = data || {}
   return {
     totalCount: optionalNumber(item.totalCount),
@@ -333,7 +317,6 @@ export async function getUavMediaSummary(): Promise<UavMediaSummary> {
 }
 
 export async function getUavDeviceSummary(): Promise<UavDeviceSummary> {
-  if (isMockMode()) return {}
   const data = await apiClient.post<never, Record<string, unknown> | null>('/v1/uav/statistics/device-summary', {})
   const item = data || {}
   return {
@@ -346,100 +329,45 @@ export async function getUavDeviceSummary(): Promise<UavDeviceSummary> {
 }
 
 export async function getRouteDetail(id: string) {
-  if (isMockMode()) {
-    const list = createRoutesForTask()
-    return list.find((item) => item.id === id) || list[0]
-  }
   const data = await apiClient.post('/v1/uav/wayline/detail', { id })
   return toRouteList({ records: [data] }).list[0]
 }
 
 export async function getFlightPlans(params: PageQuery = {}) {
-  if (isMockMode()) {
-    const routes = createRoutesForTask()
-    return {
-      list: createFlightPlans(routes),
-      total: 4,
-    }
-  }
   const data = await apiClient.post('/v1/uav/flight-plan/page', params)
   return toFlightPlanList(data)
 }
 
 export async function getFlightPlanDetail(id: string) {
-  if (isMockMode()) {
-    const routes = createRoutesForTask()
-    return createFlightPlans(routes).find((item) => item.id === id)
-  }
   const data = await apiClient.post('/v1/uav/flight-plan/detail', { id })
   return toFlightPlanList({ records: [data] }).list[0]
 }
 
 export async function getProgressingFlight() {
-  if (isMockMode()) {
-    return createLiveCruiseSnapshot()
-  }
   const data = await apiClient.post('/v1/uav/flight-task/progressing', {})
   if (!Array.isArray(data) || !data.length) return undefined
   return toFlightTaskDetail(data[0])
 }
 
 export async function getFlightTaskPage(params: PageQuery = {}) {
-  if (isMockMode()) {
-    const snap = createLiveCruiseSnapshot()
-    return { list: snap.history, total: snap.history.length }
-  }
   return apiClient.post('/v1/uav/flight-task/page', params)
 }
 
 export async function getFlightTaskDetail(id: string) {
-  if (isMockMode()) {
-    return createLiveCruiseSnapshot()
-  }
   const data = await apiClient.post('/v1/uav/flight-task/detail', { id })
   return toFlightTaskDetail(data)
 }
 
 export async function getFlightTaskTrace(flightTaskId: string) {
-  if (isMockMode()) {
-    const snap = createLiveCruiseSnapshot()
-    return {
-      coordinates: snap.routeCoordinates,
-      flownIndex: snap.flownIndex,
-      dronePosition: snap.dronePosition,
-    }
-  }
   return apiClient.post('/v1/uav/flight-task/trace', { id: flightTaskId })
 }
 
 export async function getFlightTaskMedia(params: PageQuery) {
-  if (isMockMode()) {
-    const snap = createLiveCruiseSnapshot()
-    return { list: snap.media, total: snap.media.length }
-  }
   const data = await apiClient.post('/v1/uav/flight-task/media/page', params)
   return toMediaList(data)
 }
 
 export async function getLiveStreams(): Promise<{ list: LiveStream[]; total: number; onlineDeviceCount: number }> {
-  if (isMockMode()) {
-    const snap = createLiveCruiseSnapshot()
-    return {
-      list: [
-        {
-          id: snap.flightId,
-          aircraftId: snap.aircraftId,
-          aircraftName: snap.aircraftName,
-          flightId: snap.flightId,
-          status: snap.liveStatus,
-          protocol: 'HLS',
-          playUrl: '',
-        },
-      ],
-      total: 1,
-      onlineDeviceCount: 1,
-    }
-  }
   // 直播由在线设备提供，与是否存在执行中的飞行任务无关。
   const devicePage = await apiClient.post<never, { records?: Array<Record<string, unknown>> }>('/v1/uav/device/page', {
     pageNum: 1,
@@ -459,21 +387,6 @@ export async function getLiveStreams(): Promise<{ list: LiveStream[]; total: num
 
 /** 开放组件选择器使用；统一适配后端飞行任务分页记录。 */
 export async function getUavFlightTaskOptions(params: PageQuery = {}): Promise<{ list: UavFlightTaskOption[]; total: number }> {
-  if (isMockMode()) {
-    const snapshot = createLiveCruiseSnapshot()
-    return {
-      list: snapshot.history.map((item) => ({
-        id: item.id,
-        name: item.title,
-        waylineId: '',
-        waylineName: '模拟历史航线',
-        deviceName: snapshot.aircraftName,
-        status: item.status,
-        createTime: item.date || '—',
-      })),
-      total: snapshot.history.length,
-    }
-  }
   const data = await getFlightTaskPage({ pageNum: 1, pageSize: 200, ...params })
   return toFlightTaskOptionList(data)
 }
@@ -541,21 +454,10 @@ function toDeviceLiveStream(device: Record<string, unknown>, response: unknown):
 }
 
 export async function getLiveShareCode(sn: string) {
-  if (isMockMode()) {
-    return { shareCode: 'MOCK-SHARE-CODE', sn }
-  }
   return apiClient.post('/v1/uav/live/share-code', { sn })
 }
 
 export async function getStatisticsOverview() {
-  if (isMockMode()) {
-    return {
-      flights: 18,
-      flightHours: 26.4,
-      devicesOnline: 7,
-      mediaCount: 1286,
-    }
-  }
   return apiClient.post('/v1/uav/statistics/overview', {})
 }
 

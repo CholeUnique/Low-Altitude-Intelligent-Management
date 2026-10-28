@@ -1,4 +1,5 @@
 import type { PortalTask } from '@/types'
+import type { UavComponentCapabilities } from '@/utils/uav-component-capabilities'
 
 export type RouteType = 'ortho' | 'oblique' | 'strip' | 'waypoint' | 'area'
 
@@ -22,6 +23,7 @@ export interface FlightRoute {
   durationMin: number
   photoEstimate: number
   taskId?: string
+  componentCapabilities?: UavComponentCapabilities
 }
 
 export interface FlightPlanItem {

@@ -20,6 +20,7 @@ declare module 'vue' {
     ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElPopover: typeof import('element-plus/es')['ElPopover']
+    ManagementNavIcon: typeof import('./src/components/ManagementNavIcon.vue')['default']
     MapServiceManagementPanel: typeof import('./src/components/MapServiceManagementPanel.vue')['default']
     MetadataManagementPanel: typeof import('./src/components/MetadataManagementPanel.vue')['default']
     NewTaskDialog: typeof import('./src/components/NewTaskDialog.vue')['default']

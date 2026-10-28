@@ -37,6 +37,7 @@ function harness({ fail = false, missing = false, deferred, deferredService, vis
     ...refs,
     L: { geoJSON(geometry) { assert.equal(geometry, cityGeometry); return { getBounds: () => cityBounds } } },
     taizhouDistrictBoundariesWgs84: cityGeometry,
+    getJiulongArcGisLayerBounds: () => undefined,
     map: { fitBounds(bounds, options) { calls.fits += 1; calls.lastFit = { bounds, options }; calls.order.push('fit') }, hasLayer: layer => layer.attached, getBounds: () => ({}), invalidateSize() {} },
     mapServiceLayers: new Map(), loadingMapServiceIds: new Set(), mapServiceVisibilityVersions: new Map(),
     requestedLayerOrder: [],

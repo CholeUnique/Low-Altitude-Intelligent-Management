@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { Connection, EditPen, Promotion, VideoCamera } from '@element-plus/icons-vue'
 import type { PortalTask } from '@/types'
-import { ApiBusinessError, isMockMode } from '@/api/client'
+import { ApiBusinessError } from '@/api/client'
+import { componentSelectionState } from '@/utils/uav-component-capabilities'
+import { useComponentFeedback } from '@/workspace-components/shared/component-feedback'
 import {
   getFlightPlanDetail,
   getFlightPlans,
@@ -17,9 +19,6 @@ import {
 import type { PatrolProjectOption, UavDeviceOption, UavFlightTaskOption, UavOpenComponentType } from '@/api/patrol'
 import {
   buildRouteMetrics,
-  createFlightPlans,
-  createHistoryRoutes,
-  createRoutesForTask,
   planningAlerts,
   type FlightPlanItem,
   type FlightRoute,
@@ -37,10 +36,12 @@ const props = withDefaults(defineProps<{
   showComponentNav: true,
 })
 
-const routes = ref<FlightRoute[]>(createRoutesForTask(props.task))
-const historyRoutes = ref<FlightRoute[]>(createHistoryRoutes(props.task))
-const plans = ref<FlightPlanItem[]>(createFlightPlans(routes.value))
-const activeRouteId = ref(routes.value[0]?.id || '')
+// 真实模式必须从空状态开始，不能在接口返回前用 Mock 数据占位。
+// 否则整页刷新并通过 action=edit 自动打开选择框时，会把 Mock 航线误当成已加载的真实数据。
+const routes = ref<FlightRoute[]>([])
+const historyRoutes = ref<FlightRoute[]>([])
+const plans = ref<FlightPlanItem[]>([])
+const activeRouteId = ref('')
 const activePlanId = ref('')
 const routeLoading = ref(false)
 const routeError = ref('')
@@ -56,7 +57,7 @@ const selectedDate = ref('2026-09-09')
 /**
  * 真实模式通过我方后端动态换取低空大师组件 URL，避免将已过期的分享码写入前端包。
  */
-const useDasFlyEmbed = computed(() => !isMockMode() && import.meta.env.VITE_DAS_FLY_EMBED !== 'false')
+const useDasFlyEmbed = computed(() => import.meta.env.VITE_DAS_FLY_EMBED !== 'false')
 const openComponentItems: Array<{ type: UavOpenComponentType; label: string; icon: Component }> = [
   { type: 'WAYLINE_CREATE', label: '创建航线', icon: Connection },
   { type: 'WAYLINE_EDIT', label: '编辑航线', icon: EditPen },
@@ -95,22 +96,20 @@ type OpenComponentSelection = {
   id: string
   title: string
   detail: string
-  state: string
   waylineId?: string
   flightTaskId?: string
   unavailableReason?: string
-  availability?: 'checking' | 'available' | 'unavailable'
-  componentUrl?: string
+  availability: 'available' | 'unavailable'
 }
 const componentSelectorVisible = ref(false)
 const componentSelectorLoading = ref(false)
 const componentSelectorError = ref('')
-const componentSelectorActionError = ref('')
+const showComponentError = useComponentFeedback()
 const componentSelectorKeyword = ref('')
 const componentSelectorItems = ref<OpenComponentSelection[]>([])
 const selectedComponentSelectionId = ref('')
 let componentSelectorRequestVersion = 0
-const unavailableComponentSelections = new Map<string, string>()
+let patrolDataPromise: Promise<void> | null = null
 const taskReferenceType = computed(() => String(props.task?.refType || 'NONE').toUpperCase())
 const taskReferenceId = computed(() => props.task?.refId || '')
 const isTaskPlanBound = computed(() => Boolean(props.task && taskReferenceType.value === 'PLAN' && taskReferenceId.value))
@@ -160,95 +159,58 @@ async function loadDasFlyComponentUrl(target: { waylineId?: string; flightTaskId
 }
 
 function routeSelections(source: FlightRoute[]): OpenComponentSelection[] {
-  return source.filter((route) => Boolean(route.id)).map((route) => ({
-    id: `wayline:${route.id}`,
-    title: route.name,
-    detail: `${route.routeTypeLabel} · ${route.area || '未填写区域'} · 航线 ID：${route.id}`,
-    state: route.status,
-    waylineId: route.id,
-    availability: 'checking',
-  }))
+  return source.filter((route) => Boolean(route.id)).map((route) => {
+    const capability = componentSelectionState(route.componentCapabilities?.waylineEdit)
+    return {
+      id: `wayline:${route.id}`,
+      title: route.name,
+      detail: `${route.routeTypeLabel} · ${route.area || '未填写区域'} · 航线 ID：${route.id}`,
+      waylineId: capability.targetId,
+      ...capability,
+    }
+  })
 }
 
 function flightTaskSelections(source: UavFlightTaskOption[]): OpenComponentSelection[] {
-  return source.filter((task) => Boolean(task.id)).map((task) => ({
-    id: `flight:${task.id}`,
-    title: task.name,
-    detail: `${task.waylineName} · ${task.deviceName} · 飞行任务 ID：${task.id}`,
-    state: task.status,
-    flightTaskId: task.id,
-    waylineId: task.waylineId || undefined,
-    availability: 'checking',
-  }))
-}
-
-function componentAuthorizationError(type: UavOpenComponentType, error: unknown) {
-  const label = type === 'WAYLINE_EDIT' ? '编辑航线' : '虚拟座舱'
-  return error instanceof ApiBusinessError
-    ? `后端生成${label}授权地址失败（错误码 ${error.code}）：${error.message}`
-    : error instanceof Error ? `${label}地址验证失败：${error.message}` : `${label}地址验证失败。`
-}
-
-function updateComponentSelection(id: string, patch: Partial<OpenComponentSelection>) {
-  componentSelectorItems.value = componentSelectorItems.value.map((item) => item.id === id
-    ? { ...item, ...patch }
-    : item)
-}
-
-async function validateComponentSelections(items: OpenComponentSelection[], type: UavOpenComponentType, requestVersion: number) {
-  let nextIndex = 0
-  async function worker() {
-    while (nextIndex < items.length) {
-      const item = items[nextIndex++]
-      if (!item || requestVersion !== componentSelectorRequestVersion) return
-      try {
-        const url = await getUavComponentUrl(type, { waylineId: item.waylineId, flightTaskId: item.flightTaskId })
-        if (requestVersion !== componentSelectorRequestVersion) return
-        // items 是赋给 ref 之前的原始对象；直接修改它不会触发 Vue 重新渲染。
-        // 使用新对象替换响应式列表中的对应项，确保“验证中”立即切换为最终状态。
-        updateComponentSelection(item.id, {
-          componentUrl: url,
-          unavailableReason: undefined,
-          availability: 'available',
-        })
-      } catch (error) {
-        if (requestVersion !== componentSelectorRequestVersion) return
-        const reason = componentAuthorizationError(type, error)
-        unavailableComponentSelections.set(`${type}:${item.flightTaskId || item.waylineId || item.id}`, reason)
-        updateComponentSelection(item.id, {
-          componentUrl: undefined,
-          unavailableReason: reason,
-          availability: 'unavailable',
-        })
-      }
+  return source.filter((task) => Boolean(task.id)).map((task) => {
+    const capability = componentSelectionState(task.componentCapabilities?.cockpit)
+    return {
+      id: `flight:${task.id}`,
+      title: task.name,
+      detail: `${task.waylineName} · ${task.deviceName} · 飞行任务 ID：${task.id}`,
+      flightTaskId: capability.targetId,
+      ...capability,
     }
-  }
-  await Promise.all(Array.from({ length: Math.min(4, items.length) }, () => worker()))
+  })
 }
 
 async function openComponentSelector(type: UavOpenComponentType) {
+  dasFlyEmbedRequestVersion++
+  dasFlyEmbedLoading.value = false
   activeOpenComponentType.value = type
   dasFlyComponentUrl.value = ''
   dasFlyEmbedError.value = ''
   componentSelectorVisible.value = true
   componentSelectorLoading.value = true
   componentSelectorError.value = ''
-  componentSelectorActionError.value = ''
   componentSelectorKeyword.value = ''
   componentSelectorItems.value = []
   selectedComponentSelectionId.value = ''
   const requestVersion = ++componentSelectorRequestVersion
   try {
     if (type === 'WAYLINE_EDIT') {
-      let source = routes.value
-      if (!source.length && !isMockMode()) source = (await getRoutes({ pageNum: 1, pageSize: 200, projectId: selectedProjectId.value || undefined })).list
+      // 直刷 /uav-tasks/route?action=edit 时，父组件会立即要求打开弹窗。
+      // 等待本组件的首轮真实数据初始化，避免读取尚未替换的临时状态或重复请求。
+      if (patrolDataPromise) await patrolDataPromise
+      if (requestVersion !== componentSelectorRequestVersion) return
+      const source = props.task ? routes.value
+        : (await getRoutes({ pageNum: 1, pageSize: 200, projectId: selectedProjectId.value || undefined })).list
       const items = routeSelections(source)
       if (!items.length) throw new Error('未查询到可编辑的航线，请先创建或同步航线。')
       if (requestVersion === componentSelectorRequestVersion) {
         componentSelectorItems.value = items
         componentSelectorLoading.value = false
       }
-      await validateComponentSelections(items, type, requestVersion)
     } else {
       const result = await getUavFlightTaskOptions({ pageNum: 1, pageSize: 200, projectId: selectedProjectId.value || undefined })
       const items = flightTaskSelections(result.list)
@@ -257,7 +219,6 @@ async function openComponentSelector(type: UavOpenComponentType) {
         componentSelectorItems.value = items
         componentSelectorLoading.value = false
       }
-      await validateComponentSelections(items, type, requestVersion)
     }
   } catch (error) {
     if (requestVersion === componentSelectorRequestVersion) componentSelectorError.value = error instanceof Error ? error.message : '选择数据加载失败，请重试。'
@@ -268,11 +229,12 @@ async function openComponentSelector(type: UavOpenComponentType) {
 
 /** 切换开放组件时关闭选择层，并废弃尚未返回的选项请求。 */
 function dismissComponentSelector() {
+  dasFlyEmbedRequestVersion++
+  dasFlyEmbedLoading.value = false
   componentSelectorRequestVersion += 1
   componentSelectorVisible.value = false
   componentSelectorLoading.value = false
   componentSelectorError.value = ''
-  componentSelectorActionError.value = ''
   componentSelectorKeyword.value = ''
   componentSelectorItems.value = []
   selectedComponentSelectionId.value = ''
@@ -309,27 +271,23 @@ function openCockpit() {
 defineExpose({ openFlightPlanCreate, openWaylineCreate, openWaylineEdit, openCockpit })
 
 async function confirmComponentSelection() {
+  if (dasFlyEmbedLoading.value) return
+  const requestVersion = componentSelectorRequestVersion
   const selected = componentSelectorItems.value.find((item) => item.id === selectedComponentSelectionId.value)
   if (!selected || selected.availability !== 'available') {
     componentSelectorError.value = '请先选择一条记录。'
     return
   }
-  componentSelectorActionError.value = ''
-  if (selected.componentUrl) {
-    dasFlyComponentUrl.value = selected.componentUrl
-    dasFlyEmbedError.value = ''
-    dismissComponentSelector()
-    return
-  }
   const result = await loadDasFlyComponentUrl({ waylineId: selected.waylineId, flightTaskId: selected.flightTaskId })
+  if (requestVersion !== componentSelectorRequestVersion) return
   if (result.ok) {
     dismissComponentSelector()
     return
   }
   const reason = result.error || '当前飞行任务无法生成开放组件授权地址。'
-  componentSelectorActionError.value = `${selected.title}：${reason}`
-  if (result.backendRejected && selected.flightTaskId) {
-    unavailableComponentSelections.set(`${activeOpenComponentType.value}:${selected.flightTaskId}`, reason)
+  showComponentError(`${selected.title}：${reason}`)
+  if (result.backendRejected) {
+    selected.availability = 'unavailable'
     selected.unavailableReason = reason
     selectedComponentSelectionId.value = ''
   }
@@ -350,21 +308,8 @@ function clearScopedData() {
   selectedProjectId.value = ''
 }
 
-function resetMockData() {
-    routes.value = createRoutesForTask(props.task)
-    historyRoutes.value = createHistoryRoutes(props.task)
-    plans.value = createFlightPlans(routes.value)
-    activeRouteId.value = routes.value[0]?.id || ''
-    activePlanId.value = plans.value[0]?.id || ''
-}
-
 async function loadPatrolData() {
   routeError.value = ''
-  if (isMockMode()) {
-    resetMockData()
-    return
-  }
-
   deviceLoading.value = true
   const [projectResult, deviceResult] = await Promise.allSettled([
     getUavProjectOptions(),
@@ -395,6 +340,16 @@ async function loadPatrolData() {
     ? selectedProjectId.value
     : (projectResult.status === 'fulfilled' ? projectResult.value[0]?.id || '' : '')
   await loadScopedPatrolData()
+}
+
+function refreshPatrolData() {
+  const request = loadPatrolData()
+  patrolDataPromise = request
+  void request.then(
+    () => { if (patrolDataPromise === request) patrolDataPromise = null },
+    () => { if (patrolDataPromise === request) patrolDataPromise = null },
+  )
+  return request
 }
 
 /**
@@ -432,7 +387,6 @@ async function loadTaskLinkedPlan(planId: string) {
 }
 
 async function loadScopedPatrolData() {
-  if (isMockMode()) return
   routeLoading.value = true
   routeError.value = ''
   const query = { pageNum: 1, pageSize: 200, projectId: selectedProjectId.value || undefined }
@@ -462,8 +416,12 @@ async function loadScopedPatrolData() {
   routeLoading.value = false
 }
 
-watch(() => props.task?.id, () => void loadPatrolData(), { immediate: true })
+watch(() => props.task?.id, () => void refreshPatrolData(), { immediate: true })
 watch(useDasFlyEmbed, () => void loadDasFlyComponentUrl(), { immediate: true })
+onBeforeUnmount(() => {
+  componentSelectorRequestVersion++
+  dasFlyEmbedRequestVersion++
+})
 
 const activeRoute = computed(() => routes.value.find((item) => item.id === activeRouteId.value) || routes.value[0])
 const filteredRoutes = computed(() =>
@@ -506,7 +464,7 @@ const metrics = computed(() => {
 
 async function selectRoute(id: string) {
   activeRouteId.value = id
-  if (!isMockMode()) await loadRouteDetail(id)
+  await loadRouteDetail(id)
 }
 
 async function loadRouteDetail(id: string) {
@@ -514,7 +472,7 @@ async function loadRouteDetail(id: string) {
     const detail = await getRouteDetail(id)
     if (!detail) return
     const index = routes.value.findIndex((item) => item.id === id)
-    if (index >= 0) routes.value[index] = { ...routes.value[index]!, ...detail }
+    if (index >= 0) routes.value[index] = { ...routes.value[index]!, ...detail, componentCapabilities: detail.componentCapabilities ?? routes.value[index]!.componentCapabilities }
   } catch (error) {
     routeError.value = error instanceof Error ? error.message : '航线详情加载失败。'
   }
@@ -522,11 +480,6 @@ async function loadRouteDetail(id: string) {
 
 async function selectPlan(id: string) {
   activePlanId.value = id
-  if (isMockMode()) {
-    const plan = plans.value.find((item) => item.id === id)
-    if (plan?.routeId) selectRoute(plan.routeId)
-    return
-  }
   planLoading.value = true
   try {
     const detail = await getFlightPlanDetail(id)
@@ -541,38 +494,6 @@ async function selectPlan(id: string) {
   }
 }
 
-function onRouteCreated(route: FlightRoute) {
-  if (!isMockMode()) return
-  routes.value.unshift(route)
-  activeRouteId.value = route.id
-}
-
-function reuseHistory(route: FlightRoute) {
-  if (!isMockMode()) return
-  const cloned: FlightRoute = {
-    ...route,
-    id: `RT-REUSE-${Date.now().toString().slice(-5)}`,
-    name: `${route.name}-复用`,
-    status: '草稿',
-    createdAt: new Date().toISOString().slice(0, 10),
-  }
-  routes.value.unshift(cloned)
-  activeRouteId.value = cloned.id
-}
-
-function addPlan() {
-  if (!isMockMode()) return
-  if (!activeRoute.value) return
-  plans.value.push({
-    id: `FP-${Date.now()}`,
-    date: selectedDate.value,
-    start: '15:00',
-    end: '16:00',
-    title: `${activeRoute.value.name}补充计划`,
-    area: activeRoute.value.area,
-    routeId: activeRoute.value.id,
-  })
-}
 </script>
 
 <template>
@@ -597,7 +518,6 @@ function addPlan() {
             <button type="button" aria-label="关闭选择面板" @click="dismissComponentSelector">×</button>
           </header>
           <input v-model="componentSelectorKeyword" class="component-selector__search" placeholder="搜索名称、区域、设备或 ID" />
-          <p v-if="componentSelectorActionError" class="component-selector__action-error">{{ componentSelectorActionError }}</p>
           <div v-if="componentSelectorLoading" class="component-selector__state">正在读取可选择记录…</div>
           <div v-else-if="componentSelectorError" class="component-selector__state is-error">
             <span>{{ componentSelectorError }}</span>
@@ -608,12 +528,13 @@ function addPlan() {
               v-for="item in filteredComponentSelectorItems"
               :key="item.id"
               type="button"
-              :class="{ active: item.id === selectedComponentSelectionId, unavailable: item.availability === 'unavailable', checking: item.availability === 'checking' }"
+              :class="{ active: item.id === selectedComponentSelectionId, unavailable: item.availability === 'unavailable' }"
               :disabled="item.availability !== 'available' || dasFlyEmbedLoading"
+              :title="item.unavailableReason || ''"
               @click="selectedComponentSelectionId = item.id"
             >
-              <span><b>{{ item.title }}</b><small>{{ item.detail }}</small><small v-if="item.availability === 'checking'" class="checking-reason">正在验证开放组件授权…</small></span>
-              <em>{{ item.availability === 'checking' ? '验证中' : item.availability === 'unavailable' ? '不可用' : item.state }}</em>
+              <span><b>{{ item.title }}</b><small>{{ item.detail }}</small><small v-if="item.unavailableReason" class="unavailable-reason">{{ item.unavailableReason }}</small></span>
+              <em>{{ item.availability === 'unavailable' ? '不可用' : '可用' }}</em>
             </button>
             <div v-if="!filteredComponentSelectorItems.length" class="component-selector__state">没有匹配的记录。</div>
           </div>
@@ -639,7 +560,7 @@ function addPlan() {
       <aside class="route-tool-float">
         <div class="panel">
           <div class="panel-title">航线规划工具</div>
-          <div v-if="!isMockMode()" class="route-data-selects">
+          <div class="route-data-selects">
             <label>所属项目
               <select v-model="selectedProjectId" :disabled="routeLoading || Boolean(task)" @change="loadScopedPatrolData">
                 <option value="">全部可见项目</option>
@@ -682,7 +603,7 @@ function addPlan() {
           <p v-else-if="routeError" class="panel-note error">{{ routeError }}</p>
           <p v-else-if="isTaskPlanBound" class="panel-note">当前仅展示该任务关联飞行计划及其航线。</p>
           <p v-else-if="task" class="panel-note">该任务尚未建立可用的飞行计划/航线关联。</p>
-          <p v-else-if="!isMockMode()" class="panel-note">当前展示账号可见航线。</p>
+          <p v-else class="panel-note">当前展示账号可见航线。</p>
         </div>
       </aside>
 
@@ -693,7 +614,7 @@ function addPlan() {
           <div class="panel-title">任务与航线信息</div>
           <dl>
             <dt>任务名称</dt><dd>{{ taskLoading ? '正在读取任务…' : task?.name || '未绑定任务' }}</dd>
-            <dt v-if="!isMockMode()">所属项目</dt><dd v-if="!isMockMode()">{{ projects.find((item) => item.id === selectedProjectId)?.name || '全部可见项目' }}</dd>
+            <dt>所属项目</dt><dd>{{ projects.find((item) => item.id === selectedProjectId)?.name || '全部可见项目' }}</dd>
             <dt v-if="task">任务关联</dt><dd v-if="task">{{ task.refType || 'NONE' }}{{ task.refId ? ` · ${task.refId}` : '' }}</dd>
             <dt>作业区域</dt><dd>{{ activeRoute?.area || '-' }}</dd>
             <dt>飞行器</dt><dd>{{ activeRoute?.aircraft || '-' }}</dd>
@@ -704,10 +625,10 @@ function addPlan() {
         <div class="panel">
           <div class="panel-title">航线参数</div>
           <dl v-if="activeRoute">
-            <dt>飞行高度</dt><dd><input v-model.number="activeRoute.height" :disabled="!isMockMode()" type="number" /> m</dd>
-            <dt>飞行速度</dt><dd><input v-model.number="activeRoute.speed" :disabled="!isMockMode()" type="number" /> m/s</dd>
-            <dt>航向重叠</dt><dd><input v-model.number="activeRoute.overlapFront" :disabled="!isMockMode()" type="number" /> %</dd>
-            <dt>旁向重叠</dt><dd><input v-model.number="activeRoute.overlapSide" :disabled="!isMockMode()" type="number" /> %</dd>
+            <dt>飞行高度</dt><dd><input v-model.number="activeRoute.height" disabled type="number" /> m</dd>
+            <dt>飞行速度</dt><dd><input v-model.number="activeRoute.speed" disabled type="number" /> m/s</dd>
+            <dt>航向重叠</dt><dd><input v-model.number="activeRoute.overlapFront" disabled type="number" /> %</dd>
+            <dt>旁向重叠</dt><dd><input v-model.number="activeRoute.overlapSide" disabled type="number" /> %</dd>
             <dt>航线类型</dt><dd>{{ activeRoute.routeTypeLabel }}</dd>
             <dt>返航点</dt><dd>起降点 H</dd>
           </dl>
@@ -723,8 +644,8 @@ function addPlan() {
           </div>
         </div>
         <div class="actions">
-          <button class="ghost" :disabled="!isMockMode()" title="当前后端未提供航线保存接口">保存草稿</button>
-          <button class="primary" :disabled="!isMockMode()" title="当前后端未提供航线下发接口">下发任务</button>
+          <button class="ghost" disabled title="当前后端未提供航线保存接口">保存草稿</button>
+          <button class="primary" disabled title="当前后端未提供航线下发接口">下发任务</button>
         </div>
       </aside>
     </section>
@@ -746,7 +667,6 @@ function addPlan() {
               <td>{{ route.lengthKm }} km</td>
               <td><em class="done">● 已完成</em></td>
               <td>
-                <button class="link" :disabled="!isMockMode()" @click="reuseHistory(route)">复用</button>
                 <button class="link" @click="selectRoute(route.id)">查看</button>
               </td>
             </tr>
@@ -784,7 +704,6 @@ function addPlan() {
               <span>{{ item.title }}</span>
               <small>{{ item.area }}</small>
             </button>
-            <button class="add-plan" @click="addPlan">＋ 新增计划</button>
           </div>
         </div>
       </div>
@@ -794,8 +713,7 @@ function addPlan() {
       v-model="newRouteVisible"
       :devices="deviceOptions"
       :devices-loading="deviceLoading"
-      :real-mode="!isMockMode()"
-      @created="onRouteCreated"
+      real-mode
     />
     </template>
   </div>
@@ -1119,7 +1037,6 @@ th { color: #6f8393; background: #f7fafc; }
   .das-fly-component-nav__item { grid-template-columns: 1fr; justify-items: center; min-height: 44px; padding: 6px; }
   .das-fly-component-nav__item span { display: none; }
 }
-.component-selector .component-selector__action-error { margin: -4px 0 0; padding: 9px 11px; color: #ffd0d4; background: #8b25344d; border: 1px solid #d8586880; border-radius: 4px; font-size: 12px; line-height: 1.5; }
 .component-selector__list>button.unavailable { color: #688895; background: #071b2c; cursor: not-allowed; opacity: .72; }
 .component-selector__list>button.unavailable:hover { background: #071b2c; }
 .component-selector__list>button.unavailable b { color: #7e9aa5; }

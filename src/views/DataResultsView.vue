@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { getFlightTaskMedia, getUavFlightTaskOptions, type UavFlightTaskOption } from '@/api/patrol'
+import { getFlightTaskMedia, getUavFlightTaskOptions, getUavMediaSummary, type UavFlightTaskOption } from '@/api/patrol'
+import { createCollectionMediaPager, type CollectionMediaEntry, type CollectionMediaFilter } from '@/utils/collection-media-pager'
 import type { FlightReviewMedia } from '@/api/flight-review'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
 import SharedVideoPlayer from '@/workspace-components/spot-identification/SharedVideoPlayer.vue'
+import PhotoLocationOverlay from '@/workspace-components/spot-identification/PhotoLocationOverlay.vue'
 
 const SrtInfoDialog = defineAsyncComponent(() => import('@/workspace-components/spot-identification/SrtInfoDialog.vue'))
 
 type DataTab = 'collection' | 'recognition'
-interface TaskMediaState { list: LiveMediaItem[]; all: LiveMediaItem[]; total: number; loading: boolean; error: string }
-interface CollectionMediaEntry { media: LiveMediaItem; task: UavFlightTaskOption }
 
 const props = withDefaults(defineProps<{ embedded?: boolean; activeTab?: DataTab }>(), { embedded: false, activeTab: 'collection' })
 const keyword = ref('')
@@ -20,13 +20,16 @@ const deviceFilter = ref('')
 const statusFilter = ref('')
 const loading = ref(false)
 const mediaScanLoading = ref(false)
-const mediaLoadErrors = ref(0)
+const summaryError = ref('')
 const error = ref('')
 const tasks = ref<UavFlightTaskOption[]>([])
 const total = ref(0)
 const mediaSummaryTotal = ref<number>()
-const mediaByTask = ref<Record<string, TaskMediaState>>({})
+const filteredMedia = ref<CollectionMediaEntry[]>([])
+const hasMoreMedia = ref(true)
+const mediaCacheVersion = ref(0)
 const currentPage = ref(1)
+const requestedPage = ref(1)
 const pageSize = ref(40)
 const previewMedia = ref<LiveMediaItem>()
 const previewTask = ref<UavFlightTaskOption>()
@@ -39,6 +42,8 @@ const previewScale = ref(1)
 const previewOffsetX = ref(0)
 const previewOffsetY = ref(0)
 const previewDragging = ref(false)
+const previewSwitching = ref(false)
+const previewNotice = ref('')
 const videoPlaybackReady = ref(false)
 const videoPlaybackFailed = ref(false)
 const videoFailureReason = ref<'timeout' | 'unsupported' | ''>('')
@@ -49,34 +54,39 @@ let previewDragOriginX = 0
 let previewDragOriginY = 0
 let videoLoadTimer: number | undefined
 let loadVersion = 0
+let queryVersion = 0
+let previewVersion = 0
+let filterTimer: ReturnType<typeof setTimeout> | undefined
+let pager: ReturnType<typeof createCollectionMediaPager> | undefined
+let previewFilter: CollectionMediaFilter | undefined
 
 const deviceOptions = computed(() => [...new Set(tasks.value.map((item) => item.deviceName).filter(Boolean))])
-const taskOptions = computed(() => [...new Map(tasks.value.map((item) => [item.id, item.name])).entries()]
-  .sort(([leftId], [rightId]) => {
-    const left = mediaByTask.value[leftId]
-    const right = mediaByTask.value[rightId]
-    const leftEmpty = Boolean(left && !left.loading && !left.error && left.total === 0)
-    const rightEmpty = Boolean(right && !right.loading && !right.error && right.total === 0)
-    return Number(leftEmpty) - Number(rightEmpty)
-  }))
-const filteredMedia = computed(() => {
+const taskOptions = computed(() => [...new Map(tasks.value.map((item) => [item.id, item.name])).entries()])
+const hasFilters = computed(() => Boolean(keyword.value.trim() || mediaTypeFilter.value || taskFilter.value || timeFilter.value || deviceFilter.value))
+function currentFilter(): CollectionMediaFilter {
   const query = keyword.value.trim().toLowerCase()
   const cutoff = timeFilter.value ? Date.now() - Number(timeFilter.value) * 86400000 : 0
-  return tasks.value.flatMap((task) => {
-    if ((taskFilter.value && task.id !== taskFilter.value) || (deviceFilter.value && task.deviceName !== deviceFilter.value)) return []
-    const taskMatches = `${task.name}${task.waylineName}${task.deviceName}${task.id}`.toLowerCase().includes(query)
-    return (mediaByTask.value[task.id]?.list || [])
-      .filter((media) => {
-        if (mediaTypeFilter.value && (isVideoMedia(media) ? 'video' : 'image') !== mediaTypeFilter.value) return false
-        if (query && !taskMatches && !media.name.toLowerCase().includes(query)) return false
-        if (!cutoff) return true
-        const timestamp = mediaTimestamp(media, task)
-        return Number.isFinite(timestamp) && timestamp >= cutoff
-      })
-      .map((media) => ({ media, task }))
-  }).sort((left, right) => mediaTimestamp(right.media, right.task) - mediaTimestamp(left.media, left.task))
+  const selectedTask = taskFilter.value
+  const selectedDevice = deviceFilter.value
+  const selectedType = mediaTypeFilter.value
+  return {
+    task: task => (!selectedTask || task.id === selectedTask) && (!selectedDevice || task.deviceName === selectedDevice),
+    media: (media, task) => {
+      if (!isAerialMedia(media)) return false
+      if (selectedType && (isVideoMedia(media) ? 'video' : 'image') !== selectedType) return false
+      const taskMatches = `${task.name}${task.waylineName}${task.deviceName}${task.id}`.toLowerCase().includes(query)
+      if (query && !taskMatches && !media.name.toLowerCase().includes(query)) return false
+      return !cutoff || mediaTimestamp(media, task) >= cutoff
+    },
+  }
+}
+const knownTotal = computed(() => {
+  if (!hasMoreMedia.value) return filteredMedia.value.length
+  return !hasFilters.value ? mediaSummaryTotal.value : undefined
 })
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredMedia.value.length / pageSize.value)))
+const pageCount = computed(() => knownTotal.value === undefined
+  ? Math.max(1, Math.ceil(filteredMedia.value.length / pageSize.value), hasMoreMedia.value ? currentPage.value + 1 : 1)
+  : Math.max(1, Math.ceil(knownTotal.value / pageSize.value), Math.ceil(filteredMedia.value.length / pageSize.value)))
 const pageMedia = computed(() => filteredMedia.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
 const visiblePages = computed(() => {
   const start = Math.max(1, Math.min(currentPage.value - 2, pageCount.value - 4))
@@ -91,10 +101,12 @@ const previewTaskMedia = computed(() => previewTask.value ? taskReviewMedia(prev
 
 function toReviewMedia(media: LiveMediaItem, task: UavFlightTaskOption): FlightReviewMedia {
   return { id: media.id, taskId: task.id, fileName: media.name, type: isVideoMedia(media) ? 'video' : media.mediaType || 'image',
-    thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: '', shootTime: media.capturedAt }
+    thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: '', shootTime: media.capturedAt,
+    longitude: media.longitude, latitude: media.latitude }
 }
 function taskReviewMedia(task: UavFlightTaskOption) {
-  return (mediaByTask.value[task.id]?.all || []).map(media => toReviewMedia(media, task))
+  void mediaCacheVersion.value
+  return (pager?.taskMedia(task.id) || []).map(media => toReviewMedia(media, task))
 }
 function openSrtInfo(media: LiveMediaItem, task: UavFlightTaskOption) {
   if (!isVideoMedia(media)) return
@@ -110,63 +122,47 @@ function isVideoMedia(media: LiveMediaItem) {
   return ['MP4', 'MOV', 'M4V', 'AVI', 'MKV', 'WEBM'].includes(mediaExtension(media)) || declaredType.includes('VIDEO')
 }
 function isAerialMedia(media: LiveMediaItem) {
-  const name = media.name.split(/[?#]/)[0]?.trim() || ''
   const type = String(media.mediaType || '').trim().toUpperCase()
-  return !/\.(OBS|NAV|MRK|RTK)$/i.test(name) && !['OBS', 'NAV', 'MRK', 'RTK'].includes(type)
+  return isVideoMedia(media) || ['JPG', 'JPEG', 'PNG', 'WEBP', 'BMP', 'TIF', 'TIFF', 'HEIC', 'HEIF'].includes(mediaExtension(media)) || type.includes('IMAGE') || type.includes('PHOTO')
 }
-async function refreshEligibleMediaTotal(taskList: UavFlightTaskOption[], version: number) {
-  mediaSummaryTotal.value = undefined
-  mediaScanLoading.value = true
-  mediaLoadErrors.value = 0
-  let eligibleCount = 0
-  let nextTaskIndex = 0
-  // Publish each page as soon as it arrives. A large task must not hold back the other tasks.
-  async function scanTask(task: UavFlightTaskOption) {
-    const eligible: LiveMediaItem[] = []
-    let received = 0
-    let expectedTotal = Number.POSITIVE_INFINITY
-    let pageNum = 1
-    try {
-      while (received < expectedTotal) {
-        const result = await getFlightTaskMedia({ taskId: task.id, pageNum, pageSize: 200 })
-        if (version !== loadVersion) return
-        received += result.list.length
-        expectedTotal = result.total
-        const batch = result.list.filter(isAerialMedia)
-        eligible.push(...batch)
-        eligibleCount += batch.length
-        mediaSummaryTotal.value = eligibleCount
-        const hasMore = result.list.length > 0 && received < expectedTotal
-        mediaByTask.value = {
-          ...mediaByTask.value,
-          [task.id]: { list: [...eligible], all: [...eligible], total: eligible.length, loading: hasMore, error: '' },
-        }
-        if (!hasMore) break
-        pageNum += 1
-      }
-    } catch (reason) {
-      if (version !== loadVersion) return
-      mediaLoadErrors.value += 1
-      mediaByTask.value = {
-        ...mediaByTask.value,
-        [task.id]: { list: [...eligible], all: [...eligible], total: eligible.length, loading: false, error: reason instanceof Error ? reason.message : '素材读取失败' },
-      }
-    }
-  }
-  async function worker() {
-    while (nextTaskIndex < taskList.length && version === loadVersion) {
-      const task = taskList[nextTaskIndex++]
-      if (task) await scanTask(task)
-    }
-  }
+async function loadSummary(version: number) {
   try {
-    await Promise.all(Array.from({ length: Math.min(5, taskList.length) }, () => worker()))
-    if (version === loadVersion) mediaSummaryTotal.value = eligibleCount
-  } finally {
-    if (version === loadVersion) mediaScanLoading.value = false
+    const summary = await getUavMediaSummary()
+    if (version !== loadVersion) return
+    if (summary.photoCount === undefined || summary.videoCount === undefined) throw new Error('素材统计暂未提供')
+    mediaSummaryTotal.value = summary.photoCount + summary.videoCount
+  } catch {
+    if (version === loadVersion) summaryError.value = '素材统计暂时无法读取'
   }
 }
-function setPage(page: number) { currentPage.value = Number.isFinite(page) ? Math.min(Math.max(1, Math.trunc(page)), pageCount.value) : 1 }
+async function loadMediaPage(page: number) {
+  if (!pager) return
+  const currentPager = pager
+  const version = ++queryVersion
+  const filter = currentFilter()
+  const target = Math.max(1, Math.trunc(page))
+  requestedPage.value = target
+  const size = pageSize.value
+  mediaScanLoading.value = true
+  error.value = ''
+  try {
+    const result = await currentPager.readUntil(target * size, filter, () => version === queryVersion)
+    if (!result || version !== queryVersion) return
+    filteredMedia.value = result.entries
+    hasMoreMedia.value = result.hasMore
+    mediaCacheVersion.value++
+    currentPage.value = result.hasMore ? target : Math.min(target, Math.max(1, Math.ceil(result.entries.length / size)))
+  } catch (reason) {
+    if (version === queryVersion) error.value = reason instanceof Error ? reason.message : '素材读取失败，请重试'
+  } finally {
+    if (version === queryVersion) mediaScanLoading.value = false
+  }
+}
+function setPage(page: number) {
+  if (!Number.isFinite(page) || mediaScanLoading.value) return
+  closePreview()
+  void loadMediaPage(Math.min(Math.max(1, Math.trunc(page)), pageCount.value))
+}
 function mediaSource(media: LiveMediaItem) { return media.thumbnail || media.originalUrl || '' }
 function mediaTimestamp(media: LiveMediaItem, task: UavFlightTaskOption) {
   const captured = Date.parse((media.capturedAt || '').replace(' ', 'T'))
@@ -198,6 +194,10 @@ function beginVideoPlaybackCheck() {
 }
 function openMedia(media: LiveMediaItem, task: UavFlightTaskOption, items: CollectionMediaEntry[]) {
   if (!media.originalUrl && !media.thumbnail) return
+  previewVersion++
+  previewFilter = currentFilter()
+  previewSwitching.value = false
+  previewNotice.value = ''
   previewItems.value = items.filter(({ media: item }) => item.originalUrl || item.thumbnail)
   previewIndex.value = previewItems.value.findIndex((item) => item.task.id === task.id && item.media.id === media.id)
   const entry = previewItems.value[previewIndex.value]
@@ -208,6 +208,10 @@ function openMedia(media: LiveMediaItem, task: UavFlightTaskOption, items: Colle
   if (isVideoMedia(previewMedia.value)) beginVideoPlaybackCheck()
 }
 function closePreview() {
+  previewVersion++
+  previewSwitching.value = false
+  previewNotice.value = ''
+  previewFilter = undefined
   srtContext.value = undefined
   previewMedia.value = undefined
   previewTask.value = undefined
@@ -216,16 +220,41 @@ function closePreview() {
   resetPreviewTransform()
   resetVideoPlayback()
 }
-function switchPreview(step: number) {
-  if (!previewItems.value.length) return
-  previewIndex.value = (previewIndex.value + step + previewItems.value.length) % previewItems.value.length
-  const entry = previewItems.value[previewIndex.value]
-  if (!entry) return
-  previewMedia.value = entry.media
-  previewTask.value = entry.task
-  resetPreviewTransform()
-  resetVideoPlayback()
-  if (isVideoMedia(entry.media)) beginVideoPlaybackCheck()
+async function switchPreview(step: number) {
+  if (!previewItems.value.length || previewSwitching.value) return
+  const version = previewVersion
+  const query = queryVersion
+  const active = () => version === previewVersion && query === queryVersion
+  let index = previewIndex.value + step
+  if (index < 0) { previewNotice.value = '已经是第一条素材'; return }
+  previewSwitching.value = true
+  previewNotice.value = ''
+  try {
+    while (index >= previewItems.value.length && hasMoreMedia.value && pager && previewFilter) {
+      previewNotice.value = '正在读取下一条素材…'
+      const result = await pager.readUntil(filteredMedia.value.length + 1, previewFilter, active)
+      if (!result || !active()) return
+      filteredMedia.value = result.entries
+      hasMoreMedia.value = result.hasMore
+      mediaCacheVersion.value++
+      previewItems.value = result.entries.filter(({ media }) => media.originalUrl || media.thumbnail)
+      index = previewIndex.value + step
+    }
+    if (!active()) return
+    const entry = previewItems.value[index]
+    if (!entry) { previewNotice.value = '已经是最后一条可预览素材'; return }
+    previewIndex.value = index
+    previewMedia.value = entry.media
+    previewTask.value = entry.task
+    previewNotice.value = ''
+    resetPreviewTransform()
+    resetVideoPlayback()
+    if (isVideoMedia(entry.media)) beginVideoPlaybackCheck()
+  } catch (reason) {
+    if (active()) previewNotice.value = `${reason instanceof Error ? reason.message : '素材读取失败'}，请再次切换重试`
+  } finally {
+    if (version === previewVersion) previewSwitching.value = false
+  }
 }
 function markVideoReady() {
   window.clearTimeout(videoLoadTimer)
@@ -291,18 +320,36 @@ function handlePreviewKey(event: KeyboardEvent) {
 async function loadTasks() {
   closePreview()
   const version = ++loadVersion
+  queryVersion++
+  clearTimeout(filterTimer)
+  pager = undefined
   loading.value = true
   mediaScanLoading.value = false
-  mediaByTask.value = {}
+  filteredMedia.value = []
+  hasMoreMedia.value = true
+  currentPage.value = 1
   mediaSummaryTotal.value = undefined
+  summaryError.value = ''
   error.value = ''
+  void loadSummary(version)
   try {
     const result = await getUavFlightTaskOptions({ pageNum: 1, pageSize: 200 })
     if (version !== loadVersion) return
-    tasks.value = result.list
+    const taskList = [...result.list]
+    // 下拉选项只读取任务元信息，不提前请求这些任务的素材。
+    for (let pageNum = 2; taskList.length < result.total; pageNum++) {
+      const next = await getUavFlightTaskOptions({ pageNum, pageSize: 200 })
+      if (version !== loadVersion) return
+      if (!next.list.length) throw new Error('任务列表读取不完整，请重试')
+      const known = new Set(taskList.map(task => task.id))
+      const added = next.list.filter(task => !known.has(task.id))
+      if (!added.length) throw new Error('任务分页未返回新的记录，请重试')
+      taskList.push(...added)
+    }
+    tasks.value = [...new Map(taskList.map(task => [task.id, task])).values()]
     total.value = result.total
-    void refreshEligibleMediaTotal(result.list, version)
-    currentPage.value = 1
+    pager = createCollectionMediaPager(tasks.value, getFlightTaskMedia)
+    await loadMediaPage(1)
   } catch (reason) {
     if (version !== loadVersion) return
     tasks.value = []
@@ -313,11 +360,28 @@ async function loadTasks() {
   }
 }
 
-watch([keyword, mediaTypeFilter, taskFilter, timeFilter, deviceFilter, statusFilter, pageSize], () => { currentPage.value = 1 })
-watch(pageCount, () => setPage(currentPage.value))
+watch([keyword, mediaTypeFilter, taskFilter, timeFilter, deviceFilter, statusFilter, pageSize], (next, previous) => {
+  closePreview()
+  queryVersion++
+  clearTimeout(filterTimer)
+  filteredMedia.value = []
+  hasMoreMedia.value = true
+  currentPage.value = 1
+  if (!pager) return
+  mediaScanLoading.value = true
+  if (next[0] !== previous[0]) filterTimer = setTimeout(() => { void loadMediaPage(1) }, 300)
+  else void loadMediaPage(1)
+})
 watch(() => props.activeTab, (tab) => {
-  if (tab !== 'collection') { closePreview(); return }
+  if (tab !== 'collection') {
+    closePreview()
+    queryVersion++
+    clearTimeout(filterTimer)
+    mediaScanLoading.value = false
+    return
+  }
   if (!tasks.value.length && !loading.value) void loadTasks()
+  else if (pager) void loadMediaPage(currentPage.value)
 })
 onMounted(() => {
   window.addEventListener('keydown', handlePreviewKey)
@@ -325,6 +389,9 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   loadVersion += 1
+  queryVersion++
+  previewVersion++
+  clearTimeout(filterTimer)
   window.clearTimeout(videoLoadTimer)
   window.removeEventListener('keydown', handlePreviewKey)
 })
@@ -338,7 +405,7 @@ onBeforeUnmount(() => {
         <header class="collection-heading">
           <div class="summary-strip">
             <div class="summary-card total-card"><i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="17" rx="2" /><path d="M9 3v3h6V3M8 11h3m-3 4h3m3-4h3m-3 4h3" /></svg></i><span><small>采集任务总数</small><strong><b>{{ total || tasks.length }}</b><em>个</em></strong><p>当前已接入的飞行采集任务</p></span></div>
-            <div class="summary-card image-card"><i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="15" height="15" rx="2" /><path d="M18 18v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1" /><circle cx="16.5" cy="7.5" r="1.2" /><path d="m7 16 3.3-3.4 2.5 2 2.1-2.2L19 16" /></svg></i><span><small>素材总数</small><strong><b>{{ mediaSummaryTotal ?? '—' }}</b><em v-if="mediaSummaryTotal !== undefined">项</em></strong><p>{{ mediaScanLoading ? '已读取素材，持续更新中' : '已读取的图片与视频素材' }}</p></span></div>
+            <div class="summary-card image-card"><i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="15" height="15" rx="2" /><path d="M18 18v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1" /><circle cx="16.5" cy="7.5" r="1.2" /><path d="m7 16 3.3-3.4 2.5 2 2.1-2.2L19 16" /></svg></i><span><small>素材总数</small><strong><b>{{ mediaSummaryTotal ?? '—' }}</b><em v-if="mediaSummaryTotal !== undefined">项</em></strong><p>{{ summaryError || '全部图片与视频素材' }}</p></span></div>
             <div class="summary-card device-card"><i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="5" r="2" /><circle cx="19" cy="5" r="2" /><circle cx="5" cy="19" r="2" /><circle cx="19" cy="19" r="2" /><path d="m6.5 6.5 4 4m7-4-4 4m-7 7 4-4m7 4-4-4" /><rect x="10" y="10" width="4" height="4" rx="1" /></svg></i><span><small>采集设备</small><strong><b>{{ deviceCount }}</b><em>台</em></strong><p>参与数据采集的设备数量</p></span></div>
             <div class="summary-card complete-card"><i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l3 3v15H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" /><path d="M15 3v4h3M8 11h7m-7 4h7m-7 4h5" /></svg></i><span><small>当前页数据</small><strong><b>{{ pageMedia.length }}</b><em>项</em></strong><p>当前分页展示的图片与视频</p></span></div>
           </div>
@@ -353,8 +420,8 @@ onBeforeUnmount(() => {
         </header>
 
         <div v-if="loading || (mediaScanLoading && !pageMedia.length)" class="page-state">正在读取图片与视频数据…</div>
-        <div v-else-if="error" class="page-state error-state"><span>{{ error }}</span><button @click="loadTasks">重新加载</button></div>
-        <div v-else-if="!pageMedia.length" class="page-state">{{ mediaLoadErrors ? '部分数据读取失败，当前没有符合筛选条件的素材' : '没有符合筛选条件的图片或视频' }}</div>
+        <div v-else-if="error" class="page-state error-state"><span>{{ error }}</span><button @click="pager ? loadMediaPage(requestedPage) : loadTasks()">重新加载</button></div>
+        <div v-else-if="!pageMedia.length" class="page-state">没有符合筛选条件的图片或视频</div>
         <section v-else class="collection-media-grid media-grid" aria-label="采集数据列表">
           <article v-for="{ media, task } in pageMedia" :key="`${task.id}-${media.id}`" class="media-card" :class="{ 'has-srt': isVideoMedia(media) }"><button type="button" class="media-card-open" :aria-label="`预览 ${media.name}`" @click="openMedia(media, task, filteredMedia)">
             <div class="media-preview" :class="{ 'video-preview':isVideoMedia(media), 'has-thumbnail':isVideoMedia(media) && Boolean(media.thumbnail) }"><template v-if="isVideoMedia(media)"><img v-if="media.thumbnail" :src="media.thumbnail" :alt="`${media.name} 视频缩略图`" loading="lazy" /><span class="video-preview__play"><i>▶</i><em>视频</em></span></template><img v-else-if="mediaSource(media)" :src="mediaSource(media)" :alt="media.name" loading="lazy" /><span v-else>暂无缩略图</span></div>
@@ -363,16 +430,16 @@ onBeforeUnmount(() => {
         </section>
 
         <footer class="collection-pagination">
-          <span>共 {{ filteredMedia.length }} 条数据{{ mediaScanLoading ? ' · 正在读取更多素材…' : '' }}{{ mediaLoadErrors ? ` · ${mediaLoadErrors} 个任务素材读取失败` : '' }}</span>
-          <nav><select v-model="pageSize"><option :value="20">20 条/页</option><option :value="40">40 条/页</option><option :value="60">60 条/页</option></select><button :disabled="currentPage === 1" @click="setPage(currentPage - 1)">‹</button><button v-for="page in visiblePages" :key="page" :class="{ active:currentPage === page }" @click="setPage(page)">{{ page }}</button><button :disabled="currentPage === pageCount" @click="setPage(currentPage + 1)">›</button><label>前往 <input :value="currentPage" inputmode="numeric" @change="setPage(Number(($event.target as HTMLInputElement).value))" /> 页</label></nav>
+          <span>{{ knownTotal === undefined ? `已读取 ${filteredMedia.length} 条匹配数据` : `共 ${knownTotal} 条数据` }}{{ mediaScanLoading ? ' · 正在读取素材…' : '' }}</span>
+          <nav><select v-model="pageSize"><option :value="20">20 条/页</option><option :value="40">40 条/页</option><option :value="60">60 条/页</option></select><button :disabled="currentPage === 1 || mediaScanLoading" @click="setPage(currentPage - 1)">‹</button><button v-for="page in visiblePages" :key="page" :disabled="mediaScanLoading" :class="{ active:currentPage === page }" @click="setPage(page)">{{ page }}</button><button :disabled="currentPage === pageCount || mediaScanLoading" @click="setPage(currentPage + 1)">›</button><label>前往 <input :value="currentPage" :disabled="mediaScanLoading" inputmode="numeric" @change="setPage(Number(($event.target as HTMLInputElement).value))" /> 页</label></nav>
         </footer>
       </section>
       <div v-else class="page-state">识别成果暂不可用</div>
     </main>
 
-    <div v-if="previewMedia" class="preview-mask" role="dialog" aria-modal="true" @click.self="closePreview">
-      <button class="preview-close" title="退出全屏（Esc）" aria-label="退出全屏" @click="closePreview"><span>×</span><em>退出全屏</em></button>
-      <button class="preview-nav preview-prev" title="上一张（← / ↑）" aria-label="上一张" @click.stop="switchPreview(-1)">‹</button>
+    <div v-if="previewMedia" class="preview-mask" :class="{ 'is-video': isVideoMedia(previewMedia) }" role="dialog" aria-modal="true" @click.self="closePreview">
+      <button class="preview-close" title="退出全屏（Esc）" aria-label="退出全屏" @click="closePreview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+      <button class="preview-nav preview-prev" :disabled="previewSwitching" title="上一张（← / ↑）" aria-label="上一张" @click.stop="switchPreview(-1)">‹</button>
       <section v-if="isVideoMedia(previewMedia)" class="preview-video-stage" @click.stop>
         <SharedVideoPlayer v-if="previewMedia.originalUrl && previewReviewMedia && !videoPlaybackFailed" ref="videoPlayer" :key="`${previewTask?.id}:${previewMedia.id}:${videoPlayerVersion}`" :media="previewReviewMedia" :media-list="previewTaskMedia" :src="previewMedia.originalUrl" autoplay fullscreen @ready="markVideoReady" @error="markVideoFailed" />
         <div v-if="previewMedia.originalUrl && !videoPlaybackReady && !videoPlaybackFailed" class="video-loading"><i></i><span>正在读取原视频…</span></div>
@@ -382,7 +449,6 @@ onBeforeUnmount(() => {
           <p>{{ !previewMedia.originalUrl ? '当前仅有视频缩略图，需后端提供原视频或网页兼容预览地址。' : videoFailureReason === 'timeout' ? '浏览器已尝试边缓冲边播放，但未能在 20 秒内取得可播放数据。请检查视频服务是否支持 HTTP Range、Content-Length 及 MP4 Fast Start。' : '可能由 HEVC/H.265 编码、视频地址跨域或服务端响应格式异常导致，可下载原视频后使用本地播放器打开。' }}</p>
           <button v-if="previewMedia.originalUrl" type="button" @click="retryVideoPlayback">重新尝试</button>
         </section>
-        <a v-if="previewMedia.originalUrl" class="preview-video-download" :href="previewMedia.originalUrl" target="_blank" rel="noopener" download>下载原视频</a>
       </section>
       <div
         v-else
@@ -397,9 +463,11 @@ onBeforeUnmount(() => {
         @dblclick="resetPreviewTransform"
       >
         <img :src="previewMedia.originalUrl || previewMedia.thumbnail" :alt="previewMedia.name" :style="previewImageStyle" draggable="false" />
+        <PhotoLocationOverlay v-if="previewReviewMedia?.longitude !== undefined && previewReviewMedia.latitude !== undefined" :key="previewReviewMedia.id" :media="previewReviewMedia" fullscreen />
       </div>
-      <button class="preview-nav preview-next" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
-      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small></footer>
+      <button class="preview-nav preview-next" :disabled="previewSwitching" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
+      <p v-if="previewNotice" class="preview-notice" role="status">{{ previewNotice }}</p>
+      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}{{ hasMoreMedia ? '+' : '' }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small><a v-if="isVideoMedia(previewMedia) && previewMedia.originalUrl" class="preview-video-download" :href="previewMedia.originalUrl" target="_blank" rel="noopener" download>下载原视频</a></footer>
     </div>
     <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" @close="srtContext = undefined" />
   </div>
@@ -496,23 +564,31 @@ onBeforeUnmount(() => {
 .collection-pagination select:hover { color:#fff; background:#315f91; }
 .collection-pagination select:hover option { color:#53627a; background:#fff; }
 .preview-mask { z-index:1000; display:flex; align-items:center; justify-content:center; padding:76px 110px 86px; background:rgba(3,11,22,.94); backdrop-filter:blur(5px); }
-.preview-image-stage { width:calc(100vw - 220px); height:calc(100vh - 162px); display:flex; align-items:center; justify-content:center; overflow:hidden; cursor:zoom-in; touch-action:none; user-select:none; }
+.preview-image-stage { position:relative; width:calc(100vw - 220px); height:calc(100vh - 162px); display:flex; align-items:center; justify-content:center; overflow:hidden; cursor:zoom-in; touch-action:none; user-select:none; }
 .preview-image-stage.zoomed { cursor:grab; }
 .preview-image-stage.dragging { cursor:grabbing; }
 .preview-image-stage img { width:auto; height:auto; max-width:100%; max-height:100%; border-radius:3px; object-fit:contain; box-shadow:0 16px 55px #000b; transform-origin:center; transition:transform .08s ease-out; will-change:transform; pointer-events:none; }
 .preview-image-stage.dragging img { transition:none; }
 .preview-video-stage { position:relative; width:calc(100vw - 220px); height:calc(100vh - 162px); display:flex; align-items:center; justify-content:center; overflow:hidden; background:#02060a; box-shadow:0 16px 55px #000b; }
+.preview-mask.is-video { flex-direction:column; padding:0; background:#081822; }
+.preview-mask.is-video .preview-video-stage { flex:1; min-height:0; width:100%; height:auto; box-shadow:none; }
+.preview-mask.is-video .preview-caption { position:static; flex:none; justify-content:flex-start; width:100%; min-height:50px; box-sizing:border-box; padding:8px 17px; border-top:1px solid #203949; color:#e6f4f8; background:#102735; }
+.preview-mask.is-video .preview-close { top:14px; right:14px; }
+.preview-mask.is-video .preview-nav { width:44px; height:52px; font-size:35px; line-height:1; }
+.preview-mask.is-video .preview-prev { left:24px; }
+.preview-mask.is-video .preview-next { right:24px; }
 .video-loading { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:#b9c8d5; background:#07111ddd; font-size:13px; pointer-events:none; }
 .video-loading i { width:32px; height:32px; border:3px solid #648399; border-top-color:#58c7ff; border-radius:50%; animation:video-loading-spin .8s linear infinite; }
-.preview-video-download { position:absolute; z-index:3; top:16px; right:16px; display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 14px; color:#fff; border:1px solid #72c9f7; border-radius:5px; background:#126eaaeb; box-shadow:0 5px 15px #0005; font-size:12px; font-weight:600; text-decoration:none; }
-.preview-video-download:hover { background:#1887cb; }
+.preview-video-download { flex:none; margin-left:auto; padding:0; border:0; color:#168eae; background:transparent; font-size:12px; font-weight:700; text-decoration:none; white-space:nowrap; cursor:pointer; }
+.preview-video-download:hover { color:#168eae; }
 @keyframes video-loading-spin { to { transform:rotate(360deg); } }
-.preview-close { top:24px; right:30px; height:42px; display:flex; align-items:center; gap:8px; padding:0 16px; border:1px solid #ffffff55; border-radius:22px; color:#fff; background:#172538cc; font-size:14px; transition:.18s; }
+.preview-close { z-index:12; top:24px; right:30px; width:32px; height:32px; display:grid; place-items:center; padding:0; border:1px solid #8eb9c9; border-radius:4px; color:#dff4fc; background:#0b3449e8; box-shadow:0 3px 10px #00152355; transition:.18s; }
 .preview-close:hover { border-color:#7fc9ff; background:#24669a; }
-.preview-close span { font-size:27px; font-weight:300; line-height:1; }
-.preview-close em { font-style:normal; }
+.preview-close svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
 .preview-nav { position:absolute; z-index:2; top:50%; width:54px; height:78px; border:1px solid #ffffff40; border-radius:9px; color:#fff; background:#102238b8; box-shadow:0 8px 24px #0005; font-size:52px; font-weight:200; line-height:60px; cursor:pointer; transform:translateY(-50%); transition:.18s; }
 .preview-nav:hover { border-color:#7fc9ff; background:#2677b5; transform:translateY(-50%) scale(1.05); }
+.preview-nav:disabled { opacity:.5; cursor:wait; }
+.preview-notice { position:absolute; z-index:13; left:50%; bottom:70px; max-width:calc(100% - 80px); transform:translateX(-50%); margin:0; padding:10px 16px; border:1px solid #5d8fa5; border-radius:6px; color:#e6f4f8; background:#102d40ed; font-size:13px; text-align:center; pointer-events:none; }
 .preview-prev { left:28px; }
 .preview-next { right:28px; }
 .preview-caption { position:absolute; right:100px; bottom:24px; left:100px; display:flex; align-items:center; justify-content:center; gap:18px; color:#fff; text-shadow:0 2px 6px #000; }

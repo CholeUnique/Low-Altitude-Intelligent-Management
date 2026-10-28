@@ -3,12 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { getTaskAbnormalPage } from '@/api/governance-task'
 import type { GovernanceTask, TaskAbnormal } from '@/api/governance-task'
-import { getRecognitionSpotPage, ignoreRecognitionSpots, reviewRecognitionSpots, revokeRecognitionSpots, type RecognitionSpotCreateResult } from '@/api/recognition-spot'
+import { getRecognitionSpotDetail, getRecognitionSpotPage, ignoreRecognitionSpots, reviewRecognitionSpots, revokeRecognitionSpots, type RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import { ApiBusinessError } from '@/api/client'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { inspectMapService } from '@/utils/map-service-layer'
 import { useUserStore } from '@/stores/user'
+import { useSpotAddress } from '@/composables/useSpotAddress'
 import SpotDistributionMap from './SpotDistributionMap.vue'
 import ManualSpotCreatePanel from './ManualSpotCreatePanel.vue'
 import type { ComparisonPeriod, SpotDrawingMode, SynchronizedMapView } from './SpotDistributionMap.vue'
@@ -40,9 +41,12 @@ const synchronizedMapView = ref<SynchronizedMapView>()
 const mapFullscreen = ref(false)
 const loading = ref(false)
 const loadError = ref('')
+const detailLoading = ref(false)
+const detailError = ref('')
 const records = ref<SceneSpot[]>([])
 const activeImageIndex = ref(0)
 const hiddenImageIdsBySpot = ref<Record<string, string[]>>({})
+const mapServiceOrderBySpot = ref<Record<string, string[]>>({})
 const pendingDeleteImage = ref<RelatedImagery>()
 const servicePickerVisible = ref(false)
 const servicePickerLoading = ref(false)
@@ -59,6 +63,11 @@ const pendingReview = ref<{ id: string; spotNo: string; title: string; deptId: s
 const reviewBusy = ref(false)
 const reviewError = ref('')
 const reviewMessage = ref('')
+watch(reviewMessage, (message, _previous, onCleanup) => {
+  if (!message) return
+  const timer = window.setTimeout(() => { reviewMessage.value = '' }, 3000)
+  onCleanup(() => window.clearTimeout(timer))
+})
 type SpotAction = 'ignore' | 'revoke'
 type PendingSpotAction = { kind: SpotAction; id: string; spotNo: string; title: string; deptId: string; handleStatus: number }
 const pendingSpotAction = ref<PendingSpotAction>()
@@ -66,6 +75,7 @@ const spotActionBusy = ref(false)
 const spotActionError = ref('')
 const revokeAcknowledged = ref(false)
 let requestVersion = 0
+let detailRequestVersion = 0
 const statusOptions = [
   { value: -1, label: '待人工审核' },
   { value: 0, label: '待核查' },
@@ -92,6 +102,10 @@ const activeSceneName = computed(() => {
     || (selectedGovernanceTask.value?.sceneCode === sceneCode ? selectedGovernanceTask.value?.sceneName : '')
     || sceneCode
 })
+const { spotAddress, spotAddressLoading, spotAddressError } = useSpotAddress(
+  () => active.value?.longitude,
+  () => active.value?.latitude,
+)
 
 type RelatedImagery = { id: string; label: string; url?: string; date?: string; local?: boolean; mapService?: MapServiceItem }
 const manualImageryBySpot = ref<Record<string, RelatedImagery[]>>({})
@@ -137,8 +151,21 @@ const taskComparisonImagery = computed<RelatedImagery[]>(() => {
   const spotServices = (active.value?.mapServices || []).filter((service) => !taskServiceIds.has(String(service.id)))
   return [...taskImages, ...spotServices.map((service) => ({ id: `spot-service-${service.id}`, label: service.name, mapService: service }))]
 })
-const displayableImagery = computed(() => [...taskComparisonImagery.value, ...currentManualImagery.value]
-  .filter((item) => Boolean(item.url || item.mapService) && !currentHiddenImageIds.value.includes(item.id)))
+const displayableImagery = computed(() => {
+  const images = [...taskComparisonImagery.value, ...currentManualImagery.value]
+    .filter((item) => Boolean(item.url || item.mapService) && !currentHiddenImageIds.value.includes(item.id))
+  const order = mapServiceOrderBySpot.value[currentSpotId.value] || []
+  if (!order.length) return images
+  const orderIndex = new Map(order.map((id, index) => [String(id), index]))
+  return images.map((image, index) => ({ image, index, order: image.mapService ? orderIndex.get(String(image.mapService.id)) : undefined }))
+    .sort((left, right) => {
+      if (left.order !== undefined && right.order !== undefined) return left.order - right.order
+      if (left.order !== undefined) return -1
+      if (right.order !== undefined) return 1
+      return left.index - right.index
+    })
+    .map(({ image }) => image)
+})
 const activeMapServiceIds = computed<Array<string | number>>(() => [...new Set(displayableImagery.value.flatMap((image) => image.mapService ? [String(image.mapService.id)] : []))])
 const formMapServices = computed(() => {
   const services = new Map<string, MapServiceItem>()
@@ -166,9 +193,6 @@ function imageryThumbnailPeriod(image: RelatedImagery, index: number): Compariso
 
 function statusLabel(value: number) {
   return statusOptions.find((status) => status.value === value)?.label || '未知状态'
-}
-function levelLabel(value: number) {
-  return ({ 1: '一般', 2: '较重', 3: '严重' } as Record<number, string>)[value] || `等级 ${value}`
 }
 function formatTime(value?: string) {
   return value ? value.replace('T', ' ').slice(0, 16) : '-'
@@ -271,7 +295,9 @@ function isMapServiceAdded(service: MapServiceItem) {
 function synchronizeMapServiceSelection(ids: Array<string | number>) {
   const spotId = currentSpotId.value
   if (!spotId) return
-  const selectedIds = new Set(ids.map(String))
+  const orderedIds = [...new Set(ids.map(String))]
+  mapServiceOrderBySpot.value = { ...mapServiceOrderBySpot.value, [spotId]: orderedIds }
+  const selectedIds = new Set(orderedIds)
   const visibleIds = new Set(activeMapServiceIds.value.map(String))
   const hiddenIds = new Set(currentHiddenImageIds.value)
   const manualImages = [...currentManualImagery.value]
@@ -353,6 +379,40 @@ async function loadAllRecognitionSpots(deptId?: string) {
   return all
 }
 
+async function loadSpotDetail(id: string) {
+  const summary = records.value.find((item) => item.id === id)
+  const version = ++detailRequestVersion
+  detailError.value = ''
+  if (!summary?.fromRecognitionApi) {
+    detailLoading.value = false
+    return
+  }
+  detailLoading.value = true
+  try {
+    const detail = await getRecognitionSpotDetail({ id, deptId: summary.deptId || user.activeDeptId || undefined })
+    if (version !== detailRequestVersion || active.value?.id !== id) return
+    const index = records.value.findIndex((item) => item.id === id)
+    if (index < 0) return
+    records.value[index] = {
+      ...records.value[index]!,
+      ...detail,
+      fromRecognitionApi: true,
+      bizTaskId: records.value[index]!.bizTaskId || detail.taskId || '',
+      abnormalLevel: records.value[index]!.abnormalLevel || 1,
+      sourceTaskName: records.value[index]!.sourceTaskName,
+      imageMediaId: records.value[index]!.imageMediaId,
+      imageUrl: records.value[index]!.imageUrl,
+    }
+  } catch (error) {
+    if (version !== detailRequestVersion || active.value?.id !== id) return
+    detailError.value = error instanceof ApiBusinessError && error.code === '10107'
+      ? '当前账号无权读取该图斑详情，暂显示列表摘要。'
+      : error instanceof Error ? `${error.message}，暂显示列表摘要。` : '图斑详情读取失败，暂显示列表摘要。'
+  } finally {
+    if (version === detailRequestVersion) detailLoading.value = false
+  }
+}
+
 async function loadAllTaskSpots(task: GovernanceTask): Promise<SceneSpot[]> {
   const first = await getTaskAbnormalPage({ bizTaskId: task.id, pageNum: 1, pageSize: 200 })
   const all = [...first.records]
@@ -368,6 +428,10 @@ async function loadAllTaskSpots(task: GovernanceTask): Promise<SceneSpot[]> {
 
 async function loadSpots(preferredSpotNo?: string) {
   const version = ++requestVersion
+  const previousActiveId = activeId.value
+  detailRequestVersion += 1
+  detailLoading.value = false
+  detailError.value = ''
   const deptId = user.activeDeptId
   loadError.value = ''
   loading.value = true
@@ -402,8 +466,10 @@ async function loadSpots(preferredSpotNo?: string) {
     })
     records.value = [...merged.values()].sort((left, right) =>
       (right.foundTime || right.createTime || '').localeCompare(left.foundTime || left.createTime || ''))
-    activeId.value = records.value.find((item) => item.spotNo === preferredSpotNo)?.id
+    const nextActiveId = records.value.find((item) => item.spotNo === preferredSpotNo)?.id
       || (records.value.some((item) => item.id === activeId.value) ? activeId.value : records.value[0]?.id || '')
+    activeId.value = nextActiveId
+    if (nextActiveId && nextActiveId === previousActiveId) void loadSpotDetail(nextActiveId)
   } catch (error) {
     if (version !== requestVersion) return
     records.value = []
@@ -534,6 +600,7 @@ watch([() => props.tasks.map((task) => task.id).join(','), () => user.activeDept
   reviewError.value = ''
   reviewMessage.value = ''
   clearManualImagery()
+  mapServiceOrderBySpot.value = {}
   void loadSpots()
 }, { immediate: true })
 watch(() => active.value?.bizTaskId, (taskId) => {
@@ -552,6 +619,7 @@ watch(() => active.value?.id, () => {
   synchronizedMapView.value = undefined
   periodsManuallySelected.value = false
   periods.value = displayableImagery.value.length >= 2 ? 2 : 1
+  if (active.value?.id) void loadSpotDetail(active.value.id)
 }, { flush: 'post', immediate: true })
 watch(periods, () => {
   // 切换期数时各窗口会重新创建，初始联动视图重新以第 1 期图斑范围为准。
@@ -584,12 +652,16 @@ watch(() => user.activeDeptId, () => {
   void loadSceneOptions()
 })
 onBeforeUnmount(() => {
+  detailRequestVersion += 1
   window.removeEventListener('keydown', handleMapFullscreenKeydown)
 })
 </script>
 
 <template>
   <div class="governance-page spot-page">
+    <Teleport to="body">
+      <div v-if="reviewMessage" class="review-success-toast" role="status">{{ reviewMessage }}</div>
+    </Teleport>
     <aside class="left-column">
       <section class="panel spot-list">
         <div class="panel-title"><span>问题图斑列表</span><small>{{ filtered.length }} / {{ records.length }} 处</small></div>
@@ -599,7 +671,14 @@ onBeforeUnmount(() => {
           <select v-model="handleStatus"><option value="">全部处置状态</option><option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select>
         </div>
         <div class="spot-scroll">
-          <button v-for="(item, index) in filtered" :key="item.id" class="spot-item" :class="{ active: item.id === active?.id }" @click="selectSpot(item.id)">
+          <button
+            v-for="(item, index) in filtered"
+            :key="item.id"
+            class="spot-item"
+            :class="{ active: item.id === active?.id }"
+            :title="'图斑名称：' + (item.title || '-') + '\n图斑编号：' + (item.spotNo || '#' + item.id)"
+            @click="selectSpot(item.id)"
+          >
             <i>{{ index + 1 }}</i>
             <span><b>{{ item.title }}</b><small>图斑 {{ item.spotNo || `#${item.id}` }} · {{ item.abnormalTypeDesc }}</small><small v-if="item.sourceTaskName" class="source-task">来源任务：{{ item.sourceTaskName }}</small></span>
             <em :class="`status-${item.handleStatus}`">{{ statusLabel(item.handleStatus) }}</em>
@@ -639,10 +718,10 @@ onBeforeUnmount(() => {
           <span>当前对比：{{ active?.title || '未选择图斑' }}</span>
         </div>
         <div class="imagery">
-          <button v-for="(image, index) in displayableImagery" :key="image.id" class="image-card" :class="{ active: activeImageIndex === index, displayed: isImageDisplayed(index) }" @click="selectImage(index)">
+          <button v-for="(image, index) in displayableImagery" :key="image.id" class="image-card" :class="{ active: activeImageIndex === index, displayed: isImageDisplayed(index) }" :title="`第 ${index + 1} 期 · ${image.label}`" @click="selectImage(index)">
             <SpotDistributionMap v-if="image.mapService && active" class="image-card__map-thumbnail" :spot="active" :period="imageryThumbnailPeriod(image, index)" thumbnail />
             <img v-else-if="image.url" :src="image.url" :alt="image.label" />
-            <b>第 {{ index + 1 }} 期影像</b><small>{{ image.label }}{{ image.date ? ` · ${formatTime(image.date)}` : '' }}</small>
+            <div class="image-card__caption"><b>第 {{ index + 1 }} 期影像</b><small>{{ image.label }}{{ image.date ? ` · ${formatTime(image.date)}` : '' }}</small></div>
             <span class="image-card__delete" role="button" tabindex="0" aria-label="从当前图斑移除影像" title="从当前图斑移除" @click.stop="requestImageDelete(image)" @keydown.enter.stop="requestImageDelete(image)">×</span>
           </button>
           <div v-if="!displayableImagery.length" class="imagery-empty">当前任务暂未关联可用的参考影像，可从地图服务中添加</div>
@@ -672,13 +751,13 @@ onBeforeUnmount(() => {
         @created="handleSpotCreated"
       />
       <section class="panel detail">
-        <div class="panel-title"><span>异常图斑详细信息</span><button class="review-button" type="button" :disabled="!active || active.handleStatus !== -1 || reviewBusy" @click="openReview">审核通过</button></div>
+        <div class="panel-title"><span>异常图斑详细信息<small v-if="detailLoading">正在读取…</small></span><button class="review-button" type="button" :disabled="!active || active.handleStatus !== -1 || reviewBusy" @click="openReview">审核通过</button></div>
         <div class="detail-actions">
           <button class="detail-action detail-action--ignore" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('ignore')">忽略图斑</button>
           <button class="detail-action detail-action--revoke" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('revoke')">撤销图斑</button>
         </div>
-        <p v-if="reviewMessage" class="review-feedback review-feedback--success" role="status">{{ reviewMessage }}</p>
         <p v-if="reviewError && !pendingReview" class="review-feedback review-feedback--error" role="alert">{{ reviewError }}</p>
+        <p v-if="detailError" class="review-feedback review-feedback--error" role="alert">{{ detailError }}</p>
         <template v-if="active">
           <dl>
             <dt>图斑编号</dt><dd>{{ active.spotNo || `#${active.id}` }}</dd>
@@ -687,9 +766,11 @@ onBeforeUnmount(() => {
             <template v-if="active.spotSource"><dt>图斑来源</dt><dd>{{ spotSourceLabel(active.spotSource) }}</dd></template>
             <dt>关联任务</dt><dd>{{ active.sourceTaskName || selectedGovernanceTask?.name || active.bizTaskId || '-' }}</dd>
             <dt>异常类型</dt><dd>{{ active.abnormalTypeDesc }}</dd>
-            <dt>异常等级</dt><dd :class="`text-level-${active.abnormalLevel}`">{{ levelLabel(active.abnormalLevel) }}</dd>
             <dt>面积</dt><dd>{{ active.area == null ? '-' : `${active.area} ㎡` }}</dd>
-            <template v-if="active.longitude !== undefined && active.latitude !== undefined"><dt>中心坐标</dt><dd>{{ active.longitude.toFixed(6) }}，{{ active.latitude.toFixed(6) }}</dd></template>
+            <template v-if="active.longitude !== undefined && active.latitude !== undefined">
+              <dt>中心坐标</dt><dd>{{ active.longitude.toFixed(6) }}，{{ active.latitude.toFixed(6) }}</dd>
+              <dt>图斑地址</dt><dd :class="{ 'address-loading': spotAddressLoading, 'address-error': spotAddressError }">{{ spotAddress }}</dd>
+            </template>
             <dt>处置状态</dt><dd>{{ statusLabel(active.handleStatus) }}</dd>
             <dt>发现时间</dt><dd>{{ formatTime(active.foundTime) }}</dd>
             <template v-if="active.createTime"><dt>创建时间</dt><dd>{{ formatTime(active.createTime) }}</dd></template>
@@ -763,7 +844,7 @@ onBeforeUnmount(() => {
 .filters input:focus::placeholder { color: transparent; }
 .spot-scroll { min-height: 0; overflow: auto; }.spot-item { width: 100%; display: grid; grid-template-columns: 31px minmax(0,1fr) auto; gap: 9px; align-items: center; padding: 11px 10px; border: 0; border-bottom: 1px solid #e8eef2; background: #fff; color: #29475a; text-align: left; cursor: pointer; transition: background .15s; }.spot-item:hover { background: #f2f9fc; }.spot-item.active { background: #e5f5fb; border-left: 4px solid #129bc3; padding-left: 6px; }.spot-item>i { display: grid; width: 28px; height: 28px; place-items: center; color: #ffffff; background: #3e91b1; border-radius: 50%; font-style: normal; font-size: 13px; font-weight: 700; }.spot-item>i.level-2 { background: #d79228; }.spot-item>i.level-3 { background: #d55762; }.spot-item b,.spot-item small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.spot-item b { color:#1d435b; font-size:14px; }.spot-item small { margin-top:4px;color:#6f8796;font-size:11px; }.spot-item em { padding:4px 6px;border-radius:3px;font-style:normal;font-size:11px;white-space:nowrap; }.status-0 { color:#9a680f;background:#fff3d9; }.status-1 { color:#1b79a2;background:#e2f3fa; }.status-2 { color:#21875e;background:#e3f6ed; }.status-3 { color:#667986;background:#ecf0f2; }.list-empty { display:grid; min-height:150px; place-items:center; padding:16px; color:#6f8796; font-size:13px; text-align:center; }.list-empty--error { color:#c7535e; }
 .center-column { display:contents; }.map-panel { grid-column:2; grid-row:1; display:flex; flex-direction:column; }.map-header-actions{min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:10px}.map-header-actions small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.map-header-actions button{flex:none;height:30px;padding:0 11px;color:#167895;background:#f3fafc;border:1px solid #8fc8d8;border-radius:4px;font-size:12px;font-weight:700;cursor:pointer}.map-header-actions button:hover,.map-header-actions button:focus-visible{color:#fff;background:#137f9e;border-color:#137f9e;outline:none}.map-panel.map-panel--fullscreen{position:fixed;z-index:4000;inset:0;grid-column:auto;grid-row:auto;border:0;border-radius:0;background:#c9d8df;box-shadow:none}.map-panel.map-panel--fullscreen>.panel-title{height:54px;flex:0 0 54px;padding-inline:18px;color:#fff;background:#07344f;border-color:#1e6684;font-size:18px}.map-panel.map-panel--fullscreen .map-header-actions small{color:#b4d7e5;font-size:13px}.map-panel.map-panel--fullscreen .map-header-actions button{color:#fff;background:#126f91;border-color:#6ed8eb}.map-compare { flex:1; min-height:0; display:grid; gap:4px; padding:4px; background:#c9d8df; }.map-compare.compare-2,.map-compare.compare-3 { grid-template-columns:repeat(var(--period-count),minmax(0,1fr)); }.map-compare.compare-2 { --period-count:2; }.map-compare.compare-3 { --period-count:3; }.map-compare.compare-4 { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }.map-compare :deep(.spot-map) { min-width:0; min-height:0; border:1px solid #adc6d2; }.map-empty { display:grid; flex:1; place-items:center; color:#6b8493; background:#eef3f5; font-size:14px; }
-.analysis { grid-column:2; grid-row:2; display:flex; flex-direction:column; }.periods { display:flex; align-items:center; gap:7px; padding:9px 11px 7px; }.periods button { padding:7px 11px; color:#426478; background:#f5f9fb; border:1px solid #cbdde7; border-radius:4px; font-size:12px; cursor:pointer; }.periods button.active { color:#fff; background:#168db5; border-color:#168db5; box-shadow:0 2px 5px #168db544; }.periods button:disabled { color:#9eacb3; background:#eef2f4; border-color:#dce4e8; box-shadow:none; cursor:not-allowed; opacity:.72; }.periods span { margin-left:auto; overflow:hidden; color:#6f8796; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.imagery { flex:1; min-height:0; display:flex; gap:8px; padding:0 11px 11px; overflow-x:auto; }.image-card { position:relative; flex:0 0 180px; height:112px; overflow:hidden; padding:9px; color:#f4fcff; background:linear-gradient(135deg,#276c80,#17445b); border:1px solid transparent; border-radius:5px; text-align:left; cursor:pointer; transition:border-color .18s,box-shadow .18s; }.image-card:hover,.image-card.active { border-color:#13a9d3; box-shadow:0 0 0 2px #13a9d325; }.image-card.displayed { border-color:#ff4054; box-shadow:0 0 4px #ff4054b8,inset 0 0 2px #ff8a9699; }.image-card__map-thumbnail { position:absolute; inset:0; display:block; pointer-events:none; }.image-card>img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }.image-card>span { display:grid; height:100%; place-items:center; color:#d5e1e6; background:#53616a; font-size:12px; }.image-card b,.image-card small { position:relative; z-index:1; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card b { margin-top:48px; font-size:13px; }.image-card small { margin-top:4px; font-size:11px; }.image-card.unavailable { cursor:not-allowed; }.imagery-empty { display:grid; min-width:260px; place-items:center; padding:0 16px; color:#728796; background:#f3f6f8; border:1px dashed #c4d3db; border-radius:5px; font-size:12px; line-height:1.6; }.imagery-empty--error { color:#b24e58; border-color:#e2aeb4; background:#fff5f6; }
+.analysis { grid-column:2; grid-row:2; display:flex; flex-direction:column; }.periods { display:flex; align-items:center; gap:7px; padding:9px 11px 7px; }.periods button { padding:7px 11px; color:#426478; background:#f5f9fb; border:1px solid #cbdde7; border-radius:4px; font-size:12px; cursor:pointer; }.periods button.active { color:#fff; background:#168db5; border-color:#168db5; box-shadow:0 2px 5px #168db544; }.periods button:disabled { color:#9eacb3; background:#eef2f4; border-color:#dce4e8; box-shadow:none; cursor:not-allowed; opacity:.72; }.periods span { margin-left:auto; overflow:hidden; color:#6f8796; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.imagery { flex:1; min-height:0; display:flex; gap:8px; padding:0 11px 11px; overflow-x:auto; }.image-card { position:relative; isolation:isolate; flex:0 0 180px; height:112px; overflow:hidden; padding:0; color:#f4fcff; background:linear-gradient(135deg,#276c80,#17445b); border:1px solid transparent; border-radius:5px; text-align:left; cursor:pointer; transition:border-color .18s,box-shadow .18s; }.image-card:hover,.image-card.active { border-color:#13a9d3; box-shadow:0 0 0 2px #13a9d325; }.image-card.displayed { border-color:#ff4054; box-shadow:0 0 4px #ff4054b8,inset 0 0 2px #ff8a9699; }.image-card__map-thumbnail { position:absolute; z-index:0; inset:0; display:block; pointer-events:none; }.image-card>img { position:absolute; z-index:0; inset:0; width:100%; height:100%; object-fit:cover; }.image-card__caption { position:absolute; z-index:2; right:0; bottom:0; left:0; min-width:0; padding:20px 9px 8px; color:#fff; background:linear-gradient(180deg,transparent,#061f2ddd); pointer-events:none; }.image-card__caption b,.image-card__caption small { display:block; overflow:hidden; margin:0; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 2px #002030; }.image-card__caption b { font-size:13px; }.image-card__caption small { margin-top:3px; font-size:11px; }.image-card.unavailable { cursor:not-allowed; }.imagery-empty { display:grid; min-width:260px; place-items:center; padding:0 16px; color:#728796; background:#f3f6f8; border:1px dashed #c4d3db; border-radius:5px; font-size:12px; line-height:1.6; }.imagery-empty--error { color:#b24e58; border-color:#e2aeb4; background:#fff5f6; }
 .image-card--add { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:#377b95; background:#f4fafc; border:1px dashed #69aec4; text-align:center; }.image-card--add:hover:not(:disabled) { color:#0b86ae; background:#e9f7fb; border-color:#159bc4; }.image-card--add:disabled { cursor:not-allowed; opacity:.55; }.image-card--add i { width:30px; height:30px; display:grid; place-items:center; border:1px solid currentColor; border-radius:50%; font-size:22px; font-style:normal; line-height:1; }.image-card--add b { margin:4px 0 0; color:currentColor; text-shadow:none; }.image-card--add small { color:#6d92a2; text-shadow:none; }
 .image-card > .image-card__delete { position:absolute; z-index:3; top:5px; right:5px; width:14px; height:14px; min-height:14px; padding:0; display:grid; place-items:center; color:#fff; background:#d64755; border:1px solid #fff8; border-radius:50%; box-shadow:0 1px 3px #3e1420aa; font-size:12px; font-weight:400; line-height:1; text-shadow:none; }.image-card > .image-card__delete:hover,.image-card > .image-card__delete:focus-visible { background:#b92739; outline:2px solid #ffd2d7; outline-offset:1px; }
 .image-delete-mask { position:fixed; z-index:3100; inset:0; display:grid; place-items:center; padding:20px; background:#10243180; }.image-delete-dialog { width:min(390px,calc(100vw - 40px)); overflow:hidden; color:#29475a; background:#fff; border:1px solid #b9d1dc; border-radius:7px; box-shadow:0 12px 32px #102a3d66; }.image-delete-dialog h3 { margin:0; padding:15px 18px; color:#203f53; border-bottom:1px solid #e0eaef; font-size:17px; }.image-delete-dialog p { margin:0; padding:18px; color:#5c7481; font-size:14px; line-height:1.7; }.image-delete-dialog footer { display:flex; justify-content:flex-end; gap:8px; padding:11px 18px; background:#f5f8fa; border-top:1px solid #e1ebef; }.image-delete-dialog button { min-width:76px; padding:7px 12px; color:#466877; background:#fff; border:1px solid #bfd4df; border-radius:4px; cursor:pointer; }.image-delete-dialog button.danger { color:#fff; background:#cf4655; border-color:#cf4655; }.image-delete-dialog button.danger:hover { background:#b92e40; }
@@ -830,6 +911,8 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
   white-space: normal;
 }
+.detail dd.address-loading { color: #5f8495; font-weight: 500; }
+.detail dd.address-error { color: #b14c58; font-weight: 500; }
 .detail > p {
   margin-inline: 14px;
   padding: 12px;
@@ -862,7 +945,27 @@ onBeforeUnmount(() => {
 .detail-action:focus-visible { outline: 2px solid #08799d; outline-offset: 2px; }
 .detail-action:disabled { color: #91a7b2; background: #edf3f5; border-color: #d6e2e8; cursor: not-allowed; }
 .detail > p.review-feedback { margin: 9px 14px 0; padding: 8px 10px; font-size: 12px; }
-.detail > p.review-feedback--success { color: #147254; background: #e4f6ef; }
+.review-success-toast {
+  position: fixed;
+  top: 82px;
+  left: 50%;
+  z-index: 3200;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(560px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 11px 40px;
+  transform: translateX(-50%);
+  border: 1px solid #42c9a8;
+  border-radius: 4px;
+  background: #167b6a;
+  box-shadow: 0 10px 30px #00131faa;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
 .detail > p.review-feedback--error { color: #b63f4d; background: #ffedf0; }
 .review-mask { position: fixed; z-index: 4300; inset: 0; display: grid; place-items: center; padding: 20px; background: #10243199; backdrop-filter: blur(2px); }
 .review-dialog { width: min(420px, calc(100vw - 40px)); overflow: hidden; color: #29475a; background: #fff; border: 1px solid #b9d1dc; border-radius: 8px; box-shadow: 0 18px 46px #102a3d66; }
