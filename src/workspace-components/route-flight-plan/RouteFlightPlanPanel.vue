@@ -121,8 +121,8 @@ const componentSelectorHint = computed(() => activeOpenComponentType.value === '
   : '请选择具有有效飞行任务 ID 的任务，确认后将进入对应的开放组件。')
 const filteredComponentSelectorItems = computed(() => {
   const keyword = componentSelectorKeyword.value.trim().toLowerCase()
-  if (!keyword) return componentSelectorItems.value
-  return componentSelectorItems.value.filter((item) => `${item.title}${item.detail}${item.id}${item.unavailableReason || ''}`.toLowerCase().includes(keyword))
+  return componentSelectorItems.value.filter((item) => item.availability === 'available'
+    && (!keyword || `${item.title}${item.detail}${item.id}`.toLowerCase().includes(keyword)))
 })
 
 type ComponentUrlLoadResult = { ok: boolean; error?: string; backendRejected?: boolean }
@@ -536,7 +536,7 @@ async function selectPlan(id: string) {
               <span><b>{{ item.title }}</b><small>{{ item.detail }}</small><small v-if="item.unavailableReason" class="unavailable-reason">{{ item.unavailableReason }}</small></span>
               <em>{{ item.availability === 'unavailable' ? '不可用' : '可用' }}</em>
             </button>
-            <div v-if="!filteredComponentSelectorItems.length" class="component-selector__state">没有匹配的记录。</div>
+            <div v-if="!filteredComponentSelectorItems.length" class="component-selector__state">{{ componentSelectorKeyword.trim() ? '没有匹配的可用记录。' : '暂无可用记录。' }}</div>
           </div>
           <footer>
             <button type="button" class="component-selector__cancel" :disabled="dasFlyEmbedLoading" @click="dismissComponentSelector">取消</button>

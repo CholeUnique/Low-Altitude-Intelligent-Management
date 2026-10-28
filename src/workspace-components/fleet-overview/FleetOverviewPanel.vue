@@ -27,6 +27,23 @@ const tasksLoaded = ref(false)
 const loading = ref(true)
 const errorMessage = ref('')
 const selectedDeviceId = ref('')
+const fleetMap = ref<InstanceType<typeof FleetOverviewMap>>()
+const mapPanel = ref<HTMLElement>()
+const mapFullscreen = ref(false)
+const mapNotice = ref('')
+let mapNoticeTimer: ReturnType<typeof setTimeout> | undefined
+function showMapNotice(message: string) {
+  mapNotice.value = message
+  if (mapNoticeTimer) clearTimeout(mapNoticeTimer)
+  mapNoticeTimer = setTimeout(() => { mapNotice.value = '' }, 3000)
+}
+function syncMapFullscreen() { mapFullscreen.value = document.fullscreenElement === mapPanel.value }
+async function toggleMapFullscreen() {
+  try {
+    if (document.fullscreenElement === mapPanel.value) await document.exitFullscreen()
+    else if (mapPanel.value) await mapPanel.value.requestFullscreen()
+  } catch { showMapNotice('无法进入全屏，请检查浏览器设置') }
+}
 const healthList = ref<HTMLElement>()
 const inventoryList = ref<HTMLElement>()
 const deviceStates = ref<Record<string, UavDeviceState>>({})
@@ -93,6 +110,9 @@ function statisticLabel(value?: string) { return value?.trim() || '未分类' }
 async function selectDevice(deviceId: string) {
   selectedDeviceId.value = deviceId
   await nextTick()
+  if (selectedDeviceId.value !== deviceId) return
+  if (devicesWithLocation.value.some(device => device.id === deviceId)) fleetMap.value?.focusDevice(deviceId)
+  else showMapNotice('该设备暂无位置信息')
   const selector = `[data-device-id="${CSS.escape(deviceId)}"]`
   healthList.value?.querySelector<HTMLElement>(selector)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   inventoryList.value?.querySelector<HTMLElement>(selector)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -168,9 +188,13 @@ watch(() => activeDevice.value?.sn, (sn) => void loadSelectedDeviceStatistics(sn
 
 const refreshTimer = window.setInterval(() => void loadFleetData(), 60_000)
 onMounted(() => {
+  document.addEventListener('fullscreenchange', syncMapFullscreen)
   void loadFleetData()
 })
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', syncMapFullscreen)
+  if (mapNoticeTimer) clearTimeout(mapNoticeTimer)
+  if (document.fullscreenElement === mapPanel.value) void document.exitFullscreen().catch(() => {})
   window.clearInterval(refreshTimer)
 })
 </script>
@@ -185,9 +209,9 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="fleet-grid">
-      <article class="panel map-panel">
-        <header><b>设备分布与作业态势</b><span>{{ activeDevice ? `当前设备：${activeDevice.label}` : '' }}</span></header>
-        <div class="map-wrap"><FleetOverviewMap :devices="devicesWithLocation" :selected-device-id="selectedDeviceId" @select-device="selectDevice" /><div v-if="devicesLoaded && !devicesWithLocation.length" class="map-empty">--<small>暂无设备位置数据</small></div><div class="map-legend"><span><i class="online" />在线</span><span><i class="offline" />离线</span></div></div>
+      <article ref="mapPanel" class="panel map-panel">
+        <header><b>设备分布与作业态势</b><div class="map-header-actions"><span>{{ activeDevice ? `当前设备：${activeDevice.label}` : '' }}</span><button type="button" @click="toggleMapFullscreen">{{ mapFullscreen ? '退出全屏' : '全屏展示' }}</button></div></header>
+        <div class="map-wrap"><FleetOverviewMap ref="fleetMap" :devices="devicesWithLocation" :selected-device-id="selectedDeviceId" @select-device="selectDevice" /><div v-if="devicesLoaded && !devicesWithLocation.length" class="map-empty">--<small>暂无设备位置数据</small></div><div v-if="mapNotice" class="fleet-map-notice" role="status">{{ mapNotice }}</div><div class="map-legend"><span><i class="online" />在线</span><span><i class="offline" />离线</span></div></div>
       </article>
 
       <article class="panel health-panel">
@@ -262,6 +286,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
+.map-header-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.map-header-actions button { flex: none; padding: 4px 9px; color: #2389ab; background: #eef8fb; border: 1px solid #a5d2e2; border-radius: 4px; font-size: 12px; cursor: pointer; }
+.map-header-actions button:hover { color: #fff; background: #178eae; }
+.map-panel:fullscreen { width: 100vw; height: 100vh; margin: 0; border: 0; border-radius: 0; background: #fff; }
+.map-panel:fullscreen .map-wrap { flex: 1; min-height: 0; }
+.fleet-map-notice { position: absolute; top: 12px; left: 50%; z-index: 600; transform: translateX(-50%); padding: 8px 12px; color: #fff; background: #163f54e8; border-radius: 4px; font-size: 12px; white-space: nowrap; }
 .fleet-cards .metric-icon { width:40px; height:40px; flex:0 0 40px; display:grid; place-items:center; color:#138ba9; border:1px solid #caeaf1; border-radius:11px; background:linear-gradient(145deg,#f1fbfd,#def3f8); box-shadow:inset 0 1px #fff,0 2px 5px #137c9812; }
 .fleet-cards .metric-icon svg { width:21px; height:21px; }
 .fleet-cards article:nth-child(2) .metric-icon { color:#3681ba; border-color:#d7e8f6; background:linear-gradient(145deg,#f5faff,#e5f2fd); }

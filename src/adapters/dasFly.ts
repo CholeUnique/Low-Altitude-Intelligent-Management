@@ -11,6 +11,7 @@ export interface LiveStream {
   id: string
   aircraftId: string
   aircraftName?: string
+  callsign?: string
   flightId?: string
   status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'ERROR'
   protocol: 'HLS' | 'FLV' | 'WEBRTC' | 'OTHER'
