@@ -21,6 +21,14 @@ const filled=createTopicRenderer('',[],'esriGeometryPolygon','#112233','filled')
 assert.deepEqual(filled.symbol.color,[17,34,51,255],'铺满模式使用不透明颜色')
 const point=createTopicRenderer('',[],'esriGeometryPoint','#112233','boundary')
 assert.equal(point.symbol.color[3],0);assert.equal(point.symbol.outline.color[3],255)
+const mixed=createTopicRenderer('DLBM',[
+  {value:'0101',name:'水田',style:styles.resolveC5Style('0101'),mode:'boundary'},
+  {value:'0102',name:'水浇地',mode:'filled'},
+  {value:'0103',name:'旱地'},
+],'esriGeometryPolygon','#112233','filled')
+assert.equal(mixed.uniqueValueInfos[0].symbol.style,'esriSFSNull','同一图层的水田可独立显示边界')
+assert.equal(mixed.uniqueValueInfos[1].symbol.style,'esriSFSSolid','其他分类保持铺满')
+assert.equal(mixed.uniqueValueInfos[2].symbol.style,'esriSFSSolid','未单独设置的分类继承图层模式')
 const service = {name:'普通数据',type:'ARCGIS_MAPSERVER',serviceUrl:'https://example.test/MapServer'}
 assert.equal(topic.topicRole(service,['DLBM','DLMC']),'land')
 assert.equal(topic.topicRole(service,['DLBM','DLMC','YJJBNTTBBH']),'permanent')
