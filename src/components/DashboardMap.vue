@@ -1985,6 +1985,7 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .dashboard-map { position: relative; width: 100%; height: 100%; overflow: hidden; background: #031a31; }.dashboard-map__canvas { position: absolute; inset: 0; }
+.dashboard-map__canvas.leaflet-grab { cursor: default; }
 .dashboard-map--measuring :deep(.leaflet-container) { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30' viewBox='0 0 30 30'%3E%3Cpath fill='%2337dff3' stroke='%23042b44' stroke-width='2' d='m5 22 3-7L20 3l7 7L15 22l-7 3z'/%3E%3Cpath fill='%23fff' d='m18 5 7 7-2 2-7-7z'/%3E%3C/svg%3E") 4 26, crosshair!important; }
 .dashboard-map__empty,.dashboard-map__loading { position: absolute; z-index: 700; inset: 0; display: grid; place-content: center; gap: 12px; justify-items: center; color: #56ddef; background: #031a31e8; font-size: 15px; }.dashboard-map__empty button { padding: 6px 14px; color: #d8faff; background: #075477; border: 1px solid #24cbe3; cursor: pointer; }
 .layer-panel-stack { position: absolute; z-index: 500; top: 80px; left: 10px; width: 255px; max-height: min(420px, 58%); display: flex; flex-direction: column; gap: 8px; }
