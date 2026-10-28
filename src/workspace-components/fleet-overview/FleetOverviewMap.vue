@@ -54,12 +54,13 @@ function renderDevices() {
   }
 }
 
-function focusSelectedDevice() {
-  if (!map || !props.selectedDeviceId) return
-  const device = props.devices.find((item) => item.id === props.selectedDeviceId)
+function focusDevice(deviceId: string) {
+  if (!map) return
+  const device = props.devices.find((item) => item.id === deviceId)
   if (device?.longitude === undefined || device.latitude === undefined) return
   map.flyTo([device.latitude, device.longitude], Math.max(map.getZoom(), 16), { duration: 0.45 })
 }
+defineExpose({ focusDevice })
 
 onMounted(async () => {
   await nextTick()
@@ -85,7 +86,6 @@ onMounted(async () => {
 watch(() => props.devices, renderDevices, { deep: true })
 watch(() => props.selectedDeviceId, () => {
   renderDevices()
-  focusSelectedDevice()
 })
 onBeforeUnmount(() => {
   if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame)

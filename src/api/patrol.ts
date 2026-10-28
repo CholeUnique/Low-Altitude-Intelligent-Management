@@ -443,6 +443,7 @@ function toDeviceLiveStream(device: Record<string, unknown>, response: unknown):
   return {
     id: String(device.id ?? sn),
     aircraftId: sn,
+    callsign: valueOf(device, 'callsign') || undefined,
     aircraftName: valueOf(device, 'nickname', 'deviceName', 'name', 'deviceModelName') || sn,
     status: 'ONLINE',
     protocol: playUrl ? liveProtocol(playUrl) : 'OTHER',
