@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
+import DashboardFlipNumber from './DashboardFlipNumber.vue'
 const props = withDefaults(defineProps<{ value: string | number; label: string; rate?: number; tone?: 'cyan' | 'blue' | 'mint'; title?: string }>(), { tone: 'cyan' })
 const gradientId = `dashboard-ring-${useId().replace(/:/g, '')}`
 const progress = computed(() => Math.min(100, Math.max(0, props.rate ?? 0)))
@@ -7,7 +8,7 @@ const progress = computed(() => Math.min(100, Math.max(0, props.rate ?? 0)))
 <template>
   <div class="dashboard-ring" :class="`dashboard-ring--${tone}`" :title="title" role="img" :aria-label="`${label}：${value}${rate === undefined ? '' : `，${rate}%`}`">
     <svg class="ring-chart" viewBox="0 0 120 120" aria-hidden="true"><defs><linearGradient :id="gradientId" x1="0" y1="100%" x2="100%" y2="0"><stop class="ring-start" /><stop offset=".65" class="ring-mid" /><stop offset="1" class="ring-end" /></linearGradient></defs><circle class="ring-orbit" cx="60" cy="60" r="55" /><circle class="ring-track" cx="60" cy="60" r="48" /><circle class="ring-track-edge" cx="60" cy="60" r="43" /><circle v-if="rate !== undefined" class="ring-progress" cx="60" cy="60" r="48" pathLength="100" :stroke="`url(#${gradientId})`" :stroke-dasharray="`${progress} ${100-progress}`" transform="rotate(-90 60 60)" /></svg>
-    <div class="ring-value"><div class="ring-emblem"><slot /></div><b>{{ value }}</b><span>{{ label }}</span></div>
+    <div class="ring-value"><div class="ring-emblem"><slot /></div><b><DashboardFlipNumber :value="value" /></b><span>{{ label }}</span></div>
   </div>
 </template>
 <style scoped>

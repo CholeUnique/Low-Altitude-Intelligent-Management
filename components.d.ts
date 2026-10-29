@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     BusinessTrendChart: typeof import('./src/components/BusinessTrendChart.vue')['default']
+    DashboardFlipNumber: typeof import('./src/components/DashboardFlipNumber.vue')['default']
     DashboardMap: typeof import('./src/components/DashboardMap.vue')['default']
     DashboardRing: typeof import('./src/components/DashboardRing.vue')['default']
     DashboardSymbol: typeof import('./src/components/DashboardSymbol.vue')['default']
@@ -38,6 +39,7 @@ declare module 'vue' {
     TaskWorkflowProgress: typeof import('./src/components/task-center/TaskWorkflowProgress.vue')['default']
     TopicFeatureDetails: typeof import('./src/components/TopicFeatureDetails.vue')['default']
     TopicMapToolbar: typeof import('./src/components/TopicMapToolbar.vue')['default']
+    TopicOverlayAnalysis: typeof import('./src/components/TopicOverlayAnalysis.vue')['default']
     TopicStatisticsSummary: typeof import('./src/components/TopicStatisticsSummary.vue')['default']
     UserAccountMenu: typeof import('./src/components/UserAccountMenu.vue')['default']
   }

@@ -8,7 +8,6 @@ import 'leaflet/dist/leaflet.css'
 
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
 import { getJiulongArcGisLayerBounds } from '@/utils/jiulong-arcgis-layers'
-import { getCustomDepartmentStatistics, type CustomStatGroup } from '@/api/business-statistics'
 import { getMapServiceRegionTree, listEnabledMapServices, listMapServicesForDepartments, updateMapService, type MapServiceItem, type MapServiceRegionGroup, type MapServiceRegionNode } from '@/api/map-service'
 import { getDepartmentList } from '@/api/account-management'
 import { useUserStore } from '@/stores/user'
