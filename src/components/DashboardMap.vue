@@ -190,6 +190,9 @@ function regionServiceCount(type: string, code: string | null) {
 function selectRegion(type: string, node: MapServiceRegionNode) {
   const key = regionKey(type, node.code)
   selectedRegion.value = key
+}
+function toggleRegion(type: string, node: MapServiceRegionNode) {
+  const key = regionKey(type, node.code)
   if (!node.children?.length) return
   if (expandedRegions.value.includes(key)) {
     const descendants = new Set(regionEntries([node]).map(entry => regionKey(type, entry.node.code)))
@@ -1795,7 +1798,7 @@ onBeforeUnmount(() => {
         type="button"
         :aria-label="layerPanelCollapsed ? '展开图层管理' : '收起图层管理'"
         :aria-expanded="!layerPanelCollapsed"
-        title="点击收起或展开图层管理"
+        :title="layerPanelCollapsed ? '展开' : '收起'"
         @click="toggleLayerPanel"
       >{{ layerPanelCollapsed ? '图层管理 ⌄' : '⌃' }}</button>
       <div class="layer-panel-reveal">
@@ -1803,7 +1806,7 @@ onBeforeUnmount(() => {
         <div v-if="!floatingControls" class="tool-title"><b><svg class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg>图层管理</b><span class="tool-title-state">{{ mapServiceGroups.length }} 项服务</span></div>
         <div v-if="floatingControls" :id="`${layerPanelId}-search`" class="layer-manager-search"></div>
         <div class="layer-manager-list" :aria-busy="mapServiceOrderSaving">
-          <div class="region-filter"><label>行政区划</label><button type="button" class="region-picker-trigger" :aria-expanded="regionPickerOpen" @click="regionPickerOpen = !regionPickerOpen">{{ selectedRegionLabel }} <span>{{ regionPickerOpen ? '⌃' : '⌄' }}</span></button><div v-if="regionPickerOpen" class="region-picker"><button type="button" class="region-option" :class="{ active: selectedRegion === 'all' }" @click="selectedRegion = 'all'; regionPickerOpen = false">全部图层</button><section v-for="group in regionSelectionOptions" :key="group.dataType"><strong>{{ group.dataTypeName || group.dataType }}</strong><button v-for="entry in group.entries" :key="regionKey(group.dataType, entry.node.code)" type="button" class="region-option" :class="{ active: selectedRegion === regionKey(group.dataType, entry.node.code) }" :style="{ paddingLeft: `${12 + entry.depth * 16}px` }" @click="selectRegion(group.dataType, entry.node)"><span>{{ entry.node.name }}（{{ regionServiceCount(group.dataType, entry.node.code) }}）</span><span v-if="entry.node.children?.length">{{ expandedRegions.includes(regionKey(group.dataType, entry.node.code)) ? '⌄' : '›' }}</span></button></section></div><small v-if="regionTreeError">{{ regionTreeError }}，可选择全部图层</small></div>
+          <div class="region-filter"><label>行政区划</label><button type="button" class="region-picker-trigger" :title="regionPickerOpen ? '收起' : '展开'" :aria-expanded="regionPickerOpen" @click="regionPickerOpen = !regionPickerOpen">{{ selectedRegionLabel }} <span>{{ regionPickerOpen ? '⌃' : '⌄' }}</span></button><div v-if="regionPickerOpen" class="region-picker"><button type="button" class="region-option" :class="{ active: selectedRegion === 'all' }" @click="selectedRegion = 'all'; regionPickerOpen = false">全部图层</button><section v-for="group in regionSelectionOptions" :key="group.dataType"><strong>{{ group.dataTypeName || group.dataType }}</strong><div v-for="entry in group.entries" :key="regionKey(group.dataType, entry.node.code)" class="region-node" :class="{ active: selectedRegion === regionKey(group.dataType, entry.node.code) }"><button type="button" class="region-node-select" :style="{ paddingLeft: `${12 + entry.depth * 16}px` }" @click="selectRegion(group.dataType, entry.node)">{{ entry.node.name }}（{{ regionServiceCount(group.dataType, entry.node.code) }}）</button><button v-if="entry.node.children?.length" type="button" class="region-node-toggle" :title="expandedRegions.includes(regionKey(group.dataType, entry.node.code)) ? '收起' : '展开'" :aria-label="`${expandedRegions.includes(regionKey(group.dataType, entry.node.code)) ? '收起' : '展开'}${entry.node.name}`" :aria-expanded="expandedRegions.includes(regionKey(group.dataType, entry.node.code))" @click="toggleRegion(group.dataType, entry.node)">{{ expandedRegions.includes(regionKey(group.dataType, entry.node.code)) ? '⌄' : '›' }}</button></div></section></div><small v-if="regionTreeError">{{ regionTreeError }}，可选择全部图层</small></div>
           <div v-if="mapServiceOrderSaving" class="layer-order-save-status" role="status">正在保存共享排序…</div>
           <div v-if="selectedRegion === 'all' && jiulongAdminService" class="map-service-group administrative-boundary-group">
             <button class="layer-row map-service-row" @contextmenu="jiulongAdminService && onLayerContextMenu($event, jiulongAdminService)" :class="{ active: jiulongBoundaryVisible }" type="button" title="九龙镇行政区划边界" role="switch" :aria-checked="jiulongBoundaryVisible" @click="toggleJiulongBoundary">
@@ -1936,7 +1939,12 @@ onBeforeUnmount(() => {
 .region-picker { max-height:240px; overflow:auto; padding:4px; border:1px solid #27647d; border-radius:4px; background:#092738; }
 .region-picker section strong { display:block; padding:7px 8px 3px; color:#8fc4d5; font-size:12px; }
 .region-option { display:flex; justify-content:space-between; width:100%; padding:6px 8px; border:0; border-radius:3px; color:#d5f2fa; background:transparent; text-align:left; cursor:pointer; }
-.region-option:hover,.region-option.active { background:#18516a; color:#fff; }
+.region-option:hover,.region-option.active,.region-node:hover,.region-node.active { background:#18516a; color:#fff; }
+.region-node { display:flex; align-items:stretch; border-radius:3px; }
+.region-node-select,.region-node-toggle { border:0; color:inherit; background:transparent; cursor:pointer; }
+.region-node-select { flex:1; min-width:0; padding:6px 8px; text-align:left; }
+.region-node-toggle { width:30px; font-size:15px; }
+.region-node-toggle:hover { color:#fff; background:#27647d; }
 .region-filter small { color: #efb5a6; line-height: 1.4; }
 .dashboard-map { position: relative; width: 100%; height: 100%; overflow: hidden; background: #031a31; }.dashboard-map__canvas { position: absolute; inset: 0; }
 .dashboard-map:not(.dashboard-map--measuring) :deep(.leaflet-grab),
