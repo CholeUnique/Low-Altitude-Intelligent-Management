@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import L from 'leaflet'
-import { ElTooltip } from 'element-plus'
 import 'leaflet/dist/leaflet.css'
 import type { FlightReviewMedia } from '@/api/flight-review'
 import { getTiandituAddress } from '@/api/geocoding'
+import { openAmapNavigation } from '@/utils/amap-navigation'
 import { containedVideoBounds, fitTelemetryPanelSize, placeTelemetryPanel, resizeTelemetryPanel, type TelemetryPanelBounds, type TelemetryPanelSize } from '@/utils/telemetry-panel'
 
 const props = defineProps<{ media: FlightReviewMedia; fullscreen?: boolean }>()
@@ -18,7 +18,6 @@ const panelSize = ref<TelemetryPanelSize>()
 const imageBounds = shallowRef<TelemetryPanelBounds>()
 const dragging = ref(false)
 const resizing = ref(false)
-const navigationNoticePending = ref(false)
 const placementReady = ref(false)
 const panelStyle = computed(() => ({
   ...(panelPosition.value ? { left: `${panelPosition.value.left}px`, top: `${panelPosition.value.top}px`, right: 'auto' } : {}),
@@ -32,7 +31,6 @@ let marker: L.Marker | undefined
 let resizeObserver: ResizeObserver | undefined
 let addressController: AbortController | undefined
 let placementImage: HTMLImageElement | undefined
-let navigationNoticeTimer: ReturnType<typeof setTimeout> | undefined
 let drag: { pointerId: number; x: number; y: number; left: number; top: number; handle: HTMLElement } | undefined
 let resize: { pointerId: number; x: number; y: number; origin: TelemetryPanelBounds; edge: 'left' | 'right'; handle: HTMLElement } | undefined
 let preferredSize: TelemetryPanelSize | undefined
@@ -154,13 +152,8 @@ function resizeWithKey(event: KeyboardEvent) {
   panelPosition.value = placeTelemetryPanel(right - preferredSize.width, panelPosition.value.top, preferredSize, imageBounds.value)
 }
 
-function showNavigationNotice() {
-  if (navigationNoticeTimer) clearTimeout(navigationNoticeTimer)
-  navigationNoticePending.value = true
-  navigationNoticeTimer = setTimeout(() => {
-    navigationNoticePending.value = false
-    navigationNoticeTimer = undefined
-  }, 3000)
+function navigateToLocation() {
+  openAmapNavigation(props.media.longitude, props.media.latitude, address.value.startsWith('正在') || address.value.includes('失败') ? '' : address.value)
 }
 
 async function loadAddress() {
@@ -261,7 +254,6 @@ watch(() => props.fullscreen, async () => {
 }, { flush: 'post' })
 
 onBeforeUnmount(() => {
-  if (navigationNoticeTimer) clearTimeout(navigationNoticeTimer)
   endDrag()
   endResize()
   addressController?.abort()
@@ -280,7 +272,7 @@ onBeforeUnmount(() => {
       <p v-if="mapError" class="photo-location__state">{{ mapError }}</p>
     </div>
     <dl class="photo-location__details">
-      <div class="coordinate-row"><dt>经纬度</dt><dd>{{ formatCoordinate(media.longitude!, 'E', 'W') }}，{{ formatCoordinate(media.latitude!, 'N', 'S') }}</dd><ElTooltip popper-class="navigation-pending-tooltip" :visible="navigationNoticePending" :teleported="false" :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }" placement="top" effect="light"><template #content><div class="navigation-tooltip-card" role="status"><strong>该功能暂未接入</strong></div></template><button type="button" class="navigation-button" aria-label="导航" @click.stop="showNavigationNotice">导航</button></ElTooltip></div>
+      <div class="coordinate-row"><dt>经纬度</dt><dd>{{ formatCoordinate(media.longitude!, 'E', 'W') }}，{{ formatCoordinate(media.latitude!, 'N', 'S') }}</dd><button type="button" class="navigation-button" aria-label="导航" @click.stop="navigateToLocation">导航</button></div>
       <div><dt>地址</dt><dd :title="address">{{ address }}</dd></div>
     </dl>
     <button type="button" :aria-label="`切换底图，当前为${mapMode === 'image' ? '影像地图' : '电子地图'}`" :title="`当前：${mapMode === 'image' ? '影像地图' : '电子地图'}；点击切换`" @click.stop="switchBaseMap">切换底图</button>
