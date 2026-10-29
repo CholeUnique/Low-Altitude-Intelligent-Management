@@ -30,3 +30,8 @@ export function todoTaskStatus(task: Pick<MyWorkflowTask, 'flow' | 'taskStatus' 
 export function todoTaskStatusLabel(task: Pick<MyWorkflowTask, 'flow' | 'taskStatus' | 'myWorkState'>) {
   return { handled: '已处理', pending: '待处理', archived: '已结案' }[todoTaskStatus(task)]
 }
+
+/** 工作台通知仅显示本人尚待办理的其他任务，不把场景可见历史当作待办。 */
+export function pendingWorkbenchTasks(tasks: readonly MyWorkflowTask[], currentTaskId?: string) {
+  return tasks.filter(task => task.id !== currentTaskId && task.myWorkState === 'pending' && todoTaskStatus(task) === 'pending')
+}

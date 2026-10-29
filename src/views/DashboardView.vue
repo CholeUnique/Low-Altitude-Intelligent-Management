@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DashboardRing from '@/components/DashboardRing.vue'
+import DashboardFlipNumber from '@/components/DashboardFlipNumber.vue'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import { Timer, Position } from '@element-plus/icons-vue'
 import DashboardMap from '@/components/DashboardMap.vue'
@@ -541,7 +542,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
               </header>
               <div class="resource-summary">
                 <DashboardRing :value="onlineUavCount ?? '—'" label="在线机组" :rate="fleetAvailabilityRate" :title="fleetAvailabilityRate === undefined ? '暂无机组总数' : `机组可用率 ${fleetAvailabilityRate}%`"><DashboardSymbol name="drone" /></DashboardRing>
-                <div class="resource-states"><span><i class="online"></i>直播中 <b>{{ livePreviews.filter(item => item.status === 'ONLINE').length }}</b></span><span><i class="starting"></i>连接中 <b>{{ livePreviews.filter(item => item.status === 'STARTING').length }}</b></span><span><i class="offline"></i>离线 <b>{{ formatCount(uavDeviceSummary?.offlineCount) }}</b></span></div>
+                <div class="resource-states"><span><i class="online"></i>直播中 <b><DashboardFlipNumber :value="livePreviews.filter(item => item.status === 'ONLINE').length" /></b></span><span><i class="starting"></i>连接中 <b><DashboardFlipNumber :value="livePreviews.filter(item => item.status === 'STARTING').length" /></b></span><span><i class="offline"></i>离线 <b><DashboardFlipNumber :value="formatCount(uavDeviceSummary?.offlineCount)" /></b></span></div>
               </div>
               <p class="summary-foot">{{ livePreviewLoading ? '正在获取设备状态…' : '设备状态实时刷新' }}<span>已接入 {{ livePreviews.length }} 路直播画面</span></p>
             </section>
@@ -552,8 +553,8 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <button v-if="user.hasPermission('fleet-overview')" class="overview-header-link" type="button" aria-label="进入机队总览" @click="openFleetOverview">机队总览 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <p class="panel-context">累计作业数据</p>
-              <div class="flight-kpis"><div><i><Timer /></i><span>累计飞行时长</span><b><span class="kpi-value">{{ formatFlightTime(uavFlightSummary?.flightTime).split(' ')[0] }}</span><small>{{ formatFlightTime(uavFlightSummary?.flightTime).split(' ').slice(1).join(' ') }}</small></b></div><div><i><Position /></i><span>飞行里程</span><b><span class="kpi-value">{{ formatDistance(uavFlightSummary?.flightDistance).split(' ')[0] }}</span><small>{{ formatDistance(uavFlightSummary?.flightDistance).split(' ').slice(1).join(' ') }}</small></b></div></div>
-              <div class="flight-metrics"><div><span>飞行架次</span><b>{{ formatCount(uavFlightSummary?.flightCount) }}</b></div><div><span>已完成任务</span><b>{{ formatCount(uavFlightSummary?.completedTaskCount) }}</b></div><div><span>未执行任务</span><b>{{ formatCount(uavFlightSummary?.notStartedTaskCount) }}</b></div></div>
+              <div class="flight-kpis"><div><i><Timer /></i><span>累计飞行时长</span><b><span class="kpi-value"><DashboardFlipNumber :value="formatFlightTime(uavFlightSummary?.flightTime).split(' ')[0]" /></span><small>{{ formatFlightTime(uavFlightSummary?.flightTime).split(' ').slice(1).join(' ') }}</small></b></div><div><i><Position /></i><span>飞行里程</span><b><span class="kpi-value"><DashboardFlipNumber :value="formatDistance(uavFlightSummary?.flightDistance).split(' ')[0]" /></span><small>{{ formatDistance(uavFlightSummary?.flightDistance).split(' ').slice(1).join(' ') }}</small></b></div></div>
+              <div class="flight-metrics"><div><span>飞行架次</span><b><DashboardFlipNumber :value="formatCount(uavFlightSummary?.flightCount)" /></b></div><div><span>已完成任务</span><b><DashboardFlipNumber :value="formatCount(uavFlightSummary?.completedTaskCount)" /></b></div><div><span>未执行任务</span><b><DashboardFlipNumber :value="formatCount(uavFlightSummary?.notStartedTaskCount)" /></b></div></div>
             </section>
 
             <section class="overview-float-panel media-panel">
@@ -564,10 +565,10 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
               <div class="media-summary">
                 <DashboardRing :value="formatCount(uavMediaSummary?.totalCount)" label="素材总数" tone="blue" :rate="mediaPhotoRate" title="圆环展示照片在素材总数中的占比" />
                 <dl class="metric-legend">
-                  <div><dt><i class="legend-blue"></i>照片</dt><dd>{{ formatCount(uavMediaSummary?.photoCount) }}</dd></div>
-                  <div><dt><i class="legend-mint"></i>视频</dt><dd>{{ formatCount(uavMediaSummary?.videoCount) }}</dd></div>
-                  <div><dt><i class="legend-violet"></i>其他素材</dt><dd>{{ formatCount(uavMediaSummary?.otherCount) }}</dd></div>
-                  <div><dt><i class="legend-muted"></i>素材容量</dt><dd>{{ formatFileSize(uavMediaSummary?.totalFileSize) }}</dd></div>
+                  <div><dt><i class="legend-blue"></i>照片</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.photoCount)" /></dd></div>
+                  <div><dt><i class="legend-mint"></i>视频</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.videoCount)" /></dd></div>
+                  <div><dt><i class="legend-violet"></i>其他素材</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.otherCount)" /></dd></div>
+                  <div><dt><i class="legend-muted"></i>素材容量</dt><dd><DashboardFlipNumber :value="formatFileSize(uavMediaSummary?.totalFileSize)" /></dd></div>
                 </dl>
               </div>
             </section>
@@ -583,15 +584,15 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <h2>智能识别成果</h2>
                 <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="recognition-summary"><DashboardRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :rate="recognitionHandledRate" :title="recognitionHandledRate === undefined ? '暂无图斑处置率' : `图斑处置率 ${recognitionHandledRate}%`" /><dl><div><dt>待核查图斑</dt><dd>{{ statistics?.overview.abnormalPendingCount ?? '—' }}</dd></div><div><dt>涉及面积</dt><dd>{{ formatNumber(statistics?.abnormalSummary.areaTotal) }}㎡</dd></div><div><dt>成果批次</dt><dd>{{ statistics?.overview.resultCount ?? '—' }}</dd></div></dl></div>
-              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%` }"></u></i><b>{{ item.count }}</b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
+              <div class="recognition-summary"><DashboardRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :rate="recognitionHandledRate" :title="recognitionHandledRate === undefined ? '暂无图斑处置率' : `图斑处置率 ${recognitionHandledRate}%`" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatNumber(statistics?.abnormalSummary.areaTotal) }}㎡</dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview.resultCount ?? '—'" /></dd></div></dl></div>
+              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%` }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
             </section>
             <section class="overview-float-panel topic-data-panel">
               <header>
                 <h2>专题数据管理</h2>
                 <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入专题地图" @click="openTopics">专题地图 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <TopicStatisticsSummary />
+              <TopicStatisticsSummary animated />
             </section>
             <section class="overview-float-panel scene-count-panel governance-panel">
               <header>
@@ -632,9 +633,9 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                       @keydown.space.prevent="openSceneTaskList(item.id)"
                     />
                   </svg>
-                  <div class="scene-task-ring__center"><b>{{ governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%` }}</b><span>任务完成率</span></div>
+                  <div class="scene-task-ring__center"><b><DashboardFlipNumber :value="governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%`" /></b><span>任务完成率</span></div>
                 </div>
-                <dl class="metric-legend task-state-legend"><div><dt><i class="legend-muted"></i>任务总数</dt><dd>{{ sceneTaskTotal }}</dd></div><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd>{{ item.count }}</dd></div></dl></div>
+                <dl class="metric-legend task-state-legend"><div><dt><i class="legend-muted"></i>任务总数</dt><dd><DashboardFlipNumber :value="sceneTaskTotal" /></dd></div><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd><DashboardFlipNumber :value="item.count" /></dd></div></dl></div>
                 <div class="scene-task-legend" aria-label="场景任务数图例">
                   <button
                     v-if="user.hasPermission('task-list')"
@@ -650,12 +651,12 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                   >
                     <i :style="{ backgroundColor: item.color, boxShadow: `0 0 7px ${item.color}` }"></i>
                     <span>{{ item.name }}</span>
-                    <strong>{{ item.taskCount }}</strong>
+                    <strong><DashboardFlipNumber :value="item.taskCount" /></strong>
                   </button>
                   <div v-for="item in sceneTaskChartItems" v-else :key="item.id" class="scene-task-legend__static">
                     <i :style="{ backgroundColor: item.color, boxShadow: `0 0 7px ${item.color}` }"></i>
                     <span>{{ item.name }}</span>
-                    <strong>{{ item.taskCount }}</strong>
+                    <strong><DashboardFlipNumber :value="item.taskCount" /></strong>
                   </div>
                 </div>
               </div>

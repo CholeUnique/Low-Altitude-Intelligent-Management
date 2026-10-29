@@ -8,6 +8,7 @@ import { useUserStore } from '@/stores/user'
 import TopicFeatureDetails from '@/components/TopicFeatureDetails.vue'
 import TopicStatisticsSummary from '@/components/TopicStatisticsSummary.vue'
 import TopicMapToolbar from '@/components/TopicMapToolbar.vue'
+import TopicOverlayAnalysis from '@/components/TopicOverlayAnalysis.vue'
 import { identifyVectorFeatures, setMapHoverSelection, type IdentifiedMapFeature } from '@/utils/map-service-layer'
 import { HIGH_STANDARD_TOPIC_ID, useGeographicTopicsStore, type GeographicTopic } from '@/stores/geographic-topics'
 import { createMapServiceLayer, createAdministrativeBoundaryLayer, expandMapServiceSublayers, getMapServiceLayerMetadata, queryMapServiceFeatures, queryMapServiceSpatialIds, MAP_SERVICE_IMAGERY_PANE, MAP_SERVICE_VECTOR_PANE, type MapServiceLayerHandle, type MapServiceSearchGeometry } from '@/utils/map-service-layer'
@@ -17,14 +18,14 @@ import { categoryWhere, combineWhere, type TopicRole } from '@/utils/geographic-
 import { readTopicLayerCatalog, topicStatSources, groupTopicLayers } from '@/utils/topic-layer-catalog'
 
 interface Category { value: string; name: string; count: number; checked: boolean; style?: C5Style; color?: string; mode?: TopicDisplayMode }
-interface TopicLayer { key: string; service: MapServiceItem; sourceName: string; role: TopicRole; fields: string[]; categoryField: string; categories: Category[]; visible: boolean; pending: boolean; error: string; ready: boolean; mode: TopicDisplayMode; handle?: Raw<MapServiceLayerHandle>; spatialWhere?: string }
+interface TopicLayer { key: string; service: MapServiceItem; sourceName: string; role: TopicRole; fields: string[]; categoryField: string; categories: Category[]; visible: boolean; analysisHidden: boolean; pending: boolean; error: string; ready: boolean; mode: TopicDisplayMode; handle?: Raw<MapServiceLayerHandle>; spatialWhere?: string }
 interface Project { key: string; name: string; geometries: MapServiceSearchGeometry[] }
 const user = useUserStore()
 const props = defineProps<{topic: GeographicTopic}>()
 const topicStore = useGeographicTopicsStore()
 const root = ref<HTMLElement>(), canvas = ref<HTMLElement>()
 const layers = ref<TopicLayer[]>([]), projects = ref<Project[]>([]), projectKey = ref('')
-const configOpen = ref(false), legendOpen = ref(true), pending = ref(false), error = ref(''), projectPending = ref(false), projectError = ref('')
+const configOpen = ref(false), overlayOpen = ref(false), pending = ref(false), error = ref(''), projectPending = ref(false), projectError = ref('')
 const fullscreen = ref(false)
 const toolsMap = ref<Raw<L.Map>>(), drawingToolActive = ref(false)
 const farmlandStatsAvailable = ref(true)
@@ -39,6 +40,19 @@ const scaleWidth = ref(96)
 const scaleLabel = ref('5 km')
 // 专题目录独立于任务业务场景；仅使用当前部门接口实际返回的可用图层。
 const availableLayers = computed(() => layers.value)
+const overlaySources = computed(() => groupTopicLayers(layers.value.filter(item => item.role !== 'imagery')).map(group => ({id:group.id,name:group.name})))
+const overlayVisibleKeys = computed(() => layers.value.filter(item => item.visible && !item.analysisHidden && (!item.categories.length || item.categories.some(category => category.checked))).map(item => item.key))
+function openOverlay() { configOpen.value=false; clearFeatureSelection(); overlayOpen.value=true }
+function setOverlaySources(keys:string[],visible:boolean) {
+  keys.forEach(key=>{const item=layers.value.find(layer=>layer.key===key);if(item)selectLegend(item,visible?'all':'none')})
+}
+function showOverlayResult() {
+  clearFeatureSelection()
+  // Result isolation affects map visibility only, never the configured layer catalogue.
+  layers.value.filter(item=>item.visible&&item.role!=='imagery').forEach(item=>{
+    selectLegend(item,'none')
+  })
+}
 function matchesLayer(item: TopicLayer) {
   const keyword = layerKeyword.value.trim().toLocaleLowerCase()
   return !keyword || `${item.service.name} ${item.sourceName}`.toLocaleLowerCase().includes(keyword)
@@ -47,7 +61,7 @@ const legendLayers = computed(() => availableLayers.value.filter(item => item.vi
 const imageryLayers = computed(() => availableLayers.value.filter(item => item.role === 'imagery'))
 const vectorLayers = computed(() => availableLayers.value.filter(item => item.role !== 'imagery' && matchesLayer(item)))
 const configSourceGroups = computed(() => groupTopicLayers(vectorLayers.value))
-const farmlandStatSources = computed(() => topicStatSources(layers.value))
+const farmlandStatSources = computed(() => topicStatSources(layers.value.filter(item=>!item.analysisHidden)))
 const businessAllSelected = computed(() => vectorLayers.value.length > 0 && vectorLayers.value.every(item => item.visible))
 const businessPartSelected = computed(() => !businessAllSelected.value && vectorLayers.value.some(item => item.visible))
 const roleNames: Record<TopicRole, string> = { land:'国土调查底类', permanent:'永久基本农田', boundary:'行政边界', changes:'变化线索', facility:'项目设施', project:'项目范围', parcel:'耕地地块', imagery:'遥感影像', unconfigured:'通用图层' }
@@ -63,14 +77,28 @@ function applyFilter(item: TopicLayer) {
   if (featureCandidates.value.length || identifyPending.value) clearFeatureSelection()
   item.handle?.setQueryFilter?.(expression(item))
 }
-function legendAllSelected(item: TopicLayer) { return item.categories.length > 0 && item.categories.every(category => category.checked) }
-function legendPartSelected(item: TopicLayer) { return !legendAllSelected(item) && item.categories.some(category => category.checked) }
+function legendAllSelected(item: TopicLayer) { return !item.analysisHidden && item.categories.every(category => category.checked) }
+function legendPartSelected(item: TopicLayer) { return !item.analysisHidden && !legendAllSelected(item) && item.categories.some(category => category.checked) }
+function applyLegendSelection(item: TopicLayer) {
+  if(item.categories.length)item.analysisHidden=!item.categories.some(category=>category.checked)
+  applyFilter(item)
+  if(item.analysisHidden)item.handle?.layer.remove()
+  else if(item.visible&&map){
+    if(item.handle){if(!map.hasLayer(item.handle.layer))item.handle.layer.addTo(map)}
+    else void setVisible(item,true)
+  }
+}
 function selectLegend(item: TopicLayer, mode: 'all' | 'none' | 'invert') {
+  if(!item.categories.length)item.analysisHidden=mode==='invert'?!item.analysisHidden:mode!=='all'
   item.categories.forEach(category => {
     category.checked = mode === 'invert' ? !category.checked : mode === 'all'
   })
   // 一次批量操作只对当前图层提交一次筛选，不影响其他层。
-  applyFilter(item)
+  applyLegendSelection(item)
+}
+function setCategoryVisible(item: TopicLayer,category: Category,checked: boolean) {
+  category.checked=checked
+  applyLegendSelection(item)
 }
 async function selectBusinessLayers(mode: 'all' | 'none' | 'invert') {
   if (businessBatchPending.value) return
@@ -118,7 +146,7 @@ async function identifyFeature(event: L.LeafletMouseEvent) {
   const point = map.latLngToContainerPoint(event.latlng)
   const nw = map.containerPointToLatLng(point.subtract([6,6])), se = map.containerPointToLatLng(point.add([6,6]))
   const envelope = {west:Math.min(nw.lng,se.lng),east:Math.max(nw.lng,se.lng),south:Math.min(nw.lat,se.lat),north:Math.max(nw.lat,se.lat)}
-  const visible = layers.value.filter(item => item.visible && item.handle && item.role !== 'imagery' && item.role !== 'boundary' && expression(item) !== '1=0')
+  const visible = layers.value.filter(item => item.visible && !item.analysisHidden && item.handle && item.role !== 'imagery' && item.role !== 'boundary' && expression(item) !== '1=0')
   identifyPending.value = true
   const results: PromiseSettledResult<IdentifiedMapFeature[]>[] = []
   for (let offset=0; offset<visible.length; offset+=4) {
@@ -210,7 +238,7 @@ async function prepare(item: TopicLayer) {
     restoreCategoryModes(item)
     applyDisplayMode(item)
     applyFilter(item)
-    if (item.visible) handle.layer.addTo(map)
+    if (item.visible && !item.analysisHidden) handle.layer.addTo(map)
     if (item.role === 'boundary' && handle.bounds?.isValid()) map.fitBounds(handle.bounds, { padding:[45,45], maxZoom:14 })
   } catch (reason) { if (current(item, request)) { item.error = reason instanceof Error ? reason.message : '数据读取失败'; item.visible = false } }
   finally { if (current(item, request)) item.pending = false }
@@ -219,11 +247,12 @@ async function setVisible(item: TopicLayer, visible: boolean, remember = false) 
   clearFeatureSelection()
   if (remember) topicStore.setPreference(props.topic.id,item.key,{visible})
   item.visible = visible
+  item.analysisHidden = false
   if (visible) {
     let job = inFlight.get(item.key)
     if (!job) { job = prepare(item); inFlight.set(item.key, job); void job.finally(() => { if (inFlight.get(item.key) === job) inFlight.delete(item.key) }) }
     await job
-    if (layers.value.some(layer => layer === item) && item.visible && item.handle && map) { applyFilter(item); if (!map.hasLayer(item.handle.layer)) item.handle.layer.addTo(map) }
+    if (layers.value.some(layer => layer === item) && item.visible && !item.analysisHidden && item.handle && map) { applyFilter(item); if (!map.hasLayer(item.handle.layer)) item.handle.layer.addTo(map) }
   } else item.handle?.layer.remove()
 }
 async function selectImagery(key: string) { await Promise.all(imageryLayers.value.map(item => setVisible(item, item.key === key,true))) }
@@ -296,7 +325,7 @@ async function loadData() {
         })
         entries.forEach(entry => {
           const mode = topicStore.getPreference(props.topic.id,entry.key)?.mode || (entry.role === 'boundary' ? 'boundary' : 'filled')
-          output.push({...entry,categories:[],visible:false,pending:false,ready:false,mode})
+          output.push({...entry,categories:[],visible:false,analysisHidden:false,pending:false,ready:false,mode})
         })
       }))
       if (request !== version) return
@@ -363,7 +392,7 @@ onBeforeUnmount(() => { clearFeatureSelection(); version++; projectVersion++; do
     <div ref="canvas" class="topic-map" :class="{'topic-map--drawing':drawingToolActive}"></div>
     <div class="topic-map-scale" :style="{ width: `${scaleWidth}px` }" :aria-label="`比例尺 ${scaleLabel}`"><b>{{ scaleLabel }}</b><i></i></div>
     <div class="topic-title"><span>专题数据管理</span><strong :title="topic.name">{{ topic.name }}</strong><small>{{ topic.description || '第三次全国国土调查 · 分类图式' }}</small></div>
-    <TopicMapToolbar v-if="toolsMap" :map="toolsMap" :suspended="configOpen" @drawing="setDrawingTool">
+    <TopicMapToolbar v-if="toolsMap" :map="toolsMap" :suspended="configOpen || overlayOpen" @drawing="setDrawingTool" @overlay="openOverlay">
       <button :aria-label="fullscreen ? '退出全屏' : '全屏展示'" :title="fullscreen ? '退出全屏' : '全屏展示'" @click="toggleFullscreen"><FullScreen /></button>
       <button :class="{active:configOpen}" :aria-expanded="configOpen" title="场景配置" @click="configOpen = !configOpen"><Setting /><span>场景配置</span></button>
     </TopicMapToolbar>
@@ -375,15 +404,16 @@ onBeforeUnmount(() => { clearFeatureSelection(); version++; projectVersion++; do
       <aside v-if="farmlandStatSources.length" v-show="farmlandStatsAvailable" class="topic-farmland-stat" aria-label="高标准农田统计"><header>高标准农田数据</header><TopicStatisticsSummary :sources="farmlandStatSources" @available="farmlandStatsAvailable=$event" /></aside>
       <TopicFeatureDetails v-if="featureCandidates.length" embedded :features="featureCandidates" :selected="selectedFeature" :roles="featureRoles" @select="selectFeature" @close="clearFeatureSelection" />
     </div>
-    <aside class="topic-legend" :class="{collapsed:!legendOpen}">
-      <button class="legend-heading" :aria-expanded="legendOpen" @click="legendOpen = !legendOpen"><Collection /><b>分类与图例</b><i class="disclosure-triangle" :class="{expanded:legendOpen}"></i></button>
-      <div v-if="legendOpen" class="legend-content">
+    <aside class="topic-legend">
+      <header class="legend-heading"><Collection /><b>分类与图例</b></header>
+      <div class="legend-content">
+        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="`${user.activeDeptId}:${topic.id}`" :sources="overlaySources" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @hide="showOverlayResult" @restore="setOverlaySources($event,true)" />
         <label class="layer-search"><Search aria-hidden="true" /><input v-model="layerKeyword" type="search" aria-label="搜索图层名称" placeholder="搜索图层名称" /></label>
         <p v-if="!legendLayers.length && !pending">{{ layerKeyword.trim() ? '没有匹配的已开启图层，可在场景配置中查找并开启。' : '暂无已开启的分类图层，可在场景配置中选择。' }}</p>
         <section v-for="item in legendLayers" :key="item.key" class="legend-group">
           <div class="legend-layer-row">
           <button class="legend-layer-heading" :aria-expanded="Boolean(expandedLegendLayers[item.key])" :title="`${item.sourceName} / ${item.service.name} · ${item.categories.length} 类`" @click="expandedLegendLayers[item.key] = !expandedLegendLayers[item.key]"><i class="disclosure-triangle" :class="{expanded:expandedLegendLayers[item.key]}"></i><span class="legend-layer-name"><b>{{ item.service.name }}</b><small v-if="item.service.name !== item.sourceName">{{ item.sourceName }}</small></span></button>
-          <div v-if="item.categories.length" class="selection-actions layer-selection-actions" role="group" :aria-label="`${item.service.name}分类选择`">
+          <div class="selection-actions layer-selection-actions" role="group" :aria-label="`${item.service.name}分类选择`">
             <label><input type="checkbox" :checked="legendAllSelected(item)" :indeterminate="legendPartSelected(item)" @change="selectLegend(item,($event.target as HTMLInputElement).checked ? 'all' : 'none')" />全选</label>
             <label><input type="checkbox" :checked="false" @change="($event.target as HTMLInputElement).checked=false; selectLegend(item,'invert')" />反选</label>
           </div>
@@ -396,7 +426,7 @@ onBeforeUnmount(() => { clearFeatureSelection(); version++; projectVersion++; do
           <p v-if="!item.categories.length">{{ item.role === 'imagery' ? '影像底图' : '此图层没有分类项目。' }}</p>
           <div v-for="category in item.categories" :key="category.value" class="category-entry">
           <label class="topic-category">
-            <input v-model="category.checked" type="checkbox" @change="applyFilter(item)" />
+            <input :checked="category.checked" type="checkbox" @change="setCategoryVisible(item,category,($event.target as HTMLInputElement).checked)" />
             <img v-if="category.style" :src="c5Pattern(category.style)" alt="" /><i v-else class="source-symbol" :style="{background:category.color}"></i>
             <span>{{ category.value }}<b>{{ category.name !== category.value ? category.name : '' }}</b><small v-if="category.style && !category.style.mapped">扩展地类 · 待确认规范映射</small></span><em>{{ category.count }}</em>
           </label>
@@ -460,7 +490,7 @@ onBeforeUnmount(() => { clearFeatureSelection(); version++; projectVersion++; do
 .geographic-topics>.topic-tools{z-index:560}
 .config-body .config-service-group{margin:10px 0 0;border:1px solid #719dad29;border-radius:7px;overflow:hidden}.config-source-heading{display:flex;align-items:center;gap:8px;min-height:46px;padding:0 10px;background:#23485855}.config-source-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;padding:10px 0;border:0;background:transparent;color:#d9f1f7;font:inherit;text-align:left;cursor:pointer}.config-source-toggle b{font-size:12px;font-weight:500;line-height:1.7;overflow-wrap:anywhere}.config-source-switch{display:flex;align-items:center;gap:5px;flex:none;font-size:10px;cursor:pointer}.config-source-children{padding:0 10px 0 20px}.config-source-children .config-layer:last-child{border-bottom:0;margin-bottom:0}.legend-layer-name{display:grid;flex:1;min-width:0;gap:2px}.legend-layer-name b{color:#d6eaf1}.legend-layer-heading .legend-layer-name small{display:block;overflow:hidden;text-overflow:ellipsis;font-size:9px;color:#81a7b5;line-height:14px}
 .topic-legend{top:122px;bottom:auto;width:320px;height:560px;max-height:calc(100% - 152px);border:1px solid #88bcd528;border-radius:10px;background:linear-gradient(145deg,#123846ed,#0a2938ed)}
-.legend-heading{min-height:50px;box-sizing:border-box;flex:0 0 50px;border-bottom:1px solid #7395a229;padding:0 15px;gap:9px}.legend-heading>.disclosure-triangle{margin-left:auto}
+.legend-heading{min-height:50px;box-sizing:border-box;flex:0 0 50px;border-bottom:1px solid #7395a229;padding:0 15px;gap:9px;cursor:default}
 .legend-content{flex:1;min-height:0;padding:12px;scrollbar-width:none}.legend-content::-webkit-scrollbar{display:none}
 .legend-group{margin-top:8px;padding-top:0;border-top:0}.legend-layer-row{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:7px;min-height:42px;border:1px solid #719dad20;border-radius:6px;background:#153746;padding:0 8px}.legend-layer-row:hover{background:#1b4353}
 .legend-layer-heading{display:flex;flex:1;min-width:0;align-items:center;gap:7px;width:auto;padding:10px 0;border:0;background:transparent;text-align:left;cursor:pointer}.legend-layer-heading b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:500;line-height:18px}

@@ -3,8 +3,9 @@ import { computed, ref, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { getCustomDepartmentStatistics, type CustomStatGroup } from '@/api/business-statistics'
 import { topicStatGroups } from '@/utils/topic-layer-catalog'
+import DashboardFlipNumber from './DashboardFlipNumber.vue'
 const user = useUserStore()
-const props = defineProps<{sources?:{id:string; name:string}[]}>()
+const props = defineProps<{sources?:{id:string; name:string}[];animated?:boolean}>()
 const emit = defineEmits<{available:[visible:boolean]}>()
 const groups = ref<CustomStatGroup[]>([]), loading = ref(false), error = ref('')
 const visibleGroups = computed(() => topicStatGroups(groups.value,props.sources))
@@ -26,7 +27,7 @@ watch(() => user.activeDeptId,load,{immediate:true})
     <p v-if="loading" role="status">正在读取专题统计…</p>
     <p v-else-if="error" role="alert">{{ error }} <button @click="load">重试</button></p>
     <p v-else-if="!visibleGroups.length">当前图层暂无专题统计</p>
-    <section v-for="group in visibleGroups" :key="group.code || group.name"><h3>{{ group.name }}</h3><dl><div v-for="item in group.items" :key="item.name"><dt>{{ item.name }}</dt><dd>{{ item.value }}<small>{{ item.unit }}</small></dd></div></dl></section>
+    <section v-for="group in visibleGroups" :key="group.code || group.name"><h3>{{ group.name }}</h3><dl><div v-for="item in group.items" :key="item.name"><dt>{{ item.name }}</dt><dd><DashboardFlipNumber v-if="animated" :value="item.value" /><template v-else>{{ item.value }}</template><small>{{ item.unit }}</small></dd></div></dl></section>
   </div>
 </template>
 <style scoped>
