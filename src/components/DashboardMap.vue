@@ -2,12 +2,12 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue'
 import { Aim, Compass, Delete, EditPen, InfoFilled, Location, MapLocation, Picture, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
 import L from 'leaflet'
+import { geodesicArea, formatDistance, formatArea } from '@/utils/map-measurement'
 import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
 import { getJiulongArcGisLayerBounds } from '@/utils/jiulong-arcgis-layers'
-import { getCustomDepartmentStatistics, type CustomStatGroup } from '@/api/business-statistics'
 import { listEnabledMapServices, listMapServicesForDepartments, updateMapService, type MapServiceItem } from '@/api/map-service'
 import { getDepartmentList } from '@/api/account-management'
 import { useUserStore } from '@/stores/user'
@@ -209,9 +209,6 @@ const attributeSearchGroups = computed(() => {
 const attributeFilters = ref<Record<string, string>>({})
 const attributeSearchLoading = ref(false)
 const attributeSearchError = ref('')
-const farmlandStatGroups = ref<CustomStatGroup[]>([])
-const farmlandStatLoading = ref(false)
-const farmlandStatError = ref('')
 const searchExpanded = ref(false)
 const searchKeyword = ref('')
 const searchInput = ref<HTMLInputElement>()
@@ -263,18 +260,6 @@ let selectionHighlightGroup: L.LayerGroup | undefined
 const featureCandidates = ref<IdentifiedMapFeature[]>([])
 const selectedFeatureIndex = ref(0)
 const activeFeature = computed(() => featureCandidates.value[selectedFeatureIndex.value])
-const featureLayers = computed(() => {
-  const groups = new Map<string, { serviceId: string; name: string; indices: number[] }>()
-  featureCandidates.value.forEach((feature,index) => {
-    const group = groups.get(feature.serviceId)
-    if (group) group.indices.push(index)
-    else groups.set(feature.serviceId, { serviceId: feature.serviceId, name: feature.serviceName, indices: [index] })
-  })
-  return [...groups.values()]
-})
-const activeFeatureLayerIndex = computed(() => Math.max(0, featureLayers.value.findIndex(layer => layer.serviceId === activeFeature.value?.serviceId)))
-const activeFeatureLayer = computed(() => featureLayers.value[activeFeatureLayerIndex.value])
-
 let hailingBoundaryGroup: L.LayerGroup | undefined
 let jiulongAdminHandle: MapServiceLayerHandle | undefined
 let jiulongAdminRequest = 0
@@ -288,7 +273,6 @@ let searchHighlightTimer: ReturnType<typeof window.setInterval> | undefined
 let searchHighlightClearTimer: ReturnType<typeof window.setTimeout> | undefined
 let attributeSearchRequestVersion = 0
 let featureSelectionRequestVersion = 0
-let farmlandStatRequestVersion = 0
 let focusedSceneLayerId = ''
 let overviewFocused = false
 const mapServiceLayers = new Map<string, MapServiceLayerHandle>()
@@ -1194,19 +1178,6 @@ function pinFeatureHighlight(feature: IdentifiedMapFeature, _anchor?: L.LatLng, 
   setMapHoverSelection(map, service, feature)
 }
 
-function selectFeatureTab(index: number) {
-  const feature = featureCandidates.value[index]
-  if (feature) {
-    pinFeatureHighlight(feature, undefined, featureCandidates.value)
-    void nextTick(() => document.getElementById(`${layerPanelId}-feature-tab-${activeFeatureLayerIndex.value}`)?.focus())
-  }
-}
-
-function selectFeatureLayer(index: number) {
-  const layer = featureLayers.value[index]
-  if (layer?.indices[0] != null) selectFeatureTab(layer.indices.includes(selectedFeatureIndex.value) ? selectedFeatureIndex.value : layer.indices[0])
-}
-
 async function focusParcelSearchResult(result: ParcelSearchResult) {
   if (!map) return
   attributeSearchRequestVersion += 1
@@ -1333,35 +1304,6 @@ async function identifyClickedFeature(event: L.LeafletMouseEvent) {
   else clearSelectionHighlight()
 }
 
-function statLayerKey(name: string) {
-  return name.replace(/高标准/g, '高标').replace(/建设数据$|数据$/g, '').replace(/\s+/g, '').toLowerCase()
-}
-const visibleFarmlandStatGroups = computed(() => farmlandStatGroups.value.filter(stat =>
-  mapServiceGroups.value.some(group => {
-    if (!group.layers.some(service => visibleMapServiceIds.value.includes(String(service.id)))) return false
-    if (stat.serviceId) return stat.serviceId === group.id
-    const name = stat.serviceName || stat.name
-    return statLayerKey(name) === statLayerKey(group.source.name)
-  })))
-const farmlandStatVisible = computed(() => visibleFarmlandStatGroups.value.length > 0)
-
-async function loadFarmlandStats() {
-  const requestVersion = ++farmlandStatRequestVersion
-  farmlandStatLoading.value = true
-  farmlandStatError.value = ''
-  try {
-    const groups = await getCustomDepartmentStatistics(user.activeDeptId)
-    if (requestVersion !== farmlandStatRequestVersion) return
-    farmlandStatGroups.value = groups
-  } catch (reason) {
-    if (requestVersion !== farmlandStatRequestVersion) return
-    farmlandStatGroups.value = []
-    farmlandStatError.value = reason instanceof Error ? reason.message : '定制统计加载失败'
-  } finally {
-    if (requestVersion === farmlandStatRequestVersion) farmlandStatLoading.value = false
-  }
-}
-
 async function toggleSearch() {
   searchExpanded.value = !searchExpanded.value
   if (!searchExpanded.value) {
@@ -1443,24 +1385,6 @@ function startTool(tool: 'distance' | 'area' | 'marker') {
   if (tool !== 'marker') measureGroup?.clearLayers()
   measureResult.value = activeTool.value === 'distance' ? '点击地图连续选取测距点，单击鼠标右键结束' : activeTool.value === 'area' ? '点击地图绘制范围，单击鼠标右键结束' : activeTool.value === 'marker' ? markerHint : ''
   if (activeTool.value === 'marker') markerHintTimer = window.setTimeout(clearMarkerHint, 4000)
-}
-
-function geodesicArea(points: L.LatLng[]) {
-  const radius = 6378137
-  let area = 0
-  points.forEach((point, index) => {
-    const next = points[(index + 1) % points.length]!
-    area += (next.lng - point.lng) * Math.PI / 180 * (2 + Math.sin(point.lat * Math.PI / 180) + Math.sin(next.lat * Math.PI / 180))
-  })
-  return Math.abs(area * radius * radius / 2)
-}
-
-function formatDistance(metres: number) {
-  return metres >= 1000 ? `${(metres / 1000).toFixed(2)} 公里` : `${metres.toFixed(1)} 米`
-}
-
-function formatArea(squareMetres: number) {
-  return squareMetres >= 1_000_000 ? `${(squareMetres / 1_000_000).toFixed(2)} 平方公里` : `${squareMetres.toFixed(0)} 平方米`
 }
 
 function redrawMeasurement(cursor?: L.LatLng) {
@@ -1765,10 +1689,6 @@ watch(() => props.focusLayerId, () => {
   if (props.focusLayerId) scheduleSceneFocus()
   else scheduleOverviewFocus()
 })
-watch(() => user.activeDeptId, () => {
-  farmlandStatGroups.value = []
-  void loadFarmlandStats()
-}, { immediate: true })
 watch(searchKeyword, (value) => {
   if (searchFocusTimer) window.clearTimeout(searchFocusTimer)
   const keyword = value.trim().toLowerCase()
@@ -1929,36 +1849,6 @@ onBeforeUnmount(() => {
 
     </Teleport>
 
-    <aside v-if="activeFeature" class="feature-detail-panel" aria-label="要素详情">
-      <header><div><b>要素详情</b><small>{{ featureLayers.length }} 个叠加图层 · {{ featureCandidates.length }} 个要素</small></div><button type="button" aria-label="关闭要素详情" @click="clearSelectionHighlight">×</button></header>
-      <nav class="feature-detail-tabs" role="tablist" aria-label="叠加要素">
-        <button v-for="(layer,index) in featureLayers" :id="`${layerPanelId}-feature-tab-${index}`" :key="layer.serviceId" :title="layer.name" type="button" role="tab" :aria-selected="activeFeatureLayerIndex === index" :aria-controls="`${layerPanelId}-feature-detail`" :tabindex="activeFeatureLayerIndex === index ? 0 : -1" :class="{ active: activeFeatureLayerIndex === index }" @click="selectFeatureLayer(index)" @keydown.right.prevent="selectFeatureLayer((index + 1) % featureLayers.length)" @keydown.left.prevent="selectFeatureLayer((index + featureLayers.length - 1) % featureLayers.length)">{{ layer.name }}</button>
-      </nav>
-      <section :id="`${layerPanelId}-feature-detail`" role="tabpanel" :aria-labelledby="`${layerPanelId}-feature-tab-${activeFeatureLayerIndex}`" class="feature-detail-content">
-        <div v-if="activeFeatureLayer && activeFeatureLayer.indices.length > 1" class="same-layer-features" aria-label="同层叠加要素"><button v-for="index in activeFeatureLayer.indices" :key="index" type="button" :class="{ active: index === selectedFeatureIndex }" :aria-pressed="index === selectedFeatureIndex" @click="selectFeatureTab(index)">图斑 {{ featureCandidates[index]?.objectId ?? index + 1 }}</button></div>
-        <div class="feature-detail-type"><small>{{ activeFeature.typeLabel || '地块类型' }}</small><b>{{ activeFeature.typeValue || '暂无地块类型' }}</b></div>
-        <dl><div v-for="(row,index) in activeFeature.rows" :key="`${row.name}-${index}`"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl>
-      </section>
-    </aside>
-
-    <aside v-if="farmlandStatVisible && !activeFeature" class="farmland-stat-panel">
-      <div class="tool-title"><b>{{ visibleFarmlandStatGroups[0]?.name || '九龙镇高标准农田建设数据' }}</b></div>
-      <div v-if="farmlandStatLoading" class="farmland-stat-state">正在读取定制统计…</div>
-      <div v-else-if="farmlandStatError" class="farmland-stat-state error">{{ farmlandStatError }}</div>
-      <div v-else-if="!farmlandStatGroups.length" class="farmland-stat-state">当前单位暂无定制统计</div>
-      <template v-else>
-      <section v-for="group in visibleFarmlandStatGroups" :key="group.name" class="farmland-stat-group">
-        <h3 v-if="visibleFarmlandStatGroups.length > 1">{{ group.name }}</h3>
-        <dl>
-          <div v-for="item in group.items" :key="`${group.name}-${item.name}`">
-            <dt>{{ item.name }}</dt>
-            <dd>{{ item.value }}<small v-if="item.unit">{{ item.unit }}</small></dd>
-          </div>
-        </dl>
-      </section>
-      </template>
-    </aside>
-
     <Teleport to="body">
       <div v-if="layerContextMenu" class="layer-context-menu" :style="{ left: `${layerContextMenu.x}px`, top: `${layerContextMenu.y}px` }">
         <button type="button" @click="openLayerColorPicker">选择颜色</button>
@@ -2052,25 +1942,7 @@ onBeforeUnmount(() => {
 .color-value-slider { display: grid; gap: 6px; margin: 12px 2px 2px; color: #b7d7e6; font-size: 12px; }
 .color-value-slider input { width: 100%; height: 12px; margin: 0; padding: 0; appearance: none; border: 0; border-radius: 999px; background: #000; cursor: pointer; }
 .color-value-slider input::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; background: #082033; box-shadow: 0 0 0 1px #001018aa; }
-.farmland-stat-panel { position: absolute; z-index: 500; top: 72px; right: 16px; width: 260px; max-height: min(460px, calc(100% - 110px)); display: flex; flex-direction: column; overflow: hidden; color: #d7f4ff; border: 1px solid #1688bf; border-radius: 14px; background: #031c37e8; box-shadow: 0 0 18px #00a7d534; }
-.farmland-stat-panel .tool-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.farmland-stat-state { padding: 16px 14px; color: #8ec3d4; font-size: 13px; text-align: center; }
-.farmland-stat-state.error { color: #ffb0b8; }
-.farmland-stat-group { min-height: 0; overflow: auto; }
-.farmland-stat-group h3 { margin: 0; padding: 10px 14px 0; color: #9adff0; font-size: 13px; }
-.farmland-stat-group dl { margin: 0; }
-.farmland-stat-group div { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid #0d5278; }
-.farmland-stat-group dt { color: #9fd0e0; font-size: 13px; }
-.farmland-stat-group dd { margin: 0; color: #f4fcff; font-size: 18px; font-weight: 700; }
-.farmland-stat-group small { margin-left: 4px; color: #8ec3d4; font-size: 12px; font-weight: 500; }
 .attribute-filter-chip { display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 12px;color:#82d8ec;background:#17688b22;font-size:11px;overflow-wrap:anywhere; }.attribute-filter-chip button { flex:0 0 22px;width:22px;height:22px;padding:0;color:#a5dce9;background:transparent;border:0;font-size:18px; }
-.feature-detail-panel { position:absolute;z-index:650;top:var(--cockpit-edge,20px);bottom:100px;right:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);width:clamp(285px,21vw,370px);display:flex;flex-direction:column;min-height:0;color:#dceef6;background:linear-gradient(135deg,#092c44ed,#061e32df);border:1px solid #71c4e540;border-radius:12px;box-shadow:0 12px 32px #00111e55;backdrop-filter:blur(14px);overflow:hidden; }
-.feature-detail-panel > header { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid #71c4e526; }.feature-detail-panel header div { display:grid;gap:4px; }.feature-detail-panel header b { font-size:15px; }.feature-detail-panel header small { font-size:11px;color:#93bacc; }.feature-detail-panel header button { width:28px;height:28px;color:#baddf0;background:transparent;border:0;font-size:22px; }
-.feature-detail-tabs { display:flex;gap:6px;flex:0 0 auto;padding:10px;overflow:auto;scrollbar-width:none;border-bottom:1px solid #71c4e526; }.feature-detail-tabs button { flex:1 0 95px;min-width:0;padding:8px 10px;border:1px solid transparent;border-radius:6px;color:#93bacc;background:#16435633;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }.feature-detail-tabs button.active { color:#effcff;border-color:#4bb4d573;background:#137c9f55; }.feature-detail-tabs small { margin-left:6px;color:#85d5ee; }
-.same-layer-features { display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px; }.same-layer-features button { padding:5px 9px;font-size:11px;border:1px solid #4882a44a;border-radius:5px;color:#92c5d9;background:transparent; }.same-layer-features button.active { border-color:#55c7df;color:#ecfbff;background:#20739155; }
-.feature-detail-content { flex:1;min-height:0;overflow:auto;padding:14px 16px;scrollbar-width:none; }.feature-detail-content::-webkit-scrollbar,.feature-detail-tabs::-webkit-scrollbar { display:none; }.feature-detail-type { display:grid;gap:5px;padding:10px;border-radius:6px;background:#1c75962b; }.feature-detail-type small { font-size:11px;color:#8bc6db; }.feature-detail-type b { font-size:14px; }.feature-detail-content dl { margin:12px 0 0; }.feature-detail-content dl > div { display:grid;grid-template-columns:minmax(80px,.85fr) minmax(0,1.3fr);gap:12px;padding:10px 0;border-bottom:1px solid #71c4e518;font-size:12px;line-height:19px; }.feature-detail-content dt { color:#8bc6db;overflow-wrap:anywhere; }.feature-detail-content dd { margin:0;color:#eef7fc;overflow-wrap:anywhere; }
-@media(max-width:1500px) { .feature-detail-panel { right:calc(var(--cockpit-side-width) + var(--cockpit-edge) + 18px);width:285px; } }
-.dashboard-map--clear-screen .feature-detail-panel { right:var(--cockpit-edge,20px); }
 </style>
 <style scoped src="./DashboardMapTheme.scss" lang="scss"></style>
 

@@ -85,7 +85,7 @@
 .dashboard-map--floating .layer-manager .search-result-title { padding:6px 10px;font-size:11px;background:#0b3b5644;color:#7bdeed; }
 .dashboard-map--floating .layer-manager .search-results button { padding:8px 10px; }.dashboard-map--floating .layer-manager .search-results b { font-size:12px;line-height:18px; }.dashboard-map--floating .layer-manager .search-results small { font-size:11px;line-height:16px; }.dashboard-map--floating .layer-manager .search-results p { padding:10px;font-size:12px; }
 .dashboard-map--floating .parcel-type-panel { position:relative;top:auto;right:auto;width:100%;max-width:none;max-height:min(220px,30%);flex:0 1 auto;border-radius:14px;background:var(--map-panel);border:1px solid var(--map-border);box-shadow:0 8px 30px #00111e40;pointer-events:auto; }
-.dashboard-map--floating .farmland-stat-panel { top:var(--cockpit-edge,20px);right:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);width:clamp(220px,16vw,280px);border-radius:12px;background:var(--map-panel);border:1px solid var(--map-border);box-shadow:0 8px 30px #00111e40; }
+
 .dashboard-map--floating .parcel-type-panel .tool-title { padding-right:18px; }.dashboard-map--floating .parcel-filter-heading { background:#14436633;border-bottom-color:#88b7d61c; }.dashboard-map--floating .parcel-filter-row { border-bottom-color:#88b7d615; }.dashboard-map--floating .parcel-filter-row input { accent-color:#24dceb; }
 .dashboard-map--floating .map-scale { right:calc(var(--cockpit-side-width,290px) + var(--cockpit-edge,20px) + 24px);bottom:25px;color:#cfe2ed;font-size:11px; }
 .dashboard-map--floating .map-tools .measure-result {
@@ -100,7 +100,7 @@
 @media(max-width:1500px) { .dashboard-map--floating .map-tools .measure-result { max-width:calc(50vw - var(--cockpit-side-width) - var(--cockpit-edge) - 244px); } }
 @media(max-width:1200px) { .dashboard-map--floating .map-tools .measure-result { max-width:calc(50vw - var(--cockpit-side-width) - var(--cockpit-edge) - 220px); } }
 .dashboard-map--floating :deep(.leaflet-control-attribution) { font-size:9px;background:#05253bcc;color:#7297a9; }.dashboard-map--floating :deep(.leaflet-control-attribution a) { color:#96bccf; }
-@media(max-width:1500px) { .dashboard-map--floating .left-map-rail { width:260px;left:calc(var(--cockpit-side-width) + var(--cockpit-edge) + 18px); }.dashboard-map--floating .farmland-stat-panel { right:calc(var(--cockpit-side-width) + var(--cockpit-edge) + 18px);width:255px; }.dashboard-map--floating .layer-manager .map-service-row { padding-inline:14px;gap:8px; }.dashboard-map--floating .map-tools { --tool-size:40px;gap:6px;padding:7px 10px; }.dashboard-map--floating .map-tools > button,.dashboard-map--floating .map-mode-switch button,.dashboard-map--floating .measure-tool > button { width:40px;min-width:40px;height:40px;min-height:40px;flex-basis:40px; }.dashboard-map--floating .map-mode-switch { gap:6px; } }
+@media(max-width:1500px) { .dashboard-map--floating .left-map-rail { width:260px;left:calc(var(--cockpit-side-width) + var(--cockpit-edge) + 18px); }.dashboard-map--floating .layer-manager .map-service-row { padding-inline:14px;gap:8px; }.dashboard-map--floating .map-tools { --tool-size:40px;gap:6px;padding:7px 10px; }.dashboard-map--floating .map-tools > button,.dashboard-map--floating .map-mode-switch button,.dashboard-map--floating .measure-tool > button { width:40px;min-width:40px;height:40px;min-height:40px;flex-basis:40px; }.dashboard-map--floating .map-mode-switch { gap:6px; } }
 @media(max-width:1200px) { .dashboard-map--floating .left-map-rail { width:235px; }.dashboard-map--floating .map-tools { --tool-size:36px;gap:4px;bottom:12px; }.dashboard-map--floating .map-tools > button,.dashboard-map--floating .map-mode-switch button,.dashboard-map--floating .measure-tool > button { width:36px;min-width:36px;height:36px;min-height:36px;flex-basis:36px; } }
 .dashboard-map--floating .map-search-toggle svg { display:block;width:20px;height:20px; }
 .dashboard-map--floating .map-tools .measure-tool { display:flex;align-items:center; }
@@ -108,8 +108,6 @@
 .dashboard-map--floating .map-scale { transition:right .52s cubic-bezier(.22,1,.36,1),transform .52s cubic-bezier(.22,1,.36,1),opacity .42s ease,visibility .52s; }
 .dashboard-map--floating .layer-panel-stack { transition:width .22s ease,border-radius .22s ease,box-shadow .18s ease,transform .52s cubic-bezier(.22,1,.36,1),opacity .42s ease,visibility .52s; }
 .dashboard-map--floating.dashboard-map--clear-screen .left-map-rail { left:var(--cockpit-edge,20px); }
-.dashboard-map--floating.dashboard-map--clear-screen .farmland-stat-panel { right:var(--cockpit-edge,20px); }
+
 .dashboard-map--floating.dashboard-map--clear-screen .map-scale { right:var(--cockpit-edge,20px); }
-.dashboard-map--floating .farmland-stat-panel,
-.dashboard-map--floating .feature-detail-panel { transition:right .52s cubic-bezier(.22,1,.36,1); }
 @media(prefers-reduced-motion:reduce) { .dashboard-map--floating *, .dashboard-map--floating *::after { transition:none!important; } }
