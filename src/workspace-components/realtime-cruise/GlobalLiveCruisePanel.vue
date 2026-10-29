@@ -196,6 +196,10 @@ function deviceLabel(stream: LiveStream) {
   return stream.aircraftName || stream.aircraftId || '未命名设备'
 }
 
+function liveDevicePanelLabel(stream: LiveStream) {
+  return stream.callsign || deviceLabel(stream)
+}
+
 function openPreview(stream: LiveStream) {
   activeDeviceId.value = stream.id
   previewDeviceId.value = stream.id
@@ -269,11 +273,11 @@ watch(() => user.activeDeptId, () => void loadOverview())
           @click="activeDeviceId = stream.id"
         >
           <i :class="stream.status.toLowerCase()"></i>
-          <span><b>{{ deviceLabel(stream) }}</b><small>{{ stream.aircraftId || '设备编号待同步' }}</small></span>
+          <span><b>{{ liveDevicePanelLabel(stream) }}</b><small>{{ stream.aircraftId || '设备编号待同步' }}</small></span>
           <em>{{ stream.status === 'ONLINE' ? '直播中' : stream.status === 'STARTING' ? '连接中' : '离线' }}</em>
         </button>
         <div v-if="!loading && !streams.length" class="empty-state">暂无在线直播设备</div>
-        <div v-if="selectedDevice" class="selected-device"><b>当前设备</b><span>{{ deviceLabel(selectedDevice) }}</span><small>{{ selectedDevice.protocol }} · {{ selectedDevice.status }}</small></div>
+        <div v-if="selectedDevice" class="selected-device"><b>当前设备</b><span>{{ liveDevicePanelLabel(selectedDevice) }}</span><small>{{ selectedDevice.protocol }} · {{ selectedDevice.status }}</small></div>
       </aside>
 
       <section ref="playbackPanel" class="overview-panel map-panel" :class="{ 'is-playback-fullscreen': playbackFullscreen }">
