@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import L from 'leaflet'
-import { ElTooltip } from 'element-plus'
 import 'leaflet/dist/leaflet.css'
 import { getFlightReviewSrtFile, getFlightReviewVideoSrtFile, type FlightReviewMedia } from '@/api/flight-review'
 import { getTiandituAddress } from '@/api/geocoding'
+import { openAmapNavigation } from '@/utils/amap-navigation'
 import { createTelemetryLocationResolver, type TelemetryLocationState } from '@/utils/telemetry-location'
 import { bindVideoTelemetryClock, decodeVideoSrt, formatTelemetryCoordinates, interpolatedTelemetryAtTime, parseVideoSrt, type VideoTelemetryPoint } from '@/utils/video-telemetry'
 import { containedVideoBounds, fitTelemetryPanelSize, placeTelemetryPanel, resizeTelemetryPanel, type TelemetryPanelBounds, type TelemetryPanelSize } from '@/utils/telemetry-panel'
@@ -19,8 +19,6 @@ const panelSize = ref<TelemetryPanelSize>()
 const videoBounds = shallowRef<TelemetryPanelBounds>()
 const dragging = ref(false)
 const resizing = ref(false)
-const navigationNoticePending = ref(false)
-let navigationNoticeTimer: ReturnType<typeof setTimeout> | undefined
 const panelStyle = computed(() => ({
   ...(panelPosition.value ? { left: `${panelPosition.value.left}px`, top: `${panelPosition.value.top}px`, right: 'auto', bottom: 'auto' } : {}),
   ...(panelSize.value ? { width: `${panelSize.value.width}px`, height: `${panelSize.value.height}px` } : {}),
@@ -312,13 +310,9 @@ function toggleFollow() {
   map.setView([point.latitude, point.longitude], returnZoom ?? Math.max(map.getZoom(), 17), { animate: false })
 }
 
-function showNavigationNotice() {
-  if (navigationNoticeTimer) clearTimeout(navigationNoticeTimer)
-  navigationNoticePending.value = true
-  navigationNoticeTimer = setTimeout(() => {
-    navigationNoticePending.value = false
-    navigationNoticeTimer = undefined
-  }, 3000)
+function navigateToLocation() {
+  const point = position.value
+  openAmapNavigation(point?.longitude, point?.latitude, locationPaused.value && location.value.status === 'ready' ? location.value.text : '')
 }
 
 function renderTrack() {
@@ -444,7 +438,7 @@ watch(() => props.video, video => {
   }
 }, { immediate: true, flush: 'post' })
 watch(() => props.fullscreen, async () => { await nextTick(); updatePanelLayout(true) }, { flush: 'post' })
-onBeforeUnmount(() => { if (navigationNoticeTimer) clearTimeout(navigationNoticeTimer); endDrag(); endResize(); releaseVideoClock?.(); locationResolver.dispose(); resetRequest(); resizeObserver?.disconnect(); map?.remove() })
+onBeforeUnmount(() => { endDrag(); endResize(); releaseVideoClock?.(); locationResolver.dispose(); resetRequest(); resizeObserver?.disconnect(); map?.remove() })
 </script>
 
 <template>
@@ -460,7 +454,7 @@ onBeforeUnmount(() => { if (navigationNoticeTimer) clearTimeout(navigationNotice
       <span>{{ formatTelemetryCoordinates(position) }}</span>
       <span>相对高度 {{ position?.relativeAltitude !== undefined ? `${position.relativeAltitude.toFixed(1)} m` : '—' }}</span>
     </div>
-    <div class="telemetry-location" :class="{ 'is-unavailable': location.status === 'error' }" aria-live="polite"><span>{{ locationLabel }}</span><span :title="location.text">{{ location.text }}</span><ElTooltip popper-class="navigation-pending-tooltip" :visible="navigationNoticePending" :teleported="false" :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }" placement="top" effect="light"><template #content><div class="navigation-tooltip-card" role="status"><strong>该功能暂未接入</strong></div></template><button type="button" class="navigation-button" aria-label="导航" @click="showNavigationNotice">导航</button></ElTooltip></div>
+    <div class="telemetry-location" :class="{ 'is-unavailable': location.status === 'error' }" aria-live="polite"><span>{{ locationLabel }}</span><span :title="location.text">{{ location.text }}</span><button type="button" class="navigation-button" aria-label="导航" @click="navigateToLocation" :disabled="!position">导航</button></div>
     <div class="telemetry-actions">
       <button type="button" :disabled="!points.length" :aria-pressed="follow" @click="toggleFollow">{{ follow ? '跟随中' : '跟随无人机' }}</button>
       <button type="button" :disabled="!points.length" @click="showTrack">全程轨迹</button>

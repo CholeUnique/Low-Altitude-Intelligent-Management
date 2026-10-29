@@ -185,11 +185,15 @@ const selectedRegionLabel = computed(() => {
   return node ? `${group?.dataTypeName || type} / ${node.name}` : '请选择区划'
 })
 function regionServiceCount(type: string, code: string | null) {
-  return mapServiceGroups.value.filter(item => item.source.dataType === type && (item.source.regionCode || null) === code).length
+  const group = regionTreeGroups.value.find(item => item.dataType === type)
+  const node = group && regionEntries(group.roots || []).find(entry => entry.node.code === code)?.node
+  const codes = new Set(node ? regionEntries([node]).map(entry => entry.node.code || null) : [code])
+  return mapServiceGroups.value.filter(item => item.source.dataType === type && codes.has(item.source.regionCode || null)).length
 }
 function selectRegion(type: string, node: MapServiceRegionNode) {
   const key = regionKey(type, node.code)
   selectedRegion.value = key
+  toggleRegion(type, node)
 }
 function toggleRegion(type: string, node: MapServiceRegionNode) {
   const key = regionKey(type, node.code)
@@ -1806,7 +1810,44 @@ onBeforeUnmount(() => {
         <div v-if="!floatingControls" class="tool-title"><b><svg class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg>图层管理</b><span class="tool-title-state">{{ mapServiceGroups.length }} 项服务</span></div>
         <div v-if="floatingControls" :id="`${layerPanelId}-search`" class="layer-manager-search"></div>
         <div class="layer-manager-list" :aria-busy="mapServiceOrderSaving">
-          <div class="region-filter"><label>行政区划</label><button type="button" class="region-picker-trigger" :title="regionPickerOpen ? '收起' : '展开'" :aria-expanded="regionPickerOpen" @click="regionPickerOpen = !regionPickerOpen">{{ selectedRegionLabel }} <span>{{ regionPickerOpen ? '⌃' : '⌄' }}</span></button><div v-if="regionPickerOpen" class="region-picker"><button type="button" class="region-option" :class="{ active: selectedRegion === 'all' }" @click="selectedRegion = 'all'; regionPickerOpen = false">全部图层</button><section v-for="group in regionSelectionOptions" :key="group.dataType"><strong>{{ group.dataTypeName || group.dataType }}</strong><div v-for="entry in group.entries" :key="regionKey(group.dataType, entry.node.code)" class="region-node" :class="{ active: selectedRegion === regionKey(group.dataType, entry.node.code) }"><button type="button" class="region-node-select" :style="{ paddingLeft: `${12 + entry.depth * 16}px` }" @click="selectRegion(group.dataType, entry.node)">{{ entry.node.name }}（{{ regionServiceCount(group.dataType, entry.node.code) }}）</button><button v-if="entry.node.children?.length" type="button" class="region-node-toggle" :title="expandedRegions.includes(regionKey(group.dataType, entry.node.code)) ? '收起' : '展开'" :aria-label="`${expandedRegions.includes(regionKey(group.dataType, entry.node.code)) ? '收起' : '展开'}${entry.node.name}`" :aria-expanded="expandedRegions.includes(regionKey(group.dataType, entry.node.code))" @click="toggleRegion(group.dataType, entry.node)">{{ expandedRegions.includes(regionKey(group.dataType, entry.node.code)) ? '⌄' : '›' }}</button></div></section></div><small v-if="regionTreeError">{{ regionTreeError }}，可选择全部图层</small></div>
+          <div class="region-filter"><label>行政区划</label><button type="button" class="region-picker-trigger" :title="regionPickerOpen ? '收起' : '展开'" :aria-expanded="regionPickerOpen" @click="regionPickerOpen = !regionPickerOpen">{{ selectedRegionLabel }} <span>{{ regionPickerOpen ? '⌃' : '⌄' }}</span></button><div v-if="regionPickerOpen" class="region-picker"><button type="button" class="region-option" :class="{ active: selectedRegion === 'all' }" @click="selectedRegion = 'all'; regionPickerOpen = false">全部图层</button><section v-for="regionGroup in regionSelectionOptions" :key="regionGroup.dataType"><strong>{{ regionGroup.dataTypeName || regionGroup.dataType }}</strong><template v-for="entry in regionGroup.entries" :key="regionKey(regionGroup.dataType, entry.node.code)"><button type="button" class="region-node region-node-select" :class="{ active: selectedRegion === regionKey(regionGroup.dataType, entry.node.code) }" :style="{ paddingLeft: `${12 + entry.depth * 10}px` }" :aria-expanded="entry.node.children?.length ? expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) : undefined" @click="selectRegion(regionGroup.dataType, entry.node)"><span>{{ entry.node.name }}（{{ regionServiceCount(regionGroup.dataType, entry.node.code) }}）</span><span v-if="entry.node.children?.length" class="region-node-toggle" :title="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '收起' : '展开'" aria-hidden="true">{{ expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '⌄' : '›' }}</span></button>          <div v-if="selectedRegion === regionKey(regionGroup.dataType, entry.node.code) || expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code))" class="map-service-sort-list region-service-list" :style="{ '--region-layer-indent': `${entry.depth * 10 + 10}px` }">
+            <div v-for="(group, groupIndex) in mapServiceGroups.filter(item => item.source.dataType === regionGroup.dataType && (item.source.regionCode || null) === entry.node.code)" :key="group.id" class="map-service-group" :class="{ 'is-dragging': draggingGroupId === group.id }" :data-group-id="group.id" :data-layer-kind="groupKind(group)">
+              <button :style="{ paddingLeft: `${12 + entry.depth * 10}px` }" :disabled="pendingGroupIds.has(group.id)" class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="`${group.name}(长按可拖动排序)`" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @pointerdown="onMapServicePointerDown($event, group)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
+                <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em role="switch" tabindex="0" :aria-checked="isMapServiceGroupActive(group)" :aria-label="`切换${group.name}可视性`" :title="isMapServiceGroupActive(group) ? '关闭整个服务及其依赖边界' : '显示服务图层'" @pointerdown.stop @click.stop="toggleMapServiceGroupVisibility(group)" @keydown.enter.stop.prevent="toggleMapServiceGroupVisibility(group)">{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
+              </button>
+              <div v-if="group.layers.length === 1 && attributeFilters[String(group.layers[0]!.id)]" class="attribute-filter-chip">{{ attributeFilters[String(group.layers[0]!.id)] }}<button type="button" aria-label="清除属性筛选" @click="clearAttributeFilter(group.layers[0]!)">×</button></div>
+              <div v-if="group.layers.length === 1 && categoryPanelFor(group.layers[0]!) && isCategoryExpanded(group.layers[0]!)" class="map-service-sublayers category-folder">
+                <div class="category-field-label">{{ categoryPanelFor(group.layers[0]!)!.fieldLabel }}</div>
+                <label class="layer-row map-service-row category-row">
+                  <i class="category-swatch category-swatch--all"></i><span><b>全部类型</b></span>
+                  <input type="checkbox" :checked="allVectorCategoriesChecked(categoryPanelFor(group.layers[0]!)!)" :indeterminate="someVectorCategoriesChecked(categoryPanelFor(group.layers[0]!)!)" @change="toggleAllVectorCategories(categoryPanelFor(group.layers[0]!)!, $event)" />
+                </label>
+                <label v-for="item in categoryPanelFor(group.layers[0]!)!.items" :key="item.value" class="layer-row map-service-row category-row">
+                  <i class="category-swatch" :style="{ background: item.color }"></i><span><b>{{ item.label }}</b></span>
+                  <input v-model="item.checked" type="checkbox" @change="applyVectorCategoryFilter(categoryPanelFor(group.layers[0]!)!)" />
+                </label>
+              </div>
+              <div v-if="isMapServiceGroupExpanded(group)" class="map-service-sublayers">
+                <div v-for="service in group.layers" :key="service.id" class="map-service-leaf">
+                  <button class="layer-row map-service-row map-service-sublayer" :class="{ active: visibleMapServiceIds.includes(String(service.id)), 'has-categories': categoryPanelFor(service) }" :title="service.name" role="switch" :aria-checked="visibleMapServiceIds.includes(String(service.id))" :aria-expanded="categoryPanelFor(service) ? isCategoryExpanded(service) : undefined" @click="onServiceRowClick(service)" @contextmenu="onSublayerContextMenu($event, service)">
+                    <i class="layer-kind" :style="vectorRowColor(service) ? { color: vectorRowColor(service) } : undefined"><MapLocation v-if="service.arcGisGeometryType" /><Picture v-else /></i><span><b>{{ service.name }}</b></span><em role="switch" tabindex="0" :aria-checked="visibleMapServiceIds.includes(String(service.id))" :aria-label="`切换${service.name}可视性`" @click.stop="toggleMapService(service)" @keydown.enter.stop.prevent="toggleMapService(service)" :title="visibleMapServiceIds.includes(String(service.id)) ? '隐藏' : '显示'">{{ visibleMapServiceIds.includes(String(service.id)) ? '●' : '○' }}</em>
+                  </button>
+                  <div v-if="attributeFilters[String(service.id)]" class="attribute-filter-chip">{{ attributeFilters[String(service.id)] }}<button type="button" aria-label="清除属性筛选" @click="clearAttributeFilter(service)">×</button></div>
+                  <div v-if="categoryPanelFor(service) && isCategoryExpanded(service)" class="category-folder">
+                    <div class="category-field-label">{{ categoryPanelFor(service)!.fieldLabel }}</div>
+                    <label class="layer-row map-service-row category-row">
+                      <i class="category-swatch category-swatch--all"></i><span><b>全部类型</b></span>
+                      <input type="checkbox" :checked="allVectorCategoriesChecked(categoryPanelFor(service)!)" :indeterminate="someVectorCategoriesChecked(categoryPanelFor(service)!)" @change="toggleAllVectorCategories(categoryPanelFor(service)!, $event)" />
+                    </label>
+                    <label v-for="item in categoryPanelFor(service)!.items" :key="item.value" class="layer-row map-service-row category-row">
+                      <i class="category-swatch" :style="{ background: item.color }"></i><span><b>{{ item.label }}</b></span>
+                      <input v-model="item.checked" type="checkbox" @change="applyVectorCategoryFilter(categoryPanelFor(service)!)" />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div></template></section></div><small v-if="regionTreeError">{{ regionTreeError }}，可选择全部图层</small></div>
           <div v-if="mapServiceOrderSaving" class="layer-order-save-status" role="status">正在保存共享排序…</div>
           <div v-if="selectedRegion === 'all' && jiulongAdminService" class="map-service-group administrative-boundary-group">
             <button class="layer-row map-service-row" @contextmenu="jiulongAdminService && onLayerContextMenu($event, jiulongAdminService)" :class="{ active: jiulongBoundaryVisible }" type="button" title="九龙镇行政区划边界" role="switch" :aria-checked="jiulongBoundaryVisible" @click="toggleJiulongBoundary">
@@ -1816,7 +1857,7 @@ onBeforeUnmount(() => {
           <div v-if="jiulongBoundaryError" class="layer-panel-message error" role="status">{{ jiulongBoundaryError }} <button type="button" :disabled="mapServicesLoading" @click="retryJiulongBoundary">重试</button></div>
           <div v-if="mapServicesError" class="layer-panel-message error">{{ mapServicesError }}</div>
           <div v-else-if="!mapServicesLoading && !mapServiceGroups.length" class="layer-panel-message">暂无可用的地图服务</div>
-          <TransitionGroup v-else tag="div" name="map-service-sort" class="map-service-sort-list">
+          <TransitionGroup v-else-if="selectedRegion === 'all'" tag="div" name="map-service-sort" class="map-service-sort-list">
             <div v-for="(group, groupIndex) in visibleServiceGroups" :key="group.id" class="map-service-group" :class="{ 'is-dragging': draggingGroupId === group.id }" :data-group-id="group.id" :data-layer-kind="groupKind(group)"><div v-if="groupIndex === 0 || groupKind(visibleServiceGroups[groupIndex - 1]!) !== groupKind(group)" class="map-service-kind-label">{{ groupKind(group) === 'vector' ? '矢量图层' : '影像图层' }}</div>
               <button :disabled="pendingGroupIds.has(group.id)" class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="`${group.name}(长按可拖动排序)`" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @pointerdown="onMapServicePointerDown($event, group)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
                 <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em role="switch" tabindex="0" :aria-checked="isMapServiceGroupActive(group)" :aria-label="`切换${group.name}可视性`" :title="isMapServiceGroupActive(group) ? '关闭整个服务及其依赖边界' : '显示服务图层'" @pointerdown.stop @click.stop="toggleMapServiceGroupVisibility(group)" @keydown.enter.stop.prevent="toggleMapServiceGroupVisibility(group)">{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
@@ -1936,15 +1977,16 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .region-filter { display: grid; gap: 6px; padding: 10px 12px; color: #8fc4d5; font-size: 12px; border-bottom: 1px solid #164b62; }
 .region-picker-trigger { display:flex; justify-content:space-between; align-items:center; width:100%; min-height:34px; padding:0 9px; border:1px solid #27647d; border-radius:4px; color:#d5f2fa; background:#092738; text-align:left; cursor:pointer; }
-.region-picker { max-height:240px; overflow:auto; padding:4px; border:1px solid #27647d; border-radius:4px; background:#092738; }
+.region-picker { padding:0; background:transparent; }
 .region-picker section strong { display:block; padding:7px 8px 3px; color:#8fc4d5; font-size:12px; }
 .region-option { display:flex; justify-content:space-between; width:100%; padding:6px 8px; border:0; border-radius:3px; color:#d5f2fa; background:transparent; text-align:left; cursor:pointer; }
 .region-option:hover,.region-option.active,.region-node:hover,.region-node.active { background:#18516a; color:#fff; }
-.region-node { display:flex; align-items:stretch; border-radius:3px; }
+.region-node { display:flex; align-items:center; justify-content:space-between; width:100%; border-radius:3px; }
 .region-node-select,.region-node-toggle { border:0; color:inherit; background:transparent; cursor:pointer; }
-.region-node-select { flex:1; min-width:0; padding:6px 8px; text-align:left; }
+.region-node-select { flex:1; min-width:0; padding:6px 8px; text-align:left; font-size:14px; }
+.layer-manager .region-service-list .map-service-group > .map-service-row { grid-template-columns: 16px minmax(0,1fr) auto; gap: 10px; }
 .region-node-toggle { width:30px; font-size:15px; }
-.region-node-toggle:hover { color:#fff; background:#27647d; }
+
 .region-filter small { color: #efb5a6; line-height: 1.4; }
 .dashboard-map { position: relative; width: 100%; height: 100%; overflow: hidden; background: #031a31; }.dashboard-map__canvas { position: absolute; inset: 0; }
 .dashboard-map:not(.dashboard-map--measuring) :deep(.leaflet-grab),
