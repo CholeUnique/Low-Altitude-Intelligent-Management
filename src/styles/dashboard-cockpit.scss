@@ -28,7 +28,11 @@
 .map-overview { position:absolute;inset:0;z-index:0;width:100%;height:100%;display:block;border:0;border-radius:0;background:transparent;box-shadow:none; }
 .overview-side { position:absolute;top:var(--cockpit-edge);bottom:var(--cockpit-edge);z-index:800;width:var(--cockpit-side-width);display:grid;grid-template-rows:1fr 1.1fr 1fr;gap:14px;min-height:0;pointer-events:none; }
 .overview-side--left { left:var(--cockpit-edge); }
-.overview-side--right { right:var(--cockpit-edge);grid-template-rows:.95fr .95fr 1.15fr; }
+.overview-side--right { right:var(--cockpit-edge);grid-template-rows:1.1fr 1.15fr 1.05fr; }
+.topic-data-panel { gap:10px; }
+.governance-panel .scene-task-chart { gap:8px; }
+.scene-task-ring__segment[role=button] { cursor:pointer; }
+.scene-task-ring__segment:focus-visible { outline:0;filter:drop-shadow(0 0 4px currentColor); }
 .overview-side { transition:transform .52s cubic-bezier(.22,1,.36,1),opacity .42s ease,visibility .52s; }
 .cockpit--clear-screen .overview-side { opacity:0;visibility:hidden;pointer-events:none; }
 .cockpit--clear-screen .overview-side--left { transform:translateX(calc(-100% - var(--cockpit-edge) - 20px)); }

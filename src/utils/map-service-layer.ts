@@ -52,7 +52,7 @@ interface ArcGisQueryResponse {
   features?: Array<{ attributes?: Record<string, unknown>; geometry?: MapServiceSearchGeometry }>
   fieldAliases?: Record<string, string>
   exceededTransferLimit?: boolean
-  objectIds?: Array<number | string>
+  objectIds?: Array<number | string> | null
   extent?: ArcGisExtent
 }
 
@@ -2702,6 +2702,8 @@ async function queryAllFeatures(url: string, parameters: URLSearchParams): Promi
   idParameters.set('returnGeometry', 'false')
   const index = await queryArcGis(url, idParameters)
   const ids = index.objectIds
+  // ArcGIS 对无空间命中的正常响应使用 objectIds:null，而不是空数组。
+  if (ids === null) return {features:[]}
   if (!ids) throw new Error('图层服务未返回完整要素索引')
   const features: NonNullable<ArcGisQueryResponse['features']> = []
   let fieldAliases: ArcGisQueryResponse['fieldAliases']

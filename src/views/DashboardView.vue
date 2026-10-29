@@ -5,6 +5,8 @@ import DashboardRing from '@/components/DashboardRing.vue'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import { Timer, Position } from '@element-plus/icons-vue'
 import DashboardMap from '@/components/DashboardMap.vue'
+import TopicStatisticsSummary from '@/components/TopicStatisticsSummary.vue'
+import { HIGH_STANDARD_TOPIC_ID } from '@/stores/geographic-topics'
 import { useUserStore } from '@/stores/user'
 import { getGovernanceTaskGeometry, getGovernanceTaskPage, type GovernanceTask, type TaskGeometryFeatureCollection } from '@/api/governance-task'
 import { getScene } from '@/mocks/portal'
@@ -211,8 +213,8 @@ function openLiveOperations() {
   router.push({ name: 'uav-tasks', params: { tab: 'live' } })
 }
 
-function openTaskOverview() {
-  router.push({ name: 'task-overview' })
+function openTopics() {
+  router.push({ name:'recognition',params:{tab:'data'},query:{dataTab:'topics',topic:HIGH_STANDARD_TOPIC_ID} })
 }
 
 function openDataManagement() {
@@ -576,10 +578,25 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
           </article>
 
           <aside class="overview-side overview-side--right" :inert="isMapClearScreen" :aria-hidden="isMapClearScreen">
-            <section class="overview-float-panel scene-count-panel">
+            <section class="overview-float-panel recognition-panel">
               <header>
-                <h2>各场景任务数</h2>
-                <button v-if="user.hasPermission('task-overview')" class="overview-header-link" type="button" aria-label="进入任务总览" @click="openTaskOverview">任务总览 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
+                <h2>智能识别成果</h2>
+                <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
+              </header>
+              <div class="recognition-summary"><DashboardRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :rate="recognitionHandledRate" :title="recognitionHandledRate === undefined ? '暂无图斑处置率' : `图斑处置率 ${recognitionHandledRate}%`" /><dl><div><dt>待核查图斑</dt><dd>{{ statistics?.overview.abnormalPendingCount ?? '—' }}</dd></div><div><dt>涉及面积</dt><dd>{{ formatNumber(statistics?.abnormalSummary.areaTotal) }}㎡</dd></div><div><dt>成果批次</dt><dd>{{ statistics?.overview.resultCount ?? '—' }}</dd></div></dl></div>
+              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%` }"></u></i><b>{{ item.count }}</b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
+            </section>
+            <section class="overview-float-panel topic-data-panel">
+              <header>
+                <h2>专题数据管理</h2>
+                <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入专题地图" @click="openTopics">专题地图 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
+              </header>
+              <TopicStatisticsSummary />
+            </section>
+            <section class="overview-float-panel scene-count-panel governance-panel">
+              <header>
+                <h2>任务办理成效</h2>
+                <button v-if="user.hasPermission('task-list')" class="overview-header-link" type="button" aria-label="进入任务列表" @click="openTaskList">任务列表 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <div v-if="sceneTaskChartItems.length" class="scene-task-chart">
                 <div class="scene-task-hover-card" :class="{ 'is-visible': hoveredSceneTask }" role="status">
@@ -587,7 +604,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                   <span>{{ hoveredSceneTask?.name }}</span>
                   <strong v-if="hoveredSceneTask">{{ hoveredSceneTask.taskCount }} 项</strong>
                 </div>
-                <div class="scene-task-main"><div class="scene-task-ring" :aria-label="`各场景共 ${sceneTaskTotal} 项任务`" role="img">
+                <div class="scene-task-main"><div class="scene-task-ring" :aria-label="`各场景共 ${sceneTaskTotal} 项任务`" role="group">
                   <svg viewBox="0 0 100 100" aria-hidden="true">
                     <circle class="scene-task-ring__track" cx="50" cy="50" r="42" pathLength="100" />
                     <circle
@@ -603,13 +620,21 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                       :stroke-dasharray="item.dashArray"
                       :stroke-dashoffset="item.dashOffset"
                       :class="{ 'is-hovered': hoveredSceneTaskId === item.id }"
+                      :role="user.hasPermission('task-list') ? 'button' : undefined"
+                      :tabindex="user.hasPermission('task-list') ? 0 : undefined"
+                      :aria-label="`${item.name}：${item.taskCount} 项任务，查看任务列表`"
                       @mouseenter="hoveredSceneTaskId = item.id"
                       @mouseleave="hoveredSceneTaskId = ''"
+                      @focus="hoveredSceneTaskId = item.id"
+                      @blur="hoveredSceneTaskId = ''"
+                      @click="openSceneTaskList(item.id)"
+                      @keydown.enter.prevent="openSceneTaskList(item.id)"
+                      @keydown.space.prevent="openSceneTaskList(item.id)"
                     />
                   </svg>
-                  <div class="scene-task-ring__center"><b>{{ sceneTaskTotal }}</b><span>任务总数</span></div>
+                  <div class="scene-task-ring__center"><b>{{ governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%` }}</b><span>任务完成率</span></div>
                 </div>
-                <dl class="metric-legend task-state-legend"><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd>{{ item.count }}</dd></div></dl></div>
+                <dl class="metric-legend task-state-legend"><div><dt><i class="legend-muted"></i>任务总数</dt><dd>{{ sceneTaskTotal }}</dd></div><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd>{{ item.count }}</dd></div></dl></div>
                 <div class="scene-task-legend" aria-label="场景任务数图例">
                   <button
                     v-if="user.hasPermission('task-list')"
@@ -618,6 +643,10 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                     type="button"
                     :title="`${item.name}：${item.taskCount} 项任务`"
                     @click="openSceneTaskList(item.id)"
+                    @mouseenter="hoveredSceneTaskId = item.id"
+                    @mouseleave="hoveredSceneTaskId = ''"
+                    @focus="hoveredSceneTaskId = item.id"
+                    @blur="hoveredSceneTaskId = ''"
                   >
                     <i :style="{ backgroundColor: item.color, boxShadow: `0 0 7px ${item.color}` }"></i>
                     <span>{{ item.name }}</span>
@@ -633,23 +662,6 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
               <div v-else class="float-empty">暂无场景任务数据</div>
             </section>
 
-            <section class="overview-float-panel governance-panel">
-              <header>
-                <h2>治理闭环成效</h2>
-                <button v-if="user.hasPermission('task-list')" class="overview-header-link" type="button" aria-label="进入任务列表" @click="openTaskList">任务列表 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
-              </header>
-              <div class="governance-summary"><DashboardRing :value="governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%`" label="完成率" tone="mint" :rate="governanceCompletionRate" /><dl><div><dt>任务总数</dt><dd>{{ unitTaskSummary?.total ?? '—' }}</dd></div><div><dt>已完成</dt><dd>{{ unitTaskSummary?.finished ?? '—' }}</dd></div><div><dt>执行中</dt><dd>{{ unitTaskSummary?.executing ?? '—' }}</dd></div><div><dt>待核查</dt><dd>{{ unitTaskSummary?.pendingVerify ?? '—' }}</dd></div></dl></div>
-              <div class="governance-flow" role="img" aria-label="治理流程说明：发现、核查、整改、复核、归档"><span v-for="step in ['发现','核查','整改','复核','归档']" :key="step"><i></i><b>{{ step }}</b></span></div>
-            </section>
-
-            <section class="overview-float-panel recognition-panel">
-              <header>
-                <h2>智能识别成果</h2>
-                <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
-              </header>
-              <div class="recognition-summary"><DashboardRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :rate="recognitionHandledRate" :title="recognitionHandledRate === undefined ? '暂无图斑处置率' : `图斑处置率 ${recognitionHandledRate}%`" /><dl><div><dt>待核查图斑</dt><dd>{{ statistics?.overview.abnormalPendingCount ?? '—' }}</dd></div><div><dt>涉及面积</dt><dd>{{ formatNumber(statistics?.abnormalSummary.areaTotal) }}㎡</dd></div><div><dt>成果批次</dt><dd>{{ statistics?.overview.resultCount ?? '—' }}</dd></div></dl></div>
-              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%` }"></u></i><b>{{ item.count }}</b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
-            </section>
           </aside>
         </div>
       </section>
