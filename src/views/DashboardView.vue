@@ -8,6 +8,7 @@ import { Timer, Position } from '@element-plus/icons-vue'
 import DashboardMap from '@/components/DashboardMap.vue'
 import TopicStatisticsSummary from '@/components/TopicStatisticsSummary.vue'
 import { HIGH_STANDARD_TOPIC_ID } from '@/stores/geographic-topics'
+import { isAgricultureTopicDepartment } from '@/utils/topic-access'
 import { useUserStore } from '@/stores/user'
 import { getGovernanceTaskGeometry, getGovernanceTaskPage, type GovernanceTask, type TaskGeometryFeatureCollection } from '@/api/governance-task'
 import { getScene } from '@/mocks/portal'
@@ -215,7 +216,7 @@ function openLiveOperations() {
 }
 
 function openTopics() {
-  router.push({ name:'recognition',params:{tab:'data'},query:{dataTab:'topics',topic:HIGH_STANDARD_TOPIC_ID} })
+  router.push({ name:'recognition',params:{tab:'topics'},query:{topic:HIGH_STANDARD_TOPIC_ID} })
 }
 
 function openDataManagement() {
@@ -578,7 +579,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
             <DashboardMap :key="activeScene?.id || organization.id" :layers="mapLayers" :routes="patrolRoutes" :focus-layer-id="activeScene?.id" :focus-geometry-pending="sceneGeometryPending" :screen-cleared="isMapClearScreen" floating-controls @toggle-clear-screen="isMapClearScreen = !isMapClearScreen" />
           </article>
 
-          <aside class="overview-side overview-side--right" :inert="isMapClearScreen" :aria-hidden="isMapClearScreen">
+          <aside class="overview-side overview-side--right" :style="isAgricultureTopicDepartment(user)?undefined:{gridTemplateRows:'1fr 1fr'}" :inert="isMapClearScreen" :aria-hidden="isMapClearScreen">
             <section class="overview-float-panel recognition-panel">
               <header>
                 <h2>智能识别成果</h2>
@@ -587,9 +588,9 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
               <div class="recognition-summary"><DashboardRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :rate="recognitionHandledRate" :title="recognitionHandledRate === undefined ? '暂无图斑处置率' : `图斑处置率 ${recognitionHandledRate}%`" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatNumber(statistics?.abnormalSummary.areaTotal) }}㎡</dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview.resultCount ?? '—'" /></dd></div></dl></div>
               <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%` }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
             </section>
-            <section class="overview-float-panel topic-data-panel">
+            <section v-if="isAgricultureTopicDepartment(user)" class="overview-float-panel topic-data-panel">
               <header>
-                <h2>专题数据管理</h2>
+                <h2>专题分析</h2>
                 <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入专题地图" @click="openTopics">专题地图 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <TopicStatisticsSummary animated />
