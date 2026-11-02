@@ -148,10 +148,10 @@ const geocodingCalls = []
 let geocodingGate
 function buildOverlay() {
   let source = readFileSync('src/workspace-components/spot-identification/VideoTelemetryOverlay.vue', 'utf8')
-  source = source.replace('</script>', 'defineExpose({ points, busy, error, sourceName, loadSrt, readVideoSrt, chooseLocal, follow, panel, panelPosition, panelSize, videoBounds, dragging, resizing, updatePanelLayout, startDrag, moveDrag, endDrag, movePanelWithKey, startResize, moveResize, endResize, scalePanel, showTrack, toggleFollow, showNavigationNotice });\n</script>')
+  source = source.replace('</script>', 'defineExpose({ points, busy, error, sourceName, loadSrt, readVideoSrt, chooseLocal, follow, panel, panelPosition, panelSize, videoBounds, dragging, resizing, updatePanelLayout, startDrag, moveDrag, endDrag, movePanelWithKey, startResize, moveResize, endResize, scalePanel, showTrack, toggleFollow, navigateToLocation, navigationTarget });\n</script>')
   const { descriptor } = parse(source)
   return load(compileScript(descriptor, { id: 'test-overlay', inlineTemplate: true }).content.replace('import.meta.env.VITE_TIANDITU_TOKEN', "'test-map-key'"), {
-    vue: Vue, leaflet, 'leaflet/dist/leaflet.css': {}, 'element-plus': { ElTooltip: { props: ['visible', 'placement'], setup(props, { slots }) { return () => Vue.h('div', { class: 'tooltip-stub', 'data-placement': props.placement }, [slots.default?.(), ...(props.visible ? [slots.content?.()] : [])]) } } }, '@/utils/video-telemetry': telemetry,
+    './NavigationQrDialog.vue': { default: { props: ['target'], render() { return null } } }, vue: Vue, leaflet, 'leaflet/dist/leaflet.css': {}, 'element-plus': { ElTooltip: { props: ['visible', 'placement'], setup(props, { slots }) { return () => Vue.h('div', { class: 'tooltip-stub', 'data-placement': props.placement }, [slots.default?.(), ...(props.visible ? [slots.content?.()] : [])]) } } }, '@/utils/video-telemetry': telemetry,
     '@/utils/telemetry-panel': panelUtils,
     '@/utils/telemetry-location': { createTelemetryLocationResolver: (request, publish) => locationUtils.createTelemetryLocationResolver(request, publish, { minIntervalMs: 0 }) },
     '@/api/geocoding': { getTiandituAddress: (...args) => {
@@ -190,12 +190,10 @@ assert.equal(infoRow.children.filter(node => node.type === 'span').length, 3, 'T
 assert.match(textContent(infoRow), /119\.840000°E, 32\.470000°N/)
 assert.match(textContent(locationRow), /当前位置：江苏省泰州市海陵区示例村附近/)
 assert(findClass(locationRow, 'navigation-button'), 'The position row includes the navigation action')
-assert.equal(locationRow.props.title, undefined, 'The navigation button must not inherit a native hover title')
-assert(!textContent(locationRow).includes('该功能暂未接入'), 'Hover does not show a navigation tooltip')
-assert.equal(findClass(locationRow, 'tooltip-stub').props['data-placement'], 'top', 'The tooltip arrow is aligned above the navigation button')
 findClass(locationRow, 'navigation-button').props.onClick()
 await Vue.nextTick()
-assert.match(textContent(locationRow), /该功能暂未接入/, 'Clicking navigation shows the pending tooltip')
+assert.equal(vm.navigationTarget.address, '江苏省泰州市海陵区示例村附近')
+assert.equal(vm.navigationTarget.longitude, 119.84)
 assert(!findClass(root, 'telemetry-source') && !findClass(root, 'telemetry-credit'), 'Remove both lines in the red box')
 const controlsNode = findClass(root, 'telemetry-controls')
 assert(controlsNode.children.indexOf(locationRow) > controlsNode.children.indexOf(infoRow))

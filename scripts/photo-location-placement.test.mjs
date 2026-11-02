@@ -18,7 +18,7 @@ let source = readFileSync('src/workspace-components/spot-identification/PhotoLoc
 source = source.replace('import.meta.env.VITE_TIANDITU_TOKEN', "''")
 source = source.replace('</script>', 'defineExpose({ panel, panelPosition, panelSize, imageBounds, placementReady, updatePlacement, startResize, moveResize, endResize });\n</script>')
 const component = load(compileScript(parse(source).descriptor, { id: 'photo-placement-test' }).content, {
-  vue: Vue, leaflet: {}, 'element-plus': {}, 'leaflet/dist/leaflet.css': {},
+  './NavigationQrDialog.vue': { default: {} }, vue: Vue, leaflet: {}, 'element-plus': {}, 'leaflet/dist/leaflet.css': {},
   '@/api/geocoding': {},
   '@/utils/telemetry-panel': load(readFileSync('src/utils/telemetry-panel.ts', 'utf8')),
 }).default

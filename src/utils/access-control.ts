@@ -19,7 +19,7 @@ export const permissionAliases: Record<AppPermissionKey, string[]> = {
   'route-planning': ['航线规划', 'ROUTE_PLANNING', 'WAYLINE_PLAN', 'MENU_ROUTE_PLANNING'],
   'flight-plan': ['飞行计划', 'FLIGHT_PLAN', 'MENU_FLIGHT_PLAN'],
   'live-monitoring': ['直播监控', '实时作业', 'LIVE_MONITORING', 'REALTIME_OPERATION', 'MENU_LIVE_MONITORING'],
-  'smart-recognition': ['智能识别', 'SMART_RECOGNITION', 'MENU_SMART_RECOGNITION'],
+  'smart-recognition': ['智能识别', 'SMART_RECOG', 'SMART_RECOGNITION', 'MENU_SMART_RECOGNITION'],
   'algorithm-analysis': ['算法分析', 'ALGORITHM_ANALYSIS', 'MENU_ALGORITHM_ANALYSIS'],
   'data-management': ['数据管理', 'DATA_MANAGEMENT', 'MENU_DATA_MANAGEMENT'],
   'task-overview': ['任务总览', 'TASK_OVERVIEW', 'MENU_TASK_OVERVIEW'],

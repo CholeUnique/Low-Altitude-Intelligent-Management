@@ -29,12 +29,13 @@ import MapServiceManagementPanel from '@/components/MapServiceManagementPanel.vu
 import PermissionManagementPanel from '@/components/PermissionManagementPanel.vue'
 import SceneManagementPanel from '@/components/SceneManagementPanel.vue'
 import ManagementNavIcon from '@/components/ManagementNavIcon.vue'
+import OperationLogPanel from '@/components/OperationLogPanel.vue'
 import StatusConfirmDialog from '@/components/StatusConfirmDialog.vue'
 import type { CurrentUser } from '@/types'
 import { formatBeijingDateTime } from '@/utils/date-time'
 import { canDepartmentAdminManageUser, departmentAdminFlag, hasDepartmentAdminRole, isDepartmentAdmin as isDepartmentAdminInDept, mergeUserDepartmentIdentity, needsDepartmentRoleLookup, userRoleLabel } from '@/utils/user-role'
 
-type Section = 'profile' | 'users' | 'departments' | 'scenes' | 'permissions' | 'metadata' | 'map-services'
+type Section = 'profile' | 'users' | 'departments' | 'scenes' | 'permissions' | 'metadata' | 'map-services' | 'logs'
 type EditorMode = 'add' | 'edit' | 'view'
 
 const router = useRouter()
@@ -46,7 +47,7 @@ const isDepartmentAdmin = computed(() => isDepartmentAdminInDept(userStore.curre
 const canManageDepartment = computed(() => isAdmin.value || isDepartmentAdmin.value)
 const roleName = computed(() => userRoleLabel(userStore.currentUser))
 const allowedSections = computed<Section[]>(() => isAdmin.value
-  ? ['profile', 'users', 'departments', 'scenes', 'permissions', 'metadata', 'map-services']
+  ? ['profile', 'users', 'departments', 'scenes', 'permissions', 'metadata', 'map-services', 'logs']
   : isDepartmentAdmin.value ? ['profile', 'users', 'departments', 'scenes', 'permissions'] : ['profile'])
 const busy = ref(false)
 const notice = ref('')
@@ -749,7 +750,7 @@ async function closeSceneAbnormalTypes() {
   })
 }
 
-const validSections = new Set<Section>(['profile', 'users', 'departments', 'scenes', 'permissions', 'metadata', 'map-services'])
+const validSections = new Set<Section>(['profile', 'users', 'departments', 'scenes', 'permissions', 'metadata', 'map-services', 'logs'])
 
 async function syncSectionFromRoute() {
   const routeSection = (route.name === 'account-scene-abnormal-types' ? 'scenes' : String(route.params.section || 'profile')) as Section
@@ -819,6 +820,9 @@ onMounted(loadProfile)
         </button>
         <button v-if="isAdmin" type="button" :class="{ active: activeSection === 'map-services' }" @click="selectSection('map-services')">
           <ManagementNavIcon name="map-services" /><i>地图服务管理</i>
+        </button>
+        <button v-if="isAdmin" type="button" :class="{ active: activeSection === 'logs' }" @click="selectSection('logs')">
+          <ManagementNavIcon name="logs" /><i>操作日志</i>
         </button>
       </aside>
 
@@ -939,6 +943,7 @@ onMounted(loadProfile)
         <PermissionManagementPanel v-else-if="activeSection === 'permissions' && canManageDepartment" />
         <MetadataManagementPanel v-else-if="activeSection === 'metadata' && isAdmin" />
         <MapServiceManagementPanel v-else-if="activeSection === 'map-services' && isAdmin" />
+        <OperationLogPanel v-else-if="activeSection === 'logs' && isAdmin" />
       </section>
     </div>
 

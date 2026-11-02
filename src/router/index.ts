@@ -36,7 +36,7 @@ const router = createRouter({
     { path: '/algorithms', name: 'algorithms', component: () => import('@/views/AlgorithmRepositoryView.vue'), meta: { title: '算法能力仓库' } },
     { path: '/account-management', redirect: (to) => ({ name: 'account-management', params: { section: 'profile' }, query: to.query }) },
     { path: '/account-management/scenes/:sceneId/abnormal-types', name: 'account-scene-abnormal-types', component: () => import('@/views/AccountManagementView.vue'), meta: { title: '场景异常类型', hidePrimaryHeader: true } },
-    { path: '/account-management/:section(profile|users|departments|scenes|permissions|metadata|map-services)', name: 'account-management', component: () => import('@/views/AccountManagementView.vue'), meta: { title: '后台管理', hidePrimaryHeader: true } },
+    { path: '/account-management/:section(profile|users|departments|scenes|permissions|metadata|map-services|logs)', name: 'account-management', component: () => import('@/views/AccountManagementView.vue'), meta: { title: '后台管理', hidePrimaryHeader: true } },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],
 })

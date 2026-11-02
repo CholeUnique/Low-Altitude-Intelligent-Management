@@ -56,7 +56,7 @@ const fullscreenHintVisible = ref(false)
 const previewDeviceId = ref('')
 let overviewRequestVersion = 0
 let playbackRequestVersion = 0
-let fullscreenHintTimer: ReturnType<typeof window.setTimeout> | undefined
+let fullscreenHintTimer: number | undefined
 
 const selectedDevice = computed(() => streams.value.find((item) => item.id === activeDeviceId.value))
 const previewDevice = computed(() => streams.value.find((item) => item.id === previewDeviceId.value))
