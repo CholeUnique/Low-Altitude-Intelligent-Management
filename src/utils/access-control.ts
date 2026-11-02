@@ -33,7 +33,7 @@ export const uavTabPermission: Record<string, AppPermissionKey> = {
 }
 
 export const recognitionTabPermission: Record<string, AppPermissionKey> = {
-  spots: 'smart-recognition', algorithms: 'algorithm-analysis', data: 'data-management',
+  spots: 'smart-recognition', algorithms: 'algorithm-analysis', data: 'data-management', topics:'data-management',
 }
 
 export const taskRoutePermission: Record<string, AppPermissionKey> = {

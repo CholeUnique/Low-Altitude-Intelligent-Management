@@ -4,11 +4,15 @@ import { useUserStore } from './user'
 import type { TopicDisplayMode } from '@/utils/topic-renderer'
 
 export const HIGH_STANDARD_TOPIC_ID = 'HIGH_STANDARD_FARMLAND'
+export const FACILITIES_TOPIC_ID = 'HIGH_STANDARD_FACILITIES'
 export interface GeographicTopic { id: string; name: string; description: string }
 export interface TopicLayerPreference { visible?: boolean; mode?: TopicDisplayMode; categoryModes?: Record<string, TopicDisplayMode> }
 interface TopicProfile { topics: GeographicTopic[]; preferences: Record<string,Record<string,TopicLayerPreference>> }
-const defaultTopic: GeographicTopic = { id:HIGH_STANDARD_TOPIC_ID,name:'高标准农田',description:'展示高标准农田项目、工程设施、耕地与国土调查数据。' }
-const emptyProfile = (): TopicProfile => ({topics:[{...defaultTopic}],preferences:{}})
+const defaultTopics: GeographicTopic[] = [
+  {id:HIGH_STANDARD_TOPIC_ID,name:'高标准农田管理',description:'展示高标准农田、耕地与国土调查数据。'},
+  {id:FACILITIES_TOPIC_ID,name:'高标准农田工程设施管理',description:'展示高标准农田工程设施及相关地理数据。'},
+]
+const emptyProfile = (): TopicProfile => ({topics:defaultTopics.map(topic=>({...topic})),preferences:{}})
 
 /** 专题与任务业务场景独立。独立接口上线前，配置只保存到本机、按账号及部门隔离。 */
 export const useGeographicTopicsStore = defineStore('geographic-topics', () => {
@@ -21,8 +25,8 @@ export const useGeographicTopicsStore = defineStore('geographic-topics', () => {
     try {
       const stored = JSON.parse(localStorage.getItem(key) || 'null')
       if (!stored || typeof stored !== 'object') return
-      const ids = new Set([HIGH_STANDARD_TOPIC_ID]), names = new Set([defaultTopic.name])
-      const topics: GeographicTopic[] = [{...defaultTopic}]
+      const ids = new Set(defaultTopics.map(topic=>topic.id)), names = new Set(defaultTopics.map(topic=>topic.name))
+      const topics: GeographicTopic[] = defaultTopics.map(topic=>({...topic}))
       for (const item of Array.isArray(stored.topics) ? stored.topics.slice(0,100) : []) {
         if (typeof item.id !== 'string' || !/^topic-[\w-]+$/.test(item.id) || typeof item.name !== 'string') continue
         const name = item.name.trim()

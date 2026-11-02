@@ -42,6 +42,7 @@ declare module 'vue' {
     TaskSchedulePicker: typeof import('./src/components/TaskSchedulePicker.vue')['default']
     TaskWorkflowProgress: typeof import('./src/components/task-center/TaskWorkflowProgress.vue')['default']
     TopicFeatureDetails: typeof import('./src/components/TopicFeatureDetails.vue')['default']
+    TopicMapLegend: typeof import('./src/components/TopicMapLegend.vue')['default']
     TopicMapToolbar: typeof import('./src/components/TopicMapToolbar.vue')['default']
     TopicOverlayAnalysis: typeof import('./src/components/TopicOverlayAnalysis.vue')['default']
     TopicStatisticsSummary: typeof import('./src/components/TopicStatisticsSummary.vue')['default']
