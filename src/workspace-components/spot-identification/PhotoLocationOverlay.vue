@@ -4,7 +4,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { FlightReviewMedia } from '@/api/flight-review'
 import { getTiandituAddress } from '@/api/geocoding'
-import { openAmapNavigation } from '@/utils/amap-navigation'
+import NavigationQrDialog from './NavigationQrDialog.vue'
 import { containedVideoBounds, fitTelemetryPanelSize, placeTelemetryPanel, resizeTelemetryPanel, type TelemetryPanelBounds, type TelemetryPanelSize } from '@/utils/telemetry-panel'
 
 const props = defineProps<{ media: FlightReviewMedia; fullscreen?: boolean }>()
@@ -13,6 +13,8 @@ const mapElement = ref<HTMLElement>()
 const mapMode = ref<'vector' | 'image'>('image')
 const mapError = ref('')
 const address = ref('正在获取具体位置…')
+const addressReady = ref(false)
+const navigationTarget = ref<{ longitude: number; latitude: number; address: string }>()
 const panelPosition = ref<{ left: number; top: number }>()
 const panelSize = ref<TelemetryPanelSize>()
 const imageBounds = shallowRef<TelemetryPanelBounds>()
@@ -153,11 +155,13 @@ function resizeWithKey(event: KeyboardEvent) {
 }
 
 function navigateToLocation() {
-  openAmapNavigation(props.media.longitude, props.media.latitude, address.value.startsWith('正在') || address.value.includes('失败') ? '' : address.value)
+  const { longitude, latitude } = props.media
+  if (addressReady.value && longitude !== undefined && latitude !== undefined) navigationTarget.value = { longitude, latitude, address: address.value }
 }
 
 async function loadAddress() {
   addressController?.abort()
+  addressReady.value = false
   if (props.media.longitude === undefined || props.media.latitude === undefined) {
     address.value = '暂无位置信息'
     return
@@ -170,7 +174,8 @@ async function loadAddress() {
   addressController = controller
   address.value = '正在获取具体位置…'
   try {
-    address.value = await getTiandituAddress(token, props.media.longitude, props.media.latitude, controller.signal)
+    const result = await getTiandituAddress(token, props.media.longitude, props.media.latitude, controller.signal)
+    if (!controller.signal.aborted) { address.value = result; addressReady.value = true }
   } catch (reason) {
     if (!controller.signal.aborted) address.value = reason instanceof Error ? reason.message : '具体位置暂时无法获取'
   }
@@ -265,6 +270,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <NavigationQrDialog v-if="navigationTarget" :target="navigationTarget" @close="navigationTarget = undefined" />
   <section ref="panel" class="photo-location" :class="{ 'is-dragging': dragging, 'is-resizing': resizing, 'is-positioned': placementReady }" :style="panelStyle" aria-label="拍摄位置" @pointerdown.stop @wheel.stop @dblclick.stop @click.stop @keydown.stop>
     <header tabindex="0" aria-label="拖动拍摄位置窗口，或使用方向键移动" title="按住标题栏拖动" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag" @keydown="movePanelWithKey"><strong>拍摄位置 <span class="drag-grip" aria-hidden="true">⠿</span></strong></header>
     <div class="photo-location__map-wrap">
@@ -272,7 +278,7 @@ onBeforeUnmount(() => {
       <p v-if="mapError" class="photo-location__state">{{ mapError }}</p>
     </div>
     <dl class="photo-location__details">
-      <div class="coordinate-row"><dt>经纬度</dt><dd>{{ formatCoordinate(media.longitude!, 'E', 'W') }}，{{ formatCoordinate(media.latitude!, 'N', 'S') }}</dd><button type="button" class="navigation-button" aria-label="导航" @click.stop="navigateToLocation">导航</button></div>
+      <div class="coordinate-row"><dt>经纬度</dt><dd>{{ formatCoordinate(media.longitude!, 'E', 'W') }}，{{ formatCoordinate(media.latitude!, 'N', 'S') }}</dd><button type="button" class="navigation-button" aria-label="导航" :disabled="!addressReady" :title="addressReady ? '扫码导航' : '地址尚不可用'" @click.stop="navigateToLocation">导航</button></div>
       <div><dt>地址</dt><dd :title="address">{{ address }}</dd></div>
     </dl>
     <button type="button" :aria-label="`切换底图，当前为${mapMode === 'image' ? '影像地图' : '电子地图'}`" :title="`当前：${mapMode === 'image' ? '影像地图' : '电子地图'}；点击切换`" @click.stop="switchBaseMap">切换底图</button>

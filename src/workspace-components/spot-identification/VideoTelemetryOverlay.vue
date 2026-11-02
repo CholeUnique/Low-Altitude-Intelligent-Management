@@ -2,9 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { getFlightReviewSrtFile, getFlightReviewVideoSrtFile, type FlightReviewMedia } from '@/api/flight-review'
+import { generateFlightReviewSrt, getFlightReviewSrtFile, getFlightReviewVideoSrtFile, type FlightReviewMedia } from '@/api/flight-review'
 import { getTiandituAddress } from '@/api/geocoding'
-import { openAmapNavigation } from '@/utils/amap-navigation'
+import NavigationQrDialog from './NavigationQrDialog.vue'
 import { createTelemetryLocationResolver, type TelemetryLocationState } from '@/utils/telemetry-location'
 import { bindVideoTelemetryClock, decodeVideoSrt, formatTelemetryCoordinates, interpolatedTelemetryAtTime, parseVideoSrt, type VideoTelemetryPoint } from '@/utils/video-telemetry'
 import { containedVideoBounds, fitTelemetryPanelSize, placeTelemetryPanel, resizeTelemetryPanel, type TelemetryPanelBounds, type TelemetryPanelSize } from '@/utils/telemetry-panel'
@@ -34,6 +34,7 @@ const follow = ref(true)
 const manualSource = ref(false)
 const candidates = computed(() => props.mediaList.filter(item => item.taskId === props.media.taskId && /\.srt$/i.test(item.fileName)))
 const token = import.meta.env.VITE_TIANDITU_TOKEN
+const navigationTarget = ref<{ longitude: number; latitude: number; address: string }>()
 const location = ref<TelemetryLocationState>({ status: 'idle', text: '当前时刻无有效定位' })
 const locationPaused = ref(false)
 const locationSource = ref<'pause' | 'playback'>('pause')
@@ -224,6 +225,25 @@ function readVideoSrt() {
   void loadSrt(props.media, true)
 }
 
+async function generateSrt() {
+  const media = props.media
+  resetRequest()
+  const request = version
+  busy.value = true
+  error.value = ''
+  try {
+    const ready = await generateFlightReviewSrt(media.id)
+    if (request !== version || props.media.id !== media.id) return
+    if (!ready) { error.value = '字幕尚未就绪，请稍后重试。'; return }
+    manualSource.value = false
+    await loadSrt(media, true)
+  } catch (reason) {
+    if (request === version) error.value = reason instanceof Error ? reason.message : '生成字幕失败，请稍后重试。'
+  } finally {
+    if (request === version) busy.value = false
+  }
+}
+
 function chooseLocal(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -311,8 +331,8 @@ function toggleFollow() {
 }
 
 function navigateToLocation() {
-  const point = position.value
-  openAmapNavigation(point?.longitude, point?.latitude, locationPaused.value && location.value.status === 'ready' ? location.value.text : '')
+  const state = location.value
+  if (state.status === 'ready' && state.point) navigationTarget.value = { ...state.point, address: state.text }
 }
 
 function renderTrack() {
@@ -442,6 +462,7 @@ onBeforeUnmount(() => { endDrag(); endResize(); releaseVideoClock?.(); locationR
 </script>
 
 <template>
+  <NavigationQrDialog v-if="navigationTarget" :target="navigationTarget" @close="navigationTarget = undefined" />
   <section ref="panel" class="video-telemetry" :class="{ 'is-dragging': dragging, 'is-resizing': resizing }" :style="panelStyle" aria-label="视频协同定位" @click.stop @keydown.stop>
     <header class="telemetry-header" tabindex="0" aria-label="拖动协同展示窗口，或使用方向键移动" title="按住标题栏拖动" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag" @keydown="movePanelWithKey"><div><strong>协同展示 <span class="drag-grip" aria-hidden="true">⠿</span></strong><small title="使用相邻有效定位采样插值，非设备当前实时遥测">SRT 回放位置 · 平滑插值</small></div><div class="telemetry-window-actions"><button type="button" aria-label="关闭协同展示" title="关闭协同展示" @click="emit('close')">×</button></div></header>
     <div class="telemetry-map-wrap">
@@ -454,13 +475,14 @@ onBeforeUnmount(() => { endDrag(); endResize(); releaseVideoClock?.(); locationR
       <span>{{ formatTelemetryCoordinates(position) }}</span>
       <span>相对高度 {{ position?.relativeAltitude !== undefined ? `${position.relativeAltitude.toFixed(1)} m` : '—' }}</span>
     </div>
-    <div class="telemetry-location" :class="{ 'is-unavailable': location.status === 'error' }" aria-live="polite"><span>{{ locationLabel }}</span><span :title="location.text">{{ location.text }}</span><button type="button" class="navigation-button" aria-label="导航" @click="navigateToLocation" :disabled="!position">导航</button></div>
+    <div class="telemetry-location" :class="{ 'is-unavailable': location.status === 'error' }" aria-live="polite"><span>{{ locationLabel }}</span><span :title="location.text">{{ location.text }}</span><button type="button" class="navigation-button" aria-label="导航" @click="navigateToLocation" :disabled="location.status !== 'ready' || !location.point" :title="location.status === 'ready' && location.point ? '扫码导航' : '地址尚不可用'">导航</button></div>
     <div class="telemetry-actions">
       <button type="button" :disabled="!points.length" :aria-pressed="follow" @click="toggleFollow">{{ follow ? '跟随中' : '跟随无人机' }}</button>
       <button type="button" :disabled="!points.length" @click="showTrack">全程轨迹</button>
       <button type="button" :aria-label="`切换底图，当前为${mapMode === 'image' ? '影像地图' : '电子地图'}`" :title="`当前：${mapMode === 'image' ? '影像地图' : '电子地图'}；点击切换`" @click="switchBaseMap">切换底图</button>
     </div>
     <button v-if="error || manualSource" class="backend-srt-retry" type="button" :disabled="busy" @click="readVideoSrt">{{ manualSource ? '读取当前视频配套 SRT' : '重试读取配套 SRT' }}</button>
+    <button v-if="!points.length" class="backend-srt-retry" type="button" :disabled="busy" @click="generateSrt">生成配套 SRT</button>
     <label v-if="!points.length && !busy" class="backend-srt-retry local-srt-picker" :title="sourceName">选择本地 SRT<input type="file" accept=".srt" aria-label="选择本地 SRT 文件" @change="chooseLocal" /></label>
     <select v-if="candidates.length" class="server-srt" aria-label="选择任务中的 SRT" @change="chooseServer"><option value="">选择任务中的 SRT</option><option v-for="item in candidates" :key="item.id" :value="item.id">{{ item.fileName }}</option></select>
     <p v-if="mapError && points.length" class="telemetry-warning">{{ mapError }}</p>

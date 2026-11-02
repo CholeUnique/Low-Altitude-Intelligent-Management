@@ -4,6 +4,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import type { TaskAbnormal } from '@/api/governance-task'
 import type { MapServiceItem } from '@/api/map-service'
+import SpotLocationPanel from './SpotLocationPanel.vue'
 import {
   createMapServiceLayer,
   MAP_SERVICE_IMAGERY_PANE,
@@ -35,6 +36,7 @@ const props = withDefaults(defineProps<{
   period: ComparisonPeriod
   /** 用于期次栏缩略图时隐藏说明和期次浮标。 */
   thumbnail?: boolean
+  showLocation?: boolean
   /** 仅地理影像窗口使用；普通图片查看器不参与视图联动。 */
   synchronizedView?: SynchronizedMapView
   /** 仅两幅普通图片使用相同归一化坐标时启用联动，不和地理坐标混用。 */
@@ -51,6 +53,7 @@ const emit = defineEmits<{
   'finish-drawing': []
 }>()
 const container = ref<HTMLElement>()
+const locationOpen = ref(false)
 const imageError = ref(false)
 const referenceImageryError = ref('')
 const renderedView = ref<{ center: string; zoom: number }>()
@@ -203,7 +206,7 @@ function createGeographicImageViewer(imageUrl: string) {
   if (!container.value || !props.period.bounds) return
   const [west, south, east, north] = props.period.bounds
   const bounds = L.latLngBounds([south, west], [north, east])
-  map = L.map(container.value, { maxZoom: 24, attributionControl: false }).fitBounds(bounds, { animate: false })
+  map = L.map(container.value, { maxZoom: 24, zoomControl: false, attributionControl: false }).fitBounds(bounds, { animate: false })
   map.createPane('spot-drawing').style.zIndex = '620'
   L.imageOverlay(imageUrl, bounds).on('error', () => { imageError.value = true }).addTo(map)
   imageReady = true
@@ -216,7 +219,7 @@ function createImageViewer(imageUrl: string) {
     crs: L.CRS.Simple,
     minZoom: props.synchronizeImages ? 0 : -4,
     maxZoom: props.synchronizeImages ? 16 : 4,
-    zoomControl: true,
+    zoomControl: false,
     attributionControl: false,
     zoomSnap: .25,
   }).setView([0, 0], 0)
@@ -242,7 +245,7 @@ async function createMapServiceViewer(service: MapServiceItem) {
   referenceImageryError.value = ''
   map = L.map(container.value, {
     maxZoom: 22,
-    zoomControl: !props.thumbnail,
+    zoomControl: false,
     attributionControl: false,
     dragging: !props.thumbnail,
     scrollWheelZoom: !props.thumbnail,
@@ -350,6 +353,8 @@ onBeforeUnmount(() => {
 <template>
   <div class="spot-map" :data-center="renderedView?.center" :data-zoom="renderedView?.zoom" :class="{ 'spot-map--empty': period.kind === 'empty', 'spot-map--thumbnail': thumbnail, 'spot-map--drawing': drawingMode === 'available' || drawingMode === 'active', 'spot-map--drawing-active': drawingMode === 'active', 'spot-map--drawing-preview': drawingMode === 'preview' }">
     <div v-if="period.kind !== 'empty'" ref="container" class="spot-map__canvas"></div>
+    <button v-if="showLocation && !thumbnail" class="spot-location-button" :class="{ 'is-active': locationOpen }" type="button" :aria-pressed="locationOpen" :disabled="spot?.longitude === undefined || spot?.latitude === undefined" :title="spot?.longitude === undefined || spot?.latitude === undefined ? '图斑暂无中心坐标' : locationOpen ? '关闭图斑位置' : '查看图斑位置'" @click.stop="locationOpen = !locationOpen">位置信息</button>
+    <SpotLocationPanel v-if="showLocation && locationOpen && spot?.longitude !== undefined && spot?.latitude !== undefined" :key="spot.id" :longitude="spot.longitude" :latitude="spot.latitude" @close="locationOpen = false" />
     <div v-if="!thumbnail" class="map-top-labels">
       <div v-if="drawingMode === 'active'" class="drawing-prompt drawing-prompt--active drawing-prompt--top">至少绘制三个点，单击鼠标右键完成绘制 · 已绘制 {{ draftCoordinates.length }} 个点</div>
       <div v-else-if="drawingMode === 'blocked'" class="drawing-prompt drawing-prompt--active drawing-prompt--top">请在已选中的影像窗口继续绘制</div>
@@ -368,6 +373,9 @@ onBeforeUnmount(() => {
 .spot-map { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #dce8ee; }
 .spot-map--empty { background: #d2d9de; }
 .spot-map__canvas { position: absolute; inset: 0; }
+.spot-location-button { position:absolute; z-index:710; top:9px; left:9px; padding:6px 10px; border:1px solid #54a9c1; border-radius:4px; color:#e1f7ff; background:#10384ddd; cursor:pointer; }
+.spot-location-button.is-active { color:#70edff; border-color:#33cde4; background:#075875ef; box-shadow:0 0 0 1px #27c4dd55; }
+.spot-location-button:disabled { opacity:.5; cursor:not-allowed; }
 .map-top-labels { position:absolute; z-index:700; top:9px; left:9px; right:9px; display:flex; justify-content:flex-end; align-items:flex-start; gap:8px; min-width:0; pointer-events:none; }
 .period-badge { flex:none; padding:5px 8px; color:#effbff; background:#08364ad9; border:1px solid #54d6e099; border-radius:4px; font-size:12px; font-weight:600; white-space:nowrap; pointer-events:none; }
 .empty-imagery { position: absolute; z-index: 500; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 10px 15px; color: #526773; background: #edf1f3dd; border: 1px solid #afbdc5; border-radius: 4px; font-size: 14px; font-weight: 600; white-space: nowrap; pointer-events: none; }

@@ -695,10 +695,11 @@ onBeforeUnmount(() => {
         <div class="panel-title"><span>问题图斑分布</span><div class="map-header-actions"><small v-if="active">当前：{{ active.title }}</small><button type="button" :aria-label="mapFullscreen ? '退出问题图斑分布全屏' : '全屏展示问题图斑分布'" @click="toggleMapFullscreen">{{ mapFullscreen ? '退出全屏' : '全屏展示' }}</button></div></div>
         <div v-if="active" class="map-compare" :class="`compare-${periods}`">
           <SpotDistributionMap
-            v-for="period in comparisonPeriods"
+            v-for="(period, index) in comparisonPeriods"
             :key="`${active.id}-${periods}-${period.number}-${period.imageUrl || period.mapService?.id || period.kind}`"
             :spot="active"
             :period="period"
+            :show-location="index === 0"
             :synchronized-view="synchronizedMapView"
             :drawing-mode="drawingMode(period)"
             :draft-coordinates="draftCoordinates"

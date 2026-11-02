@@ -1,5 +1,5 @@
 export interface TelemetryLocationPoint { longitude: number; latitude: number }
-export interface TelemetryLocationState { status: 'idle' | 'loading' | 'ready' | 'error'; text: string }
+export interface TelemetryLocationState { status: 'idle' | 'loading' | 'ready' | 'error'; text: string; point?: TelemetryLocationPoint }
 
 /** 由播放开始/暂停等离散事件驱动：约 20m 网格缓存、限频、只应用当前网格结果。 */
 export function createTelemetryLocationResolver(
@@ -39,7 +39,7 @@ export function createTelemetryLocationResolver(
     lastStart = now()
     let state: TelemetryLocationState
     try {
-      state = { status: 'ready', text: await request(target.point, controller.signal) }
+      state = { status: 'ready', text: await request(target.point, controller.signal), point: target.point }
     } catch (reason) {
       state = { status: 'error', text: reason instanceof Error ? reason.message : '具体位置暂时无法获取' }
     }

@@ -602,6 +602,11 @@ export async function bindGovernanceTaskMedia(input: GovernanceTaskMediaBindInpu
   await apiClient.post('/v1/biz/task/media/bind', input)
 }
 
+/** 解绑任务与素材的关联，素材文件本身不删除。 */
+export async function unbindGovernanceTaskMedia(input: GovernanceTaskMediaBindInput): Promise<void> {
+  await apiClient.post('/v1/biz/task/media/unbind', input)
+}
+
 export async function setGovernanceTaskMediaCover(input: {
   deptId?: string
   bizTaskId: string

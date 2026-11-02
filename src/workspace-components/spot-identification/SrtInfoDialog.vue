@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { getFlightReviewVideoSrtFile, type FlightReviewMedia } from '@/api/flight-review'
+import { generateFlightReviewSrt, getFlightReviewVideoSrtFile, type FlightReviewMedia } from '@/api/flight-review'
 import { decodeVideoSrt, formatTelemetryCoordinates } from '@/utils/video-telemetry'
 import { formatSrtTime, inspectSrt, srtAltitudePath, srtField, type SrtDocument } from '@/utils/srt-inspector'
 
@@ -11,6 +11,7 @@ const closeButton = ref<HTMLButtonElement>()
 const expanded = ref(false)
 const tab = ref<'overview' | 'records' | 'raw'>('overview')
 const busy = ref(false)
+const generating = ref(false)
 const error = ref('')
 const raw = ref('')
 const file = shallowRef<Blob>()
@@ -85,6 +86,21 @@ function download() {
   link.click()
 }
 
+async function generateSrt() {
+  if (generating.value || busy.value) return
+  const mediaId = activeMedia.value.id
+  const version = requestVersion
+  generating.value = true
+  try {
+    const ready = await generateFlightReviewSrt(mediaId)
+    if (version !== requestVersion || activeMedia.value.id !== mediaId) return
+    if (ready) await load()
+    else error.value = '字幕暂未就绪，请稍后重试。'
+  } catch (reason) {
+    if (version === requestVersion) error.value = reason instanceof Error ? reason.message : '字幕生成失败，请重试。'
+  } finally { generating.value = false }
+}
+
 function showRecords() { tab.value = 'records' }
 function handleKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); emit('close'); return }
@@ -126,7 +142,7 @@ onBeforeUnmount(() => {
         </header>
         <nav class="srt-tabs" role="tablist" aria-label="SRT 信息视图"><button type="button" role="tab" :aria-selected="tab === 'overview'" @click="tab = 'overview'">数据总览</button><button type="button" role="tab" :aria-selected="tab === 'records'" @click="tab = 'records'">字幕记录 <span v-if="data">{{ data.records.length.toLocaleString() }}</span></button><button type="button" role="tab" :aria-selected="tab === 'raw'" @click="tab = 'raw'">原始全文</button></nav>
         <div v-if="busy" class="srt-state" role="status"><span class="srt-spinner" /><h3>正在读取飞行遥测</h3><p>读取当前视频的完整 SRT 文件…</p></div>
-        <div v-else-if="error && !raw" class="srt-state is-error" role="status"><span class="state-symbol">!</span><h3>暂时无法读取 SRT</h3><p>{{ error }}</p><button type="button" @click="load">重新读取</button></div>
+        <div v-else-if="error && !raw" class="srt-state is-error" role="status"><span class="state-symbol">!</span><h3>暂时无法读取 SRT</h3><p>{{ error }}</p><button type="button" @click="load">重新读取</button><button type="button" :disabled="generating" @click="generateSrt">{{ generating ? '正在准备字幕…' : '手动生成字幕' }}</button></div>
         <template v-else>
           <p v-if="error || (data && !data.records.length)" class="srt-notice">{{ error || '未识别到标准字幕时间记录，原始内容仍可完整查看。' }} <button type="button" @click="tab = 'raw'">查看原文</button></p>
           <div v-if="tab === 'overview'" class="srt-overview" role="tabpanel">

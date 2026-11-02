@@ -321,11 +321,11 @@ let jiulongAdminRequest = 0
 let jiulongAdminPendingFit = jiulongBoundaryVisible.value
 const jiulongAdminService = ref<MapServiceItem>()
 const jiulongAdminSourceId = ref('')
-let toolMessageTimer: ReturnType<typeof window.setTimeout> | undefined
-let markerHintTimer: ReturnType<typeof window.setTimeout> | undefined
-let searchFocusTimer: ReturnType<typeof window.setTimeout> | undefined
-let searchHighlightTimer: ReturnType<typeof window.setInterval> | undefined
-let searchHighlightClearTimer: ReturnType<typeof window.setTimeout> | undefined
+let toolMessageTimer: number | undefined
+let markerHintTimer: number | undefined
+let searchFocusTimer: number | undefined
+let searchHighlightTimer: number | undefined
+let searchHighlightClearTimer: number | undefined
 let attributeSearchRequestVersion = 0
 let featureSelectionRequestVersion = 0
 let focusedSceneLayerId = ''

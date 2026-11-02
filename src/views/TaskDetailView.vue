@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import TaskHistory from '@/components/task-center/TaskHistory.vue'
+import TaskLinkedMedia from '@/components/task-center/TaskLinkedMedia.vue'
+import { useUserStore } from '@/stores/user'
 import { projectTaskListWorkflow } from '@/utils/task-list-workflow'
 import { workflowNodeDisplayName } from '@/utils/task-workflow-state'
 import { getTaskWorkflow, type TaskWorkflow } from '@/api/task-workflow'
@@ -13,6 +15,7 @@ import { cancelGovernanceTask, executeGovernanceTask, finishGovernanceTask, getG
 import type { GovernanceTaskDetail, GovernanceTaskOperateLog, TaskAbnormal, TaskGeometryFeatureCollection } from '@/api/governance-task'
 
 const route = useRoute()
+const user = useUserStore()
 const router = useRouter()
 const detail = ref<GovernanceTaskDetail>()
 const geometry = ref<TaskGeometryFeatureCollection>({ type: 'FeatureCollection', features: [] })
@@ -277,7 +280,7 @@ onMounted(() => void loadTask())
         <section class="detail-panel basic-info">
           <div class="detail-title">任务基本信息<button v-if="task.taskStatus !== 4 && task.taskStatus !== 5" @click="editVisible = true">编辑</button></div>
           <div class="basic-scroll" tabindex="0" aria-label="任务基本信息，可滚动查看"><h2>{{ task.name }}</h2><div class="basic-badges"><em>{{ taskPriorityLabel(task.priority) }}优先级</em><em :class="statusClass(displayedTask?.taskStatus)">{{ displayedTask?.taskStatusDesc }}</em></div>
-          <dl><template v-for="[label, value] in basicFields" :key="label"><dt>{{ label }}</dt><dd>{{ value == null || value === '' ? '暂无数据' : value }}</dd></template></dl></div>
+          <dl><template v-for="[label, value] in basicFields" :key="label"><dt>{{ label }}</dt><dd>{{ value == null || value === '' ? '暂无数据' : value }}</dd></template></dl><TaskLinkedMedia v-if="task.imageCount" :task-id="task.id" :dept-id="task.deptId" :image-count="task.imageCount" :editable="user.hasPermission('smart-recognition') && ![3, 4, 5].includes(task.taskStatus)" @changed="loadTask" /></div>
         </section>
       </aside>
 

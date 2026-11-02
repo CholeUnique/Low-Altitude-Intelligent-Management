@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ name: 'profile' | 'users' | 'departments' | 'scenes' | 'permissions' | 'metadata' | 'map-services' }>()
+defineProps<{ name: 'profile' | 'users' | 'departments' | 'scenes' | 'permissions' | 'metadata' | 'map-services' | 'logs' }>()
 </script>
 
 <template>
@@ -22,6 +22,9 @@ defineProps<{ name: 'profile' | 'users' | 'departments' | 'scenes' | 'permission
     </template>
     <template v-else-if="name === 'metadata'">
       <ellipse cx="12" cy="6" rx="7.5" ry="2.7" /><path d="M4.5 6v6c0 1.5 3.4 2.7 7.5 2.7s7.5-1.2 7.5-2.7V6M4.5 12v6c0 1.5 3.4 2.7 7.5 2.7s7.5-1.2 7.5-2.7v-6" />
+    </template>
+    <template v-else-if="name === 'logs'">
+      <rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" />
     </template>
     <template v-else>
       <path d="m12 3 9 4.5-9 4.5-9-4.5zM4.5 12 12 15.8l7.5-3.8M4.5 16 12 19.8 19.5 16" />

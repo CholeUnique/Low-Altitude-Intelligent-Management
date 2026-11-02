@@ -2,6 +2,11 @@ import { apiClient } from './client'
 
 type RawRecord = Record<string, unknown>
 
+/** 手动补齐视频字幕，返回是否就绪。 */
+export function generateFlightReviewSrt(mediaId: string, deptId?: string): Promise<boolean> {
+  return apiClient.post<never, boolean>('/v1/uav/media/srt/generate', { mediaId, deptId })
+}
+
 interface RawPage {
   records?: RawRecord[]
   total?: number | string
