@@ -1,20 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Cpu, DocumentChecked, Files, Plus } from '@element-plus/icons-vue'
+import { Cpu, DocumentChecked, Files, Plus, MapLocation } from '@element-plus/icons-vue'
 import SpotIdentificationPanel from '@/workspace-components/spot-identification/SpotIdentificationPanel.vue'
 import GeneralSpotReviewPanel from '@/workspace-components/spot-identification/GeneralSpotReviewPanel.vue'
 import FlightTaskReviewPanel from '@/workspace-components/spot-identification/FlightTaskReviewPanel.vue'
 import AlgorithmRepositoryView from '@/views/AlgorithmRepositoryView.vue'
 import DataResultsView from '@/views/DataResultsView.vue'
 import GeographicTopicsView from '@/views/GeographicTopicsView.vue'
+import EngineeringFacilitiesOverview from '@/views/EngineeringFacilitiesOverview.vue'
+import { isAgricultureTopicDepartment } from '@/utils/topic-access'
 import { getGovernanceTaskPage, toPatrolTask, type GovernanceTask } from '@/api/governance-task'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { useUserStore } from '@/stores/user'
-import { HIGH_STANDARD_TOPIC_ID, useGeographicTopicsStore } from '@/stores/geographic-topics'
+import { HIGH_STANDARD_TOPIC_ID, FACILITIES_TOPIC_ID, useGeographicTopicsStore } from '@/stores/geographic-topics'
 
-type RecognitionMode = 'spots' | 'algorithms' | 'data'
-type DataTab = 'collection' | 'recognition' | 'topics'
+type RecognitionMode = 'spots' | 'algorithms' | 'data' | 'topics'
+type DataTab = 'collection' | 'recognition'
 type RecognitionAnalysisMode = 'flight' | 'scene' | 'task-review'
 
 const route = useRoute()
@@ -25,16 +27,19 @@ const topicsExpanded = ref(true)
 const topicDialog = ref<HTMLDialogElement>()
 const topicName = ref(''), topicDescription = ref(''), topicFormError = ref('')
 const selectedTopic = computed(() => topicStore.topics.find(item => item.id === route.query.topic) || topicStore.topics[0]!)
-const recognitionModes: RecognitionMode[] = ['algorithms', 'spots', 'data']
+const canUseTopics = computed(()=>isAgricultureTopicDepartment(user)&&user.hasPermission('data-management'))
+const mapTopic=computed(()=>selectedTopic.value.id===FACILITIES_TOPIC_ID?{...selectedTopic.value,name:'工程设施地图'}:selectedTopic.value)
+const facilityPage = computed(()=>route.query.view==='map'?'map':'overview')
+const recognitionModes: RecognitionMode[] = ['algorithms', 'spots', 'data', 'topics']
 const recognitionNavItems = computed(() => [
   { key: 'spots' as const, icon: DocumentChecked, label: '任务研判', permission: 'smart-recognition' as const },
   { key: 'algorithms' as const, icon: Cpu, label: '算法分析', permission: 'algorithm-analysis' as const },
   { key: 'data' as const, icon: Files, label: '数据管理', permission: 'data-management' as const },
+  ...(canUseTopics.value?[{key:'topics' as const,icon:MapLocation,label:'专题分析',permission:'data-management' as const}]:[]),
 ].filter((item) => user.hasPermission(item.permission)))
 const dataNavItems: Array<{ key: DataTab; label: string; disabled?: boolean }> = [
   { key: 'collection', label: '采集数据' },
   { key: 'recognition', label: '识别成果', disabled: true },
-  { key: 'topics', label: '专题数据管理' },
 ]
 const mode = computed<RecognitionMode>(() => recognitionModes.includes(route.params.tab as RecognitionMode) ? route.params.tab as RecognitionMode : 'spots')
 const recognitionAnalysisItems = [
@@ -82,18 +87,25 @@ async function loadTasks() {
     loading.value = false
   }
 }
-function setMode(nextMode: RecognitionMode) { if (mode.value !== nextMode) void router.push({ name: 'recognition', params: { tab: nextMode } }) }
-function setDataTab(tab: DataTab) {
-  if (!dataNavItems.some(item => item.key === tab && !item.disabled)) return
-  if (tab === 'topics' && activeDataTab.value === 'topics') { topicsExpanded.value = !topicsExpanded.value; return }
-  topicsExpanded.value = true
-  void router.push({ name: 'recognition', params: { tab: 'data' }, query: { dataTab: tab, ...(tab === 'topics' ? { topic: selectedTopic.value.id } : {}) } })
+function setMode(nextMode: RecognitionMode) {
+  if(nextMode==='topics'){
+    if(!canUseTopics.value)return
+    if(mode.value==='topics'){topicsExpanded.value=!topicsExpanded.value;return}
+    selectTopic(selectedTopic.value.id);return
+  }
+  if(mode.value!==nextMode)void router.push({name:'recognition',params:{tab:nextMode}})
 }
-function selectTopic(id: string) {
-  topicsExpanded.value = true
-  void router.push({ name: 'recognition', params: { tab: 'data' }, query: { dataTab: 'topics', topic: id } })
+function setDataTab(tab: DataTab) {
+  if(!dataNavItems.some(item=>item.key===tab&&!item.disabled))return
+  void router.push({name:'recognition',params:{tab:'data'},query:{dataTab:tab}})
+}
+function selectTopic(id: string, view:'overview'|'map'='overview') {
+  if(!canUseTopics.value)return
+  topicsExpanded.value=true
+  void router.push({name:'recognition',params:{tab:'topics'},query:{topic:id,...(id===FACILITIES_TOPIC_ID?{view}: {})}})
 }
 function openTopicDialog() {
+  if(!canUseTopics.value)return
   topicName.value = ''; topicDescription.value = ''; topicFormError.value = ''
   topicDialog.value?.showModal()
 }
@@ -103,12 +115,10 @@ function createTopic() {
     topicDialog.value?.close(); selectTopic(topic.id)
   } catch (reason) { topicFormError.value = reason instanceof Error ? reason.message : '专题创建失败' }
 }
-watch(() => route.query.topic, () => { if (activeDataTab.value === 'topics') topicsExpanded.value = true })
+watch(() => route.query.topic, () => { if (mode.value === 'topics') topicsExpanded.value = true })
 watch(() => user.activeDeptId, () => {
   topicDialog.value?.close()
-  if (mode.value === 'data' && activeDataTab.value === 'topics') {
-    void router.replace({ name: 'recognition', params: { tab: 'data' }, query: { dataTab: 'topics', topic: HIGH_STANDARD_TOPIC_ID } })
-  }
+  if(mode.value==='topics')void router.replace(canUseTopics.value?{name:'recognition',params:{tab:'topics'},query:{topic:HIGH_STANDARD_TOPIC_ID}}:{name:'recognition',params:{tab:'data'}})
 })
 function setRecognitionMode(nextMode: RecognitionAnalysisMode) {
   const target = recognitionAnalysisItems.find((item) => item.key === nextMode)
@@ -129,7 +139,7 @@ watch([mode, () => route.query.analysis], ([nextMode]) => {
     if (route.query.analysis !== resolved) void router.replace({ name: 'recognition', params: { tab: 'spots' }, query: { ...route.query, analysis: resolved } })
   }
 }, { immediate: true })
-onMounted(() => void loadTasks())
+watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
 </script>
 <template>
   <div class="recognition-page">
@@ -137,9 +147,22 @@ onMounted(() => void loadTasks())
       <aside>
         <nav>
           <template v-for="item in recognitionNavItems" :key="item.key">
-            <button :class="{ active: mode === item.key }" @click="setMode(item.key)"><i aria-hidden="true">
+            <div v-if="item.key==='topics'" class="topic-menu-row topic-primary-row">
+              <button class="topic-primary-button" :class="{active:mode==='topics'}" :aria-expanded="mode==='topics'&&topicsExpanded" @click="setMode('topics')"><i aria-hidden="true"><MapLocation /></i><span><b>专题分析</b></span><em>›</em></button>
+              <button class="topic-add" aria-label="新增专题场景" title="新增专题场景" @click.stop="openTopicDialog"><Plus /></button>
+            </div>
+            <button v-else class="primary-nav-button" :class="{ active: mode === item.key }" @click="setMode(item.key)"><i aria-hidden="true">
                 <component :is="item.icon" />
               </i><span><b>{{ item.label }}</b></span><em>›</em></button>
+            <div v-if="item.key==='topics'&&mode==='topics'&&topicsExpanded" class="recognition-task-submenu topic-root-menu" aria-label="专题分析目录">
+              <template v-for="topic in topicStore.topics" :key="topic.id">
+                <button class="task-button" :class="{selected:selectedTopic.id===topic.id}" :title="topic.name" :aria-current="selectedTopic.id===topic.id&&topic.id!==FACILITIES_TOPIC_ID?'page':undefined" @click="selectTopic(topic.id)"><b>{{ topic.name }}</b></button>
+                <div v-if="topic.id===FACILITIES_TOPIC_ID&&selectedTopic.id===topic.id" class="topic-scene-menu facility-submenu" aria-label="工程设施管理">
+                  <button :class="{selected:facilityPage==='overview'}" :aria-current="facilityPage==='overview'?'page':undefined" @click="selectTopic(topic.id,'overview')">工程设施总览</button>
+                  <button :class="{selected:facilityPage==='map'}" :aria-current="facilityPage==='map'?'page':undefined" @click="selectTopic(topic.id,'map')">工程设施地图</button>
+                </div>
+              </template>
+            </div>
             <div v-if="item.key === 'spots' && mode === 'spots'"
               class="recognition-task-submenu recognition-analysis-submenu">
               <button v-for="analysis in recognitionAnalysisItems" :key="analysis.key" class="task-button"
@@ -149,27 +172,7 @@ onMounted(() => void loadTasks())
             </div>
             <div v-if="item.key === 'data' && mode === 'data'"
               class="recognition-task-submenu recognition-data-submenu">
-              <template v-for="tab in dataNavItems" :key="tab.key">
-                <div v-if="tab.key === 'topics'" class="topic-menu-entry">
-                  <div class="topic-menu-row">
-                    <button class="task-button" :class="{ selected: activeDataTab === 'topics' }"
-                      :aria-expanded="activeDataTab === 'topics' && topicsExpanded"
-                      @click="setDataTab('topics')"><b>专题数据管理</b></button>
-                    <button class="topic-add" aria-label="新增专题场景" title="新增专题场景" @click.stop="openTopicDialog">
-                      <Plus />
-                    </button>
-                  </div>
-                  <div v-if="activeDataTab === 'topics' && topicsExpanded" class="topic-scene-menu" aria-label="专题场景">
-                    <button v-for="topic in topicStore.topics" :key="topic.id"
-                      :class="{ selected: selectedTopic.id === topic.id }"
-                      :aria-current="selectedTopic.id === topic.id ? 'page' : undefined" :title="topic.name"
-                      @click="selectTopic(topic.id)">{{ topic.name }}</button>
-                  </div>
-                </div>
-                <button v-else class="task-button"
-                  :class="{ selected: activeDataTab === tab.key, unavailable: tab.disabled }" :disabled="tab.disabled"
-                  @click="setDataTab(tab.key)"><b>{{ tab.label }}</b></button>
-              </template>
+              <button v-for="tab in dataNavItems" :key="tab.key" class="task-button" :class="{selected:activeDataTab===tab.key,unavailable:tab.disabled}" :disabled="tab.disabled" @click="setDataTab(tab.key)"><b>{{ tab.label }}</b></button>
             </div>
           </template>
         </nav>
@@ -181,7 +184,8 @@ onMounted(() => void loadTasks())
         <GeneralSpotReviewPanel v-else-if="mode === 'spots' && activeRecognitionMode === 'task-review'" />
         <FlightTaskReviewPanel v-else-if="mode === 'spots' && activeRecognitionMode === 'flight'" />
         <AlgorithmRepositoryView v-else-if="mode === 'algorithms'" embedded />
-        <GeographicTopicsView v-else-if="activeDataTab === 'topics'" :topic="selectedTopic" />
+        <EngineeringFacilitiesOverview v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='overview'" @open-map="selectTopic(FACILITIES_TOPIC_ID,'map')" />
+        <GeographicTopicsView v-else-if="mode==='topics'&&canUseTopics" :topic="mapTopic" />
         <DataResultsView v-else embedded :active-tab="activeDataTab" />
       </section>
     </main>
@@ -205,6 +209,8 @@ onMounted(() => void loadTasks())
   </div>
 </template>
 <style scoped lang="scss">
+.topic-primary-row{gap:0}.topic-primary-button{flex:1;min-width:0}.topic-primary-row>.topic-add{margin-left:3px}.topic-root-menu>.task-button b{white-space:normal!important;line-height:1.6;font-size:12px!important}.facility-submenu{margin-left:12px}
+
 .topic-menu-row {
   display: flex;
   align-items: center;
@@ -243,7 +249,8 @@ onMounted(() => void loadTasks())
   height: 15px
 }
 
-.topic-menu-row:hover .topic-add,
+.topic-primary-row:hover .topic-add,
+.topic-add:hover,
 .topic-add:focus-visible {
   opacity: 1;
   pointer-events: auto
@@ -419,7 +426,7 @@ onMounted(() => void loadTasks())
   gap: 9px
 }
 
-.recognition-page aside nav>button {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button) {
   position: relative;
   z-index: 1;
   width: 100%;
@@ -438,7 +445,7 @@ onMounted(() => void loadTasks())
   transition: border-color .18s, background .18s, box-shadow .18s, color .18s
 }
 
-.recognition-page aside nav>button::after {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button)::after {
   position: absolute;
   right: 10px;
   bottom: -5px;
@@ -447,12 +454,12 @@ onMounted(() => void loadTasks())
   content: ''
 }
 
-.recognition-page aside nav>button:hover {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button):hover {
   color: #eafaff;
   background: #0a2d48
 }
 
-.recognition-page aside nav>button>i {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button)>i {
   width: 34px;
   height: 34px;
   display: grid;
@@ -465,13 +472,13 @@ onMounted(() => void loadTasks())
   font-size: 19px
 }
 
-.recognition-page aside nav>button span,
-.recognition-page aside nav>button b {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button) span,
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button) b {
   display: block;
   min-width: 0
 }
 
-.recognition-page aside nav>button b {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button) b {
   overflow: hidden;
   color: inherit;
   font-size: 17px;
@@ -479,30 +486,30 @@ onMounted(() => void loadTasks())
   white-space: nowrap
 }
 
-.recognition-page aside nav>button>em {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button)>em {
   color: #668fa1;
   font-size: 22px;
   font-style: normal
 }
 
-.recognition-page aside nav>button.active {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button).active {
   color: #fff;
   border-color: #1686a8;
   background: #082f4c;
   box-shadow: none
 }
 
-.recognition-page aside nav>button.active::before {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button).active::before {
   display: none
 }
 
-.recognition-page aside nav>button.active>i {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button).active>i {
   color: #e8fdff;
   background: #075a78;
   border-color: #1686a8
 }
 
-.recognition-page aside nav>button.active>em {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button).active>em {
   color: #48d9eb
 }
 
@@ -605,7 +612,7 @@ onMounted(() => void loadTasks())
     padding: 12px 8px
   }
 
-  .recognition-page aside nav>button {
+  .recognition-page aside nav :is(.primary-nav-button,.topic-primary-button) {
     grid-template-columns: 34px minmax(0, 1fr) 9px;
     gap: 7px
   }
@@ -689,7 +696,7 @@ onMounted(() => void loadTasks())
   content: '•'
 }
 
-.recognition-page aside nav>button>i {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button)>i {
   color: #9bd7e9;
   background: linear-gradient(145deg, #114762, #0b354e);
   border-color: #226682;
@@ -698,18 +705,18 @@ onMounted(() => void loadTasks())
   transition: background .18s, border-color .18s, color .18s;
 }
 
-.recognition-page aside nav>button>i svg {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button)>i svg {
   width: 19px;
   height: 19px;
 }
 
-.recognition-page aside nav>button:hover>i {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button):hover>i {
   color: #e9faff;
   background: linear-gradient(145deg, #17607e, #0d4462);
   border-color: #4aacc8;
 }
 
-.recognition-page aside nav>button.active>i {
+.recognition-page aside nav :is(.primary-nav-button,.topic-primary-button).active>i {
   color: #fff;
   background: linear-gradient(145deg, #1685a6, #0e617f);
   border-color: #63cae2;

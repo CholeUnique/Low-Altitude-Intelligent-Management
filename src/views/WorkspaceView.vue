@@ -21,6 +21,7 @@ import SceneNodePlaceholder from '@/workspace-components/shared/SceneNodePlaceho
 import RouteFlightPlanPanel from '@/workspace-components/route-flight-plan/RouteFlightPlanPanel.vue'
 import RealtimeCruisePanel from '@/workspace-components/realtime-cruise/RealtimeCruisePanel.vue'
 import NonGrainWorkspace from '@/workspace-components/non-grain/NonGrainWorkspace.vue'
+import FarmlandFacilitiesWorkspace from '@/workspace-components/farmland-facilities/FarmlandFacilitiesWorkspace.vue'
 import TaskAcceptancePanel from '@/workspace-components/shared/TaskAcceptancePanel.vue'
 import { vWorkbenchValidation } from '@/workspace-components/shared/workbench-validation'
 
@@ -175,6 +176,14 @@ onMounted(() => void loadTaskContext())
     <section class="workspace-context" aria-label="工作台操作"><div class="workspace-brand"><div><b>场景作业工作台</b><small>正在加载真实任务</small></div></div></section>
     <main class="empty-body"><div class="empty-card"><h2>正在加载任务工作台…</h2></div></main>
   </div>
+
+  <FarmlandFacilitiesWorkspace
+    v-workbench-validation
+    v-else-if="!taskError && task && workspaceSceneId === 'farmland-facilities'"
+    :key="task.id"
+    :task-id="task.id"
+    :task-name="task.name"
+  />
 
   <NonGrainWorkspace
     v-workbench-validation

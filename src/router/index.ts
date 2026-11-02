@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteLocationNormalized } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { isAgricultureTopicDepartment } from '@/utils/topic-access'
 import {
   recognitionPermissionOrder,
   recognitionTabPermission,
@@ -22,7 +23,7 @@ const router = createRouter({
     { path: '/uav-tasks', redirect: '/uav-tasks/fleet' },
     { path: '/uav-tasks/:tab(fleet|live|ticket|route|plan|schedule)', name: 'uav-tasks', component: () => import('@/views/UavTasksView.vue'), meta: { title: '飞行作业' } },
     { path: '/recognition', redirect: '/recognition/spots' },
-    { path: '/recognition/:tab(algorithms|spots|data)', name: 'recognition', component: () => import('@/views/RecognitionCenterView.vue'), meta: { title: '智能研判' } },
+    { path: '/recognition/:tab(algorithms|spots|data|topics)', name: 'recognition', component: () => import('@/views/RecognitionCenterView.vue'), meta: { title: '智能研判' } },
     { path: '/data-results', name: 'data-results', component: () => import('@/views/DataResultsView.vue'), meta: { title: '数据管理' } },
     { path: '/tasks', name: 'tasks', redirect: '/tasks/overview' },
     { path: '/tasks/overview', name: 'task-overview', component: () => import('@/views/TaskOverviewView.vue'), meta: { title: '任务总览' } },
@@ -68,6 +69,11 @@ router.beforeEach(async (to) => {
 
   const user = useUserStore()
   await user.ensureMenuPermissions()
+  if(to.name==='recognition'){
+    const topicRequest=to.params.tab==='topics'||(to.params.tab==='data'&&(to.query.dataTab==='topics'||to.query.analysis==='topics'))
+    if(topicRequest&&!isAgricultureTopicDepartment(user))return {name:'forbidden',query:{from:to.fullPath}}
+    if(topicRequest&&to.params.tab==='data')return {name:'recognition',params:{tab:'topics'},query:{topic:to.query.topic}}
+  }
   if (to.name === 'login') return firstAccessiblePath(user.hasPermission)
   const redirectedSection = to.redirectedFrom?.path
   if (redirectedSection === '/uav-tasks') {
