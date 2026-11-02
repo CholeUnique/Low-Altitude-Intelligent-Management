@@ -8,7 +8,7 @@ interface FilterRow { id:number; field:string; op:'EQ'|'IN'; values:string }
 interface Selection { label:'A'|'B'; serviceId:string; layerId:string; layers:SpatialLayer[]; filters:FilterRow[]; loading:boolean; error:string; revision:number }
 interface Result { id:string; name:string; summary:SpatialOverlaySummary; data:Raw<SpatialCollection>; difference:Raw<SpatialCollection>; layer:Raw<L.GeoJSON>; visible:boolean; restore:string[]; details:boolean; refreshing:boolean; error:string }
 const props=defineProps<{map:L.Map; open:boolean; context:string; sources:{id:string;name:string}[]; visibleKeys:string[]}>()
-const emit=defineEmits<{close:[];hide:[keys:string[]];restore:[keys:string[]]}>()
+const emit=defineEmits<{close:[];hide:[keys:string[]];restore:[keys:string[]];legend:[items:{id:string;name:string;color:string}[]]}>()
 const user=useUserStore(),dialog=ref<HTMLDialogElement>()
 const selection=(label:'A'|'B'):Selection=>({label,serviceId:'',layerId:'',layers:[],filters:[],loading:false,error:'',revision:0})
 const a=reactive(selection('A')),b=reactive(selection('B')),selections=[a,b]
@@ -19,6 +19,7 @@ let job=0,filterSequence=0,controller:AbortController|undefined,toastTimer:Retur
 const layerControllers=new Map<Selection,AbortController>(),detailControllers=new Set<AbortController>()
 const typeNames:Record<string,string>={DIFF:'不重叠区域'}
 const colors:Record<string,string>={DIFF:'#45d9d2'}
+watch(()=>results.value.filter(result=>result.visible).map(result=>({id:result.id,name:result.name,color:colors.DIFF!})),items=>emit('legend',items),{immediate:true})
 function selected(side:Selection){return side.layers.find(layer=>String(layer.layerId)===side.layerId)}
 function sourceKey(side:Selection){return `${side.serviceId}/${side.layerId}`}
 function toast(message:string,isError=false){notice.value=message;failed.value=isError;clearTimeout(toastTimer);if(!isError)toastTimer=setTimeout(()=>{notice.value=''},10_000)}
@@ -151,6 +152,7 @@ const metrics=[['areaA','A 图层面积'],['areaB','B 图层面积'],['overlapAr
       </div>
     </div>
   </section>
+  <Teleport :to="map.getContainer().parentElement!">
   <dialog ref="dialog" class="overlay-dialog" aria-labelledby="overlay-title" @cancel.prevent="emit('close')" @close="emit('close')">
     <form @submit.prevent="finish">
       <header><div><small>SPATIAL ANALYSIS / SYMMETRICAL DIFFERENCE</small><h2 id="overlay-title">对称差分 / 交集取反</h2></div><button type="button" aria-label="关闭对称差分分析" @click="emit('close')">×</button></header>
@@ -174,7 +176,6 @@ const metrics=[['areaA','A 图层面积'],['areaB','B 图层面积'],['overlapAr
       <footer><span>完成后仅显示两图层不同的区域</span><button type="button" @click="emit('close')">取消</button><button class="primary" type="submit" :disabled="!canFinish">Finish · 开始分析</button></footer>
     </form>
   </dialog>
-  <Teleport :to="map.getContainer().parentElement!">
     <div v-if="busy" class="overlay-running" role="status" aria-live="polite"><div class="analysis-earth" aria-hidden="true"><div class="earth-land"></div><i></i><i></i></div><div><b>后端对称差分分析运行中</b><span>{{ stage }}</span></div><button type="button" title="仅停止前端等待，不取消后端计算" @click="stopWaiting()">停止等待</button></div>
     <div v-if="notice" class="overlay-toast" :class="{'is-error':failed}" :role="failed?'alert':'status'"><span>{{ failed?'!':'✓' }}</span><p>{{ notice }}</p><button type="button" aria-label="关闭分析提示" @click="notice=''">×</button></div>
   </Teleport>
