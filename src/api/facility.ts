@@ -12,6 +12,9 @@ export interface FacilityRecord {
   bizStatus?: string | null
   bizStatusName?: string | null
   updateTime?: string | null
+  geometryType?: string | null
+  geometryJson?: string | null
+  remark?: string | null
 }
 export interface FacilityOption { id: string | number; code: string; name: string; children?: FacilityOption[] }
 export interface FacilityStatistics {
@@ -25,6 +28,7 @@ export interface FacilityPage { records: FacilityRecord[]; total: number; pageNu
 export interface FacilityQuery { deptId: string; pageNum: number; pageSize: number; keyword?: string; facilityType?: string; bizStatus?: string }
 
 export const getFacilityPage = (query: FacilityQuery) => apiClient.post<never, FacilityPage>('/v1/biz/facility/page', query)
+export const getFacilityDetail = (deptId: string, id: string | number) => apiClient.post<never, FacilityRecord>('/v1/biz/facility/detail', { deptId, id })
 export const getFacilityStatistics = (deptId: string) => apiClient.post<never, FacilityStatistics>('/v1/biz/facility/statistics/overall', { deptId })
 export const getFacilityTypes = () => apiClient.post<never, FacilityOption[]>('/v1/biz/facility/type/options', {})
 export interface FacilityImportQuery { deptId: string; serviceId: string | number; layerIds: number[]; nameField?: string; projectNameField?: string; villageField?: string; typeField?: string }

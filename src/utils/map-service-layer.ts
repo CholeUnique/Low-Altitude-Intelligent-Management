@@ -44,6 +44,9 @@ interface ArcGisMapServiceMetadata {
 interface ArcGisLayerMetadata {
   name?: string
   geometryType?: string
+  capabilities?: string
+  type?: string
+  subLayerIds?: number[] | null
   displayField?: string
   fields?: Array<{ name?: string; alias?: string; type?: string }>
 }
