@@ -9,6 +9,7 @@ import AlgorithmRepositoryView from '@/views/AlgorithmRepositoryView.vue'
 import DataResultsView from '@/views/DataResultsView.vue'
 import GeographicTopicsView from '@/views/GeographicTopicsView.vue'
 import EngineeringFacilitiesOverview from '@/views/EngineeringFacilitiesOverview.vue'
+import EngineeringFacilityLedger from '@/views/EngineeringFacilityLedger.vue'
 import { isAgricultureTopicDepartment } from '@/utils/topic-access'
 import { getGovernanceTaskPage, toPatrolTask, type GovernanceTask } from '@/api/governance-task'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
@@ -29,7 +30,7 @@ const topicName = ref(''), topicDescription = ref(''), topicFormError = ref('')
 const selectedTopic = computed(() => topicStore.topics.find(item => item.id === route.query.topic) || topicStore.topics[0]!)
 const canUseTopics = computed(()=>isAgricultureTopicDepartment(user)&&user.hasPermission('data-management'))
 const mapTopic=computed(()=>selectedTopic.value.id===FACILITIES_TOPIC_ID?{...selectedTopic.value,name:'工程设施地图'}:selectedTopic.value)
-const facilityPage = computed(()=>route.query.view==='map'?'map':'overview')
+const facilityPage = computed(()=>route.query.view==='map'?'map':route.query.view==='ledger'?'ledger':'overview')
 const recognitionModes: RecognitionMode[] = ['algorithms', 'spots', 'data', 'topics']
 const recognitionNavItems = computed(() => [
   { key: 'spots' as const, icon: DocumentChecked, label: '任务研判', permission: 'smart-recognition' as const },
@@ -99,7 +100,7 @@ function setDataTab(tab: DataTab) {
   if(!dataNavItems.some(item=>item.key===tab&&!item.disabled))return
   void router.push({name:'recognition',params:{tab:'data'},query:{dataTab:tab}})
 }
-function selectTopic(id: string, view:'overview'|'map'='overview') {
+function selectTopic(id: string, view:'overview'|'map'|'ledger'='overview') {
   if(!canUseTopics.value)return
   topicsExpanded.value=true
   void router.push({name:'recognition',params:{tab:'topics'},query:{topic:id,...(id===FACILITIES_TOPIC_ID?{view}: {})}})
@@ -160,6 +161,7 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
                 <div v-if="topic.id===FACILITIES_TOPIC_ID&&selectedTopic.id===topic.id" class="topic-scene-menu facility-submenu" aria-label="工程设施管理">
                   <button :class="{selected:facilityPage==='overview'}" :aria-current="facilityPage==='overview'?'page':undefined" @click="selectTopic(topic.id,'overview')">工程设施总览</button>
                   <button :class="{selected:facilityPage==='map'}" :aria-current="facilityPage==='map'?'page':undefined" @click="selectTopic(topic.id,'map')">工程设施地图</button>
+                  <button :class="{selected:facilityPage==='ledger'}" :aria-current="facilityPage==='ledger'?'page':undefined" @click="selectTopic(topic.id,'ledger')">设施台账</button>
                 </div>
               </template>
             </div>
@@ -185,6 +187,7 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
         <FlightTaskReviewPanel v-else-if="mode === 'spots' && activeRecognitionMode === 'flight'" />
         <AlgorithmRepositoryView v-else-if="mode === 'algorithms'" embedded />
         <EngineeringFacilitiesOverview v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='overview'" @open-map="selectTopic(FACILITIES_TOPIC_ID,'map')" />
+        <EngineeringFacilityLedger v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='ledger'" />
         <GeographicTopicsView v-else-if="mode==='topics'&&canUseTopics" :topic="mapTopic" />
         <DataResultsView v-else embedded :active-tab="activeDataTab" />
       </section>

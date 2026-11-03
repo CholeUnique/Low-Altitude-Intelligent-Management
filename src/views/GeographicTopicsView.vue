@@ -10,6 +10,7 @@ import TopicStatisticsSummary from '@/components/TopicStatisticsSummary.vue'
 import TopicMapToolbar from '@/components/TopicMapToolbar.vue'
 import TopicOverlayAnalysis from '@/components/TopicOverlayAnalysis.vue'
 import TopicMapLegend from '@/components/TopicMapLegend.vue'
+import OverviewMapScale from '@/components/OverviewMapScale.vue'
 import { identifyVectorFeatures, setMapHoverSelection, type IdentifiedMapFeature } from '@/utils/map-service-layer'
 import { HIGH_STANDARD_TOPIC_ID, FACILITIES_TOPIC_ID, useGeographicTopicsStore, type GeographicTopic } from '@/stores/geographic-topics'
 import { createMapServiceLayer, createAdministrativeBoundaryLayer, expandMapServiceSublayers, getMapServiceLayerMetadata, queryMapServiceFeatures, MAP_SERVICE_IMAGERY_PANE, MAP_SERVICE_VECTOR_PANE, type MapServiceLayerHandle } from '@/utils/map-service-layer'
@@ -17,6 +18,7 @@ import { resolveC5Style, c5Pattern, type C5Style } from '@/utils/land-survey-c5'
 import { createTopicRenderer, type TopicDisplayMode } from '@/utils/topic-renderer'
 import { categoryWhere, type TopicRole } from '@/utils/geographic-topic'
 import { readTopicLayerCatalog, topicStatSources, groupTopicLayers } from '@/utils/topic-layer-catalog'
+import { facilityCategoryFromName } from '@/utils/facility-category'
 
 interface Category { value: string; name: string; count: number; checked: boolean; style?: C5Style; color?: string; mode?: TopicDisplayMode }
 interface TopicLayer { key: string; service: MapServiceItem; sourceName: string; role: TopicRole; fields: string[]; categoryField: string; categories: Category[]; visible: boolean; analysisHidden: boolean; pending: boolean; error: string; ready: boolean; mode: TopicDisplayMode; handle?: Raw<MapServiceLayerHandle> }
@@ -38,8 +40,6 @@ const collapsedConfigSources = ref<Record<string,boolean>>({})
 const featureCandidates = ref<IdentifiedMapFeature[]>([]), selectedFeature = ref(0), identifyPending = ref(false), identifyError = ref('')
 const featureRoles = computed(() => Object.fromEntries(layers.value.map(item => [String(item.service.id),item.role])))
 let selectionGroup: L.LayerGroup | undefined, selectionVersion = 0
-const scaleWidth = ref(96)
-const scaleLabel = ref('5 km')
 // 专题目录独立于任务业务场景；仅使用当前部门接口实际返回的可用图层。
 const availableLayers = computed(() => layers.value)
 const overlaySources = computed(() => groupTopicLayers(layers.value.filter(item => item.role !== 'imagery')).map(group => ({id:group.id,name:group.name})))
@@ -69,6 +69,14 @@ const mapLegendGroups=computed(()=>[
       label:category.name,color:category.style?`rgb(${category.style.rgb.join(',')})`:category.color||item.handle!.color||'#56bccc',
       pattern:category.style?c5Pattern(category.style):undefined,standard:!!category.style,mode:category.mode??item.mode,geometry:item.service.arcGisGeometryType||'esriGeometryPolygon',
     })):[{label:item.service.name,color:item.handle!.color||'#56bccc',mode:item.mode,geometry:item.service.arcGisGeometryType||'esriGeometryPolygon',administrative:item.role==='boundary'}]
+    if (props.topic.id === FACILITIES_TOPIC_ID && item.role === 'facility' && item.categories.length) {
+      const grouped = new Map<string, typeof symbols[number]>()
+      for (const symbol of symbols) {
+        const label = facilityCategoryFromName(symbol.label)
+        if (!grouped.has(label)) grouped.set(label, { ...symbol, label })
+      }
+      return {key:item.key,name:item.service.name,symbols:[...grouped.values()]}
+    }
     return {key:item.key,name:item.service.name,symbols}
   }),
   ...analysisLegend.value.map(item=>({key:'analysis-'+item.id,name:item.name,symbols:[{label:'不重叠区域',color:item.color,mode:'filled' as TopicDisplayMode,geometry:'esriGeometryPolygon'}]})),
@@ -169,6 +177,10 @@ async function identifyFeature(event: L.LeafletMouseEvent) {
   identifyPending.value = false
   identifyError.value = results.some(result => result.status === 'rejected') ? '部分图层查询失败，请点击地图重试。' : ''
   featureCandidates.value = results.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+  if (props.topic.id === FACILITIES_TOPIC_ID) {
+    const isPoint = (feature: IdentifiedMapFeature) => /point/i.test(feature.location.geometryType || '') || feature.location.geometries.some(geometry => !!geometry.points?.length || (Number.isFinite(geometry.x) && Number.isFinite(geometry.y)))
+    featureCandidates.value.sort((a, b) => Number(isPoint(b)) - Number(isPoint(a)))
+  }
   if (featureCandidates.value.length) selectFeature(0)
 }
 function setDrawingTool(active:boolean) {
@@ -206,7 +218,7 @@ function assignLayerPane(item: TopicLayer, layer: L.Layer) {
   let pane = map.getPane(paneName)
   if (!pane) pane = map.createPane(paneName)
   // 每层有固定的容器；切换渲染器时新瓦片只替换本层，不能跃到其他图层上方。
-  pane.style.zIndex = '335'
+  pane.style.zIndex = props.topic.id === FACILITIES_TOPIC_ID && item.role === 'facility' && /point/i.test(item.service.arcGisGeometryType) ? '340' : '335'
   pane.style.pointerEvents = 'none'
   const assign = (child: L.Layer) => {
     child.options.pane = paneName
@@ -317,22 +329,6 @@ async function toggleFullscreen() {
   catch { error.value = '浏览器未允许全屏，请使用浏览器全屏查看。' }
 }
 function updateFullscreen() { fullscreen.value = document.fullscreenElement === root.value; map?.invalidateSize({pan:false}) }
-function updateScale() {
-  if (!map) return
-  const referenceWidth = 110
-  const centerY = map.getSize().y / 2
-  const left = map.containerPointToLatLng([0, centerY])
-  const right = map.containerPointToLatLng([referenceWidth, centerY])
-  const metres = map.distance(left, right)
-  if (!Number.isFinite(metres) || metres <= 0) return
-  const magnitude = 10 ** Math.floor(Math.log10(metres))
-  const niceDistance = [1, 2, 5].reduce((best, factor) => {
-    const candidate = factor * magnitude
-    return candidate <= metres && candidate > best ? candidate : best
-  }, magnitude / 10)
-  scaleWidth.value = Math.max(34, Math.round(referenceWidth * niceDistance / metres))
-  scaleLabel.value = niceDistance >= 1000 ? `${niceDistance / 1000} km` : `${niceDistance} m`
-}
 watch(() => user.activeDeptId, () => { void loadData() })
 watch(configOpen, open => { if (open) clearFeatureSelection() })
 watch(() => props.topic.id, () => {
@@ -345,9 +341,6 @@ watch(() => props.topic.id, () => {
 onMounted(() => {
   if (!canvas.value) return
   map = L.map(canvas.value, { center:[32.49,119.85], zoom:12, attributionControl:false, zoomControl:false })
-  L.control.zoom({position:'bottomright'}).addTo(map)
-  updateScale()
-  map.on('moveend zoomend resize', updateScale)
   for (const [name,zIndex] of [[MAP_SERVICE_IMAGERY_PANE,225],[MAP_SERVICE_VECTOR_PANE,335],['administrative-boundaries',350]] as const) map.createPane(name).style.zIndex = String(zIndex)
   map.createPane('topic-selection').style.zIndex = '450'
   selectionGroup = L.layerGroup().addTo(map)
@@ -365,9 +358,7 @@ onBeforeUnmount(() => { clearFeatureSelection(); version++; document.removeEvent
 <template>
   <section ref="root" class="geographic-topics" :class="{'has-map-legend':mapLegendGroups.length > 0}" aria-label="专题地图">
     <div ref="canvas" class="topic-map" :class="{'topic-map--drawing':drawingToolActive}"></div>
-    <div class="topic-map-scale" :style="{ width: `${scaleWidth}px` }" :aria-label="`比例尺：图示线段代表实地距离 ${scaleLabel}`">
-      <div class="scale-labels"><span>0</span><b>{{ scaleLabel }}</b></div><i aria-hidden="true"></i>
-    </div>
+    <OverviewMapScale :map="toolsMap" />
     <div class="topic-north" role="img" aria-label="指北针：上方为北">
       <span>北 N</span><svg viewBox="0 0 24 36" aria-hidden="true"><path d="M12 2 22 32 12 25Z" fill="#ecf4f2"/><path d="M12 2 2 32 12 25Z" fill="#243e49"/><path d="M12 2 22 32 12 25 2 32Z" fill="none" stroke="#ecf4f2" stroke-width="1.2"/></svg>
     </div>

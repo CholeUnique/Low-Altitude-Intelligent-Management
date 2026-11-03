@@ -96,7 +96,7 @@ async function harness(records, options = {}) {
     },
     '@/utils/collection-media-pager': pagerApi,
     '@/workspace-components/spot-identification/SharedVideoPlayer.vue': { default: {} },
-    '@/workspace-components/spot-identification/PhotoLocationOverlay.vue': { default: {} },
+    '@/workspace-components/spot-identification/PhotoLocationControl.vue': { default: {} },
   }).default
   component.render = () => null
   let vm

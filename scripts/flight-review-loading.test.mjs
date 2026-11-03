@@ -46,7 +46,7 @@ const component = load(script, {
     getFlightReviewTasks:async()=>({records:taskList,total:18,pageSize:200}),
     getFlightReviewMedia:mediaRequest
   }, '@/stores/user':{useUserStore:()=>user},
-  './SpotUploadDialog.vue':{}, './SharedVideoPlayer.vue':{}, './PhotoLocationOverlay.vue':{}
+  './SpotUploadDialog.vue':{}, './SharedVideoPlayer.vue':{}, './PhotoLocationControl.vue':{}
 }).default
 component.render = ()=>null
 const app = renderer.createApp(component)

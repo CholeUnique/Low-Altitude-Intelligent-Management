@@ -61,3 +61,95 @@ for (const layout of ['collection', 'review']) {
   app.unmount()
 }
 console.log('Photo panel: collection/review zoom-independent bounds, resize visibility, fullscreen exit defaults and capture cleanup passed')
+
+// 图斑窗口的缩放范围需避开影像顶部标签，并在外层尺寸变化后仍保持可见。
+let spotSource = readFileSync('src/workspace-components/spot-identification/SpotLocationPanel.vue', 'utf8')
+spotSource = spotSource.replace('import.meta.env.VITE_TIANDITU_TOKEN', "''")
+spotSource = spotSource.replace('</script>', 'defineExpose({ panel, layout, updateLayout, startResize, moveResize, endResize, resizeWithKey });\n</script>')
+const SpotPanel = load(compileScript(parse(spotSource).descriptor, { id: 'spot-resize-test' }).content, {
+  vue: Vue, leaflet: {}, './NavigationQrDialog.vue': {},
+  '@/composables/useSpotAddress': { useSpotAddress: () => ({ spotAddress: Vue.ref('测试地址'), spotAddressLoading: Vue.ref(false), spotAddressError: Vue.ref(false) }) },
+  '@/utils/telemetry-panel': load(readFileSync('src/utils/telemetry-panel.ts', 'utf8')),
+}).default
+SpotPanel.render = () => null
+let spot
+const spotApp = renderer.createApp({ render: () => Vue.h(SpotPanel, { longitude: 119.8, latitude: 32.4, ref: vm => { if (vm) spot = vm } }) })
+spotApp.mount({})
+const viewport = { clientWidth: 700, clientHeight: 500 }
+spot.panel = Vue.markRaw({ parentElement: viewport })
+spot.updateLayout()
+assert.equal(spot.layout.top, 48)
+assert.deepEqual({ width: spot.layout.width, height: spot.layout.height }, { width: 340, height: 300 })
+const captures = new Set()
+const handle = { setPointerCapture: id => captures.add(id), hasPointerCapture: id => captures.has(id), releasePointerCapture: id => captures.delete(id) }
+for (const edge of ['left', 'right']) {
+  spot.startResize({ button: 0, isPrimary: true, pointerId: 10, clientX: 0, clientY: 0, currentTarget: handle, preventDefault() {} }, edge)
+  spot.moveResize({ pointerId: 10, clientX: edge === 'left' ? -2000 : 2000, clientY: 2000 })
+  assert(spot.layout.top >= 48)
+  assert(spot.layout.left >= 8)
+  assert(spot.layout.left + spot.layout.width <= viewport.clientWidth - 8)
+  assert(spot.layout.top + spot.layout.height <= viewport.clientHeight - 8)
+  spot.endResize()
+}
+viewport.clientWidth = 380
+viewport.clientHeight = 320
+spot.updateLayout()
+assert(spot.layout.left + spot.layout.width <= viewport.clientWidth - 8)
+assert(spot.layout.top + spot.layout.height <= viewport.clientHeight - 8)
+spot.resizeWithKey({ key: 'ArrowLeft', preventDefault() {} }, 'left')
+assert(spot.layout.width >= 300)
+spotApp.unmount()
+assert.equal(captures.size, 0)
+console.log('Spot panel: two-corner resizing, top-label clearance, small viewport clamping and pointer cleanup passed')
+
+// 实际渲染照片开关：初始不创建地图；点击才展示；换照片重置，切换全屏保持开关状态。
+globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
+const listeners = new Map()
+const testImage = { offsetLeft: 0, offsetTop: 0, clientWidth: 1000, clientHeight: 600, naturalWidth: 4000, naturalHeight: 3000,
+  addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
+function hostNode(type) { return { type, children: [], props: {}, parent: null, get parentElement() { return this.parent }, querySelector: () => testImage } }
+const controlRenderer = Vue.createRenderer({
+  createElement: hostNode, createText: () => hostNode('text'), createComment: () => hostNode('comment'),
+  insert(child, parent, anchor) { child.parent = parent; const i = parent.children.indexOf(anchor); if (i < 0) parent.children.push(child); else parent.children.splice(i, 0, child) },
+  remove(child) { const i = child.parent.children.indexOf(child); if (i >= 0) child.parent.children.splice(i, 1) },
+  patchProp: (node, key, _before, after) => { node.props[key] = after }, setText() {}, setElementText() {},
+  parentNode: node => node.parent, nextSibling: node => node.parent?.children[node.parent.children.indexOf(node) + 1],
+})
+let mapsCreated = 0
+const overlay = Vue.defineComponent({ setup() { mapsCreated++; return () => Vue.h('section') } })
+const Control = load(compileScript(parse(readFileSync('src/workspace-components/spot-identification/PhotoLocationControl.vue', 'utf8')).descriptor, { id: 'photo-control-test', inlineTemplate: true }).content, {
+  vue: Vue, './PhotoLocationOverlay.vue': { __esModule: true, default: overlay },
+  '@/utils/telemetry-panel': load(readFileSync('src/utils/telemetry-panel.ts', 'utf8')),
+}).default
+const controlProps = Vue.reactive({ media: { id: 'photo-a', longitude: 119.8, latitude: 32.4 }, fullscreen: false })
+const root = hostNode('root')
+const controlApp = controlRenderer.createApp({ render: () => Vue.h(Control, controlProps) })
+controlApp.mount(root)
+await Vue.nextTick()
+const toggle = () => root.children.find(node => node.type === 'button')
+assert.equal(mapsCreated, 0)
+assert.equal(toggle().props['aria-pressed'], false)
+assert.deepEqual(toggle().props.style, { left: '109px', top: '9px' }, 'Toggle follows actual contained image, excluding letterboxing')
+toggle().props.onClick({ stopPropagation() {} })
+await Vue.nextTick()
+assert.equal(mapsCreated, 1)
+assert.equal(toggle().props['aria-pressed'], true)
+controlProps.fullscreen = true
+await Vue.nextTick()
+assert.equal(toggle().props['aria-pressed'], true)
+toggle().props.onClick({ stopPropagation() {} })
+await Vue.nextTick()
+assert(!root.children.some(node => node.type === 'section'))
+toggle().props.onClick({ stopPropagation() {} })
+await Vue.nextTick()
+controlProps.media = { ...controlProps.media, id: 'photo-b' }
+await Vue.nextTick()
+await Vue.nextTick()
+assert.equal(toggle().props['aria-pressed'], false)
+assert(!root.children.some(node => node.type === 'section'))
+controlProps.media = { id: 'no-coordinates' }
+await Vue.nextTick()
+assert.equal(toggle().props.disabled, true)
+controlApp.unmount()
+assert.equal(listeners.size, 0)
+console.log('Photo location control: lazy opening, active state, contained-image position, closing, media reset and no-coordinate disabling passed')
