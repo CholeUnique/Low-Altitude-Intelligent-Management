@@ -101,6 +101,8 @@ export interface MapServiceLayerHandle {
   definitionExpression?: () => string
   setRenderer?: (renderer: Record<string, unknown>) => void
   setQueryFilter?: (expression: string) => void
+  /** 专题使用统一的要素悬浮控制器时，关闭图层原有的文字悬浮查询。 */
+  setHoverEnabled?: (enabled: boolean) => void
 }
 
 export interface MapServiceLayerOptions {
@@ -1063,6 +1065,7 @@ function clearHoverSlot(key: string, map?: L.Map) {
 }
 
 class ArcGisVectorLayer extends L.LayerGroup {
+  private hoverEnabled = true
   private hoverTimer?: number
   private requestSequence = 0
   private filterSwapSequence = 0
@@ -1112,6 +1115,7 @@ class ArcGisVectorLayer extends L.LayerGroup {
   }
 
   private handleMouseMove(event: L.LeafletMouseEvent) {
+    if (!this.hoverEnabled) return
     const focus = this._map ? selectedHoverByMap.get(this._map) : undefined
     if (focus && this.hoverKey !== focus.key) { this.closeVectorTooltip(); return }
     const fieldName = focus?.objectIdField || this.fieldName
@@ -1165,6 +1169,8 @@ class ArcGisVectorLayer extends L.LayerGroup {
     this.pendingImageLayer?.setDisplayColor(color)
     return colors
   }
+
+  setHoverEnabled(enabled:boolean) { this.hoverEnabled=enabled;if(!enabled)this.closeVectorTooltip() }
 
   setFillOpacity(opacity: number) {
     if (this.imageLayer instanceof ArcGisExportLayer) this.imageLayer.setFillOpacity(opacity)
@@ -2327,6 +2333,7 @@ async function createArcGisVectorHandle(
     setFillOpacity: opacity => vectorLayer.setFillOpacity(opacity),
     setRenderer: renderer => vectorLayer.setStandardRenderer(renderer),
     setQueryFilter: expression => { queryDefinition = expression || '1=1'; applyFilter() },
+    setHoverEnabled: enabled => vectorLayer.setHoverEnabled(enabled),
     setAttributeFilter: (field, value) => {
       const type = layerMetadata.fields?.find(item => item.name === field)?.type
       const numeric = type && /Integer|Double|Single|OID/.test(type) && value != null && value.trim() !== '' && Number.isFinite(Number(value))
@@ -2783,6 +2790,19 @@ export async function identifyVectorFeatures(
   const response = await queryAllFeatures(servicePath(url, `${layerId}/query`), parameters)
   const metadata = await cachedLayerMetadata(url, layerId)
   return (response.features || []).map(feature => identifiedFeature(service, feature, metadata, response.fieldAliases))
+}
+
+/** 面使用精确鼠标点查询，避免把附近却未命中的地块当作当前悬浮对象。 */
+export async function queryVectorHover(service:MapServiceItem,point:{lng:number;lat:number},envelope:{west:number;east:number;south:number;north:number},where:string,signal:AbortSignal) {
+  signal.throwIfAborted()
+  const metadata=await getMapServiceLayerMetadata(service)
+  signal.throwIfAborted()
+  const polygon=(service.arcGisGeometryType||metadata.geometryType)==='esriGeometryPolygon'
+  const geometry=polygon?{x:point.lng,y:point.lat,spatialReference:{wkid:4326}}:{xmin:envelope.west,ymin:envelope.south,xmax:envelope.east,ymax:envelope.north,spatialReference:{wkid:4326}}
+  const parameters=new URLSearchParams({where:where||'1=1',geometry:JSON.stringify(geometry),geometryType:polygon?'esriGeometryPoint':'esriGeometryEnvelope',inSR:'4326',spatialRel:'esriSpatialRelIntersects',outFields:'*',returnGeometry:'true',outSR:'4326'})
+  const response=await queryAllFeatures(servicePath(serviceRoot(service.serviceUrl),`${service.arcGisLayerId}/query`),parameters,{signal,maxFeatures:32})
+  signal.throwIfAborted()
+  return {metadata,features:response.features||[]}
 }
 
 function searchableFieldNames(metadata: ArcGisLayerMetadata) {

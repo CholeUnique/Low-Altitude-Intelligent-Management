@@ -1,6 +1,6 @@
 import { getSpatialOverlayGeoJson, type SpatialCollection, type SpatialDifferenceType, type SpatialField, type SpatialFilter, type SpatialGeometry, type SpatialOverlaySummary } from '@/api/spatial-analysis'
 
-export const SPATIAL_DIFFERENCE_COLORS:Record<SpatialDifferenceType,string>={A_ONLY:'#f8c36b',B_ONLY:'#a998ff'}
+export const SPATIAL_DIFFERENCE_COLORS:Record<SpatialDifferenceType,string>={A_ONLY:'#ffb81c',B_ONLY:'#9b5cff'}
 export function spatialDifferenceLabel(type:SpatialDifferenceType,summary:Pick<SpatialOverlaySummary,'sourceA'|'sourceB'>) {
   const source=type==='A_ONLY'?summary.sourceA:summary.sourceB
   const excluded=type==='A_ONLY'?summary.sourceB:summary.sourceA

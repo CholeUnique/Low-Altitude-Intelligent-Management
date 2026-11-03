@@ -8,6 +8,7 @@ export type AppPermissionKey =
   | 'smart-recognition'
   | 'algorithm-analysis'
   | 'data-management'
+  | 'special-analysis'
   | 'task-overview'
   | 'task-list'
   | 'task-todo'
@@ -22,6 +23,7 @@ export const permissionAliases: Record<AppPermissionKey, string[]> = {
   'smart-recognition': ['智能识别', 'SMART_RECOG', 'SMART_RECOGNITION', 'MENU_SMART_RECOGNITION'],
   'algorithm-analysis': ['算法分析', 'ALGORITHM_ANALYSIS', 'MENU_ALGORITHM_ANALYSIS'],
   'data-management': ['数据管理', 'DATA_MANAGEMENT', 'MENU_DATA_MANAGEMENT'],
+  'special-analysis': ['专题分析', 'SPECIAL_ANALYSIS'],
   'task-overview': ['任务总览', 'TASK_OVERVIEW', 'MENU_TASK_OVERVIEW'],
   'task-list': ['任务列表', 'TASK_LIST', 'MENU_TASK_LIST'],
   'task-todo': ['我的待办', 'TASK_TODO', 'MY_TODO', 'MENU_TASK_TODO'],
@@ -33,7 +35,7 @@ export const uavTabPermission: Record<string, AppPermissionKey> = {
 }
 
 export const recognitionTabPermission: Record<string, AppPermissionKey> = {
-  spots: 'smart-recognition', algorithms: 'algorithm-analysis', data: 'data-management', topics:'data-management',
+  spots: 'smart-recognition', algorithms: 'algorithm-analysis', data: 'data-management', topics:'special-analysis',
 }
 
 export const taskRoutePermission: Record<string, AppPermissionKey> = {
@@ -53,6 +55,7 @@ export const recognitionPermissionOrder: Array<{ key: AppPermissionKey; path: st
   { key: 'smart-recognition', path: '/recognition/spots' },
   { key: 'algorithm-analysis', path: '/recognition/algorithms' },
   { key: 'data-management', path: '/recognition/data' },
+  { key: 'special-analysis', path: '/recognition/topics' },
 ]
 
 export const taskPermissionOrder: Array<{ key: AppPermissionKey; path: string }> = [

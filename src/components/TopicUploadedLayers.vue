@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import L from 'leaflet'
-import { Upload } from '@element-plus/icons-vue'
+import { createLocalId } from '@/utils/local-id'
+import { featureHoverCaption } from '@/utils/feature-hover-caption'
+import { bindTopicFeatureHover } from '@/utils/topic-feature-hover'
 import { readShpPayload, UPLOAD_COLORS, UPLOAD_CRS, validateUploadName, type ParsedTopicUpload, type UploadedTopicLayer } from '@/utils/topic-upload'
 import { readTopicUploads, writeTopicUploads } from '@/utils/topic-upload-storage'
 
@@ -25,7 +27,7 @@ function persist(){
 function style(item:UploadedTopicLayer):L.PathOptions{return {pane,renderer,color:item.color,weight:item.mode==='boundary'?2.6:1.4,fillColor:item.color,fillOpacity:item.mode==='boundary'?0:.3,bubblingMouseEvents:false}}
 function addHandle(item:UploadedTopicLayer){
   const layer=L.geoJSON(item.data,{...style(item),style:()=>style(item),pointToLayer:(_feature,position)=>L.circleMarker(position,{...style(item),radius:5}),onEachFeature(feature,shape){
-    const label=document.createElement('span');label.textContent=`${item.name} · 要素 ${feature.id??''}`;shape.bindTooltip(label,{sticky:true})
+    bindTopicFeatureHover(shape,props.map,()=>featureHoverCaption(feature.properties,item.fields,item.name),()=>{(shape as L.Path).setStyle(style(item))})
     const content=document.createElement('div');content.className='uploaded-feature-properties'
     const title=document.createElement('b');title.textContent=item.name;content.appendChild(title)
     Object.entries(feature.properties||{}).forEach(([key,value])=>{const row=document.createElement('p');row.textContent=`${key}：${value==null?'—':typeof value==='object'?JSON.stringify(value):String(value)}`;content.appendChild(row)})
@@ -64,7 +66,7 @@ async function submit(){
     })
     if(current!==request||scope!==props.scope)return
     const used=new Set(items.value.map(item=>item.color)),color=UPLOAD_COLORS.find(color=>!used.has(color))||UPLOAD_COLORS[items.value.length%UPLOAD_COLORS.length]!
-    const item:UploadedTopicLayer={...parsed,data:markRaw(parsed.data),id:`upload-${crypto.randomUUID()}`,name:title,fileName,color,mode:'filled',selected:true,createdAt:new Date().toISOString()}
+    const item:UploadedTopicLayer={...parsed,data:markRaw(parsed.data),id:`upload-${createLocalId()}`,name:title,fileName,color,mode:'filled',selected:true,createdAt:new Date().toISOString()}
     addHandle(item);items.value.push(item);announce();persist();locate(item);emit('imported');name.value='';files.value=[];close()
   }catch(error){if(current===request)validation.value=error instanceof Error?error.message:'上传解析失败'}
   finally{parser?.terminate();if(worker===parser)worker=undefined;if(current===request){clearTimeout(parseTimer);busy.value=false}}
@@ -81,8 +83,8 @@ defineExpose({open,select})
 </script>
 
 <template>
-  <section class="uploaded-layers" aria-label="本机上传图层">
-    <header><b>上传图层 <small>{{ items.length }}</small></b><button type="button" @click="open"><Upload />上传 SHP</button></header>
+  <section v-if="items.length||storageError||loading" class="uploaded-layers" aria-label="本机上传图层">
+    <header v-if="items.length"><b>上传图层 <small>{{ items.length }}</small></b></header>
     <p v-if="loading" role="status">正在读取本机图层…</p><p v-if="storageError" class="upload-error" role="alert">{{ storageError }}</p>
     <article v-for="item in matches" :key="item.id" class="uploaded-layer" :data-upload-id="item.id">
       <div class="upload-layer-heading"><b :title="item.name">{{ item.name }}</b><div><label><input type="checkbox" :checked="item.selected" :aria-label="`${item.name}全选`" @change="select([item.id],($event.target as HTMLInputElement).checked)" />全选</label><label><input type="checkbox" :checked="false" :aria-label="`${item.name}反选`" @change="($event.target as HTMLInputElement).checked=false;select([item.id],!item.selected)" />反选</label></div></div>
@@ -91,7 +93,6 @@ defineExpose({open,select})
       <div class="upload-layer-actions"><button type="button" @click="locate(item)">定位</button><button type="button" @click="removing=removing===item.id?'':item.id">移除</button></div>
       <div v-if="removing===item.id" class="upload-remove"><span>从当前浏览器移除此图层？</span><button type="button" @click="remove(item)">确认</button><button type="button" @click="removing=''">取消</button></div>
     </article>
-    <p v-if="!items.length&&!loading">可上传规划范围，与业务图层进行分析。</p>
   </section>
   <Teleport :to="map.getContainer().parentElement!">
     <dialog v-if="opened" ref="dialog" class="topic-upload-dialog" aria-labelledby="topic-upload-title" @cancel.prevent="close" @close="opened && close()">

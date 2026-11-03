@@ -42,7 +42,8 @@ async function spatialPost<T>(endpoint:string,body:object,options:RequestOptions
     const payload=failure?.response?.data,status=failure?.response?.status
     const code=error instanceof ApiBusinessError?error.code:String(payload?.code??(status?`HTTP ${status}`:failure?.code||'NETWORK_ERROR'))
     const message=payload?.msg||(error instanceof Error?error.message:'请求未完成')
-    const detail=['ECONNABORTED','ETIMEDOUT'].includes(code)?'请求超时，请重试或检查后端是否仍在计算':code==='ERR_NETWORK'?'无法连接后端，请检查服务是否重启完成及网络连接':message
+    const detail=code==='403'||status===403?'当前账号或部门视角未获后端授权。请管理员检查“专题分析”（SPECIAL_ANALYSIS）权限及服务的部门授权；仅有“数据管理”权限不能使用空间分析。':
+      ['ECONNABORTED','ETIMEDOUT'].includes(code)?'请求超时，请重试或检查后端是否仍在计算':code==='ERR_NETWORK'?'无法连接后端，请检查服务是否重启完成及网络连接':message
     throw new SpatialRequestError(endpoint,'resultId' in body?String(body.resultId):undefined,code,detail)
   }
 }

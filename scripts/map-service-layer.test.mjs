@@ -103,6 +103,13 @@ assert.equal(identified[0].typeValue,'水浇地','Hover displays land type rathe
 const gbz=await api.identifyVectorFeatures({...service,arcGisLayerId:1},{west:119,south:32,east:120,north:33})
 assert.equal(gbz[0].category.field,'项目类','GBZ without a land-use field exposes its genuine project classification')
 assert.equal(gbz[0].typeLabel,'项目类型')
+requests.length=0
+const hovered=await api.queryVectorHover({...service,arcGisGeometryType:'esriGeometryPolygon'},{lng:119.8,lat:32.4},{west:119,south:32,east:120,north:33},"DLMC = '水浇地'",new AbortController().signal)
+assert.equal(hovered.features.length,2)
+assert(requests.every(p=>p.get('geometryType')==='esriGeometryPoint'),'Polygon hover tests the cursor point rather than a nearby envelope')
+assert(requests.every(p=>p.get('where')==="DLMC = '水浇地'"),'Hover preserves category/selection filters')
+assert.equal(requests.at(-1).get('returnGeometry'),'true','Hover retrieves actual highlight geometry')
+const hoverAbort=new AbortController();hoverAbort.abort();await assert.rejects(api.queryVectorHover(service,{lng:119,lat:32},{west:119,south:32,east:120,north:33},'1=1',hoverAbort.signal),error=>error.name==='AbortError')
 assert.equal(new Set(Array.from({length:60},(_,i)=>api.vectorLayerColor(`layer-${i}`))).size,60,'New layers do not cycle through twelve repeated colors')
 const shades=api.categoryShadeColors('#ff0000',5)
 assert.equal(new Set(shades).size,5)

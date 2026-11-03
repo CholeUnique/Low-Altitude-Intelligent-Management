@@ -80,6 +80,8 @@ handle=async()=>{throw Object.assign(new Error('Network Error'),{code:'ERR_NETWO
 await assert.rejects(api.getSpatialOverlayGeoJson('33','1'),/无法连接后端/);
 handle=async()=>{throw {response:{status:503,data:{msg:'服务维护中'}}}};
 await assert.rejects(api.getSpatialOverlayGeoJson('33','1'),/HTTP 503.*服务维护中/);
+handle=async()=>{throw new ApiBusinessError('403','无权限访问')};
+await assert.rejects(api.getSpatialLayers('9','1'),/SPECIAL_ANALYSIS.*数据管理/);
 const abort=new AbortController();abort.abort();const aborted=Object.assign(new Error('aborted'),{name:'AbortError'});
 handle=async()=>{throw aborted};await assert.rejects(loadSpatialOverlayResult('33','1',{signal:abort.signal}),error=>error===aborted);
 console.log('spatial analysis: classified symmetric difference, preserved geometry and provenance, positive areas, exact diagnostics, filters, IDs and cancellation passed');

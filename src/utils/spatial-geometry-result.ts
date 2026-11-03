@@ -6,7 +6,7 @@ export type SpatialAnalysisOperation='difference'|'coverage'
 export type SpatialAnalysisSummary=Pick<SpatialOverlaySummary,'sourceA'|'sourceB'|'areaA'|'areaB'|'overlapArea'|'onlyAArea'|'onlyBArea'|'diffArea'|'minAreaSqm'|'crsUsed'|'featureCountA'|'featureCountB'|'spotCount'>
   &Partial<Pick<SpatialOverlaySummary,'resultId'|'cached'|'costMs'|'createTime'|'diffAreaRaw'|'diffRate'>>
   &{coverageRate?:number|null;outsideRate?:number|null;unreturnedArea?:number}
-export const COVERAGE_COLORS={INSIDE:'#57d2a3',OUTSIDE:'#f1ad6c'}
+export const COVERAGE_COLORS={INSIDE:'#00e6a0',OUTSIDE:'#ff8c24'}
 export function validateCompareGroup(group:SpatialCompareGroup,kind:'OVERLAP'|'A_ONLY'|'B_ONLY'):SpatialCollection {
   if(!group||!Number.isFinite(group.areaSqm)||group.areaSqm<0||!Number.isInteger(group.spotCount)||group.spotCount<0)throw new Error('后端分组统计无效')
   const data=group.featureCollection
