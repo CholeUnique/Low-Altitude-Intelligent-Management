@@ -7,7 +7,7 @@ let handle
 const client={ApiBusinessError,apiClient:{post:async(path,body,options)=>{calls.push({path,body,options});return handle(path,body,options)}}}
 function load(file,dependencies){const module={exports:{}};new Function('module','exports','require',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(module,module.exports,id=>{assert(id in dependencies,`Unexpected dependency: ${id}`);return dependencies[id]});return module.exports}
 const api=load('src/api/spatial-analysis.ts',{'./client':client})
-const {loadSpatialOverlayResult,spatialFilters,spatialDifferenceFeatures}=load('src/utils/spatial-overlay-result.ts',{'@/api/client':client,'@/api/spatial-analysis':api})
+const {loadSpatialOverlayResult,spatialFilters,spatialDifferenceFeatures,annotateSpatialDifference,spatialDifferenceLabel,SPATIAL_DIFFERENCE_COLORS}=load('src/utils/spatial-overlay-result.ts',{'@/api/client':client,'@/api/spatial-analysis':api})
 const signal=new AbortController().signal
 const fields=[{name:'DLMC',alias:'地类名称',type:'text'}]
 handle=async()=>[{layerId:2,name:'后端原名',analyzable:true,geometryType:'POLYGON',fields}]
@@ -30,34 +30,48 @@ assert.throws(()=>spatialFilters([{field:'DLMC',op:'EQ',values:' '}],fields),/�
 
 const outer=[[119,32],[120,32],[120,33],[119,32]],hole=[[119.2,32.2],[119.3,32.2],[119.3,32.3],[119.2,32.2]];
 const geometry={type:'MultiPolygon',coordinates:[[outer,hole]]};
-const feature={type:'Feature',geometry,properties:{diffType:'DIFF',areaSqm:135.27,partCount:2}};
-const data={type:'FeatureCollection',features:[feature]};
+const feature={type:'Feature',geometry,properties:{diffType:'A_ONLY',areaSqm:135.27,seqNo:1}};
+const featureB={...feature,properties:{diffType:'B_ONLY',areaSqm:25.8,seqNo:2}};
+const data={type:'FeatureCollection',features:[feature,featureB]};
+handle=async()=>({areaA:20,areaB:10,both:{},aOnly:{},bOnly:{}})
+await api.compareSpatialGeometries({geometryA:data,geometryB:data,minAreaSqm:4},{signal})
+assert.equal(calls.at(-1).path,'/v1/spatial/spot/compare');assert.equal(calls.at(-1).options.timeout,180000);assert.equal(calls.at(-1).options.signal,signal)
+assert.equal(calls.at(-1).body.geometryA,data,'Uploaded analysis sends complete geometry to the existing backend')
 const original=JSON.stringify(data);
-assert.equal(spatialDifferenceFeatures(data),data,'Use the merged backend result unchanged');
+assert.equal(spatialDifferenceFeatures(data),data,'Use the classified backend result unchanged');
 assert.equal(spatialDifferenceFeatures(data).features[0].geometry,geometry,'Preserve multipart geometry and holes');
 assert.equal(JSON.stringify(data),original,'Never merge or recalculate geometry in the browser');
-for(const diffType of ['A_ONLY','B_ONLY','OVERLAP',undefined]){
- assert.throws(()=>spatialDifferenceFeatures({type:'FeatureCollection',features:[{...feature,properties:{diffType}}]}),/未获取到独立的不重叠区域图层/);
-}
-assert.throws(()=>spatialDifferenceFeatures({type:'FeatureCollection',features:[feature,{...feature,properties:{diffType:'A_ONLY'}}]}),/单个 DIFF/);
-assert.throws(()=>spatialDifferenceFeatures({type:'FeatureCollection',features:[feature,feature]}),/单个 DIFF/);
-assert.throws(()=>spatialDifferenceFeatures({type:'FeatureCollection',features:[]}),/后端返回空结果/);
+for(const diffType of ['DIFF','OVERLAP',undefined])assert.throws(()=>spatialDifferenceFeatures({type:'FeatureCollection',features:[{...feature,properties:{diffType,areaSqm:1}}]}),/来源分类/);
+for(const areaSqm of [0,-1,NaN,Infinity,undefined,'12'])assert.throws(()=>spatialDifferenceFeatures({type:'FeatureCollection',features:[{...feature,properties:{diffType:'A_ONLY',areaSqm}}]}),/有效正面积/);
+assert.equal(spatialDifferenceFeatures({type:'FeatureCollection',features:[feature]}).features.length,1,'One side may have no exclusive area');
+assert.equal(spatialDifferenceFeatures({type:'FeatureCollection',features:[]}).features.length,0,'Empty collection can represent genuinely identical layers; caller verifies summary');
 assert.throws(()=>spatialDifferenceFeatures({type:'FeatureCollection',features:[{...feature,geometry:null}]}),/有效的面图斑/);
 assert.throws(()=>spatialDifferenceFeatures({type:'FeatureCollection',features:[{...feature,geometry:{type:'Polygon',coordinates:[]}}]}),/有效的面图斑/);
+const sources={sourceA:{serviceId:'9',layerId:0,layerName:'高标准农田GBZ',serviceName:'高标准农田数据'},sourceB:{serviceId:'9',layerId:1,layerName:'九龙镇永久基本农田1',serviceName:'高标准农田数据'}};
+const annotated=annotateSpatialDifference(data,sources);
+assert.notEqual(annotated,data);assert.equal(annotated.features[0].geometry,geometry,'Annotation never modifies geometry');assert.equal(JSON.stringify(data),original,'Annotation never mutates backend data');
+assert.equal(annotated.features[0].properties.analysisSourceLayerName,sources.sourceA.layerName);
+assert.equal(annotated.features[0].properties.analysisExcludedLayerName,sources.sourceB.layerName);
+assert.equal(annotated.features[1].properties.analysisSourceSide,'B');
+assert.equal(annotated.features[1].properties.analysisSourceLayerName,sources.sourceB.layerName);
+assert.equal(annotated.features[1].properties.analysisExcludedLayerName,sources.sourceA.layerName);
+assert.equal(annotated.features[1].properties.areaSqm,25.8,'Keep backend area exactly');
+assert.equal(spatialDifferenceLabel('A_ONLY',sources),'仅高标准农田GBZ（非九龙镇永久基本农田1）');
+assert.notEqual(SPATIAL_DIFFERENCE_COLORS.A_ONLY,SPATIAL_DIFFERENCE_COLORS.B_ONLY,'Provenance has distinguishable colors');
 handle=async()=>data;
 assert.equal(await loadSpatialOverlayResult(summary.resultId,'1',{signal}),data);
 assert.equal(calls.at(-1).path,'/v1/spatial/overlay/geojson');
-assert.equal(calls.at(-1).body.merge,true,'Explicitly request the independent merged layer');
+assert.equal(calls.at(-1).body.merge,false,'Explicitly preserve source-side classification in one result layer');
 assert.equal(calls.at(-1).body.resultId,summary.resultId);
 assert.equal(calls.at(-1).options.signal,signal);
 for(const code of ['-1','10707','403','10709']){
  const attempted=[];
  handle=async(path)=>{attempted.push(path);throw new ApiBusinessError(code,code==='-1'?'unknown error':'接口错误')};
  await assert.rejects(loadSpatialOverlayResult('33','1'),error=>error.code===code&&error.message.includes('结果 33')&&error.message.includes('/geojson'));
- assert.deepEqual(attempted,['/v1/spatial/overlay/geojson'],'Never replace unavailable merged geometry with A_ONLY/B_ONLY paging');
+ assert.deepEqual(attempted,['/v1/spatial/overlay/geojson'],'Do not silently replace failed geometry with another endpoint');
 }
-handle=async()=>({type:'FeatureCollection',features:[{...feature,properties:{diffType:'A_ONLY'}}]});
-await assert.rejects(loadSpatialOverlayResult('33','1'),/merge=true.*结果 33.*不会使用 A_ONLY\/B_ONLY 替代/);
+handle=async()=>({type:'FeatureCollection',features:[{...feature,properties:{diffType:'DIFF',areaSqm:12}}]});
+await assert.rejects(loadSpatialOverlayResult('33','1'),/merge=false.*结果 33.*来源分类/);
 handle=async()=>{throw new ApiBusinessError('-1','unknown error')};
 await assert.rejects(api.getSpatialOverlayGeoJson('33','1'),error=>error instanceof api.SpatialRequestError&&error.code==='-1'&&error.endpoint==='/v1/spatial/overlay/geojson'&&/服务端异常日志/.test(error.message));
 handle=async()=>{throw Object.assign(new Error('timeout'),{code:'ECONNABORTED'})};
@@ -68,4 +82,4 @@ handle=async()=>{throw {response:{status:503,data:{msg:'服务维护中'}}}};
 await assert.rejects(api.getSpatialOverlayGeoJson('33','1'),/HTTP 503.*服务维护中/);
 const abort=new AbortController();abort.abort();const aborted=Object.assign(new Error('aborted'),{name:'AbortError'});
 handle=async()=>{throw aborted};await assert.rejects(loadSpatialOverlayResult('33','1',{signal:abort.signal}),error=>error===aborted);
-console.log('spatial analysis: explicit merge=true, strict single DIFF geometry, preserved holes, no A_ONLY/B_ONLY fallback, exact diagnostics, filters, IDs and cancellation passed');
+console.log('spatial analysis: classified symmetric difference, preserved geometry and provenance, positive areas, exact diagnostics, filters, IDs and cancellation passed');

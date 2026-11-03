@@ -3,8 +3,8 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import L from 'leaflet'
 import { EditPen, Location, Connection, ArrowDown } from '@element-plus/icons-vue'
 import { geodesicArea, formatArea, formatDistance } from '@/utils/map-measurement'
-const props = defineProps<{map:L.Map; suspended?:boolean}>()
-const emit = defineEmits<{drawing:[active:boolean];overlay:[]}>()
+const props = defineProps<{map:L.Map; suspended?:boolean;coverageEnabled?:boolean}>()
+const emit = defineEmits<{drawing:[active:boolean];overlay:[];coverage:[]}>()
 type Tool = 'distance'|'area'|'marker'
 const menu = ref<'measure'|'annotation'|'analysis'>(), tool = ref<Tool>(), message = ref('')
 const measurements = L.layerGroup(), annotations = L.layerGroup()
@@ -86,7 +86,7 @@ onBeforeUnmount(()=>{unbind();window.removeEventListener('keydown',key)})
       </div>
       <div class="tool-dropdown">
         <button :class="{active:menu==='analysis'}" :aria-expanded="menu==='analysis'" @click="toggleMenu('analysis')"><Connection /><span>空间分析</span><ArrowDown class="down" /></button>
-        <div v-if="menu==='analysis'" class="tool-menu" aria-label="空间分析选项"><button @click="stopDrawing(); menu=undefined; emit('overlay')">对称差分</button></div>
+        <div v-if="menu==='analysis'" class="tool-menu" aria-label="空间分析选项"><button @click="stopDrawing(); menu=undefined; emit('overlay')">对称差分</button><button v-if="coverageEnabled" @click="stopDrawing(); menu=undefined; emit('coverage')">范围覆盖分析</button></div>
       </div>
       <span class="tool-divider"></span><slot />
     </div>

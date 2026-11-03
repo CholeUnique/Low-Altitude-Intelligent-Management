@@ -1,4 +1,11 @@
-import { getSpatialOverlayGeoJson, type SpatialCollection, type SpatialField, type SpatialFilter, type SpatialGeometry } from '@/api/spatial-analysis'
+import { getSpatialOverlayGeoJson, type SpatialCollection, type SpatialDifferenceType, type SpatialField, type SpatialFilter, type SpatialGeometry, type SpatialOverlaySummary } from '@/api/spatial-analysis'
+
+export const SPATIAL_DIFFERENCE_COLORS:Record<SpatialDifferenceType,string>={A_ONLY:'#f8c36b',B_ONLY:'#a998ff'}
+export function spatialDifferenceLabel(type:SpatialDifferenceType,summary:Pick<SpatialOverlaySummary,'sourceA'|'sourceB'>) {
+  const source=type==='A_ONLY'?summary.sourceA:summary.sourceB
+  const excluded=type==='A_ONLY'?summary.sourceB:summary.sourceA
+  return `仅${source.layerName}（非${excluded.layerName}）`
+}
 
 export function spatialFilters(rows:{field:string;op:'EQ'|'IN';values:string}[],fields:SpatialField[]):SpatialFilter[] {
   return rows.map(row=>{
@@ -22,19 +29,29 @@ function collection(value:SpatialCollection) {
   return value
 }
 
-/** Accept only the server's merged result. Never substitute categorized source-exclusive spots. */
+/** 后端负责差分几何；一个结果图层保留 A_ONLY/B_ONLY 分类，不接收来源已被抹掉的 DIFF。 */
 export function spatialDifferenceFeatures(data:SpatialCollection):SpatialCollection {
   collection(data)
-  if(!data.features.length)throw new Error('未获取到独立的不重叠区域图层：后端返回空结果，请检查是否存在满足面积阈值的差异区域')
-  if(data.features.length!==1||data.features[0]?.properties?.diffType!=='DIFF'){
+  if(data.features.some(feature=>!['A_ONLY','B_ONLY'].includes(String(feature.properties?.diffType)))){
     const types=[...new Set(data.features.map(feature=>String(feature.properties?.diffType||'未标注类型')))].slice(0,5).join('、')
-    throw new Error(`未获取到独立的不重叠区域图层：merge=true 应返回单个 DIFF 要素，实际返回 ${data.features.length} 个 ${types} 要素；不会使用 A_ONLY/B_ONLY 替代显示，请后端检查合并结果`)
+    throw new Error(`差分图层缺少有效的来源分类：merge=false 应返回 A_ONLY/B_ONLY，实际返回 ${types}；不能用 DIFF 或交集代替`)
   }
+  if(data.features.some(feature=>typeof feature.properties?.areaSqm!=='number'||!Number.isFinite(feature.properties.areaSqm)||feature.properties.areaSqm<=0))throw new Error('后端返回了缺少有效正面积的差分图斑，请检查零面积碎片及面积字段')
   return data
 }
-/** Missing/failed merged geometry is an error, even if statistics or spot paging succeed. */
+/** 只补充图层来源元数据，几何和后端统计均原样保留，不在浏览器计算差分。 */
+export function annotateSpatialDifference(data:SpatialCollection,summary:Pick<SpatialOverlaySummary,'sourceA'|'sourceB'>):SpatialCollection {
+  spatialDifferenceFeatures(data)
+  return {...data,features:data.features.map(feature=>{
+    const type=feature.properties!.diffType as SpatialDifferenceType
+    const source=type==='A_ONLY'?summary.sourceA:summary.sourceB
+    const excluded=type==='A_ONLY'?summary.sourceB:summary.sourceA
+    return {...feature,properties:{...feature.properties,analysisSourceSide:type==='A_ONLY'?'A':'B',analysisSourceLayerName:source.layerName,analysisExcludedLayerName:excluded.layerName,analysisSourceServiceId:String(source.serviceId),analysisSourceLayerId:source.layerId,analysisMembership:spatialDifferenceLabel(type,summary)}}
+  })}
+}
+/** Failed or unclassified geometry remains an error; do not silently fall back to merged geometry. */
 export async function loadSpatialOverlayResult(resultId:string,deptId?:string,options:{signal?:AbortSignal}={}):Promise<SpatialCollection> {
   const data=await getSpatialOverlayGeoJson(resultId,deptId,{signal:options.signal})
   try{return spatialDifferenceFeatures(data)}
-  catch(error){throw new Error(`读取不重叠区域图层失败（POST /api/v1/spatial/overlay/geojson，merge=true，结果 ${resultId}）：${error instanceof Error?error.message:'后端结果格式无效'}`)}
+  catch(error){throw new Error(`读取差分来源图层失败（POST /api/v1/spatial/overlay/geojson，merge=false，结果 ${resultId}）：${error instanceof Error?error.message:'后端结果格式无效'}`)}
 }

@@ -49,6 +49,7 @@ declare module 'vue' {
     TopicMapToolbar: typeof import('./src/components/TopicMapToolbar.vue')['default']
     TopicOverlayAnalysis: typeof import('./src/components/TopicOverlayAnalysis.vue')['default']
     TopicStatisticsSummary: typeof import('./src/components/TopicStatisticsSummary.vue')['default']
+    TopicUploadedLayers: typeof import('./src/components/TopicUploadedLayers.vue')['default']
     UserAccountMenu: typeof import('./src/components/UserAccountMenu.vue')['default']
   }
 }
