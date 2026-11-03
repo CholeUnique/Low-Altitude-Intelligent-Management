@@ -6,18 +6,23 @@
 
 ## 当前空间分析约定
 
-以 2026-10-29 最新 Swagger 的 SpatialGeojsonReq 为准。
+以 2026-11-03 最新 Swagger 和实际响应为准，当前需求已从单色 DIFF 改为一个结果图层内保留来源的对称差分。
 
 - POST /api/v1/spatial/layer/list：读取当前部门可分析图层及字段，点/线不可用于面积分析。
 - POST /api/v1/spatial/overlay：提交 A/B 服务和图层、EQ/IN 属性条件、minAreaSqm（默认 4）及 includeOverlapSpots=false。后端计算，前端等待 180 秒。
-- POST /api/v1/spatial/overlay/geojson：明确提交 resultId、deptId、merge=true，要求后端 union 后的独立差异要素。预期 FeatureCollection 中一个 Polygon/MultiPolygon，properties.diffType=DIFF、areaSqm、partCount；接缝已消除。
+- POST /api/v1/spatial/overlay/geojson：明确提交 resultId、deptId、merge=false，读取后端裁切好的 A_ONLY / B_ONLY 多要素 FeatureCollection，作为一个独立差分图层展示。
 - POST /api/v1/spatial/overlay/detail：刷新统计及输入快照。
 
-前端只接受有效单个 DIFF 要素，不筛选/组合 A_ONLY、B_ONLY。空结果、分类结果、混合类型、多个要素、无效几何及接口错误均明确报错。即使分页接口可返回分类图斑，也不再降级读取或显示。不存在浏览器几何运算。
+黄色表示仅 A（A − B），紫色表示仅 B（B − A）。图例、点击详情、鼠标提示和导出均保留具体来源名称；导出补充 analysisSourceSide、analysisSourceLayerName、analysisExcludedLayerName、analysisSourceServiceId、analysisSourceLayerId、analysisMembership。后端几何、内环、面积和原属性不改写，浏览器不计算差分。
 
-成功后单色显示一个不重叠区域图层，临时隐藏原始业务矢量，保留影像底图；提供 DIFF GeoJSON 导出。原始图层的专题配置、图例行、分类项目和显示模式保留；分析成功后将原业务图层分类全部取消勾选。图例只提供全选/反选，不设额外显示选项；无分类图层也由同一组全选/反选控制。已选配置的 visible 状态不改变，无需重新配置。面积与 A/B 来源保留在左侧统计。失败不创建替代图层，不隐藏输入，不丢弃上次有效 DIFF 结果；错误提示包含接口、结果编号和错误码，保留至用户关闭。
+前端拒绝 DIFF（无法区分来源）、OVERLAP、未分类结果、无效面及非正面积。接口错误不会降级显示其他几何。如果结果为空且后端差异面积和图斑数均为 0，提示无有效差异并保留原图层；若统计有差异却无几何则报错。
 
-## 最新复测
+成功后临时取消原业务矢量分类的选择，保留影像底图。原始专题配置、图层详情行、分类和模式保留，只通过全选/反选恢复。失败不隐藏输入，不删除已有有效结果。后台结果的 diffType 是后端几何裁切后的来源，不是原始 A/B 整层的简单重叠显示。
+
+## 历史复测（2026-10-29）
+
+以下追溯此前单 DIFF 导出故障；当时“拒绝分类结果”的要求已于 2026-11-03 被上述保留来源的需求替代。
+
 
 2026-10-29 18:35，GBZ 9/0 与永久基本农田 9/1：
 

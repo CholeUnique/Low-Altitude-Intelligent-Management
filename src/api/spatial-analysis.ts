@@ -15,6 +15,10 @@ export interface SpatialOverlaySummary {
 }
 export type SpatialGeometry = GeoJSON.Polygon | GeoJSON.MultiPolygon
 export type SpatialCollection = GeoJSON.FeatureCollection<SpatialGeometry>
+export type SpatialDifferenceType = 'A_ONLY' | 'B_ONLY'
+export interface SpatialResultLegend { id:string; name:string; symbols:{label:string;color:string}[] }
+export interface SpatialCompareGroup {areaSqm:number;areaMu?:number;spotCount:number;featureCollection:SpatialCollection}
+export interface SpatialGeometryCompare {areaA:number;areaB:number;crsUsed:string;minAreaSqm:number;both:SpatialCompareGroup;aOnly:SpatialCompareGroup;bOnly:SpatialCompareGroup}
 export interface SpatialSpot { seqNo:number; diffType:string; areaSqm:number; centerLng:number; centerLat:number; geometry:SpatialGeometry }
 export interface SpatialSpotPage { records:SpatialSpot[]; total:number; pageNum:number; pageSize:number }
 interface RequestOptions { signal?:AbortSignal }
@@ -22,7 +26,7 @@ interface RequestOptions { signal?:AbortSignal }
 /** Keep diagnostic context without exposing request headers or authentication tokens. */
 export class SpatialRequestError extends ApiBusinessError {
   constructor(public readonly endpoint:string,public readonly resultId:string|undefined,code:string,detail:string) {
-    super(code,`${endpoint.endsWith('/overlay')?'后端分析':endpoint.endsWith('/geojson')?'读取结果 GeoJSON':endpoint.endsWith('/spot/page')?'读取结果分页':endpoint.endsWith('/detail')?'读取分析统计':'读取可分析图层'}失败（POST /api${endpoint}${resultId?`，结果 ${resultId}`:''}，错误码 ${code}）：${/^unknown error$/i.test(detail.trim())?'后端未提供具体原因（unknown error），请检查服务端异常日志':detail}`)
+    super(code,`${endpoint.endsWith('/overlay')||endpoint.endsWith('/spot/compare')?'后端分析':endpoint.endsWith('/geojson')?'读取结果 GeoJSON':endpoint.endsWith('/spot/page')?'读取结果分页':endpoint.endsWith('/detail')?'读取分析统计':'读取可分析图层'}失败（POST /api${endpoint}${resultId?`，结果 ${resultId}`:''}，错误码 ${code}）：${/^unknown error$/i.test(detail.trim())?'后端未提供具体原因（unknown error），请检查服务端异常日志':detail}`)
     this.name='SpatialRequestError'
   }
 }
@@ -55,8 +59,12 @@ export function getSpatialOverlayDetail(resultId:string,deptId?:string,options:R
   return spatialPost<SpatialOverlaySummary>('/v1/spatial/overlay/detail',{resultId,deptId},options)
 }
 export function getSpatialOverlayGeoJson(resultId:string,deptId?:string,options:RequestOptions={}) {
-  return spatialPost<SpatialCollection>('/v1/spatial/overlay/geojson',{resultId,deptId,merge:true},options)
+  // 一个差分图层内保留来源分类；合并成 DIFF 会丢失每块区域属于 A 还是 B 的信息。
+  return spatialPost<SpatialCollection>('/v1/spatial/overlay/geojson',{resultId,deptId,merge:false},options)
 }
 export function getSpatialOverlaySpots(resultId:string,pageNum:number,deptId?:string,options:RequestOptions={}) {
   return spatialPost<SpatialSpotPage>('/v1/spatial/overlay/spot/page',{resultId,deptId,pageNum,pageSize:200},options)
+}
+export function compareSpatialGeometries(input:{geometryA:SpatialCollection;geometryB:SpatialCollection;minAreaSqm:number},options:RequestOptions={}) {
+  return spatialPost<SpatialGeometryCompare>('/v1/spatial/spot/compare',input,{...options,timeout:180_000})
 }

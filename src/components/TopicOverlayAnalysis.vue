@@ -1,27 +1,36 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, markRaw, type Raw } from 'vue'
 import L from 'leaflet'
-import { analyzeSpatialOverlay, getSpatialLayers, getSpatialOverlayDetail, type SpatialCollection, type SpatialLayer, type SpatialOverlaySummary, type SpatialInput } from '@/api/spatial-analysis'
-import { loadSpatialOverlayResult, spatialFilters, spatialDifferenceFeatures } from '@/utils/spatial-overlay-result'
+import { analyzeSpatialOverlay, compareSpatialGeometries, getSpatialLayers, getSpatialOverlayDetail, type SpatialCollection, type SpatialDifferenceType, type SpatialLayer, type SpatialInput, type SpatialResultLegend, type SpatialSource } from '@/api/spatial-analysis'
+import { annotateSpatialDifference, loadSpatialOverlayResult, spatialFilters, spatialDifferenceLabel, SPATIAL_DIFFERENCE_COLORS } from '@/utils/spatial-overlay-result'
+import { geometryAnalysisResult, COVERAGE_COLORS, type SpatialAnalysisOperation, type SpatialAnalysisSummary } from '@/utils/spatial-geometry-result'
+import { filterUploadedGeometry, geometryRequestInputs } from '@/utils/spatial-geometry-input'
+import type { UploadedTopicLayer } from '@/utils/topic-upload'
 import { useUserStore } from '@/stores/user'
 interface FilterRow { id:number; field:string; op:'EQ'|'IN'; values:string }
 interface Selection { label:'A'|'B'; serviceId:string; layerId:string; layers:SpatialLayer[]; filters:FilterRow[]; loading:boolean; error:string; revision:number }
-interface Result { id:string; name:string; summary:SpatialOverlaySummary; data:Raw<SpatialCollection>; difference:Raw<SpatialCollection>; layer:Raw<L.GeoJSON>; visible:boolean; restore:string[]; details:boolean; refreshing:boolean; error:string }
-const props=defineProps<{map:L.Map; open:boolean; context:string; sources:{id:string;name:string}[]; visibleKeys:string[]}>()
-const emit=defineEmits<{close:[];hide:[keys:string[]];restore:[keys:string[]];legend:[items:{id:string;name:string;color:string}[]]}>()
+interface Result { id:string; name:string; operation:SpatialAnalysisOperation;remote:boolean;summary:SpatialAnalysisSummary; data:Raw<SpatialCollection>; difference:Raw<SpatialCollection>; layer:Raw<L.GeoJSON>; visible:boolean; restore:string[]; details:boolean; refreshing:boolean; error:string }
+const props=withDefaults(defineProps<{map:L.Map; open:boolean; context:string; sources:{id:string;name:string}[]; visibleKeys:string[];uploads?:UploadedTopicLayer[];operation?:SpatialAnalysisOperation;loadGeometry?:(input:SpatialInput,signal:AbortSignal)=>Promise<SpatialCollection>}>(),{uploads:()=>[],operation:'difference'})
+const emit=defineEmits<{close:[];upload:[];hide:[keys:string[]];restore:[keys:string[]];legend:[items:SpatialResultLegend[]]}>()
 const user=useUserStore(),dialog=ref<HTMLDialogElement>()
 const selection=(label:'A'|'B'):Selection=>({label,serviceId:'',layerId:'',layers:[],filters:[],loading:false,error:'',revision:0})
 const a=reactive(selection('A')),b=reactive(selection('B')),selections=[a,b]
 const minAreaSqm=ref<number|string>(4)
 const busy=ref(false),stage=ref(''),validation=ref(''),notice=ref(''),failed=ref(false),results=ref<Result[]>([])
 const canFinish=computed(()=>!busy.value&&selections.every(side=>!side.loading&&selected(side)?.analyzable))
+const coverage=computed(()=>props.operation==='coverage'),title=computed(()=>coverage.value?'范围覆盖分析':'对称差分 / 交集取反')
+const availableUploads=computed(()=>props.uploads.filter(item=>item.analyzable))
 let job=0,filterSequence=0,controller:AbortController|undefined,toastTimer:ReturnType<typeof setTimeout>|undefined
 const layerControllers=new Map<Selection,AbortController>(),detailControllers=new Set<AbortController>()
-const typeNames:Record<string,string>={DIFF:'不重叠区域'}
-const colors:Record<string,string>={DIFF:'#45d9d2'}
-watch(()=>results.value.filter(result=>result.visible).map(result=>({id:result.id,name:result.name,color:colors.DIFF!})),items=>emit('legend',items),{immediate:true})
+const colors=SPATIAL_DIFFERENCE_COLORS
+function resultTypes(result:Result){return (result.operation==='coverage'?['INSIDE','OUTSIDE']:['A_ONLY','B_ONLY']).filter(type=>result.difference.features.some(feature=>resultType(result,feature)===type))}
+function resultType(result:Pick<Result,'operation'>,feature:GeoJSON.Feature){return String(result.operation==='coverage'?feature.properties?.analysisCoverage:feature.properties?.diffType)}
+function typeColor(type:string){return {...colors,...COVERAGE_COLORS}[type as keyof typeof colors|keyof typeof COVERAGE_COLORS]}
+function typeLabel(type:string,summary:SpatialAnalysisSummary){return type==='INSIDE'?`位于${summary.sourceB.layerName}范围内`:type==='OUTSIDE'?`位于${summary.sourceB.layerName}范围外`:spatialDifferenceLabel(type as SpatialDifferenceType,summary)}
+watch(()=>results.value.filter(result=>result.visible).map(result=>({id:result.id,name:result.name,symbols:resultTypes(result).map(type=>({label:typeLabel(type,result.summary),color:typeColor(type)}))})),items=>emit('legend',items),{immediate:true})
 function selected(side:Selection){return side.layers.find(layer=>String(layer.layerId)===side.layerId)}
-function sourceKey(side:Selection){return `${side.serviceId}/${side.layerId}`}
+function uploaded(side:Selection){return props.uploads.find(item=>`upload:${item.id}`===side.serviceId)}
+function sourceKey(side:Selection){return uploaded(side)?side.serviceId:`${side.serviceId}/${side.layerId}`}
 function toast(message:string,isError=false){notice.value=message;failed.value=isError;clearTimeout(toastTimer);if(!isError)toastTimer=setTimeout(()=>{notice.value=''},10_000)}
 function errorText(error:unknown){return error instanceof Error?error.message:'请求失败，请重试'}
 function number(value:number|null|undefined){return value==null||!Number.isFinite(Number(value))?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:2})}
@@ -33,6 +42,8 @@ async function loadLayers(side:Selection){
   if(!side.serviceId){side.loading=false;return}
   side.loading=true
   try{
+    const local=uploaded(side)
+    if(local){side.layers=[{layerId:0,name:local.name,geometryType:local.analyzable?'POLYGON':'OTHER',analyzable:local.analyzable,fields:local.fields}];side.layerId='0';return}
     const layers=await getSpatialLayers(side.serviceId,user.activeDeptId,{signal:abort.signal})
     if(request!==side.revision||abort.signal.aborted)return
     if(!Array.isArray(layers))throw new Error('后端图层清单格式无效')
@@ -43,10 +54,16 @@ async function loadLayers(side:Selection){
 }
 async function initialize(){
   const context=props.context
+  if(coverage.value){
+    if(!uploaded(a)){a.serviceId=availableUploads.value[0]?`upload:${availableUploads.value[0].id}`:'';await loadLayers(a)}
+    if(context!==props.context)return
+    if(!b.serviceId||!props.sources.some(source=>source.id===b.serviceId)&&!uploaded(b)){const other=availableUploads.value.find(item=>`upload:${item.id}`!==a.serviceId);b.serviceId=props.sources[0]?.id||(other?`upload:${other.id}`:'');await loadLayers(b)}
+    return
+  }
   const preferred=props.sources.find(source=>props.visibleKeys.some(key=>key.startsWith(`${source.id}/`)))||props.sources[0]
-  if(!a.serviceId||!props.sources.some(source=>source.id===a.serviceId)){a.serviceId=preferred?.id||'';await loadLayers(a)}
+  if(!a.serviceId||!props.sources.some(source=>source.id===a.serviceId)&&!uploaded(a)){a.serviceId=preferred?.id||'';await loadLayers(a)}
   if(context!==props.context)return
-  if(!b.serviceId||!props.sources.some(source=>source.id===b.serviceId)){b.serviceId=a.serviceId;await loadLayers(b)}
+  if(!b.serviceId||!props.sources.some(source=>source.id===b.serviceId)&&!uploaded(b)){b.serviceId=a.serviceId;await loadLayers(b)}
   if(sourceKey(a)===sourceKey(b))b.layerId=String(b.layers.find(layer=>layer.analyzable&&String(layer.layerId)!==a.layerId)?.layerId??'')
 }
 watch(()=>props.open,async open=>{
@@ -65,34 +82,41 @@ function clear(){
   results.value.forEach(result=>result.layer.remove());results.value=[];emit('close');notice.value='';clearTimeout(toastTimer)
 }
 watch(()=>props.context,clear)
+watch(()=>props.operation,()=>{stopWaiting(false);validation.value='';if(props.open)void initialize()})
+watch(()=>props.uploads.map(item=>item.id).join(','),()=>{
+  for(const side of selections)if(side.serviceId.startsWith('upload:')&&!uploaded(side)){if(busy.value){stopWaiting(false);toast('输入上传图层已移除，已停止等待分析结果',true)};side.serviceId='';side.layerId='';side.layers=[];side.filters=[]}
+  if(props.open&&!busy.value)void initialize()
+})
 onBeforeUnmount(clear)
 function toggle(result:Result){result.visible?result.layer.addTo(props.map):result.layer.remove()}
 function remove(result:Result){result.layer.remove();results.value=results.value.filter(item=>item.id!==result.id)}
 function download(result:Result){
   const url=URL.createObjectURL(new Blob([JSON.stringify(result.difference)],{type:'application/geo+json'}))
-  const link=document.createElement('a');link.href=url;link.download=`对称差分-${result.id}.geojson`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+  const link=document.createElement('a');link.href=url;link.download=`${result.operation==='coverage'?'范围覆盖':'对称差分'}-${result.id}.geojson`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
 }
 async function refreshDetail(result:Result){
-  if(result.refreshing)return
+  if(result.refreshing||!result.remote)return
   const abort=new AbortController();detailControllers.add(abort);result.refreshing=true;result.error=''
   try{const detail=await getSpatialOverlayDetail(result.id,user.activeDeptId,{signal:abort.signal});if(!abort.signal.aborted)result.summary=detail}
   catch(error){if(!abort.signal.aborted)result.error=errorText(error)}
   finally{result.refreshing=false;detailControllers.delete(abort)}
 }
-function display(data:SpatialCollection,summary:SpatialOverlaySummary,restore:string[]){
-  const difference=spatialDifferenceFeatures(data)
+function display(data:SpatialCollection,summary:SpatialAnalysisSummary,restore:string[],operation:SpatialAnalysisOperation='difference',remote=true){
+  const difference=operation==='coverage'?data:annotateSpatialDifference(data,summary)
+  if(!difference.features.length)throw new Error('后端统计存在差异，但未返回差分图斑，请后端检查结果完整性')
   // Only the current analysis is initially visible; older results stay available in the list.
   const hidePrevious=()=>results.value.forEach(result=>{result.layer.remove();result.visible=false})
-  const existing=results.value.find(result=>result.id===summary.resultId)
+  const id=summary.resultId||crypto.randomUUID(),existing=results.value.find(result=>result.id===id)
   if(!props.map.getPane('topic-analysis'))props.map.createPane('topic-analysis').style.zIndex='370'
-  const title=`${summary.sourceA.layerName} ↔ ${summary.sourceB.layerName}`
-  const layer=L.geoJSON(difference,{pane:'topic-analysis',style:{color:colors.DIFF,weight:2,fillOpacity:.35},onEachFeature(feature,shape){
-    const properties=feature.properties||{},type=typeNames[String(properties.diffType)]||String(properties.diffType||'差异图斑')
-    shape.bindTooltip(`${type} · ${number(properties.areaSqm)} ㎡`,{sticky:true})
+  const title=operation==='coverage'?`${summary.sourceA.layerName} · ${summary.sourceB.layerName}覆盖分析`:`${summary.sourceA.layerName} ↔ ${summary.sourceB.layerName}`
+  const layer=L.geoJSON(difference,{pane:'topic-analysis',style:feature=>({color:typeColor(resultType({operation},feature!)),weight:2,fillOpacity:.35}),onEachFeature(feature,shape){
+    const properties=feature.properties||{},type=typeLabel(resultType({operation},feature),summary)
+    const tooltip=document.createElement('span');tooltip.textContent=`${type} · ${number(properties.areaSqm)} ㎡`
+    shape.bindTooltip(tooltip,{sticky:true})
     const body=document.createElement('div');body.className='overlay-result-properties'
     const heading=document.createElement('b');heading.textContent=type;body.appendChild(heading)
     for(const [label,source] of [['A',summary.sourceA],['B',summary.sourceB]] as const){const row=document.createElement('p');row.textContent=`${label} 图层：${source.layerName}（${source.serviceName}）`;body.appendChild(row)}
-    const aliases:Record<string,string>={seqNo:'图斑序号',diffType:'结果类型',areaSqm:'差异面积（㎡）',partCount:'子图斑数',centerLng:'中心经度',centerLat:'中心纬度'}
+    const aliases:Record<string,string>={seqNo:'图斑序号',diffType:'后端分组',areaSqm:'结果面积（㎡）',areaMu:'结果面积（亩）',partCount:'子图斑数',centerLng:'中心经度',centerLat:'中心纬度',analysisSourceSide:'来源侧',analysisSourceLayerName:'所属图层',analysisExcludedLayerName:'不属于图层',analysisTargetLayerName:'目标图层',analysisCoverage:'覆盖分组',analysisSourceServiceId:'来源服务编号',analysisSourceLayerId:'来源子图层编号',analysisMembership:'归属说明'}
     Object.entries(properties).forEach(([key,value])=>{const row=document.createElement('p');row.textContent=`${aliases[key]||key}：${key==='diffType'?type:value??'—'}`;body.appendChild(row)})
     shape.bindPopup(body,{maxWidth:320,maxHeight:260})
     shape.on('mouseover',()=>{(shape as L.Path).setStyle({weight:4})});shape.on('mouseout',()=>layer.resetStyle(shape as L.Path))
@@ -100,7 +124,7 @@ function display(data:SpatialCollection,summary:SpatialOverlaySummary,restore:st
   try{if(difference.features.length)layer.addTo(props.map)}catch(error){layer.remove();throw error}
   hidePrevious()
   if(existing)results.value=results.value.filter(result=>result.id!==existing.id)
-  results.value.unshift({id:summary.resultId,name:title,summary,data:markRaw(data),difference:markRaw(difference),layer:markRaw(layer),visible:difference.features.length>0,restore,details:true,refreshing:false,error:''})
+  results.value.unshift({id,name:title,operation,remote,summary,data:markRaw(data),difference:markRaw(difference),layer:markRaw(layer),visible:difference.features.length>0,restore,details:true,refreshing:false,error:''})
   if(layer.getBounds().isValid())props.map.fitBounds(layer.getBounds(),{padding:[80,80],maxZoom:17})
   return difference.features.length
 }
@@ -116,50 +140,75 @@ async function finish(){
   const area=Number(minAreaSqm.value)
   try{
     sourceA=input(a);sourceB=input(b)
+    if(coverage.value&&!uploaded(a))throw new Error('范围覆盖分析需要选择上传的面图层作为范围 U')
     if(sourceA.serviceId===sourceB.serviceId&&sourceA.layerId===sourceB.layerId)throw new Error('请选择两个不同的面图层')
     if(String(minAreaSqm.value).trim()===''||!Number.isFinite(area)||area<0||area>10000)throw new Error('最小图斑面积须在 0–10,000 ㎡之间')
   }catch(error){validation.value=errorText(error);return}
-  const keys=[sourceKey(a),sourceKey(b)],restore=keys.filter(key=>props.visibleKeys.includes(key)),deptId=user.activeDeptId
-  const request=++job,abort=new AbortController();controller=abort;busy.value=true;stage.value='后端正在执行对称差分分析…';notice.value='';emit('close')
+  const operation=props.operation,keys=[sourceKey(a),sourceKey(b)],restore=keys.filter(key=>props.visibleKeys.includes(key)),deptId=user.activeDeptId
+  const snapshot=(side:Selection):SpatialSource=>({serviceId:side.serviceId,serviceName:uploaded(side)?'本机上传':props.sources.find(source=>source.id===side.serviceId)?.name||side.serviceId,layerId:selected(side)!.layerId,layerName:selected(side)!.name,filters:spatialFilters(side.filters,selected(side)!.fields)})
+  const sources={sourceA:snapshot(a),sourceB:snapshot(b)},locals=[uploaded(a),uploaded(b)]
+  const request=++job,abort=new AbortController();controller=abort;busy.value=true;stage.value='正在读取完整输入图层…';notice.value='';emit('close')
   try{
-    const summary=await analyzeSpatialOverlay({deptId,sourceA,sourceB,minAreaSqm:area,includeOverlapSpots:false},{signal:abort.signal})
+    let summary:SpatialAnalysisSummary,data:SpatialCollection
+    const remote=operation==='difference'&&!locals.some(Boolean)
+    if(remote){
+      stage.value='后端正在执行对称差分分析…'
+      const response=await analyzeSpatialOverlay({deptId,sourceA,sourceB,minAreaSqm:area,includeOverlapSpots:false},{signal:abort.signal})
+      if(request!==job)return
+      summary=response;stage.value='正在读取后端差分图层及来源分类…'
+      data=await loadSpatialOverlayResult(response.resultId,deptId,{signal:abort.signal})
+    }else{
+      const resolve=async(input:SpatialInput,index:number):Promise<SpatialCollection>=>{
+        const local=locals[index]
+        if(local)return filterUploadedGeometry(local.data,input.filters)
+        if(!props.loadGeometry)throw new Error('未配置发布图层几何读取功能')
+        return props.loadGeometry(input,abort.signal)
+      }
+      const [geometryA,geometryB]=await Promise.all([resolve(sourceA,0),resolve(sourceB,1)])
+      if(request!==job)return
+      stage.value='后端正在计算交集与差集…'
+      const response=await compareSpatialGeometries({...geometryRequestInputs(geometryA,geometryB),minAreaSqm:area},{signal:abort.signal})
+      if(request!==job)return
+      const result=geometryAnalysisResult(response,operation,sources,{a:geometryA.features.length,b:geometryB.features.length})
+      summary=result.summary;data=result.data
+    }
     if(request!==job)return
-    stage.value='正在读取后端独立不重叠区域图层…'
-    const data=await loadSpatialOverlayResult(summary.resultId,deptId,{signal:abort.signal})
-    if(request!==job)return
-    display(data,summary,restore)
+    if(!data.features.length){if(operation==='difference'&&summary.diffArea>0)throw new Error('后端未返回统计中存在的不重叠区域');toast('分析完成：没有满足面积阈值的结果图斑，输入图层保持显示');return}
+    display(data,summary,restore,operation,remote)
     emit('hide',keys)
-    toast(`对称差分完成：已显示独立的不重叠区域图层，已隐藏原始图层${summary.cached?'（命中后端缓存）':''}`)
-  }catch(error){if(request===job&&!abort.signal.aborted)toast(`对称差分分析失败：${errorText(error)}`,true)}
+    toast(operation==='coverage'?'范围覆盖分析完成：绿色为范围内，橙色为范围外；原图层已取消勾选，配置保留':`对称差分完成：一个结果图层按“仅 A / 仅 B”分色，已隐藏原始图层${summary.cached?'（命中后端缓存）':''}`)
+  }catch(error){if(request===job&&!abort.signal.aborted){toast(`${operation==='coverage'?'范围覆盖':'对称差分'}分析失败：${errorText(error)}`,true);abort.abort()}}
   finally{if(request===job){controller=undefined;busy.value=false}}
 }
 const metrics=[['areaA','A 图层面积'],['areaB','B 图层面积'],['overlapArea','重叠面积'],['onlyAArea','仅 A 面积'],['onlyBArea','仅 B 面积'],['diffArea','差异面积'],['diffAreaRaw','过滤前差异面积']] as const
+const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围内面积'],['onlyAArea','范围外面积'],['unreturnedArea','阈值未输出面积']] as const
 </script>
 <template>
   <section v-if="results.length" class="overlay-results" aria-label="对称差分分析结果">
     <h3>后端分析结果 <small>{{ results.length }}</small></h3>
     <div v-for="result in results" :key="result.id" class="overlay-result-row">
-      <label><input v-model="result.visible" type="checkbox" :disabled="!result.difference.features.length" @change="toggle(result)" /><span :title="result.name">不重叠区域</span><small>独立图层</small></label>
+      <label><input v-model="result.visible" type="checkbox" :disabled="!result.difference.features.length" @change="toggle(result)" /><span :title="result.name">{{ result.operation==='coverage'?'范围覆盖结果':'不重叠区域' }}</span><small>独立图层</small></label>
       <dl class="analysis-sources"><div><dt>A 图层</dt><dd><b>{{ result.summary.sourceA.layerName }}</b><small>{{ result.summary.sourceA.serviceName }}</small></dd></div><div><dt>B 图层</dt><dd><b>{{ result.summary.sourceB.layerName }}</b><small>{{ result.summary.sourceB.serviceName }}</small></dd></div></dl>
-      <div class="result-actions"><button type="button" @click="result.details=!result.details">{{ result.details?'收起统计':'面积统计' }}</button><button type="button" :disabled="!result.difference.features.length" @click="download(result)">导出差异图层</button><button type="button" :disabled="!result.restore.length" @click="emit('restore',result.restore)">恢复输入</button><button type="button" @click="remove(result)">移除</button></div>
+      <div class="result-actions"><button type="button" @click="result.details=!result.details">{{ result.details?'收起统计':'面积统计' }}</button><button type="button" :disabled="!result.difference.features.length" @click="download(result)">导出结果图层</button><button type="button" :disabled="!result.restore.length" @click="emit('restore',result.restore)">恢复输入</button><button type="button" @click="remove(result)">移除</button></div>
       <div v-if="result.details" class="result-summary">
-        <p>结果编号 {{ result.id }} <span v-if="result.summary.cached">· 后端缓存</span></p>
-        <dl><div v-for="[key,label] in metrics" :key="key"><dt>{{ label }}</dt><dd>{{ number(result.summary[key]) }}<small>㎡</small></dd></div><div><dt>差异率</dt><dd>{{ result.summary.diffRate==null?'—':`${number(result.summary.diffRate*100)}%` }}</dd></div></dl>
-        <p>A / B 要素数：{{ number(result.summary.featureCountA) }} / {{ number(result.summary.featureCountB) }}<br />输出图斑数：{{ number(result.summary.spotCount) }} · 最小面积 {{ number(result.summary.minAreaSqm) }} ㎡<br />投影：{{ result.summary.crsUsed }}<br />耗时：{{ number(result.summary.costMs) }} 毫秒 · {{ result.summary.createTime }}</p>
-        <p>地图显示后端合并的不重叠区域图层，不显示原始 A、B 图层及交集。</p>
-        <div v-if="result.difference.features.length" class="result-types"><span><i :style="{background:colors.DIFF}"></i>不重叠区域</span></div>
-        <button type="button" :disabled="result.refreshing" @click="refreshDetail(result)">{{ result.refreshing?'读取中…':'刷新后端统计' }}</button><p v-if="result.error" class="overlay-error" role="alert">{{ result.error }}</p>
+        <p v-if="result.remote">结果编号 {{ result.id }} <span v-if="result.summary.cached">· 后端缓存</span></p>
+        <dl><div v-for="[key,label] in result.operation==='coverage'?coverageMetrics:metrics" :key="key"><dt>{{ label }}</dt><dd>{{ number(result.summary[key]) }}<small>㎡</small></dd></div><template v-if="result.operation==='coverage'"><div><dt>范围内占比</dt><dd>{{ number((result.summary.coverageRate??0)*100) }}%</dd></div><div><dt>范围外占比</dt><dd>{{ number((result.summary.outsideRate??0)*100) }}%</dd></div></template><div v-else><dt>差异率</dt><dd>{{ result.summary.diffRate==null?'—':`${number(result.summary.diffRate*100)}%` }}</dd></div></dl>
+        <p>A / B 要素数：{{ number(result.summary.featureCountA) }} / {{ number(result.summary.featureCountB) }}<br />输出图斑数：{{ number(result.summary.spotCount) }} · 最小面积 {{ number(result.summary.minAreaSqm) }} ㎡<br />投影：{{ result.summary.crsUsed }}<template v-if="result.summary.costMs!=null"><br />耗时：{{ number(result.summary.costMs) }} 毫秒 · {{ result.summary.createTime }}</template></p>
+        <p>{{ result.operation==='coverage'?'A 为上传范围，B 为目标图层。结果包含 A∩B（范围内）与 A−B（范围外），不包含 B 单独存在的区域。':'一个差分图层包含两种来源：仅 A（A − B）和仅 B（B − A）。每块结果均为后端裁切后的不重叠区域。' }}</p>
+        <div v-if="result.difference.features.length" class="result-types"><span v-for="type in resultTypes(result)" :key="type"><i :style="{background:typeColor(type)}"></i>{{ typeLabel(type,result.summary) }}</span></div>
+        <button v-if="result.remote" type="button" :disabled="result.refreshing" @click="refreshDetail(result)">{{ result.refreshing?'读取中…':'刷新后端统计' }}</button><p v-if="result.error" class="overlay-error" role="alert">{{ result.error }}</p>
       </div>
     </div>
   </section>
   <Teleport :to="map.getContainer().parentElement!">
   <dialog ref="dialog" class="overlay-dialog" aria-labelledby="overlay-title" @cancel.prevent="emit('close')" @close="emit('close')">
     <form @submit.prevent="finish">
-      <header><div><small>SPATIAL ANALYSIS / SYMMETRICAL DIFFERENCE</small><h2 id="overlay-title">对称差分 / 交集取反</h2></div><button type="button" aria-label="关闭对称差分分析" @click="emit('close')">×</button></header>
+      <header><div><small>SPATIAL ANALYSIS / {{ coverage?'COVERAGE':'SYMMETRICAL DIFFERENCE' }}</small><h2 id="overlay-title">{{ title }}</h2></div><button type="button" aria-label="关闭空间分析" @click="emit('close')">×</button></header>
       <div class="overlay-dialog-body">
-        <div class="overlay-intro"><svg viewBox="0 0 120 64" aria-hidden="true"><path d="M10 10h62v42H10z" fill="#31b8cd33" stroke="#56d6e9"/><path d="M45 24h62v35H45z" fill="#f8c36b33" stroke="#f8c36b"/><path d="M45 24h27v28H45z" fill="#102f3b"/></svg><div><b>两图层对称差分（交集取反）</b><p>由后端生成独立的不重叠区域图层，去掉共同区域；成功后自动隐藏原始图层。</p></div></div>
+        <div class="overlay-intro"><svg viewBox="0 0 120 64" aria-hidden="true"><path d="M10 10h62v42H10z" fill="#f8c36b55" stroke="#f8c36b"/><path d="M45 24h62v35H45z" fill="#a998ff55" stroke="#a998ff"/><path d="M45 24h27v28H45z" :fill="coverage?'#57d2a3':'#102f3b'"/></svg><div><b>{{ coverage?'上传范围与目标图层的覆盖关系':'两图层对称差分（保留来源）' }}</b><p>{{ coverage?'将上传范围裁切为目标范围内、外两部分，显示各自面积和占比。':'输出一个不重叠区域图层：黄色为仅 A，紫色为仅 B。图例和点击详情显示具体图层名称。' }}</p></div></div>
+        <p v-if="coverage&&!availableUploads.length" class="overlay-error">请先上传一个面图层。<button type="button" class="text-button" @click="emit('close');emit('upload')">上传 SHP</button></p>
         <fieldset v-for="side in selections" :key="side.label"><legend>图层 {{ side.label }} · {{ side.label==='A'?'基准数据':'对比数据' }}</legend>
-          <div class="overlay-output-grid"><label>地图服务 <em>*</em><select v-model="side.serviceId" required :aria-label="`图层${side.label}地图服务`" @change="loadLayers(side)"><option value="" disabled>请选择地图服务</option><option v-for="source in sources" :key="source.id" :value="source.id">{{ source.name }}</option></select></label>
+          <div class="overlay-output-grid"><label>{{ coverage&&side.label==='A'?'上传范围 U':'数据来源' }} <em>*</em><select v-model="side.serviceId" required :aria-label="`图层${side.label}地图服务`" @change="loadLayers(side)"><option value="" disabled>请选择图层来源</option><optgroup v-if="!coverage||side.label==='B'" label="已发布服务"><option v-for="source in sources" :key="source.id" :value="source.id">{{ source.name }}</option></optgroup><optgroup label="本机上传面图层"><option v-for="item in availableUploads" :key="item.id" :value="`upload:${item.id}`">{{ item.name }}</option></optgroup></select></label>
           <label>分析图层 <em>*</em><select v-model="side.layerId" required :disabled="side.loading||!side.layers.length" :aria-label="`图层${side.label}分析图层`" @change="side.filters=[]"><option value="" disabled>{{ side.loading?'正在读取后端图层…':'请选择面图层' }}</option><option v-for="layer in side.layers" :key="layer.layerId" :value="String(layer.layerId)" :disabled="!layer.analyzable">{{ layer.name }}{{ layer.analyzable?'':`（${layer.geometryType}，不可分析）` }}</option></select></label></div>
           <p v-if="side.error" class="overlay-error" role="alert">{{ side.error }} <button type="button" class="text-button" @click="loadLayers(side)">重试</button></p>
           <div v-for="filter in side.filters" :key="filter.id" class="attribute-filter">
@@ -170,13 +219,13 @@ const metrics=[['areaA','A 图层面积'],['areaB','B 图层面积'],['overlapAr
           </div>
           <button type="button" class="text-button add-filter" :disabled="!selected(side)?.analyzable||!selected(side)?.fields.length" @click="addFilter(side)">＋ 添加图层 {{ side.label }} 属性筛选</button><p>未添加条件时分析整个图层；多条条件同时满足。</p>
         </fieldset>
-        <fieldset><legend>输出设置</legend><label>最小差异图斑面积（㎡）<input v-model="minAreaSqm" type="number" required min="0" max="10000" step="any" aria-label="最小差异图斑面积" /></label><p>后端合并输出（A − B）∪（B − A），作为独立的不重叠区域图层。小于阈值的碎片不输出；设为 0 保留全部差异。左侧保留完整面积统计。</p><p>面积按后端 CGCS2000 3° 带投影计算，结果图斑以 WGS 84 显示。源数据不作修改。</p></fieldset>
+        <fieldset><legend>输出设置</legend><label>最小结果图斑面积（㎡）<input v-model="minAreaSqm" type="number" required min="0" max="10000" step="any" aria-label="最小差异图斑面积" /></label><p>{{ coverage?'后端输出 A∩B 和 A−B，在同一结果图层中以绿色、橙色区分；占比以完整上传范围面积为分母。':'后端输出（A − B）∪（B − A），在同一结果图层中保留 A_ONLY / B_ONLY 归属。' }} 小于阈值的碎片不输出，过滤面积单独列出。导出包含来源图层名称。</p><p>面积按后端 CGCS2000 3° 带投影计算，结果图斑以 WGS 84 显示。源数据不作修改。</p></fieldset>
         <p v-if="validation" class="overlay-error" role="alert">{{ validation }}</p>
       </div>
-      <footer><span>完成后仅显示两图层不同的区域</span><button type="button" @click="emit('close')">取消</button><button class="primary" type="submit" :disabled="!canFinish">Finish · 开始分析</button></footer>
+      <footer><span>{{ coverage?'完成后显示上传范围内、外的结果':'完成后仅显示两图层不同的区域' }}</span><button type="button" @click="emit('close')">取消</button><button class="primary" type="submit" :disabled="!canFinish">Finish · 开始分析</button></footer>
     </form>
   </dialog>
-    <div v-if="busy" class="overlay-running" role="status" aria-live="polite"><div class="analysis-earth" aria-hidden="true"><div class="earth-land"></div><i></i><i></i></div><div><b>后端对称差分分析运行中</b><span>{{ stage }}</span></div><button type="button" title="仅停止前端等待，不取消后端计算" @click="stopWaiting()">停止等待</button></div>
+    <div v-if="busy" class="overlay-running" role="status" aria-live="polite"><div class="analysis-earth" aria-hidden="true"><div class="earth-land"></div><i></i><i></i></div><div><b>后端空间分析运行中</b><span>{{ stage }}</span></div><button type="button" title="仅停止前端等待，不取消后端计算" @click="stopWaiting()">停止等待</button></div>
     <div v-if="notice" class="overlay-toast" :class="{'is-error':failed}" :role="failed?'alert':'status'"><span>{{ failed?'!':'✓' }}</span><p>{{ notice }}</p><button type="button" aria-label="关闭分析提示" @click="notice=''">×</button></div>
   </Teleport>
 </template>

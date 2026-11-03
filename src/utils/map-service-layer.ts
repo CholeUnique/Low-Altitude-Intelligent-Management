@@ -2621,12 +2621,12 @@ export async function getMapServiceLayerMetadata(service: MapServiceItem) {
 }
 
 /** 专题按字段读取完整结果，复用 ID 分批机制，不受旧服务 1000 条上限影响。 */
-export async function queryMapServiceFeatures(service: MapServiceItem, fields: string[], where = '1=1', geometry = false) {
+export async function queryMapServiceFeatures(service: MapServiceItem, fields: string[], where = '1=1', geometry = false,options:{signal?:AbortSignal;maxFeatures?:number}={}) {
   const metadata = await getMapServiceLayerMetadata(service)
   const knownFields = new Set((metadata.fields || []).map(field => field.name))
   if (fields.some(field => !knownFields.has(field))) throw new Error('所选字段不存在于当前图层')
   const parameters = new URLSearchParams({ where, outFields: fields.join(','), returnGeometry: String(geometry), outSR: '4326' })
-  const result = await queryAllFeatures(servicePath(serviceRoot(service.serviceUrl), `${service.arcGisLayerId}/query`), parameters)
+  const result = await queryAllFeatures(servicePath(serviceRoot(service.serviceUrl), `${service.arcGisLayerId}/query`), parameters,options)
   return { features: result.features || [], objectIdField: metadata.fields?.find(field => field.type === 'esriFieldTypeOID')?.name || 'OBJECTID' }
 }
 
@@ -2674,12 +2674,13 @@ function featureLocation(feature: { geometry?: MapServiceSearchGeometry }, geome
   }
 }
 
-async function queryArcGis(url: string, parameters: URLSearchParams): Promise<ArcGisQueryResponse> {
+async function queryArcGis(url: string, parameters: URLSearchParams,signal?:AbortSignal): Promise<ArcGisQueryResponse> {
   parameters.set('f', 'json')
   let response: Response
   try {
-    response = await fetch(url, { method: 'POST', body: parameters })
-  } catch {
+    response = await fetch(url, { method: 'POST', body: parameters,signal })
+  } catch(error) {
+    if(signal?.aborted)throw error
     // Some older ArcGIS services allow JSONP but do not enable CORS for POST.
     return loadArcGisJson<ArcGisQueryResponse>(serviceParameters(url, parameters))
   }
@@ -2691,7 +2692,7 @@ async function queryArcGis(url: string, parameters: URLSearchParams): Promise<Ar
   return data
 }
 
-async function queryAllFeatures(url: string, parameters: URLSearchParams): Promise<ArcGisQueryResponse> {
+async function queryAllFeatures(url: string, parameters: URLSearchParams,options:{signal?:AbortSignal;maxFeatures?:number}={}): Promise<ArcGisQueryResponse> {
   // ID queries work on legacy MapServer versions without pagination and are not
   // subject to the feature transfer limit. Read every matching ID in small batches.
   const idParameters = new URLSearchParams(parameters)
@@ -2700,11 +2701,13 @@ async function queryAllFeatures(url: string, parameters: URLSearchParams): Promi
   idParameters.delete('outFields')
   idParameters.set('returnIdsOnly', 'true')
   idParameters.set('returnGeometry', 'false')
-  const index = await queryArcGis(url, idParameters)
+  options.signal?.throwIfAborted()
+  const index = await queryArcGis(url, idParameters,options.signal)
   const ids = index.objectIds
   // ArcGIS 对无空间命中的正常响应使用 objectIds:null，而不是空数组。
   if (ids === null) return {features:[]}
   if (!ids) throw new Error('图层服务未返回完整要素索引')
+  if(options.maxFeatures&&ids.length>options.maxFeatures)throw new Error(`所选图层超过 ${options.maxFeatures} 个要素，请先按属性筛选后分析`)
   const features: NonNullable<ArcGisQueryResponse['features']> = []
   let fieldAliases: ArcGisQueryResponse['fieldAliases']
   const readBatch = async (batchIds: Array<number | string>): Promise<void> => {
@@ -2712,7 +2715,8 @@ async function queryAllFeatures(url: string, parameters: URLSearchParams): Promi
     batch.delete('resultRecordCount')
     batch.delete('resultOffset')
     batch.set('objectIds', batchIds.join(','))
-    const result = await queryArcGis(url, batch)
+    options.signal?.throwIfAborted()
+    const result = await queryArcGis(url, batch,options.signal)
     if (result.exceededTransferLimit) {
       if (batchIds.length <= 1) throw new Error('服务未能完整返回要素')
       const middle = Math.ceil(batchIds.length / 2)
@@ -2720,6 +2724,7 @@ async function queryAllFeatures(url: string, parameters: URLSearchParams): Promi
       await readBatch(batchIds.slice(middle))
       return
     }
+    if(options.maxFeatures&&(result.features||[]).length!==batchIds.length)throw new Error('服务未完整返回所选要素，请重试或缩小分析范围')
     fieldAliases = result.fieldAliases || fieldAliases
     features.push(...(result.features || []))
   }

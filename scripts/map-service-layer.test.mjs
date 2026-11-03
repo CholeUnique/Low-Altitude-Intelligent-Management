@@ -81,6 +81,12 @@ const topicRecords = await api.queryMapServiceFeatures(service, ['DLMC'], "DLMC 
 assert.equal(topicRecords.features.length,401,'Topic classification must include records beyond legacy transfer limits')
 assert(requests.every(p => p.get('where') === "DLMC = '水浇地'"), 'Every topic query batch retains its scope')
 await assert.rejects(api.queryMapServiceFeatures(service, ['MISSING_FIELD']), /字段不存在/, 'Reject unknown field names before constructing a query')
+await assert.rejects(api.queryMapServiceFeatures(service,['OBJECTID'],'1=1',true,{maxFeatures:400}),/超过 400/,'Analysis refuses oversized complete indexes before fetching geometry')
+const aborted=new AbortController();aborted.abort()
+await assert.rejects(api.queryMapServiceFeatures(service,['OBJECTID'],'1=1',true,{signal:aborted.signal}),error=>error.name==='AbortError','Canceled analysis does not start feature batches')
+globalThis.fetch=async(_url,options)=>({ok:true,json:async()=>options.body.get('returnIdsOnly')==='true'?{objectIds:[1,2]}:{features:[{attributes:{OBJECTID:1}}]}})
+await assert.rejects(api.queryMapServiceFeatures(service,['OBJECTID'],'1=1',true,{maxFeatures:5000}),/未完整返回/,'Do not analyze a silently truncated feature response')
+globalThis.fetch=regularFetch
 requests.length = 0
 const matches=await api.searchVectorLayerText(service,'needle')
 assert.equal(matches.length,401,'All matching records survive transfer-limit batching')

@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { computed, markRaw, onBeforeUnmount, onMounted, ref, watch, type Raw } from 'vue'
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Raw } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { FullScreen, Setting, Close, Collection, Refresh, Search } from '@element-plus/icons-vue'
+import { FullScreen, Setting, Close, Collection, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
 import TopicFeatureDetails from '@/components/TopicFeatureDetails.vue'
 import TopicStatisticsSummary from '@/components/TopicStatisticsSummary.vue'
 import TopicMapToolbar from '@/components/TopicMapToolbar.vue'
 import TopicOverlayAnalysis from '@/components/TopicOverlayAnalysis.vue'
+import TopicUploadedLayers from '@/components/TopicUploadedLayers.vue'
+import type { UploadedTopicLayer } from '@/utils/topic-upload'
+import type { SpatialAnalysisOperation } from '@/utils/spatial-geometry-result'
+import { readPublishedSpatialGeometry } from '@/utils/spatial-geometry-input'
 import TopicMapLegend from '@/components/TopicMapLegend.vue'
+import type { SpatialResultLegend, SpatialInput } from '@/api/spatial-analysis'
 import OverviewMapScale from '@/components/OverviewMapScale.vue'
 import { identifyVectorFeatures, setMapHoverSelection, type IdentifiedMapFeature } from '@/utils/map-service-layer'
 import { HIGH_STANDARD_TOPIC_ID, FACILITIES_TOPIC_ID, useGeographicTopicsStore, type GeographicTopic } from '@/stores/geographic-topics'
@@ -28,8 +33,13 @@ const topicStore = useGeographicTopicsStore()
 const root = ref<HTMLElement>(), canvas = ref<HTMLElement>()
 const layers = ref<TopicLayer[]>([])
 const legendCollapsed=ref(false)
-const analysisLegend=ref<{id:string;name:string;color:string}[]>([])
+const analysisLegend=ref<SpatialResultLegend[]>([])
 const configOpen = ref(false), overlayOpen = ref(false), pending = ref(false), error = ref('')
+const uploadPanel=ref<InstanceType<typeof TopicUploadedLayers>>(),uploadedLayers=shallowRef<UploadedTopicLayer[]>([]),uploadDialogOpen=ref(false),overlayOperation=ref<SpatialAnalysisOperation>('difference')
+const uploadScope=computed(()=>`${user.currentUser?.id||user.currentUser?.username||'anonymous'}:${user.activeDeptId}:${props.topic.id}`)
+let resumeCoverage=false
+async function openUpload(resume=false){resumeCoverage=resume;overlayOpen.value=false;configOpen.value=false;await nextTick();await uploadPanel.value?.open()}
+async function uploaded(){legendCollapsed.value=false;if(resumeCoverage){resumeCoverage=false;await nextTick();openOverlay('coverage')}}
 const fullscreen = ref(false)
 const toolsMap = ref<Raw<L.Map>>(), drawingToolActive = ref(false)
 const farmlandStatsAvailable = ref(true)
@@ -43,10 +53,12 @@ let selectionGroup: L.LayerGroup | undefined, selectionVersion = 0
 // 专题目录独立于任务业务场景；仅使用当前部门接口实际返回的可用图层。
 const availableLayers = computed(() => layers.value)
 const overlaySources = computed(() => groupTopicLayers(layers.value.filter(item => item.role !== 'imagery')).map(group => ({id:group.id,name:group.name})))
-const overlayVisibleKeys = computed(() => layers.value.filter(item => item.visible && !item.analysisHidden && (!item.categories.length || item.categories.some(category => category.checked))).map(item => item.key))
-function openOverlay() { configOpen.value=false; clearFeatureSelection(); overlayOpen.value=true }
+const overlayVisibleKeys = computed(() => [...layers.value.filter(item => item.visible && !item.analysisHidden && (!item.categories.length || item.categories.some(category => category.checked))).map(item => item.key),...uploadedLayers.value.filter(item=>item.selected).map(item=>`upload:${item.id}`)])
+function openOverlay(operation:SpatialAnalysisOperation='difference') { overlayOperation.value=operation;configOpen.value=false; clearFeatureSelection(); overlayOpen.value=true }
+function loadAnalysisGeometry(input:SpatialInput,signal:AbortSignal){const item=layers.value.find(item=>item.key===`${input.serviceId}/${input.layerId}`);if(!item)throw new Error('所选发布图层不在当前部门的可用目录中');return readPublishedSpatialGeometry(item.service,input.filters,signal)}
 function setOverlaySources(keys:string[],visible:boolean) {
   keys.forEach(key=>{const item=layers.value.find(layer=>layer.key===key);if(item)selectLegend(item,visible?'all':'none')})
+  uploadPanel.value?.select(keys,visible)
 }
 function showOverlayResult() {
   clearFeatureSelection()
@@ -54,6 +66,7 @@ function showOverlayResult() {
   layers.value.filter(item=>item.visible&&item.role!=='imagery').forEach(item=>{
     selectLegend(item,'none')
   })
+  uploadPanel.value?.select(uploadedLayers.value.map(item=>item.id),false)
 }
 function matchesLayer(item: TopicLayer) {
   const keyword = layerKeyword.value.trim().toLocaleLowerCase()
@@ -79,7 +92,8 @@ const mapLegendGroups=computed(()=>[
     }
     return {key:item.key,name:item.service.name,symbols}
   }),
-  ...analysisLegend.value.map(item=>({key:'analysis-'+item.id,name:item.name,symbols:[{label:'不重叠区域',color:item.color,mode:'filled' as TopicDisplayMode,geometry:'esriGeometryPolygon'}]})),
+  ...analysisLegend.value.map(item=>({key:'analysis-'+item.id,name:item.name,symbols:item.symbols.map(symbol=>({...symbol,mode:'filled' as TopicDisplayMode,geometry:'esriGeometryPolygon'}))})),
+  ...uploadedLayers.value.filter(item=>item.selected).map(item=>({key:item.id,name:item.name,symbols:[{label:item.name,color:item.color,mode:item.mode,geometry:/Point/.test(item.data.features[0]?.geometry.type||'')?'esriGeometryPoint':/LineString/.test(item.data.features[0]?.geometry.type||'')?'esriGeometryPolyline':'esriGeometryPolygon'}]})),
 ].filter(group=>group.symbols.length))
 const farmlandStatSources = computed(() => topicStatSources(layers.value.filter(item=>!item.analysisHidden)))
 const businessAllSelected = computed(() => vectorLayers.value.length > 0 && vectorLayers.value.every(item => item.visible))
@@ -363,7 +377,8 @@ onBeforeUnmount(() => { clearFeatureSelection(); version++; document.removeEvent
       <span>北 N</span><svg viewBox="0 0 24 36" aria-hidden="true"><path d="M12 2 22 32 12 25Z" fill="#ecf4f2"/><path d="M12 2 2 32 12 25Z" fill="#243e49"/><path d="M12 2 22 32 12 25 2 32Z" fill="none" stroke="#ecf4f2" stroke-width="1.2"/></svg>
     </div>
     <div class="topic-title"><span>专题分析</span><strong :title="topic.name">{{ topic.name }}</strong><small>{{ topic.description || '第三次全国国土调查 · 分类图式' }}</small></div>
-    <TopicMapToolbar v-if="toolsMap" :map="toolsMap" :suspended="configOpen || overlayOpen" @drawing="setDrawingTool" @overlay="openOverlay">
+    <TopicMapToolbar v-if="toolsMap" :map="toolsMap" :suspended="configOpen || overlayOpen || uploadDialogOpen" :coverage-enabled="topic.id===HIGH_STANDARD_TOPIC_ID" @drawing="setDrawingTool" @overlay="openOverlay('difference')" @coverage="openOverlay('coverage')">
+      <button v-if="topic.id===HIGH_STANDARD_TOPIC_ID" type="button" title="上传 SHP 图层" @click="openUpload()"><Upload /><span>上传图层</span></button>
       <button :aria-label="fullscreen ? '退出全屏' : '全屏展示'" :title="fullscreen ? '退出全屏' : '全屏展示'" @click="toggleFullscreen"><FullScreen /></button>
       <button :class="{active:configOpen}" :aria-expanded="configOpen" title="场景配置" @click="configOpen = !configOpen"><Setting /><span>场景配置</span></button>
     </TopicMapToolbar>
@@ -379,8 +394,9 @@ onBeforeUnmount(() => { clearFeatureSelection(); version++; document.removeEvent
     <aside class="topic-legend" :class="{'is-collapsed':legendCollapsed}" :aria-hidden="legendCollapsed" :inert="legendCollapsed">
       <header class="legend-heading"><Collection /><b>图层详情</b></header>
       <div class="legend-content">
-        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="`${user.activeDeptId}:${topic.id}`" :sources="overlaySources" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
+        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
         <label class="layer-search"><Search aria-hidden="true" /><input v-model="layerKeyword" type="search" aria-label="搜索图层名称" placeholder="搜索图层名称" /></label>
+        <TopicUploadedLayers v-if="toolsMap&&topic.id===HIGH_STANDARD_TOPIC_ID" ref="uploadPanel" :map="toolsMap" :scope="uploadScope" :keyword="layerKeyword" @change="uploadedLayers=$event" @dialog="uploadDialogOpen=$event" @imported="uploaded" />
         <p v-if="!legendLayers.length && !pending">{{ layerKeyword.trim() ? '没有匹配的已开启图层，可在场景配置中查找并开启。' : '暂无已开启的分类图层，可在场景配置中选择。' }}</p>
         <section v-for="item in legendLayers" :key="item.key" class="legend-group">
           <div class="legend-layer-row">
