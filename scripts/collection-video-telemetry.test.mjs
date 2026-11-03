@@ -81,7 +81,7 @@ const View = load(compileScript(descriptor, { id: 'collection-test', inlineTempl
   },
   '@/utils/collection-media-pager': load(readFileSync('src/utils/collection-media-pager.ts', 'utf8'), {}),
   '@/workspace-components/spot-identification/SharedVideoPlayer.vue': { __esModule: true, default: SharedPlayer },
-  '@/workspace-components/spot-identification/PhotoLocationOverlay.vue': { __esModule: true, default: PhotoLocation },
+  '@/workspace-components/spot-identification/PhotoLocationControl.vue': { __esModule: true, default: PhotoLocation },
   '@/workspace-components/spot-identification/SrtInfoDialog.vue': { __esModule: true, default: SrtDialog },
 }).default
 const root = node('root'), props = Vue.reactive({ embedded: true, activeTab: 'collection' })

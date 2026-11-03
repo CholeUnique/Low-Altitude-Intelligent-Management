@@ -8,6 +8,7 @@ import NavigationQrDialog from './NavigationQrDialog.vue'
 import { containedVideoBounds, fitTelemetryPanelSize, placeTelemetryPanel, resizeTelemetryPanel, type TelemetryPanelBounds, type TelemetryPanelSize } from '@/utils/telemetry-panel'
 
 const props = defineProps<{ media: FlightReviewMedia; fullscreen?: boolean }>()
+const emit = defineEmits<{ close: [] }>()
 const panel = ref<HTMLElement>()
 const mapElement = ref<HTMLElement>()
 const mapMode = ref<'vector' | 'image'>('image')
@@ -272,7 +273,10 @@ onBeforeUnmount(() => {
 <template>
   <NavigationQrDialog v-if="navigationTarget" :target="navigationTarget" @close="navigationTarget = undefined" />
   <section ref="panel" class="photo-location" :class="{ 'is-dragging': dragging, 'is-resizing': resizing, 'is-positioned': placementReady }" :style="panelStyle" aria-label="拍摄位置" @pointerdown.stop @wheel.stop @dblclick.stop @click.stop @keydown.stop>
-    <header tabindex="0" aria-label="拖动拍摄位置窗口，或使用方向键移动" title="按住标题栏拖动" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag" @keydown="movePanelWithKey"><strong>拍摄位置 <span class="drag-grip" aria-hidden="true">⠿</span></strong></header>
+    <header tabindex="0" aria-label="拖动拍摄位置窗口，或使用方向键移动" title="按住标题栏拖动" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag" @keydown="movePanelWithKey">
+      <strong>拍摄位置 <span class="drag-grip" aria-hidden="true">⠿</span></strong>
+      <button class="photo-location__close" type="button" aria-label="关闭拍摄位置面板" title="关闭拍摄位置" @pointerdown.stop @click.stop="emit('close')">×</button>
+    </header>
     <div class="photo-location__map-wrap">
       <div ref="mapElement" class="photo-location__map" />
       <p v-if="mapError" class="photo-location__state">{{ mapError }}</p>
@@ -290,6 +294,9 @@ onBeforeUnmount(() => {
 .photo-location{position:absolute;z-index:7;top:12px;right:12px;display:flex;width:min(340px,calc(100% - 24px));height:300px;overflow:hidden;visibility:hidden;box-sizing:border-box;flex-direction:column;border:1px solid #5a9aaf;border-radius:8px;color:#dff4fc;background:#102d40f5;box-shadow:0 8px 25px #00152366;font-size:11px;pointer-events:auto}.photo-location.is-positioned{visibility:visible}
 .photo-location header{display:flex;flex:none;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid #345464;cursor:grab;touch-action:none;user-select:none}.photo-location.is-dragging header{cursor:grabbing}.photo-location header:focus-visible{outline:2px solid #4fe2f4;outline-offset:-2px}
 .photo-location header strong{display:block;font-size:13px}
+.photo-location__close{display:grid;flex:none;width:20px;height:18px;place-items:center;margin:0;padding:0;border:0;border-radius:3px;color:#b8dfeb;background:transparent;font-size:20px;line-height:1;cursor:pointer}
+.photo-location__close:hover{color:#fff;background:#245066}
+.photo-location__close:focus-visible{outline:2px solid #4fe2f4;outline-offset:2px}
 .drag-grip{margin-left:5px;color:#91b5c4}
 .photo-location__map-wrap{position:relative;flex:1;min-height:0}.photo-location__map{height:100%;background:#263e4a}
 .photo-location__state{position:absolute;inset:0;z-index:500;display:grid;margin:0;place-items:center;color:#edcc8c;background:#102d40d9}

@@ -18,7 +18,7 @@ import {
 import { useUserStore } from '@/stores/user'
 import SpotUploadDialog from './SpotUploadDialog.vue'
 import SharedVideoPlayer from './SharedVideoPlayer.vue'
-import PhotoLocationOverlay from './PhotoLocationOverlay.vue'
+import PhotoLocationControl from './PhotoLocationControl.vue'
 
 const SrtInfoDialog = defineAsyncComponent(() => import('./SrtInfoDialog.vue'))
 
@@ -766,7 +766,7 @@ async function exportList() {
               <div class="media-stage" :class="{ 'can-expand': previewState === 'ready' && mediaKind(previewMedia) === 'image', 'image-zoomed': previewImageScale > 1, 'image-dragging': previewImageDragging }" @wheel="zoomPreviewImage" @pointerdown="startPreviewImageDrag" @pointermove="movePreviewImageDrag" @pointerup="endPreviewImageDrag" @pointercancel="endPreviewImageDrag" @dblclick="resetPreviewImageTransform">
                 <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailRow.media" :src="previewMedia.originalUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
                 <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error' && previewImageUrl" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" :style="previewImageStyle" draggable="false" @load="markPreviewReady" @error="handlePreviewImageError" />
-                <PhotoLocationOverlay v-if="mediaKind(previewMedia) === 'image' && previewState === 'ready' && previewMedia.longitude !== undefined && previewMedia.latitude !== undefined" :key="`location:${mediaKey(previewMedia)}`" :media="previewMedia" :fullscreen="mediaFullscreen" />
+                <PhotoLocationControl v-if="mediaKind(previewMedia) === 'image' && previewState === 'ready'" :key="`location:${mediaKey(previewMedia)}`" :media="previewMedia" :fullscreen="mediaFullscreen" />
                 <button v-if="previewState === 'ready'" class="fullscreen-toggle" type="button" :aria-label="mediaFullscreen ? '退出全屏' : '进入全屏'" :title="mediaFullscreen ? '退出全屏' : '进入全屏'" @click="toggleMediaFullscreen">
                   <svg v-if="!mediaFullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5m13 5h5v-5" /></svg>
                   <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>

@@ -5,7 +5,7 @@ import { createCollectionMediaPager, type CollectionMediaEntry, type CollectionM
 import type { FlightReviewMedia } from '@/api/flight-review'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
 import SharedVideoPlayer from '@/workspace-components/spot-identification/SharedVideoPlayer.vue'
-import PhotoLocationOverlay from '@/workspace-components/spot-identification/PhotoLocationOverlay.vue'
+import PhotoLocationControl from '@/workspace-components/spot-identification/PhotoLocationControl.vue'
 
 const SrtInfoDialog = defineAsyncComponent(() => import('@/workspace-components/spot-identification/SrtInfoDialog.vue'))
 
@@ -463,7 +463,7 @@ onBeforeUnmount(() => {
         @dblclick="resetPreviewTransform"
       >
         <img :src="previewMedia.originalUrl || previewMedia.thumbnail" :alt="previewMedia.name" :style="previewImageStyle" draggable="false" />
-        <PhotoLocationOverlay v-if="previewReviewMedia?.longitude !== undefined && previewReviewMedia.latitude !== undefined" :key="previewReviewMedia.id" :media="previewReviewMedia" fullscreen />
+        <PhotoLocationControl v-if="previewReviewMedia" :key="previewReviewMedia.id" :media="previewReviewMedia" fullscreen />
       </div>
       <button class="preview-nav preview-next" :disabled="previewSwitching" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
       <p v-if="previewNotice" class="preview-notice" role="status">{{ previewNotice }}</p>
