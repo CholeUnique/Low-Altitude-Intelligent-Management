@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 const route = useRoute()
 const router = useRouter()
 const blockedPath = computed(() => typeof route.query.from === 'string' ? route.query.from : '')
+const topicBlocked=computed(()=>blockedPath.value.startsWith('/recognition/topics'))
 </script>
 
 <template>
@@ -12,7 +13,8 @@ const blockedPath = computed(() => typeof route.query.from === 'string' ? route.
     <main>
       <div class="forbidden-symbol">!</div>
       <h1>无权限访问</h1>
-      <p>当前身份未被管理员授予该功能权限，请联系管理员调整当前部门下的功能权限。</p>
+      <p v-if="topicBlocked">该专题需要当前部门下的“专题分析”（SPECIAL_ANALYSIS）权限。请管理员在后台权限管理中核对并授权；“数据管理”权限不能替代此权限。</p>
+      <p v-else>当前身份未被管理员授予该功能权限，请联系管理员调整当前部门下的功能权限。</p>
       <small v-if="blockedPath">受限地址：{{ blockedPath }}</small>
       <button type="button" @click="router.back()">返回上一页</button>
     </main>

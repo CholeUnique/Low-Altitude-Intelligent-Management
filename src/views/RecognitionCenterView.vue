@@ -28,7 +28,7 @@ const topicsExpanded = ref(true)
 const topicDialog = ref<HTMLDialogElement>()
 const topicName = ref(''), topicDescription = ref(''), topicFormError = ref('')
 const selectedTopic = computed(() => topicStore.topics.find(item => item.id === route.query.topic) || topicStore.topics[0]!)
-const canUseTopics = computed(()=>isAgricultureTopicDepartment(user)&&user.hasPermission('data-management'))
+const canUseTopics = computed(()=>isAgricultureTopicDepartment(user)&&user.hasPermission('special-analysis'))
 const mapTopic=computed(()=>selectedTopic.value.id===FACILITIES_TOPIC_ID?{...selectedTopic.value,name:'工程设施地图'}:selectedTopic.value)
 const facilityPage = computed(()=>route.query.view==='map'?'map':route.query.view==='ledger'?'ledger':'overview')
 const recognitionModes: RecognitionMode[] = ['algorithms', 'spots', 'data', 'topics']
@@ -36,7 +36,7 @@ const recognitionNavItems = computed(() => [
   { key: 'spots' as const, icon: DocumentChecked, label: '任务研判', permission: 'smart-recognition' as const },
   { key: 'algorithms' as const, icon: Cpu, label: '算法分析', permission: 'algorithm-analysis' as const },
   { key: 'data' as const, icon: Files, label: '数据管理', permission: 'data-management' as const },
-  ...(canUseTopics.value?[{key:'topics' as const,icon:MapLocation,label:'专题分析',permission:'data-management' as const}]:[]),
+  ...(canUseTopics.value?[{key:'topics' as const,icon:MapLocation,label:'专题分析',permission:'special-analysis' as const}]:[]),
 ].filter((item) => user.hasPermission(item.permission)))
 const dataNavItems: Array<{ key: DataTab; label: string; disabled?: boolean }> = [
   { key: 'collection', label: '采集数据' },
@@ -212,34 +212,33 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
   </div>
 </template>
 <style scoped lang="scss">
-.topic-primary-row{gap:0}.topic-primary-button{flex:1;min-width:0}.topic-primary-row>.topic-add{margin-left:3px}.topic-root-menu>.task-button b{white-space:normal!important;line-height:1.6;font-size:12px!important}.facility-submenu{margin-left:12px}
+.topic-primary-button{min-width:0}.topic-root-menu>.task-button b{white-space:normal!important;line-height:1.6;font-size:12px!important}.facility-submenu{margin-left:12px}
 
 .topic-menu-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0,1fr);
   align-items: center;
-  gap: 4px;
+  gap: 0;
   min-width: 0
 }
 
-.recognition-page aside .topic-menu-row>.task-button {
-  flex: 1;
-  min-width: 0;
-  width: auto
-}
-
 .topic-add {
+  grid-area: 1 / 1;
+  justify-self: end;
+  z-index: 2;
+  margin-right: 2px;
   display: grid;
   place-items: center;
   flex: none;
-  width: 25px;
-  height: 25px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   box-sizing: border-box;
   line-height: 1;
-  border: 1px solid #276079;
+  border: 0;
   border-radius: 5px;
   color: #7cdae9;
-  background: #164a62;
+  background: transparent;
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -262,6 +261,10 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
 .topic-add:hover {
   background: #236880
 }
+
+.topic-primary-row>.topic-primary-button{grid-area:1 / 1}
+.topic-primary-row:hover .topic-primary-button>em,
+.topic-primary-row:has(.topic-add:focus-visible) .topic-primary-button>em{opacity:0}
 
 .topic-scene-menu {
   display: grid;
@@ -490,6 +493,9 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
 }
 
 .recognition-page aside nav :is(.primary-nav-button,.topic-primary-button)>em {
+  display: grid;
+  place-items: center;
+  line-height: 1;
   color: #668fa1;
   font-size: 22px;
   font-style: normal

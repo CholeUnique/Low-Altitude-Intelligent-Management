@@ -6,6 +6,9 @@ import { annotateSpatialDifference, loadSpatialOverlayResult, spatialFilters, sp
 import { geometryAnalysisResult, COVERAGE_COLORS, type SpatialAnalysisOperation, type SpatialAnalysisSummary } from '@/utils/spatial-geometry-result'
 import { filterUploadedGeometry, geometryRequestInputs } from '@/utils/spatial-geometry-input'
 import type { UploadedTopicLayer } from '@/utils/topic-upload'
+import { createLocalId } from '@/utils/local-id'
+import { featureHoverCaption } from '@/utils/feature-hover-caption'
+import { bindTopicFeatureHover } from '@/utils/topic-feature-hover'
 import { useUserStore } from '@/stores/user'
 interface FilterRow { id:number; field:string; op:'EQ'|'IN'; values:string }
 interface Selection { label:'A'|'B'; serviceId:string; layerId:string; layers:SpatialLayer[]; filters:FilterRow[]; loading:boolean; error:string; revision:number }
@@ -106,20 +109,18 @@ function display(data:SpatialCollection,summary:SpatialAnalysisSummary,restore:s
   if(!difference.features.length)throw new Error('后端统计存在差异，但未返回差分图斑，请后端检查结果完整性')
   // Only the current analysis is initially visible; older results stay available in the list.
   const hidePrevious=()=>results.value.forEach(result=>{result.layer.remove();result.visible=false})
-  const id=summary.resultId||crypto.randomUUID(),existing=results.value.find(result=>result.id===id)
+  const id=summary.resultId||createLocalId(),existing=results.value.find(result=>result.id===id)
   if(!props.map.getPane('topic-analysis'))props.map.createPane('topic-analysis').style.zIndex='370'
   const title=operation==='coverage'?`${summary.sourceA.layerName} · ${summary.sourceB.layerName}覆盖分析`:`${summary.sourceA.layerName} ↔ ${summary.sourceB.layerName}`
-  const layer=L.geoJSON(difference,{pane:'topic-analysis',style:feature=>({color:typeColor(resultType({operation},feature!)),weight:2,fillOpacity:.35}),onEachFeature(feature,shape){
+  const layer=L.geoJSON(difference,{pane:'topic-analysis',style:feature=>({color:typeColor(resultType({operation},feature!)),weight:2,fillOpacity:.65}),onEachFeature(feature,shape){
     const properties=feature.properties||{},type=typeLabel(resultType({operation},feature),summary)
-    const tooltip=document.createElement('span');tooltip.textContent=`${type} · ${number(properties.areaSqm)} ㎡`
-    shape.bindTooltip(tooltip,{sticky:true})
+    bindTopicFeatureHover(shape,props.map,()=>featureHoverCaption(properties,[],type),()=>layer.resetStyle(shape as L.Path))
     const body=document.createElement('div');body.className='overlay-result-properties'
     const heading=document.createElement('b');heading.textContent=type;body.appendChild(heading)
     for(const [label,source] of [['A',summary.sourceA],['B',summary.sourceB]] as const){const row=document.createElement('p');row.textContent=`${label} 图层：${source.layerName}（${source.serviceName}）`;body.appendChild(row)}
     const aliases:Record<string,string>={seqNo:'图斑序号',diffType:'后端分组',areaSqm:'结果面积（㎡）',areaMu:'结果面积（亩）',partCount:'子图斑数',centerLng:'中心经度',centerLat:'中心纬度',analysisSourceSide:'来源侧',analysisSourceLayerName:'所属图层',analysisExcludedLayerName:'不属于图层',analysisTargetLayerName:'目标图层',analysisCoverage:'覆盖分组',analysisSourceServiceId:'来源服务编号',analysisSourceLayerId:'来源子图层编号',analysisMembership:'归属说明'}
     Object.entries(properties).forEach(([key,value])=>{const row=document.createElement('p');row.textContent=`${aliases[key]||key}：${key==='diffType'?type:value??'—'}`;body.appendChild(row)})
     shape.bindPopup(body,{maxWidth:320,maxHeight:260})
-    shape.on('mouseover',()=>{(shape as L.Path).setStyle({weight:4})});shape.on('mouseout',()=>layer.resetStyle(shape as L.Path))
   }})
   try{if(difference.features.length)layer.addTo(props.map)}catch(error){layer.remove();throw error}
   hidePrevious()

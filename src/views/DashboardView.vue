@@ -591,7 +591,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
             <section v-if="isAgricultureTopicDepartment(user)" class="overview-float-panel topic-data-panel">
               <header>
                 <h2>专题分析</h2>
-                <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入专题地图" @click="openTopics">专题地图 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
+                <button v-if="user.hasPermission('special-analysis')" class="overview-header-link" type="button" aria-label="进入专题地图" @click="openTopics">专题地图 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <TopicStatisticsSummary animated />
             </section>
