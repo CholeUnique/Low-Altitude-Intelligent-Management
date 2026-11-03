@@ -71,25 +71,23 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
   flex-direction: column;
   box-sizing: border-box;
   overflow: hidden;
-  border: 1px solid #d1dddc;
-  border-radius: 7px;
-  background: #f5f8f6;
-  color: #243d44;
-  box-shadow: 0 3px 16px #001a2840;
+  border: 0;
+  background: transparent;
+  color: #f1f6f5;
+  text-shadow: 0 1px 2px #001017, 0 0 4px #001017;
   pointer-events: auto;
 }
-.map-symbol-legend::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 12px; background: linear-gradient(transparent, #f5f8f6); pointer-events: none; }
 header { flex: none; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 13px 18px 10px; }
-header::before, header::after { content: ''; height: 1px; flex: 1; background: #cdd9d6; }
+header::before, header::after { content: ''; height: 1px; flex: 1; background: #e3eeec70; }
 h2 { margin: 0; font-size: 14px; font-weight: 600; line-height: 20px; letter-spacing: 6px; padding-left: 6px; }
 .map-symbol-content { min-height: 0; overflow: auto; padding: 0 16px 14px; overscroll-behavior: contain; scrollbar-width: none; }
 .map-symbol-content::-webkit-scrollbar { display: none; }
-.map-symbol-content:focus-visible { outline: 2px solid #397d89; outline-offset: -3px; }
-.map-legend-group + .map-legend-group { border-top: 1px solid #dce4e0; margin-top: 10px; padding-top: 10px; }
+.map-symbol-content:focus-visible { outline: 2px solid #b9e7f4; outline-offset: -3px; }
+.map-legend-group + .map-legend-group { border-top: 1px solid #e3eeec45; margin-top: 10px; padding-top: 10px; }
 h3 { margin: 0 0 7px; font-size: 12px; font-weight: 600; line-height: 18px; overflow-wrap: anywhere; }
 .map-symbol-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; list-style: none; padding: 0; margin: 0; }
 .map-symbol-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; column-gap: 8px; min-height: 28px; }
 .map-symbol-row.wide-label { grid-column: 1 / -1; }
-.map-symbol { display: block; width: 40px; height: 26px; overflow: visible; }
+.map-symbol { display: block; width: 40px; height: 26px; overflow: visible; filter: drop-shadow(0 1px 1px #001017); }
 .map-symbol-label { font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
 </style>
