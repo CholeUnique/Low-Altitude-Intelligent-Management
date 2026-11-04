@@ -405,7 +405,7 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
     <div v-else-if="topicStore.storageError" class="topic-status" role="alert">{{ topicStore.storageError }}</div>
     <div v-if="identifyPending || identifyError" class="topic-identify-status" :role="identifyError ? 'alert' : 'status'">{{ identifyError || '正在查询要素…' }}</div>
     <div v-if="!configOpen && (farmlandStatSources.length || featureCandidates.length)" class="topic-inspector-rail" :class="{'has-details':featureCandidates.length}">
-      <aside v-if="farmlandStatSources.length" v-show="farmlandStatsAvailable" class="topic-farmland-stat" aria-label="高标准农田统计"><header>高标准农田数据</header><TopicStatisticsSummary :sources="farmlandStatSources" @available="farmlandStatsAvailable=$event" /></aside>
+      <aside v-if="farmlandStatSources.length" v-show="farmlandStatsAvailable" class="topic-farmland-stat" aria-label="高标准农田统计"><header>高标准农田数据</header><TopicStatisticsSummary area-in-mu :sources="farmlandStatSources" @available="farmlandStatsAvailable=$event" /></aside>
       <TopicFeatureDetails v-if="featureCandidates.length" embedded :features="featureCandidates" :selected="selectedFeature" :roles="featureRoles" @select="selectFeature" @close="clearFeatureSelection" />
     </div>
     <button class="topic-details-toggle" :class="{collapsed:legendCollapsed}" :aria-label="legendCollapsed?'展开图层详情':'收起图层详情'" :aria-expanded="!legendCollapsed" @click="legendCollapsed=!legendCollapsed">{{ legendCollapsed?'›':'‹' }}</button>
@@ -476,7 +476,7 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
             </div>
           </section>
         </section>
-        <section v-if="topic.id === HIGH_STANDARD_TOPIC_ID"><h3>专题统计</h3><TopicStatisticsSummary /></section>
+        <section v-if="topic.id === HIGH_STANDARD_TOPIC_ID"><h3>专题统计</h3><TopicStatisticsSummary area-in-mu /></section>
       </div>
     </aside></Transition>
   </section>

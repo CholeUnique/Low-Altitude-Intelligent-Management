@@ -4,11 +4,12 @@ import { useUserStore } from '@/stores/user'
 import { getCustomDepartmentStatistics, type CustomStatGroup } from '@/api/business-statistics'
 import { topicStatGroups } from '@/utils/topic-layer-catalog'
 import DashboardFlipNumber from './DashboardFlipNumber.vue'
+import { topicAreaMetric } from '@/utils/topic-area'
 const user = useUserStore()
-const props = defineProps<{sources?:{id:string; name:string}[];animated?:boolean}>()
+const props = defineProps<{sources?:{id:string; name:string}[];animated?:boolean;areaInMu?:boolean}>()
 const emit = defineEmits<{available:[visible:boolean]}>()
 const groups = ref<CustomStatGroup[]>([]), loading = ref(false), error = ref('')
-const visibleGroups = computed(() => topicStatGroups(groups.value,props.sources))
+const visibleGroups = computed(() => topicStatGroups(groups.value,props.sources).map(group => props.areaInMu ? {...group,items:group.items.map(topicAreaMetric)} : group))
 watch([visibleGroups,loading,error],()=>emit('available',loading.value || Boolean(error.value) || visibleGroups.value.length>0),{immediate:true})
 let version = 0
 async function load() {

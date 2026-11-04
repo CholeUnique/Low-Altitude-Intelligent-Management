@@ -2,7 +2,8 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import L from 'leaflet'
 import { EditPen, Location, Connection, ArrowDown } from '@element-plus/icons-vue'
-import { geodesicArea, formatArea, formatDistance } from '@/utils/map-measurement'
+import { formatSquareMetresAsMu } from '@/utils/topic-area'
+import { geodesicArea, formatDistance } from '@/utils/map-measurement'
 const props = defineProps<{map:L.Map; suspended?:boolean;coverageEnabled?:boolean}>()
 const emit = defineEmits<{drawing:[active:boolean];overlay:[];coverage:[]}>()
 type Tool = 'distance'|'area'|'marker'
@@ -32,7 +33,7 @@ function redraw(cursor?:L.LatLng) {
   points.forEach((point,index) => L.circleMarker(point,{...style,radius:4,fillOpacity:1}).bindTooltip(String(index+1),{permanent:true,direction:'top',className:'topic-measure-index'}).addTo(measurements))
   if (path.length<2) return
   if (tool.value === 'area' && path.length>2) {
-    L.polygon(path,style).addTo(measurements); message.value = `测量面积：${formatArea(geodesicArea(path))}`
+    L.polygon(path,style).addTo(measurements); message.value = `测量面积：${formatSquareMetresAsMu(geodesicArea(path))} 亩`
   } else {
     L.polyline(path,style).addTo(measurements)
     if (tool.value === 'distance') message.value = `测量距离：${formatDistance(path.slice(1).reduce((sum,point,index)=>sum+props.map.distance(path[index]!,point),0))}`

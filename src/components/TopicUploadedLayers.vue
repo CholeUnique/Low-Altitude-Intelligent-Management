@@ -4,6 +4,7 @@ import L from 'leaflet'
 import { createLocalId } from '@/utils/local-id'
 import { featureHoverCaption } from '@/utils/feature-hover-caption'
 import { bindTopicFeatureHover } from '@/utils/topic-feature-hover'
+import { topicAreaAttribute } from '@/utils/topic-area'
 import { readShpPayload, UPLOAD_COLORS, UPLOAD_CRS, validateUploadName, type ParsedTopicUpload, type UploadedTopicLayer } from '@/utils/topic-upload'
 import { readTopicUploads, writeTopicUploads } from '@/utils/topic-upload-storage'
 
@@ -30,7 +31,10 @@ function addHandle(item:UploadedTopicLayer){
     bindTopicFeatureHover(shape,props.map,()=>featureHoverCaption(feature.properties,item.fields,item.name),()=>{(shape as L.Path).setStyle(style(item))})
     const content=document.createElement('div');content.className='uploaded-feature-properties'
     const title=document.createElement('b');title.textContent=item.name;content.appendChild(title)
-    Object.entries(feature.properties||{}).forEach(([key,value])=>{const row=document.createElement('p');row.textContent=`${key}：${value==null?'—':typeof value==='object'?JSON.stringify(value):String(value)}`;content.appendChild(row)})
+    Object.entries(feature.properties||{}).forEach(([key,value])=>{
+      const area=topicAreaAttribute(key,item.fields.find(field=>field.name===key)?.alias||key,value)
+      const row=document.createElement('p');row.textContent=`${area?.label||key}：${area?.value??(value==null?'—':typeof value==='object'?JSON.stringify(value):String(value))}`;content.appendChild(row)
+    })
     shape.bindPopup(content,{maxWidth:300,maxHeight:240})
   }})
   handles.set(item.id,layer)

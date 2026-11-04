@@ -1,4 +1,5 @@
 import type { MapFeatureAttributeRow } from './map-service-layer'
+import { topicAreaAttribute } from './topic-area'
 
 // 来源：高标准农田地块属性表 C3、国土变更调查数据属性字段 C.2。
 const farmland: Record<string, string> = {
@@ -22,16 +23,17 @@ const survey: Record<string, string> = {
 }
 // 工程、项目辅助图层只展示已明确含义的核心业务字段，不展示系统编号和几何计算字段。
 const auxiliary: Record<string, string> = {GCMC:'工程名称',XMMC:'项目名称',XMLX:'项目类型',SSXMMC:'所属项目名称',SSXMDM:'所属项目代码',SFGBXMJS:'是否高标项目建设',DKMC:'地块名称',DKBH:'地块编号',DLMC:'地类名称',MJ:'面积',BZ:'备注'}
-const areaFields = new Set(['MJ','LZGM','TBMJ','KCMJ','TBDLMJ'])
 // 用户最新截图中永久基本农田图层红框指定的字段，按业务阅读顺序展示。
 const permanentFields: Record<string,string> = {
   XZQMC:'行政区名称',YJJBNTTBBH:'永久基本农田图斑编号',DLMC:'地类名称',QSDWMC:'权属单位名称',
-  ZLDWMC:'坐落单位名称',YJJBNTTBMJ:'永久基本农田图斑面积（㎡）',ZZSXMC:'种植属性名称',SJNF:'数据年份',
+  ZLDWMC:'坐落单位名称',YJJBNTTBMJ:'永久基本农田图斑面积',ZZSXMC:'种植属性名称',SJNF:'数据年份',
 }
 export function topicFeatureRows(rows: MapFeatureAttributeRow[], role: string) {
   if (role === 'permanent') return Object.entries(permanentFields).flatMap(([key,label]) => {
     const row = rows.find(row => row.name?.toUpperCase() === key)
-    return row && row.value && row.value !== '—' ? [{...row,label}] : []
+    if (!row?.value || row.value === '—') return []
+    const area = topicAreaAttribute(key,row.label || label,row.value)
+    return [{...row,label,...(area ? {label:`${label}（亩）`,value:area.value} : {})}]
   })
   const fields = ['land','changes','permanent','parcel'].includes(role) ? {...survey,...farmland} : auxiliary
   return rows.flatMap(row => {
@@ -39,6 +41,7 @@ export function topicFeatureRows(rows: MapFeatureAttributeRow[], role: string) {
     const key = name === 'JYZTMC_1' ? 'JYZTMC' : name
     const label = fields[key]
     if (!label || !row.value || row.value === '—') return []
-    return [{...row,label:areaFields.has(key) ? `${label}（㎡）` : key === 'XZDWKD' ? `${label}（米）` : label}]
+    const area = topicAreaAttribute(key,row.label || label,row.value)
+    return [{...row,label:key === 'XZDWKD' ? `${label}（米）` : label,...(area ? {label:`${label}（亩）`,value:area.value} : {})}]
   })
 }
