@@ -5,7 +5,11 @@ import 'leaflet/dist/leaflet.css'
 import { FullScreen, Setting, Close, Collection, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
+import TopicLayerCard from '@/components/TopicLayerCard.vue'
+import TopicLayerDisplayMode from '@/components/TopicLayerDisplayMode.vue'
 import TopicFeatureDetails from '@/components/TopicFeatureDetails.vue'
+import TopicAnalysisStatistics from '@/components/TopicAnalysisStatistics.vue'
+import { farmlandDefaults, type AnalysisStatistics } from '@/utils/farmland-analysis'
 import TopicStatisticsSummary from '@/components/TopicStatisticsSummary.vue'
 import TopicMapToolbar from '@/components/TopicMapToolbar.vue'
 import TopicOverlayAnalysis from '@/components/TopicOverlayAnalysis.vue'
@@ -30,6 +34,12 @@ interface Category { value: string; name: string; count: number; checked: boolea
 interface TopicLayer { key: string; service: MapServiceItem; sourceName: string; role: TopicRole; fields: string[]; categoryField: string; categories: Category[]; visible: boolean; analysisHidden: boolean; pending: boolean; error: string; ready: boolean; mode: TopicDisplayMode; handle?: Raw<MapServiceLayerHandle> }
 const user = useUserStore()
 const props = defineProps<{topic: GeographicTopic}>()
+const isFarmland=computed(()=>props.topic.id===HIGH_STANDARD_TOPIC_ID)
+const analysisStatistics=ref<AnalysisStatistics[]>([])
+const detailLayerOrder=ref<Record<string,number>>({})
+let nextAddedLayerOrder=10000
+function rememberAddedLayers(keys:string[]){for(const key of keys)if(detailLayerOrder.value[key]===undefined)detailLayerOrder.value[key]=nextAddedLayerOrder++}
+function updateUploads(items:UploadedTopicLayer[]){uploadedLayers.value=items;rememberAddedLayers(items.map(item=>`upload:${item.id}`))}
 const topicStore = useGeographicTopicsStore()
 const root = ref<HTMLElement>(), canvas = ref<HTMLElement>()
 const layers = ref<TopicLayer[]>([])
@@ -62,6 +72,7 @@ function hoverTargets():TopicHoverTarget[]{
 }
 // 专题目录独立于任务业务场景；仅使用当前部门接口实际返回的可用图层。
 const availableLayers = computed(() => layers.value)
+const baselineInputs=computed(()=>farmlandDefaults(layers.value))
 const overlaySources = computed(() => groupTopicLayers(layers.value.filter(item => item.role !== 'imagery')).map(group => ({id:group.id,name:group.name})))
 const overlayVisibleKeys = computed(() => [...layers.value.filter(item => item.visible && !item.analysisHidden && (!item.categories.length || item.categories.some(category => category.checked))).map(item => item.key),...uploadedLayers.value.filter(item=>item.selected).map(item=>`upload:${item.id}`)])
 function openOverlay(operation:SpatialAnalysisOperation='difference') { overlayOperation.value=operation;configOpen.value=false; clearFeatureSelection(); overlayOpen.value=true }
@@ -102,10 +113,16 @@ const mapLegendGroups=computed(()=>[
     }
     return {key:item.key,name:item.service.name,symbols}
   }),
-  ...analysisLegend.value.map(item=>({key:'analysis-'+item.id,name:item.name,symbols:item.symbols.map(symbol=>({...symbol,mode:'filled' as TopicDisplayMode,geometry:'esriGeometryPolygon'}))})),
+  ...analysisLegend.value.map(item=>({key:'analysis-'+item.id,name:item.name,symbols:item.symbols.map(symbol=>({...symbol,mode:symbol.mode||'filled' as TopicDisplayMode,geometry:'esriGeometryPolygon'}))})),
   ...uploadedLayers.value.filter(item=>item.selected).map(item=>({key:item.id,name:item.name,symbols:[{label:item.name,color:item.color,mode:item.mode,geometry:/Point/.test(item.data.features[0]?.geometry.type||'')?'esriGeometryPoint':/LineString/.test(item.data.features[0]?.geometry.type||'')?'esriGeometryPolyline':'esriGeometryPolygon'}]})),
 ].filter(group=>group.symbols.length))
-const farmlandStatSources = computed(() => topicStatSources(layers.value.filter(item=>!item.analysisHidden)))
+const farmlandStatSources = computed(() => {
+  if(!isFarmland.value)return topicStatSources(layers.value.filter(item=>!item.analysisHidden))
+  if(analysisStatistics.value.length)return []
+  const {a,b}=baselineInputs.value
+  const item=layers.value.find(item=>[a&&`${a.serviceId}/${a.layerId}`,b&&`${b.serviceId}/${b.layerId}`].includes(item.key)&&item.visible&&!item.analysisHidden&&(!item.categories.length||item.categories.some(category=>category.checked)))
+  return item?[{id:item.key.split('/')[0]!,name:item.sourceName}]:[]
+})
 const businessAllSelected = computed(() => vectorLayers.value.length > 0 && vectorLayers.value.every(item => item.visible))
 const businessPartSelected = computed(() => !businessAllSelected.value && vectorLayers.value.some(item => item.visible))
 const roleNames: Record<TopicRole, string> = { land:'国土调查底类', permanent:'永久基本农田', boundary:'行政边界', changes:'变化线索', facility:'项目设施', project:'项目范围', parcel:'耕地地块', imagery:'遥感影像', unconfigured:'通用图层' }
@@ -307,8 +324,11 @@ async function setVisible(item: TopicLayer, visible: boolean, remember = false) 
   } else item.handle?.layer.remove()
 }
 async function selectImagery(key: string) { await Promise.all(imageryLayers.value.map(item => setVisible(item, item.key === key,true))) }
+let initialSceneScope=''
 async function applyScene() {
-  const land = availableLayers.value.find(item => item.role === 'land'), boundary = availableLayers.value.find(item => item.role === 'boundary'), imagery = imageryLayers.value[0]
+  const initializeDefaults=initialSceneScope!==uploadScope.value
+  initialSceneScope=uploadScope.value
+  const boundary = availableLayers.value.find(item => item.role === 'boundary'&&(!isFarmland.value||baselineInputs.value.keys.includes(item.key))), imagery = imageryLayers.value[0]
   await Promise.all(layers.value.map(item => {
     const preference = topicStore.getPreference(props.topic.id,item.key)
     const mode = preference?.mode || (item.role === 'boundary' ? 'boundary' : 'filled')
@@ -316,8 +336,8 @@ async function applyScene() {
     restoreCategoryModes(item)
     applyDisplayMode(item)
     item.categories.forEach(category => { category.checked = true })
-    const defaultVisible = [boundary?.key,imagery?.key,...(props.topic.id === HIGH_STANDARD_TOPIC_ID ? [land?.key] : props.topic.id===FACILITIES_TOPIC_ID?layers.value.filter(item=>item.role==='facility').map(item=>item.key):[])].includes(item.key)
-    return setVisible(item, preference?.visible ?? defaultVisible)
+    const defaultVisible = [boundary?.key,imagery?.key,...(props.topic.id === HIGH_STANDARD_TOPIC_ID ? baselineInputs.value.keys : props.topic.id===FACILITIES_TOPIC_ID?layers.value.filter(item=>item.role==='facility').map(item=>item.key):[])].includes(item.key)
+    return setVisible(item, isFarmland.value&&initializeDefaults&&baselineInputs.value.keys.includes(item.key) ? true : preference?.visible ?? defaultVisible)
   }))
 }
 async function loadData() {
@@ -356,6 +376,7 @@ async function toggleFullscreen() {
   catch { error.value = '浏览器未允许全屏，请使用浏览器全屏查看。' }
 }
 function updateFullscreen() { fullscreen.value = document.fullscreenElement === root.value; map?.invalidateSize({pan:false}) }
+watch(uploadScope,()=>{analysisStatistics.value=[];analysisLegend.value=[];detailLayerOrder.value={};nextAddedLayerOrder=10000})
 watch(() => user.activeDeptId, () => { void loadData() })
 watch(configOpen, open => { if (open) clearFeatureSelection() })
 watch(uploadDialogOpen,open=>{if(open)featureHover?.clear()})
@@ -395,7 +416,7 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
       <OverviewMapScale :map="toolsMap" />
     </div>
     <div class="topic-title"><span>专题分析 / {{ topic.name }}</span></div>
-    <TopicMapToolbar v-if="toolsMap" :map="toolsMap" :suspended="configOpen || overlayOpen || uploadDialogOpen" :coverage-enabled="topic.id===HIGH_STANDARD_TOPIC_ID" @drawing="setDrawingTool" @overlay="openOverlay('difference')" @coverage="openOverlay('coverage')">
+    <TopicMapToolbar v-if="toolsMap" :map="toolsMap" :suspended="configOpen || overlayOpen || uploadDialogOpen" :coverage-enabled="topic.id===HIGH_STANDARD_TOPIC_ID" :analysis-label="isFarmland?'高标田与永农对比分析':undefined" @drawing="setDrawingTool" @overlay="openOverlay('difference')" @coverage="openOverlay('coverage')">
       <button v-if="topic.id===HIGH_STANDARD_TOPIC_ID" type="button" aria-label="上传 SHP 图层" title="上传 SHP 图层" @click="openUpload()"><Upload /></button>
       <button :aria-label="fullscreen ? '退出全屏' : '全屏展示'" :title="fullscreen ? '退出全屏' : '全屏展示'" @click="toggleFullscreen"><FullScreen /></button>
       <button :class="{active:configOpen}" :aria-expanded="configOpen" title="场景配置" @click="configOpen = !configOpen"><Setting /><span>场景配置</span></button>
@@ -404,32 +425,20 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
     <div v-else-if="pending" class="topic-status" role="status">正在准备专题数据…</div>
     <div v-else-if="topicStore.storageError" class="topic-status" role="alert">{{ topicStore.storageError }}</div>
     <div v-if="identifyPending || identifyError" class="topic-identify-status" :role="identifyError ? 'alert' : 'status'">{{ identifyError || '正在查询要素…' }}</div>
-    <div v-if="!configOpen && (farmlandStatSources.length || featureCandidates.length)" class="topic-inspector-rail" :class="{'has-details':featureCandidates.length}">
-      <aside v-if="farmlandStatSources.length" v-show="farmlandStatsAvailable" class="topic-farmland-stat" aria-label="高标准农田统计"><header>高标准农田数据</header><TopicStatisticsSummary area-in-mu :sources="farmlandStatSources" @available="farmlandStatsAvailable=$event" /></aside>
+    <div v-if="!configOpen && (analysisStatistics.length || farmlandStatSources.length || featureCandidates.length)" class="topic-inspector-rail" :class="{'has-details':featureCandidates.length}">
+      <aside v-if="analysisStatistics.length || farmlandStatSources.length" v-show="analysisStatistics.length || farmlandStatsAvailable" class="topic-farmland-stat" :aria-label="analysisStatistics.length?'分析结果':'高标准农田统计'"><header>{{ analysisStatistics.length?'分析结果':'高标准农田数据' }}</header><TopicAnalysisStatistics v-if="analysisStatistics.length" :items="analysisStatistics" /><TopicStatisticsSummary v-else area-in-mu :sources="farmlandStatSources" @available="farmlandStatsAvailable=$event" /></aside>
       <TopicFeatureDetails v-if="featureCandidates.length" embedded :features="featureCandidates" :selected="selectedFeature" :roles="featureRoles" @select="selectFeature" @close="clearFeatureSelection" />
     </div>
     <button class="topic-details-toggle" :class="{collapsed:legendCollapsed}" :aria-label="legendCollapsed?'展开图层详情':'收起图层详情'" :aria-expanded="!legendCollapsed" @click="legendCollapsed=!legendCollapsed">{{ legendCollapsed?'›':'‹' }}</button>
     <aside class="topic-legend" :class="{'is-collapsed':legendCollapsed}" :aria-hidden="legendCollapsed" :inert="legendCollapsed">
       <header class="legend-heading"><Collection /><b>图层详情</b></header>
-      <div class="legend-content">
-        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
-        <label class="layer-search"><Search aria-hidden="true" /><input v-model="layerKeyword" type="search" aria-label="搜索图层名称" placeholder="搜索图层名称" /></label>
-        <TopicUploadedLayers v-if="toolsMap&&topic.id===HIGH_STANDARD_TOPIC_ID" ref="uploadPanel" :map="toolsMap" :scope="uploadScope" :keyword="layerKeyword" @change="uploadedLayers=$event" @dialog="uploadDialogOpen=$event" @imported="uploaded" />
+      <label class="layer-search"><Search aria-hidden="true" /><input v-model="layerKeyword" type="search" aria-label="搜索图层名称" placeholder="搜索图层名称" /></label>
+      <div class="legend-content"><div class="legend-layer-list">
+        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :farmland="isFarmland" :defaults="baselineInputs" :keyword="layerKeyword" :layer-order="detailLayerOrder" @layerkeys="rememberAddedLayers" @statistics="analysisStatistics=$event" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
+        <TopicUploadedLayers v-if="toolsMap&&topic.id===HIGH_STANDARD_TOPIC_ID" ref="uploadPanel" :map="toolsMap" :scope="uploadScope" :keyword="layerKeyword" integrated :layer-order="detailLayerOrder" @change="updateUploads" @dialog="uploadDialogOpen=$event" @imported="uploaded" />
         <p v-if="!legendLayers.length && !pending">{{ layerKeyword.trim() ? '没有匹配的已开启图层，可在场景配置中查找并开启。' : '暂无已开启的分类图层，可在场景配置中选择。' }}</p>
-        <section v-for="item in legendLayers" :key="item.key" class="legend-group">
-          <div class="legend-layer-row">
-          <button class="legend-layer-heading" :aria-expanded="Boolean(expandedLegendLayers[item.key])" :title="`${item.sourceName} / ${item.service.name} · ${item.categories.length} 类`" @click="expandedLegendLayers[item.key] = !expandedLegendLayers[item.key]"><i class="disclosure-triangle" :class="{expanded:expandedLegendLayers[item.key]}"></i><span class="legend-layer-name"><b>{{ item.service.name }}</b><small v-if="item.service.name !== item.sourceName">{{ item.sourceName }}</small></span></button>
-          <div class="selection-actions layer-selection-actions" role="group" :aria-label="`${item.service.name}分类选择`">
-            <label><input type="checkbox" :checked="legendAllSelected(item)" :indeterminate="legendPartSelected(item)" @change="selectLegend(item,($event.target as HTMLInputElement).checked ? 'all' : 'none')" />全选</label>
-            <label><input type="checkbox" :checked="false" @change="($event.target as HTMLInputElement).checked=false; selectLegend(item,'invert')" />反选</label>
-          </div>
-          </div>
-          <div v-show="expandedLegendLayers[item.key]" class="legend-layer-content">
-          <fieldset v-if="item.service.arcGisGeometryType || item.role === 'boundary'" class="display-mode" :aria-label="`${item.service.name}图例显示模式`"><legend>图层显示</legend>
-            <label><input :checked="layerUsesMode(item,'filled')" type="radio" :name="`legend-mode-${item.key}`" value="filled" @change="setLayerMode(item,'filled')" />铺满模式</label>
-            <label><input :checked="layerUsesMode(item,'boundary')" type="radio" :name="`legend-mode-${item.key}`" value="boundary" @change="setLayerMode(item,'boundary')" />边界模式</label>
-          </fieldset>
-          <p v-if="!item.categories.length">{{ item.role === 'imagery' ? '影像底图' : '此图层没有分类项目。' }}</p>
+        <TopicLayerCard v-for="item in legendLayers" :key="item.key" v-model:expanded="expandedLegendLayers[item.key]" :title="item.service.name" :subtitle="item.service.name!==item.sourceName?item.sourceName:undefined" :checked="legendAllSelected(item)" :indeterminate="legendPartSelected(item)" class="published-layer" :data-layer-key="`published:${item.key}`" :style="{order:layers.findIndex(layer=>layer.key===item.key)}" @select="selectLegend(item,$event?'all':'none')" @invert="selectLegend(item,'invert')">
+          <TopicLayerDisplayMode v-if="item.service.arcGisGeometryType || item.role==='boundary'" :mode="layerUsesMode(item,'filled')?'filled':layerUsesMode(item,'boundary')?'boundary':'mixed'" :name="`legend-mode-${item.key}`" :label="`${item.service.name}图例显示模式`" :class="{'has-categories':item.categories.length>0}" :color="item.handle?.color" @change="setLayerMode(item,$event)" />
           <div v-for="category in item.categories" :key="category.value" class="category-entry">
           <label class="topic-category">
             <input :checked="category.checked" type="checkbox" @change="setCategoryVisible(item,category,($event.target as HTMLInputElement).checked)" />
@@ -442,9 +451,9 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
             <label><input type="radio" :name="`category-mode-${item.key}-${category.value}`" :checked="(category.mode ?? item.mode) === 'boundary'" @change="setCategoryMode(item,category,'boundary')" />边界</label>
           </fieldset>
           </div>
-          </div>
-        </section>
-      </div>
+          <template v-if="item.handle?.bounds?.isValid()" #actions><button type="button" @click="toolsMap?.fitBounds(item.handle!.bounds!,{padding:[80,80],maxZoom:17})">定位</button></template>
+        </TopicLayerCard>
+      </div></div>
     </aside>
     <TopicMapLegend :groups="mapLegendGroups" />
     <Transition name="topic-drawer"><aside v-if="configOpen" class="topic-config" aria-label="场景配置">
@@ -507,4 +516,6 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
 @media(max-width:1100px){.topic-legend{width:var(--details-width);max-height:none}.topic-inspector-rail{width:280px}}
 @media(prefers-reduced-motion:reduce){.disclosure-triangle{transition:none}}
 .topic-map--drawing :deep(.jiulong-feature-tooltip){display:none}
+.topic-legend>.layer-search{flex:none;margin:12px 12px 0}.legend-content{overflow:auto}.legend-layer-list{display:flex;flex-direction:column;gap:8px;min-height:0}.legend-layer-list>.legend-group{flex:none;margin-top:0}.topic-farmland-stat{max-height:min(68dvh,100%)}.topic-farmland-stat :deep(.analysis-statistics){flex:1;min-height:0}
+.published-layer :deep(.layer-display-mode.has-categories){margin-bottom:8px}
 </style>

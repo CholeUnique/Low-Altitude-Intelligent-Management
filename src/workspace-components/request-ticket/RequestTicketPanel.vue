@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   addRequestTicket,
@@ -223,8 +224,8 @@ onMounted(() => void loadInitial())
         <header><div><h2>新建需求工单</h2><p>填写需求信息并绘制作业范围</p></div><button type="button" @click="showCreate = false">×</button></header>
         <div class="create-modal__body">
           <div class="form-grid">
-            <label><span>工单名称 *</span><input v-model="form.name" maxlength="100" required /></label>
-            <label><span>工单类型 *</span><select v-model="form.type" required><option value="" disabled>请选择工单类型</option><option v-for="item in types" :key="item.id" :value="item.name">{{ item.name }}</option></select></label>
+            <label><span>工单名称 <WorkbenchRequiredMark /></span><input v-model="form.name" maxlength="100" required /></label>
+            <label><span>工单类型 <WorkbenchRequiredMark /></span><select v-model="form.type" required><option value="" disabled>请选择工单类型</option><option v-for="item in types" :key="item.id" :value="item.name">{{ item.name }}</option></select></label>
             <label class="wide"><span>工单描述</span><textarea v-model="form.description" rows="3"></textarea></label>
             <label><span>需求单位</span><input :value="currentRequester" readonly aria-label="当前需求单位" title="按当前登录身份自动确定" /></label>
             <label><span>执行频率</span><input v-model="form.frequency" placeholder="如：每周一次" /></label>

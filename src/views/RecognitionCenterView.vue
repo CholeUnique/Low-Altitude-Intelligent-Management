@@ -193,7 +193,6 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
 }
 
 .topic-primary-row>.topic-primary-button{grid-area:1 / 1}
-.topic-primary-row:hover .topic-primary-button>em{opacity:0}
 
 .topic-scene-menu {
   display: grid;
@@ -342,7 +341,9 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
   line-height: 1;
   color: #668fa1;
   font-size: 22px;
-  font-style: normal
+  font-style: normal;
+  opacity: 1;
+  transition: color .18s ease
 }
 
 .recognition-page aside nav :is(.primary-nav-button,.topic-primary-button).active {

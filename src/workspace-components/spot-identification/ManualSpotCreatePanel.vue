@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElTooltip } from 'element-plus'
 import { addRecognitionSpot, getRecognitionSpotTypes } from '@/api/recognition-spot'
@@ -196,12 +197,12 @@ function toggleMapServiceSelection(serviceId: string | number, checked: boolean)
         <button type="button" :disabled="!coordinates.length" @click="emit('clear-drawing')">清空</button>
         <button class="finish" type="button" :disabled="!boundaryReady" @click="emit('finish-drawing')">完成绘制</button>
       </div>
-      <label class="field field--wide"><span>所属场景 <em>*</em></span><select v-model="selectedSceneCode"><option value="" disabled>请选择所属场景</option><option v-for="scene in scenes" :key="scene.id" :value="scene.code">{{ scene.name }}</option></select></label>
-      <label class="field"><span>异常类型 <em>*</em></span><select v-model="abnormalType" :disabled="!selectedSceneCode || abnormalTypesLoading"><option value="" disabled>{{ abnormalTypesLoading ? '正在读取异常类型…' : '请选择异常类型' }}</option><option v-for="item in abnormalTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select><small v-if="abnormalTypesError" class="field-error">{{ abnormalTypesError }}</small></label>
+      <label class="field field--wide"><span>所属场景 <WorkbenchRequiredMark /></span><select v-model="selectedSceneCode"><option value="" disabled>请选择所属场景</option><option v-for="scene in scenes" :key="scene.id" :value="scene.code">{{ scene.name }}</option></select></label>
+      <label class="field"><span>异常类型 <WorkbenchRequiredMark /></span><select v-model="abnormalType" :disabled="!selectedSceneCode || abnormalTypesLoading"><option value="" disabled>{{ abnormalTypesLoading ? '正在读取异常类型…' : '请选择异常类型' }}</option><option v-for="item in abnormalTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select><small v-if="abnormalTypesError" class="field-error">{{ abnormalTypesError }}</small></label>
       <label class="field"><span>发现时间</span><SpotDateTimePicker v-model="foundTime" placeholder="选择时间" compact /></label>
-      <label class="field field--wide"><span>图斑标题 <em>*</em></span><input v-model="title" maxlength="100" placeholder="请输入图斑标题" /></label>
+      <label class="field field--wide"><span>图斑标题 <WorkbenchRequiredMark /></span><input v-model="title" maxlength="100" placeholder="请输入图斑标题" /></label>
       <fieldset class="reference-services field--wide">
-        <legend>参考影像地图服务 <em>*</em></legend>
+        <legend>参考影像地图服务 <WorkbenchRequiredMark /></legend>
         <div v-if="mapServices.length" class="reference-service-list">
           <label v-for="service in mapServices" :key="service.id"><input type="checkbox" :checked="selectedMapServiceIds.some((id) => String(id) === String(service.id))" @change="toggleMapServiceSelection(service.id, ($event.target as HTMLInputElement).checked)" /><span :title="service.name">{{ service.name }}</span><small v-if="selectedMapServiceIds.some((id) => String(id) === String(service.id))">第 {{ selectedMapServiceIds.findIndex((id) => String(id) === String(service.id)) + 1 }} 期</small></label>
         </div>
