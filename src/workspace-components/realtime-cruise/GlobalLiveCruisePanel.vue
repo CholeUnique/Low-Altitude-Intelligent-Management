@@ -294,7 +294,7 @@ watch(() => user.activeDeptId, () => void loadOverview())
       </section>
 
       <aside class="overview-panel route-panel">
-        <div class="panel-title route-panel-title"><b>选择任务航线</b><span>{{ flightTasks.filter(item => item.availability === 'available').length }} 条可用</span></div>
+        <div class="panel-title route-panel-title"><b>选择历史飞行任务</b><span>{{ flightTasks.filter(item => item.availability === 'available').length }} 条可用</span></div>
         <input v-model="flightTaskKeyword" class="flight-task-search" placeholder="搜索任务名称、航线、设备或 ID" />
         <button v-for="task in filteredFlightTasks" :key="task.id" type="button" class="route-row flight-task-row" :class="{ active: selectedFlightTaskId === task.id, unavailable: task.availability === 'unavailable' }" :disabled="task.availability !== 'available'" :title="task.unavailableReason || ''" @click="selectFlightTask(task.id)">
           <span><b>{{ task.name }}</b><small>{{ task.waylineName || '未关联航线' }} · {{ task.deviceName || '未关联设备' }}</small><small>飞行任务 ID：{{ task.id }}</small><small v-if="task.availability === 'unavailable'" class="unavailable-reason">{{ task.unavailableReason || '该任务无法进入轨迹回放' }}</small></span><em>{{ task.availability === 'unavailable' ? '不可用' : '可用' }}</em>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Cpu, DocumentChecked, Files, Plus, MapLocation } from '@element-plus/icons-vue'
+import { Cpu, DocumentChecked, Files, MapLocation } from '@element-plus/icons-vue'
 import SpotIdentificationPanel from '@/workspace-components/spot-identification/SpotIdentificationPanel.vue'
 import GeneralSpotReviewPanel from '@/workspace-components/spot-identification/GeneralSpotReviewPanel.vue'
 import FlightTaskReviewPanel from '@/workspace-components/spot-identification/FlightTaskReviewPanel.vue'
@@ -9,6 +9,7 @@ import AlgorithmRepositoryView from '@/views/AlgorithmRepositoryView.vue'
 import DataResultsView from '@/views/DataResultsView.vue'
 import GeographicTopicsView from '@/views/GeographicTopicsView.vue'
 import EngineeringFacilitiesOverview from '@/views/EngineeringFacilitiesOverview.vue'
+import EngineeringFacilitiesDashboard from '@/views/EngineeringFacilitiesDashboard.vue'
 import EngineeringFacilityLedger from '@/views/EngineeringFacilityLedger.vue'
 import { isAgricultureTopicDepartment } from '@/utils/topic-access'
 import { getGovernanceTaskPage, toPatrolTask, type GovernanceTask } from '@/api/governance-task'
@@ -25,8 +26,6 @@ const router = useRouter()
 const user = useUserStore()
 const topicStore = useGeographicTopicsStore()
 const topicsExpanded = ref(true)
-const topicDialog = ref<HTMLDialogElement>()
-const topicName = ref(''), topicDescription = ref(''), topicFormError = ref('')
 const selectedTopic = computed(() => topicStore.topics.find(item => item.id === route.query.topic) || topicStore.topics[0]!)
 const canUseTopics = computed(()=>isAgricultureTopicDepartment(user)&&user.hasPermission('special-analysis'))
 const mapTopic=computed(()=>selectedTopic.value.id===FACILITIES_TOPIC_ID?{...selectedTopic.value,name:'工程设施地图'}:selectedTopic.value)
@@ -105,20 +104,8 @@ function selectTopic(id: string, view:'overview'|'map'|'ledger'='overview') {
   topicsExpanded.value=true
   void router.push({name:'recognition',params:{tab:'topics'},query:{topic:id,...(id===FACILITIES_TOPIC_ID?{view}: {})}})
 }
-function openTopicDialog() {
-  if(!canUseTopics.value)return
-  topicName.value = ''; topicDescription.value = ''; topicFormError.value = ''
-  topicDialog.value?.showModal()
-}
-function createTopic() {
-  try {
-    const topic = topicStore.addTopic(topicName.value, topicDescription.value)
-    topicDialog.value?.close(); selectTopic(topic.id)
-  } catch (reason) { topicFormError.value = reason instanceof Error ? reason.message : '专题创建失败' }
-}
 watch(() => route.query.topic, () => { if (mode.value === 'topics') topicsExpanded.value = true })
 watch(() => user.activeDeptId, () => {
-  topicDialog.value?.close()
   if(mode.value==='topics')void router.replace(canUseTopics.value?{name:'recognition',params:{tab:'topics'},query:{topic:HIGH_STANDARD_TOPIC_ID}}:{name:'recognition',params:{tab:'data'}})
 })
 function setRecognitionMode(nextMode: RecognitionAnalysisMode) {
@@ -150,7 +137,6 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
           <template v-for="item in recognitionNavItems" :key="item.key">
             <div v-if="item.key==='topics'" class="topic-menu-row topic-primary-row">
               <button class="topic-primary-button" :class="{active:mode==='topics'}" :aria-expanded="mode==='topics'&&topicsExpanded" @click="setMode('topics')"><i aria-hidden="true"><MapLocation /></i><span><b>专题分析</b></span><em>›</em></button>
-              <button class="topic-add" aria-label="新增专题场景" title="新增专题场景" @click.stop="openTopicDialog"><Plus /></button>
             </div>
             <button v-else class="primary-nav-button" :class="{ active: mode === item.key }" @click="setMode(item.key)"><i aria-hidden="true">
                 <component :is="item.icon" />
@@ -186,29 +172,13 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
         <GeneralSpotReviewPanel v-else-if="mode === 'spots' && activeRecognitionMode === 'task-review'" />
         <FlightTaskReviewPanel v-else-if="mode === 'spots' && activeRecognitionMode === 'flight'" />
         <AlgorithmRepositoryView v-else-if="mode === 'algorithms'" embedded />
-        <EngineeringFacilitiesOverview v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='overview'" @open-map="selectTopic(FACILITIES_TOPIC_ID,'map')" />
+        <EngineeringFacilitiesDashboard v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='overview'" />
+        <EngineeringFacilitiesOverview v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='map'" />
         <EngineeringFacilityLedger v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='ledger'" />
         <GeographicTopicsView v-else-if="mode==='topics'&&canUseTopics" :topic="mapTopic" />
         <DataResultsView v-else embedded :active-tab="activeDataTab" />
       </section>
     </main>
-    <dialog ref="topicDialog" class="topic-create-dialog" aria-labelledby="topic-create-title">
-      <form @submit.prevent="createTopic">
-        <header>
-          <h2 id="topic-create-title">新增专题场景</h2><button type="button" aria-label="关闭新增专题"
-            @click="topicDialog?.close()">×</button>
-        </header>
-        <p>专题与业务任务场景独立。当前保存到本机浏览器，按账号及部门隔离。</p>
-        <label>专题名称<input v-model.trim="topicName" required maxlength="30" placeholder="输入专题名称" autofocus
-            :aria-invalid="Boolean(topicFormError)" /></label>
-        <span v-if="topicFormError" class="topic-form-error" role="alert">{{ topicFormError }}</span>
-        <label>专题说明<textarea v-model="topicDescription" maxlength="200" rows="3"
-            placeholder="选填，可描述这个专题展示的内容"></textarea></label>
-        <p v-if="topicStore.storageError" class="topic-form-error" role="alert">{{ topicStore.storageError }}</p>
-        <footer><button type="button" @click="topicDialog?.close()">取消</button><button type="submit">创建专题</button>
-        </footer>
-      </form>
-    </dialog>
   </div>
 </template>
 <style scoped lang="scss">
@@ -222,49 +192,8 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
   min-width: 0
 }
 
-.topic-add {
-  grid-area: 1 / 1;
-  justify-self: end;
-  z-index: 2;
-  margin-right: 2px;
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  box-sizing: border-box;
-  line-height: 1;
-  border: 0;
-  border-radius: 5px;
-  color: #7cdae9;
-  background: transparent;
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .15s, background .15s
-}
-
-.topic-add svg {
-  display: block;
-  width: 15px;
-  height: 15px
-}
-
-.topic-primary-row:hover .topic-add,
-.topic-add:hover,
-.topic-add:focus-visible {
-  opacity: 1;
-  pointer-events: auto
-}
-
-.topic-add:hover {
-  background: #236880
-}
-
 .topic-primary-row>.topic-primary-button{grid-area:1 / 1}
-.topic-primary-row:hover .topic-primary-button>em,
-.topic-primary-row:has(.topic-add:focus-visible) .topic-primary-button>em{opacity:0}
+.topic-primary-row:hover .topic-primary-button>em{opacity:0}
 
 .topic-scene-menu {
   display: grid;
@@ -302,104 +231,19 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
   border-color: #20637f
 }
 
-.topic-create-dialog {
-  width: 410px;
-  max-width: calc(100vw - 40px);
-  box-sizing: border-box;
-  border: 1px solid #36758b;
-  border-radius: 12px;
-  padding: 24px;
-  background: #0c2c40;
-  color: #e7f6fa;
-  box-shadow: 0 24px 80px #00111daa
-}
 
-.topic-create-dialog::backdrop {
-  background: #00121e88;
-  backdrop-filter: blur(3px)
-}
 
-.topic-create-dialog form {
-  display: grid;
-  gap: 15px
-}
 
-.topic-create-dialog header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between
-}
 
-.topic-create-dialog h2 {
-  margin: 0;
-  font-size: 18px
-}
 
-.topic-create-dialog header button {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 24px;
-  cursor: pointer
-}
 
-.topic-create-dialog p {
-  margin: 0;
-  color: #a4c6d3;
-  font-size: 12px;
-  line-height: 1.7
-}
 
-.topic-create-dialog label {
-  display: grid;
-  gap: 9px;
-  font-size: 13px
-}
 
-.topic-create-dialog input,
-.topic-create-dialog textarea {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid #36758b;
-  border-radius: 5px;
-  background: #123b50;
-  color: #effbff;
-  padding: 10px;
-  font: inherit;
-  resize: vertical
-}
 
-.topic-create-dialog input:focus,
-.topic-create-dialog textarea:focus {
-  outline: 2px solid #3fc8df55;
-  border-color: #57cadb
-}
 
-.topic-create-dialog footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 5px
-}
 
-.topic-create-dialog footer button {
-  padding: 8px 16px;
-  border: 1px solid #36758b;
-  border-radius: 5px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer
-}
 
-.topic-create-dialog footer button[type=submit] {
-  background: #168bad;
-  border-color: #2bb8d0
-}
 
-.topic-create-dialog .topic-form-error {
-  color: #f7a698;
-  font-size: 12px
-}
 
 .recognition-page {
   width: 100%;

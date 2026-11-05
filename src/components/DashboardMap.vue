@@ -174,7 +174,12 @@ function regionEntries(nodes: MapServiceRegionNode[], depth = 0): Array<{ node: 
 function visibleRegionEntries(type: string, nodes: MapServiceRegionNode[], depth = 0): Array<{ node: MapServiceRegionNode; depth: number }> {
   return nodes.flatMap(node => [{ node, depth }, ...(expandedRegions.value.includes(regionKey(type, node.code)) ? visibleRegionEntries(type, node.children || [], depth + 1) : [])])
 }
-const regionSelectionOptions = computed(() => regionTreeGroups.value.map(group => ({ ...group, entries: visibleRegionEntries(group.dataType, group.roots || []) })))
+const regionSelectionOptions = computed(() => regionTreeGroups.value.map(group => {
+  const all = visibleRegionEntries(group.dataType, group.roots || [])
+  // 省级固定为上下文，不作为列表条目：列表根节点直接是市（层级深度上移一层）。
+  const cities = all.filter(entry => entry.depth > 0).map(entry => ({ ...entry, depth: entry.depth - 1 }))
+  return { ...group, entries: cities.length ? cities : all }
+}))
 const selectedRegionLabel = computed(() => {
   if (!selectedRegion.value) return '请选择区划'
   if (selectedRegion.value === 'all') return '全部图层'
@@ -613,7 +618,13 @@ async function loadMapServices() {
   mapServicesLoading.value = true
   mapServicesError.value = ''
   void getMapServiceRegionTree({ deptId: user.activeDeptId, status: 1 }).then(result => {
-    if (requestVersion === mapServiceRequestVersion) regionTreeGroups.value = Array.isArray(result) ? result : []
+    if (requestVersion !== mapServiceRequestVersion) return
+    const groups = Array.isArray(result) ? result : []
+    regionTreeGroups.value = groups
+    // 图层管理默认从市级开始展示：加载后自动展开省级节点，第一屏直接看到各个市。
+    expandedRegions.value = groups.flatMap(group => (group.roots || [])
+      .filter(node => node.children?.length)
+      .map(node => regionKey(group.dataType, node.code)))
   }).catch(() => { if (requestVersion === mapServiceRequestVersion) regionTreeError.value = '行政区划加载失败' })
   try {
     const sourceServices = await listEnabledMapServices(user.activeDeptId)

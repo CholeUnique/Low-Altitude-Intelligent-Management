@@ -8,8 +8,11 @@ import type { RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import {
   getFlightReviewMedia,
   getFlightReviewMediaFile,
+  getFlightReviewPlanRegion,
   getFlightReviewPlans,
   getFlightReviewTasks,
+  getRegionBoundaryStatus,
+  recalculateFlightPlanRegion,
   type FlightReviewMedia,
   type FlightReviewPlan,
   type FlightReviewTask,
@@ -55,6 +58,19 @@ const summaryFailed = ref(false)
 const openingPlanId = ref('')
 const exporting = ref(false)
 const actionError = ref('')
+/** 非阻断性提示（如区划重算未判定），用浮动提示而不是占一行表内警告条。 */
+const actionNotice = ref('')
+/** 浮动提示 3 秒后自动消失；手动关闭或换成新提示会重置计时。 */
+let errorToastTimer: ReturnType<typeof setTimeout> | undefined
+let noticeToastTimer: ReturnType<typeof setTimeout> | undefined
+watch(actionError, (value) => {
+  if (errorToastTimer) { clearTimeout(errorToastTimer); errorToastTimer = undefined }
+  if (value) errorToastTimer = setTimeout(() => { actionError.value = '' }, 3000)
+})
+watch(actionNotice, (value) => {
+  if (noticeToastTimer) { clearTimeout(noticeToastTimer); noticeToastTimer = undefined }
+  if (value) noticeToastTimer = setTimeout(() => { actionNotice.value = '' }, 3000)
+})
 let pendingMedia = new Map<string, Promise<void>>()
 let pendingCounts = new Map<string, Promise<void>>()
 const error = ref('')
@@ -62,6 +78,9 @@ const planKeyword = ref('')
 const routeTypeFilter = ref('')
 const taskTypeFilter = ref('')
 const deviceFilter = ref('')
+/** 区划筛选的“未判定”哨兵值：后端按轨迹未判定区划时 regionCode 为空。 */
+const REGION_UNSET = '__unset__'
+const regionFilter = ref('')
 const startDate = ref('')
 const endDate = ref('')
 const resultTypeFilter = ref('')
@@ -502,6 +521,7 @@ async function loadData() {
   departmentMediaSummary.value = {}
   summaryFailed.value = false
   actionError.value = ''
+  actionNotice.value = ''
   openingPlanId.value = ''
   pendingMedia = new Map()
   pendingCounts = new Map()
@@ -573,6 +593,18 @@ const rows = computed<PlanRow[]>(() => plans.value.map((plan) => {
 const routeTypes = computed(() => [...new Set(rows.value.map((row) => row.routeType).filter(Boolean))])
 const taskTypes = computed(() => [...new Set(rows.value.map((row) => row.taskType).filter(Boolean))])
 const devices = computed(() => [...new Set(rows.value.map((row) => row.device).filter(Boolean))])
+// 区划选项取自已载入计划的实际判定结果，保证筛选项与数据一致（未判定的单独归为“未判定”）。
+const regions = computed(() => {
+  const labels = new Map<string, string>()
+  rows.value.forEach((row) => {
+    if (row.plan.regionCode) labels.set(row.plan.regionCode, row.plan.regionName || row.plan.regionCode)
+  })
+  return [...labels].sort((left, right) => left[1].localeCompare(right[1], 'zh-CN')).map(([code, label]) => ({ code, label }))
+})
+const hasUnassignedRegion = computed(() => rows.value.some((row) => !row.plan.regionCode))
+/** 区划重算接口仅管理员可用（后端同样按 403 拦截）。 */
+const canRecalcRegion = computed(() => user.currentUser?.role === 'ADMIN')
+const recalcPlanId = ref('')
 const baseFilteredRows = computed(() => rows.value.filter((row) => {
   // 只有全部关联任务都确认没有素材时才排除；未知或查询失败不能当成零。
   if (row.fileCount === 0) return false
@@ -581,6 +613,9 @@ const baseFilteredRows = computed(() => rows.value.filter((row) => {
   if (routeTypeFilter.value && row.routeType !== routeTypeFilter.value) return false
   if (taskTypeFilter.value && row.taskType !== taskTypeFilter.value) return false
   if (deviceFilter.value && row.device !== deviceFilter.value) return false
+  if (regionFilter.value === REGION_UNSET) {
+    if (row.plan.regionCode) return false
+  } else if (regionFilter.value && row.plan.regionCode !== regionFilter.value) return false
   const completedDate = row.completedAt.slice(0, 10)
   if (startDate.value && (!completedDate || completedDate < startDate.value)) return false
   if (endDate.value && (!completedDate || completedDate > endDate.value)) return false
@@ -596,22 +631,27 @@ const pageCount = computed(() => Math.max(1, Math.ceil(filteredRows.value.length
 const pageRows = computed(() => filteredRows.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
 watch(pageCount, count => { currentPage.value = Math.min(currentPage.value, count) })
 const detailRow = computed(() => rows.value.find((row) => row.plan.id === detailPlanId.value))
-const detailMedia = computed(() => [...(detailRow.value?.media || [])].sort((left, right) => mediaRank(left) - mediaRank(right)))
+/** 成果弹窗只列可预览的图片/视频；.DSC/.DAT 等后端附带文件不进列表。 */
+const detailMedia = computed(() => [...(detailRow.value?.media || [])]
+  .filter(item => mediaKind(item) !== 'other')
+  .sort((left, right) => mediaRank(left) - mediaRank(right)))
 const previewMedia = computed(() => detailMedia.value.find((item) => mediaKey(item) === previewMediaId.value) || detailMedia.value[0])
 const previewOrdinal = computed(() => previewMedia.value ? detailMedia.value.findIndex((item) => mediaKey(item) === mediaKey(previewMedia.value!)) + 1 : 0)
 watch(() => previewMedia.value ? `${mediaKey(previewMedia.value)}|${previewMedia.value.localFileUrl}|${previewMedia.value.originalUrl}|${previewMedia.value.thumbnailUrl}` : '', () => { resetPreviewImageTransform(); void initializePreview() })
 watch(mediaFullscreen, resetPreviewImageTransform)
-watch([planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, startDate, endDate, resultTypeFilter, pageSize], () => { currentPage.value = 1 })
+watch([planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, regionFilter, startDate, endDate, resultTypeFilter, pageSize], () => { currentPage.value = 1 })
 watch(() => loading.value || resultTypeFilter.value ? '' : pageRows.value.map(row => row.plan.id).join(','), key => {
   if (key) void loadVisibleCounts()
 })
-watch([resultTypeFilter, planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, startDate, endDate], () => { void loadFilteredMedia() })
+watch([resultTypeFilter, planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, regionFilter, startDate, endDate], () => { void loadFilteredMedia() })
 watch(() => user.activeDeptId, () => { void loadData() }, { immediate: true })
 onMounted(() => window.addEventListener('keydown', handleDetailKeydown))
 onBeforeUnmount(() => {
   loadVersion += 1
   previewRequestVersion += 1
   if (aiNoticeTimer) clearTimeout(aiNoticeTimer)
+  if (errorToastTimer) clearTimeout(errorToastTimer)
+  if (noticeToastTimer) clearTimeout(noticeToastTimer)
   clearVideoTimer()
   previewAbortController?.abort()
   releasePreviewFile()
@@ -623,9 +663,35 @@ function resetFilters() {
   routeTypeFilter.value = ''
   taskTypeFilter.value = ''
   deviceFilter.value = ''
+  regionFilter.value = ''
   startDate.value = ''
   endDate.value = ''
   resultTypeFilter.value = ''
+}
+/** 重算为空时给出可执行的原因：边界未导入 → 未开启轨迹 → 轨迹无有效航点。 */
+async function undeterminedRegionReason(row: PlanRow) {
+  try {
+    const boundary = await getRegionBoundaryStatus()
+    if (!boundary.ready) return '区划重算未判定：区县边界尚未导入（边界条数 0），后端此时不做判定。请管理员先导入区县边界 GeoJSON 再重算。'
+  } catch { /* 状态接口不可用时继续按计划信息判断 */ }
+  if (!row.plan.enableTrace) return '区划重算未判定：该计划未开启轨迹记录（enableTrace=0），后端拿不到航点，无法按轨迹判定区划。'
+  return '区划重算未判定：该计划的轨迹没有落在任何区县边界内，请确认航点坐标与边界数据坐标系一致。'
+}
+/** 管理员重算单条计划的所属区划：按轨迹重新判定后回读一次，就地更新行内区划。 */
+async function recalcRegion(row: PlanRow) {
+  if (recalcPlanId.value) return
+  recalcPlanId.value = row.plan.id
+  actionError.value = ''
+  actionNotice.value = ''
+  try {
+    await recalculateFlightPlanRegion(row.plan.id, user.activeDeptId)
+    const region = await getFlightReviewPlanRegion(row.plan.id, user.activeDeptId)
+    row.plan.regionCode = region.regionCode
+    row.plan.regionName = region.regionName
+    if (!region.regionCode) actionNotice.value = await undeterminedRegionReason(row)
+  } catch (reason) {
+    actionError.value = reason instanceof Error ? `区划重算失败：${reason.message}` : '区划重算失败，请稍后重试。'
+  } finally { recalcPlanId.value = '' }
 }
 async function openDetail(row: PlanRow) {
   if (openingPlanId.value) return
@@ -639,8 +705,8 @@ async function openDetail(row: PlanRow) {
       actionError.value = '该计划部分成果读取失败，请点击“查看成果”重试。'
       return
     }
-    if (!rows.value.find(item => item.plan.id === row.plan.id)?.media.length) {
-      actionError.value = '该计划暂无成果文件。'
+    if (!rows.value.find(item => item.plan.id === row.plan.id)?.media.some(media => mediaKind(media) !== 'other')) {
+      actionError.value = '该计划暂无可预览的成果文件。'
       return
     }
     detailPlanId.value = row.plan.id
@@ -662,13 +728,13 @@ async function exportList() {
   if (!baseFilteredRows.value.length || exporting.value) return
   const version = loadVersion
   const exportPlans = [...baseFilteredRows.value]
-  const filterSnapshot = JSON.stringify([planKeyword.value, routeTypeFilter.value, taskTypeFilter.value, deviceFilter.value, startDate.value, endDate.value, resultTypeFilter.value])
+  const filterSnapshot = JSON.stringify([planKeyword.value, routeTypeFilter.value, taskTypeFilter.value, deviceFilter.value, regionFilter.value, startDate.value, endDate.value, resultTypeFilter.value])
   exporting.value = true
   actionError.value = ''
   try {
     await forEachTask(exportPlans.flatMap(row => row.tasks), version, task => loadTaskMedia(task.id, version))
     if (version !== loadVersion) return
-    if (filterSnapshot !== JSON.stringify([planKeyword.value, routeTypeFilter.value, taskTypeFilter.value, deviceFilter.value, startDate.value, endDate.value, resultTypeFilter.value])) {
+    if (filterSnapshot !== JSON.stringify([planKeyword.value, routeTypeFilter.value, taskTypeFilter.value, deviceFilter.value, regionFilter.value, startDate.value, endDate.value, resultTypeFilter.value])) {
       actionError.value = '筛选条件已变化，请重新导出清单。'
       return
     }
@@ -676,9 +742,9 @@ async function exportList() {
       actionError.value = '部分成果读取失败，未导出不完整的清单，请重试。'
       return
     }
-  const headers = ['飞行计划', '计划ID', '关联需求工单', '航线类型', '任务类型', '执行设备SN', '完成时间', '时长(分钟)', '图片', '视频', '其他文件']
+  const headers = ['飞行计划', '计划ID', '所属区划', '关联需求工单', '航线类型', '任务类型', '执行设备SN', '完成时间', '时长(分钟)', '图片', '视频', '其他文件']
   const content = [headers, ...filteredRows.value.map((row) => [
-    row.plan.name, row.plan.id, '--', routeTypeLabel(row.routeType), taskTypeLabel(row.taskType), display(row.device),
+    row.plan.name, row.plan.id, row.plan.regionName || row.plan.regionCode || '未判定', '--', routeTypeLabel(row.routeType), taskTypeLabel(row.taskType), display(row.device),
     dateTime(row.completedAt), row.durationMinutes ?? '--', row.imageCount, row.videoCount, row.otherCount,
   ])].map((line) => line.map(csvCell).join(',')).join('\r\n')
   const url = URL.createObjectURL(new Blob(['\ufeff', content], { type: 'text/csv;charset=utf-8' }))
@@ -697,6 +763,7 @@ async function exportList() {
       <header><div><h2>成果筛选</h2><span>按计划、航线、任务与文件类型检索真实飞行成果</span></div><button class="text-button" type="button" @click="resetFilters">重置条件</button></header>
       <div class="filter-grid">
         <label>飞行计划<input v-model="planKeyword" class="plan-keyword-input" placeholder="计划名称 / 编号" /></label>
+        <label>所属区划<select v-model="regionFilter"><option value="">全部区划</option><option v-for="item in regions" :key="item.code" :value="item.code">{{ item.label }}</option><option v-if="hasUnassignedRegion" :value="REGION_UNSET">未判定</option></select></label>
         <label>需求工单号<input placeholder="待关联接口接入" disabled title="后端暂未提供飞行计划与需求工单的关联关系" /></label>
         <label>航线类型<select v-model="routeTypeFilter"><option value="">全部航线</option><option v-for="item in routeTypes" :key="item" :value="item">{{ routeTypeLabel(item) }}</option></select></label>
         <label>任务类型<select v-model="taskTypeFilter"><option value="">全部类型</option><option v-for="item in taskTypes" :key="item" :value="item">{{ taskTypeLabel(item) }}</option></select></label>
@@ -724,12 +791,11 @@ async function exportList() {
       <div v-else-if="loading" class="state">正在读取飞行计划与任务…</div>
       <div v-else-if="!filteredRows.length" class="state">{{ mediaLoading && resultTypeFilter ? '正在读取符合条件的成果…' : '当前条件下暂无飞行计划' }}</div>
       <template v-else>
-        <div v-if="actionError" class="warning" role="alert">{{ actionError }}</div>
         <div v-if="failedMediaTasks.length" class="warning">{{ failedMediaTasks.length }} 个飞行任务的素材未能读取；相关数量可能不完整，可重新加载。</div>
-        <div class="table-scroll"><table><thead><tr><th>飞行计划 / 结果目录</th><th>关联需求工单</th><th>航线类型</th><th>任务类型</th><th>执行设备</th><th>完成时间</th><th>时长</th><th>成果文件</th><th>操作</th></tr></thead><tbody>
+        <div class="table-scroll"><table><thead><tr><th>飞行计划 / 结果目录</th><th>所属区划</th><th>关联需求工单</th><th>航线类型</th><th>任务类型</th><th>执行设备</th><th>完成时间</th><th>时长</th><th>成果文件</th><th>操作</th></tr></thead><tbody>
           <tr v-for="row in pageRows" :key="row.plan.id">
             <td><div class="plan-cell"><span class="folder-icon" aria-hidden="true"><FolderOpened /></span><div><b :title="row.plan.name">{{ display(row.plan.name) }}</b><small>计划 ID：{{ row.plan.id }}</small><small v-if="row.tasks.length">{{ row.tasks.length }} 个关联飞行任务</small></div></div></td>
-            <td class="muted">--</td><td><span class="soft-tag">{{ routeTypeLabel(row.routeType) }}</span></td><td>{{ taskTypeLabel(row.taskType) }}</td><td>{{ display(row.device) }}<small v-if="row.plan.deviceType" class="cell-sub">{{ row.plan.deviceType }}</small></td><td>{{ dateTime(row.completedAt) }}</td><td>{{ row.durationMinutes === undefined ? '--' : `${row.durationMinutes} min` }}</td>
+            <td :class="{ muted: !row.plan.regionCode }" :title="row.plan.regionCode || '后端未按轨迹判定所属区划'">{{ row.plan.regionName || row.plan.regionCode || '未判定' }}</td><td class="muted">--</td><td><span class="soft-tag">{{ routeTypeLabel(row.routeType) }}</span></td><td>{{ taskTypeLabel(row.taskType) }}</td><td>{{ display(row.device) }}<small v-if="row.plan.deviceType" class="cell-sub">{{ row.plan.deviceType }}</small></td><td>{{ dateTime(row.completedAt) }}</td><td>{{ row.durationMinutes === undefined ? '--' : `${row.durationMinutes} min` }}</td>
             <td><div v-if="row.mediaFailed && !row.media.length" class="media-count failed">素材读取失败</div><div v-else-if="!row.media.length" class="muted">{{ row.fileCount === undefined ? (row.countFailed ? '数量读取失败' : '数量读取中…') : row.fileCount ? `${row.fileCount} 个文件` : '--' }}</div><div v-else class="media-count"><span v-if="row.imageCount">图 {{ row.imageCount }}</span><span v-if="row.videoCount">视 {{ row.videoCount }}</span><span v-if="row.otherCount">其他 {{ row.otherCount }}</span><span v-if="row.mediaPending">统计中…</span><span v-else-if="row.mediaFailed" class="failed">部分读取失败</span></div></td>
             <td><div class="row-actions">
               <button class="view-button" type="button" :disabled="!!openingPlanId || row.fileCount === 0" @click="openDetail(row)">{{ openingPlanId === row.plan.id ? '正在读取…' : '查看成果' }}</button>
@@ -744,6 +810,7 @@ async function exportList() {
                 <template #content><div class="ai-upload-tooltip is-pending" role="status"><strong>AI模型暂未在线接入</strong></div></template>
                 <button class="view-button" type="button" :disabled="row.fileCount === 0" :aria-label="`${display(row.plan.name)}：AI识别`" @click="showAiPendingNotice(String(row.plan.id))">AI识别</button>
               </ElTooltip>
+              <button v-if="canRecalcRegion" class="view-button recalc-button" type="button" :disabled="recalcPlanId === row.plan.id" title="按航线航点轨迹重新判定所属区划（仅管理员）" @click="recalcRegion(row)">{{ recalcPlanId === row.plan.id ? '重算中…' : '重算区划' }}</button>
             </div></td>
           </tr>
         </tbody></table></div>
@@ -753,7 +820,7 @@ async function exportList() {
 
     <div v-if="detailRow" class="detail-backdrop" :class="{ 'is-fullscreen': mediaFullscreen }" @click.self="closeDetail">
       <section class="detail-dialog" :class="{ 'is-fullscreen': mediaFullscreen }" role="dialog" aria-modal="true" aria-label="飞行成果详情">
-        <header><div class="detail-heading"><h2>飞行成果</h2><div class="detail-heading__summary"><strong>{{ display(detailRow.plan.name) }}</strong><small>计划 ID：{{ detailRow.plan.id }} · {{ detailRow.tasks.length }} 个飞行任务 · {{ detailRow.media.length }} 个文件</small></div></div><button type="button" aria-label="关闭" @click="closeDetail">×</button></header>
+        <header><div class="detail-heading"><h2>飞行成果</h2><div class="detail-heading__summary"><strong>{{ display(detailRow.plan.name) }}</strong><small>计划 ID：{{ detailRow.plan.id }} · {{ detailRow.tasks.length }} 个飞行任务 · {{ detailMedia.length }} 个可预览文件</small></div></div><button type="button" aria-label="关闭" @click="closeDetail">×</button></header>
         <div class="detail-body">
           <aside aria-label="成果文件列表">
             <div v-for="item in detailMedia" :key="mediaKey(item)" class="detail-media-item" :class="{ 'is-selected': previewMedia && mediaKey(previewMedia) === mediaKey(item), 'has-srt': mediaKind(item) === 'video' }"><button type="button" class="media-preview-choice" :class="{ selected: previewMedia && mediaKey(previewMedia) === mediaKey(item), unavailable: mediaRank(item) >= 2 }" @click="previewMediaId = mediaKey(item)">
@@ -764,7 +831,7 @@ async function exportList() {
           <main>
             <template v-if="previewMedia">
               <div class="media-stage" :class="{ 'can-expand': previewState === 'ready' && mediaKind(previewMedia) === 'image', 'image-zoomed': previewImageScale > 1, 'image-dragging': previewImageDragging }" @wheel="zoomPreviewImage" @pointerdown="startPreviewImageDrag" @pointermove="movePreviewImageDrag" @pointerup="endPreviewImageDrag" @pointercancel="endPreviewImageDrag" @dblclick="resetPreviewImageTransform">
-                <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailRow.media" :src="previewMedia.originalUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
+                <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailMedia" :src="previewMedia.originalUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
                 <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error' && previewImageUrl" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" :style="previewImageStyle" draggable="false" @load="markPreviewReady" @error="handlePreviewImageError" />
                 <PhotoLocationControl v-if="mediaKind(previewMedia) === 'image' && previewState === 'ready'" :key="`location:${mediaKey(previewMedia)}`" :media="previewMedia" :fullscreen="mediaFullscreen" />
                 <button v-if="previewState === 'ready'" class="fullscreen-toggle" type="button" :aria-label="mediaFullscreen ? '退出全屏' : '进入全屏'" :title="mediaFullscreen ? '退出全屏' : '进入全屏'" @click="toggleMediaFullscreen">
@@ -788,6 +855,8 @@ async function exportList() {
         </div>
       </section>
     </div>
+    <div v-if="actionError" class="action-toast error" role="alert">{{ actionError }}<button type="button" aria-label="关闭提示" @click="actionError = ''">×</button></div>
+    <div v-if="actionNotice" class="action-toast notice" role="status">{{ actionNotice }}<button type="button" aria-label="关闭提示" @click="actionNotice = ''">×</button></div>
     <SpotUploadDialog v-if="uploadVisible" @close="uploadVisible = false" @uploaded="handleSpotUploaded" />
     <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" @close="srtContext = undefined" />
   </div>
@@ -802,7 +871,7 @@ async function exportList() {
 .summary-card:nth-child(4)>.summary-icon { color:#299584; border-color:#d5ede7; background:linear-gradient(145deg,#f6fdfb,#e7f8f2); }
 .folder-icon { border:1px solid #d4ecf2; background:#edf9fc; }
 .folder-icon svg { width:17px; height:17px; }
-.flight-review{height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;padding:14px;background:#edf3f7;color:#24495d;overflow:auto}.panel{background:#fff;border:1px solid #d6e5ec;border-radius:7px;box-shadow:0 2px 10px #173c500a}.filter-panel{padding:14px 16px 16px}.filter-panel>header,.result-panel>header{display:flex;justify-content:space-between;align-items:center;gap:15px}.filter-panel h2,.result-panel h2{display:inline;margin:0;font-size:16px;color:#24495c}.filter-panel header span,.result-panel header span{margin-left:10px;color:#8aa0ab;font-size:11px}.text-button{border:0;background:none;color:#1593b2;font-size:12px;font-weight:700;cursor:pointer}.text-button:hover{text-decoration:underline}.filter-grid{display:grid;grid-template-columns:1.15fr 1.05fr repeat(6,minmax(105px,1fr));gap:10px;margin-top:16px}.filter-grid label{min-width:0;display:grid;gap:6px;color:#758e9c;font-size:11px;font-weight:700}.filter-grid input,.filter-grid select{width:100%;height:37px;box-sizing:border-box;padding:0 10px;color:#315568;background:#f9fcfd;border:1px solid #c9dce6;border-radius:4px;outline:none;font:inherit;font-size:12px}.filter-grid input:focus,.filter-grid select:focus{border-color:#1696b7;box-shadow:0 0 0 3px #159ac01a}.filter-grid input:disabled{color:#a7b9c1;background:#f3f6f7;cursor:not-allowed}.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) minmax(240px,1.32fr);gap:10px}.summary-card{min-height:86px;box-sizing:border-box;display:flex;align-items:center;gap:13px;padding:13px 16px}.summary-card>i{width:38px;height:38px;display:grid;place-items:center;flex:none;color:#198faf;background:#e6f6fa;border-radius:50%;font-size:17px;font-style:normal}.summary-card span,.summary-card small{display:block;color:#8ba1ac;font-size:11px}.summary-card strong{display:block;margin:2px 0;color:#1d6580;font-size:24px;line-height:1}.summary-tip{padding:13px 15px;background:linear-gradient(125deg,#f7fdff,#edf8fb);border-color:#b8dce9}.summary-tip b{color:#207d9c;font-size:13px}.summary-tip p{margin:7px 0 0;color:#648393;font-size:11px;line-height:1.55}.summary-tip code{font-family:inherit;color:#207d9c}.result-panel{flex:1;min-height:300px;display:flex;flex-direction:column;overflow:hidden}.result-panel>header{min-height:54px;box-sizing:border-box;padding:0 16px;border-bottom:1px solid #dce9ee}.result-panel .loading-note{color:#238aa5}.outline-button,.view-button{border:1px solid #9acddd;border-radius:4px;background:#edf9fc;color:#137e9f;font-size:12px;font-weight:700;cursor:pointer}.outline-button{height:32px;padding:0 12px}.view-button{height:31px;padding:0 11px;white-space:nowrap}.outline-button:hover:not(:disabled),.view-button:hover:not(:disabled){background:#d7f2f9;border-color:#4aaec7}.outline-button:disabled,.view-button:disabled{opacity:.55;cursor:not-allowed}.warning{padding:7px 16px;color:#9a6727;background:#fff7e7;border-bottom:1px solid #f4dfbd;font-size:11px}.table-scroll{flex:1;min-height:0;overflow:auto}table{width:100%;min-width:1210px;border-collapse:collapse;table-layout:fixed}th{height:45px;padding:0 12px;color:#728c9c;background:#eef6fa;text-align:left;font-size:11px;font-weight:700}th:nth-child(1){width:22%}th:nth-child(2){width:11%}th:nth-child(3){width:8%}th:nth-child(4){width:10%}th:nth-child(5){width:11%}th:nth-child(6){width:12%}th:nth-child(7){width:7%}th:nth-child(8){width:11%}th:nth-child(9){width:8%}td{height:69px;box-sizing:border-box;padding:9px 12px;border-bottom:1px solid #e5eef2;font-size:12px;color:#48677a}tbody tr:hover{background:#f8fcfd}.plan-cell{display:flex;align-items:center;gap:10px;min-width:0}.folder-icon{width:29px;height:29px;display:grid;place-items:center;flex:none;color:#1696b7;background:#e8f6fa;border-radius:5px}.plan-cell>div{min-width:0}.plan-cell b,.plan-cell small,.cell-sub{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.plan-cell b{color:#315b70;font-size:13px}.plan-cell small,.cell-sub{margin-top:3px;color:#91a6b0;font-size:10px}.muted{color:#9aadb7}.soft-tag{display:inline-block;max-width:100%;overflow:hidden;padding:5px 7px;color:#28849f;background:#e9f6fa;border-radius:3px;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.media-count{display:flex;flex-wrap:wrap;gap:4px}.media-count span{padding:3px 5px;color:#2189a8;background:#e8f7fb;border-radius:3px;font-size:10px}.media-count.failed{color:#b26942}.result-panel>footer{min-height:48px;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:0 15px;color:#8ca3af;border-top:1px solid #e0eaef;font-size:11px}.result-panel>footer>div{display:flex;align-items:center;gap:7px}.result-panel footer button,.result-panel footer select{height:29px;padding:0 8px;border:1px solid #d6e4ea;border-radius:4px;color:#547285;background:#fff;cursor:pointer}.result-panel footer button:disabled{opacity:.4;cursor:not-allowed}.result-panel footer b{min-width:44px;text-align:center}.state{flex:1;min-height:200px;display:grid;align-content:center;justify-items:center;gap:9px;color:#8ba1ac;font-size:13px}.state.error{color:#a24d52}.state button{padding:7px 12px;border:0;border-radius:4px;color:#fff;background:#168ead;cursor:pointer}.detail-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:28px;background:#091c2da8}.detail-dialog{width:min(1100px,100%);height:min(720px,100%);display:flex;flex-direction:column;overflow:hidden;background:#fff;border-radius:9px;box-shadow:0 25px 80px #06172766}.detail-dialog>header{min-height:76px;box-sizing:border-box;display:flex;justify-content:space-between;align-items:center;padding:13px 22px;border-bottom:1px solid #dce8ed}.detail-dialog>header span{color:#1994b3;font-size:11px;font-weight:700}.detail-dialog h2{margin:3px 0;color:#24495c;font-size:18px}.detail-dialog>header small{color:#8fa3ac;font-size:11px}.detail-dialog>header button{width:31px;height:31px;border:0;border-radius:4px;color:#688494;background:#f0f5f7;font-size:22px;cursor:pointer}.detail-body{flex:1;min-height:0;display:grid;grid-template-columns:280px minmax(0,1fr)}.detail-body aside{overflow:auto;background:#f7fafb;border-right:1px solid #dce8ed}.detail-body aside button{width:100%;display:flex;align-items:center;gap:9px;padding:11px 13px;border:0;border-bottom:1px solid #e2ebef;color:#496779;background:transparent;text-align:left;cursor:pointer}.detail-body aside button.selected,.detail-body aside button:hover{background:#e6f5f9}.detail-body aside button>span{width:30px;height:30px;display:grid;place-items:center;flex:none;color:#198eac;background:#d6eef5;border-radius:4px}.detail-body aside button>div{min-width:0}.detail-body aside b,.detail-body aside small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.detail-body aside b{font-size:11px}.detail-body aside small{margin-top:4px;color:#90a5af;font-size:10px}.detail-body main{min-width:0;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#e9f0f4}.detail-body main img,.detail-body main video{max-width:100%;max-height:calc(100% - 55px);object-fit:contain}.preview-empty{color:#8ca4b1;font-size:13px}.detail-body main footer{width:100%;min-height:50px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:auto;padding:0 17px;background:#fff;border-top:1px solid #dce8ed;color:#546f7e;font-size:12px}.detail-body main footer span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.detail-body main footer a{flex:none;color:#168eae;text-decoration:none}@media(max-width:1500px){.filter-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.summary-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.summary-tip{grid-column:1/-1}}@media(max-width:800px){.filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-body{grid-template-columns:190px minmax(0,1fr)}}
+.flight-review{height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;padding:14px;background:#edf3f7;color:#24495d;overflow:auto}.panel{background:#fff;border:1px solid #d6e5ec;border-radius:7px;box-shadow:0 2px 10px #173c500a}.filter-panel{padding:14px 16px 16px}.filter-panel>header,.result-panel>header{display:flex;justify-content:space-between;align-items:center;gap:15px}.filter-panel h2,.result-panel h2{display:inline;margin:0;font-size:16px;color:#24495c}.filter-panel header span,.result-panel header span{margin-left:10px;color:#8aa0ab;font-size:11px}.text-button{border:0;background:none;color:#1593b2;font-size:12px;font-weight:700;cursor:pointer}.text-button:hover{text-decoration:underline}.filter-grid{display:grid;grid-template-columns:1.15fr 1.05fr repeat(7,minmax(105px,1fr));gap:10px;margin-top:16px}.filter-grid label{min-width:0;display:grid;gap:6px;color:#758e9c;font-size:11px;font-weight:700}.filter-grid input,.filter-grid select{width:100%;height:37px;box-sizing:border-box;padding:0 10px;color:#315568;background:#f9fcfd;border:1px solid #c9dce6;border-radius:4px;outline:none;font:inherit;font-size:12px}.filter-grid input:focus,.filter-grid select:focus{border-color:#1696b7;box-shadow:0 0 0 3px #159ac01a}.filter-grid input:disabled{color:#a7b9c1;background:#f3f6f7;cursor:not-allowed}.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) minmax(240px,1.32fr);gap:10px}.summary-card{min-height:86px;box-sizing:border-box;display:flex;align-items:center;gap:13px;padding:13px 16px}.summary-card>i{width:38px;height:38px;display:grid;place-items:center;flex:none;color:#198faf;background:#e6f6fa;border-radius:50%;font-size:17px;font-style:normal}.summary-card span,.summary-card small{display:block;color:#8ba1ac;font-size:11px}.summary-card strong{display:block;margin:2px 0;color:#1d6580;font-size:24px;line-height:1}.summary-tip{padding:13px 15px;background:linear-gradient(125deg,#f7fdff,#edf8fb);border-color:#b8dce9}.summary-tip b{color:#207d9c;font-size:13px}.summary-tip p{margin:7px 0 0;color:#648393;font-size:11px;line-height:1.55}.summary-tip code{font-family:inherit;color:#207d9c}.result-panel{flex:1;min-height:300px;display:flex;flex-direction:column;overflow:hidden}.result-panel>header{min-height:54px;box-sizing:border-box;padding:0 16px;border-bottom:1px solid #dce9ee}.result-panel .loading-note{color:#238aa5}.outline-button,.view-button{border:1px solid #9acddd;border-radius:4px;background:#edf9fc;color:#137e9f;font-size:12px;font-weight:700;cursor:pointer}.outline-button{height:32px;padding:0 12px}.view-button{height:31px;padding:0 11px;white-space:nowrap}.outline-button:hover:not(:disabled),.view-button:hover:not(:disabled){background:#d7f2f9;border-color:#4aaec7}.outline-button:disabled,.view-button:disabled{opacity:.55;cursor:not-allowed}.warning{padding:7px 16px;color:#9a6727;background:#fff7e7;border-bottom:1px solid #f4dfbd;font-size:11px}.table-scroll{flex:1;min-height:0;overflow:auto}table{width:100%;min-width:1210px;border-collapse:collapse;table-layout:fixed}th{height:45px;padding:0 12px;color:#728c9c;background:#eef6fa;text-align:left;font-size:11px;font-weight:700}th:nth-child(1){width:22%}th:nth-child(2){width:11%}th:nth-child(3){width:8%}th:nth-child(4){width:10%}th:nth-child(5){width:11%}th:nth-child(6){width:12%}th:nth-child(7){width:7%}th:nth-child(8){width:11%}th:nth-child(9){width:8%}td{height:69px;box-sizing:border-box;padding:9px 12px;border-bottom:1px solid #e5eef2;font-size:12px;color:#48677a}tbody tr:hover{background:#f8fcfd}.plan-cell{display:flex;align-items:center;gap:10px;min-width:0}.folder-icon{width:29px;height:29px;display:grid;place-items:center;flex:none;color:#1696b7;background:#e8f6fa;border-radius:5px}.plan-cell>div{min-width:0}.plan-cell b,.plan-cell small,.cell-sub{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.plan-cell b{color:#315b70;font-size:13px}.plan-cell small,.cell-sub{margin-top:3px;color:#91a6b0;font-size:10px}.muted{color:#9aadb7}.soft-tag{display:inline-block;max-width:100%;overflow:hidden;padding:5px 7px;color:#28849f;background:#e9f6fa;border-radius:3px;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.media-count{display:flex;flex-wrap:wrap;gap:4px}.media-count span{padding:3px 5px;color:#2189a8;background:#e8f7fb;border-radius:3px;font-size:10px}.media-count.failed{color:#b26942}.result-panel>footer{min-height:48px;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:0 15px;color:#8ca3af;border-top:1px solid #e0eaef;font-size:11px}.result-panel>footer>div{display:flex;align-items:center;gap:7px}.result-panel footer button,.result-panel footer select{height:29px;padding:0 8px;border:1px solid #d6e4ea;border-radius:4px;color:#547285;background:#fff;cursor:pointer}.result-panel footer button:disabled{opacity:.4;cursor:not-allowed}.result-panel footer b{min-width:44px;text-align:center}.state{flex:1;min-height:200px;display:grid;align-content:center;justify-items:center;gap:9px;color:#8ba1ac;font-size:13px}.state.error{color:#a24d52}.state button{padding:7px 12px;border:0;border-radius:4px;color:#fff;background:#168ead;cursor:pointer}.detail-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:28px;background:#091c2da8}.detail-dialog{width:min(1100px,100%);height:min(720px,100%);display:flex;flex-direction:column;overflow:hidden;background:#fff;border-radius:9px;box-shadow:0 25px 80px #06172766}.detail-dialog>header{min-height:76px;box-sizing:border-box;display:flex;justify-content:space-between;align-items:center;padding:13px 22px;border-bottom:1px solid #dce8ed}.detail-dialog>header span{color:#1994b3;font-size:11px;font-weight:700}.detail-dialog h2{margin:3px 0;color:#24495c;font-size:18px}.detail-dialog>header small{color:#8fa3ac;font-size:11px}.detail-dialog>header button{width:31px;height:31px;border:0;border-radius:4px;color:#688494;background:#f0f5f7;font-size:22px;cursor:pointer}.detail-body{flex:1;min-height:0;display:grid;grid-template-columns:280px minmax(0,1fr)}.detail-body aside{overflow:auto;background:#f7fafb;border-right:1px solid #dce8ed}.detail-body aside button{width:100%;display:flex;align-items:center;gap:9px;padding:11px 13px;border:0;border-bottom:1px solid #e2ebef;color:#496779;background:transparent;text-align:left;cursor:pointer}.detail-body aside button.selected,.detail-body aside button:hover{background:#e6f5f9}.detail-body aside button>span{width:30px;height:30px;display:grid;place-items:center;flex:none;color:#198eac;background:#d6eef5;border-radius:4px}.detail-body aside button>div{min-width:0}.detail-body aside b,.detail-body aside small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.detail-body aside b{font-size:11px}.detail-body aside small{margin-top:4px;color:#90a5af;font-size:10px}.detail-body main{min-width:0;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#e9f0f4}.detail-body main img,.detail-body main video{max-width:100%;max-height:calc(100% - 55px);object-fit:contain}.preview-empty{color:#8ca4b1;font-size:13px}.detail-body main footer{width:100%;min-height:50px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:auto;padding:0 17px;background:#fff;border-top:1px solid #dce8ed;color:#546f7e;font-size:12px}.detail-body main footer span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.detail-body main footer a{flex:none;color:#168eae;text-decoration:none}@media(max-width:1500px){.filter-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.summary-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.summary-tip{grid-column:1/-1}}@media(max-width:800px){.filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-body{grid-template-columns:190px minmax(0,1fr)}}
 .flight-review > .filter-panel {
   display: block;
   width: 100%;
@@ -846,12 +915,27 @@ async function exportList() {
 .summary-upload-button:hover,.summary-upload-button:focus-visible { color: #fff; background: #168eae; border-color: #168eae; box-shadow: 0 2px 8px #08779c32; outline: none; }
 .row-actions { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .row-actions .view-button { padding: 0 8px; }
-.flight-review th:nth-child(1) { width: 20%; }
-.flight-review th:nth-child(2) { width: 10%; }
-.flight-review th:nth-child(4) { width: 9%; }
-.flight-review th:nth-child(5) { width: 10%; }
-.flight-review th:nth-child(8) { width: 10%; }
-.flight-review th:nth-child(9) { width: 14%; }
+.row-actions .recalc-button { border-style: dashed; color: #4a7c90; background: #f7fbfd; font-weight: 600; }
+.row-actions .recalc-button:hover:not(:disabled) { border-color: #168eae; color: #12799a; background: #eaf7fb; }
+/* 表格操作列：三个按钮固定同一行，列宽按 px 预留，避免被 flex-wrap 折成三行。 */
+.flight-review td .row-actions { flex-wrap: nowrap; }
+.flight-review table { min-width: 1360px; }
+.flight-review th:nth-child(1) { width: 16%; }
+.flight-review th:nth-child(2) { width: 9%; }
+.flight-review th:nth-child(3) { width: 7%; }
+.flight-review th:nth-child(4) { width: 7%; }
+.flight-review th:nth-child(5) { width: 7%; }
+.flight-review th:nth-child(6) { width: 10%; }
+.flight-review th:nth-child(7) { width: 10%; }
+.flight-review th:nth-child(8) { width: 6%; }
+.flight-review th:nth-child(9) { width: 13%; }
+.flight-review th:nth-child(10) { width: 15%; min-width: 204px; }
+.flight-review td:nth-child(10) { white-space: nowrap; }
+/* 操作反馈用浮动提示，不再占用表格内的一行高度。 */
+.action-toast { position: fixed; top: 82px; left: 50%; z-index: 3200; width: max-content; min-width: 220px; max-width: min(560px, calc(100vw - 32px)); padding: 11px 40px; transform: translateX(-50%); border: 1px solid; border-radius: 4px; box-shadow: 0 10px 30px #00131faa; color: #fff; font-size: 13px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; }
+.action-toast.error { background: #8e3544; border-color: #e26d7b; }
+.action-toast.notice { background: #7c5a1f; border-color: #dcb264; }
+.action-toast button { position: absolute; top: 4px; right: 7px; border: 0; background: transparent; color: #fff; font-size: 20px; line-height: 1; cursor: pointer; }
 .ai-upload-tooltip { padding: 9px 12px; border-radius: 7px; background: linear-gradient(135deg,#fff,#f3fafc); font-family: "Microsoft YaHei",sans-serif; }
 .ai-upload-tooltip strong { display: block; color: #173f57; font-size: 12px; line-height: 1.4; white-space: nowrap; }
 .ai-upload-tooltip.is-pending { background: linear-gradient(135deg,#fff,#fff5f6); }

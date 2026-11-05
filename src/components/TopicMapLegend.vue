@@ -24,7 +24,7 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
 <template>
   <aside v-if="groups.length" class="map-symbol-legend" aria-label="地图图例">
     <header><h2>图例</h2></header>
-    <div class="map-symbol-content" tabindex="0" aria-label="图例符号列表">
+    <div class="map-symbol-content" aria-label="图例符号列表">
       <section v-for="(group, groupIndex) in groups" :key="group.key" class="map-legend-group" :aria-label="group.name">
         <h3 v-if="!repeatsHeading(group)">{{ group.name }}</h3>
         <ul class="map-symbol-grid">
@@ -79,8 +79,8 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
 header { flex: none; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 13px 18px 10px; }
 header::before, header::after { content: ''; height: 1px; flex: 1; background: #e3eeec70; }
 h2 { margin: 0; font-size: 14px; font-weight: 600; line-height: 20px; letter-spacing: 6px; padding-left: 6px; }
-.map-symbol-content { padding: 0 16px; }
-.map-symbol-content:focus-visible { outline: 2px solid #b9e7f4; outline-offset: -3px; }
+/* 图例不做滚动：内容区不限制高度、不裁剪，面板随符号数量完整撑开。 */
+.map-symbol-content { padding: 0 16px 12px; overflow: visible; max-height: none; }
 .map-legend-group + .map-legend-group { border-top: 1px solid #e3eeec45; margin-top: 10px; padding-top: 10px; }
 h3 { margin: 0 0 7px; font-size: 12px; font-weight: 600; line-height: 18px; overflow-wrap: anywhere; }
 .map-symbol-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; list-style: none; padding: 0; margin: 0; }

@@ -17,6 +17,8 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/login' },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
+    /** 移动端扫码上报页：匿名访问，凭 URL 中的 facilityId/ts/sign 签名校验。 */
+    { path: '/facility-report', name: 'facility-report', component: () => import('@/views/FacilityReportView.vue'), meta: { public: true, title: '设施问题上报' } },
     { path: '/forbidden', name: 'forbidden', component: () => import('@/views/ForbiddenView.vue'), meta: { title: '无权限访问' } },
     { path: '/dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { title: '总览首页' } },
     { path: '/dashboard/:sceneId', name: 'dashboard-scene', component: () => import('@/views/DashboardView.vue'), meta: { title: '场景总览' } },

@@ -539,7 +539,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
             <section class="overview-float-panel resource-panel">
               <header>
                 <h2>无人机机组资源</h2>
-                <button v-if="user.hasPermission('live-monitoring')" class="overview-header-link" type="button" aria-label="进入实时作业" @click="openLiveOperations">实时作业 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
+                <button v-if="user.hasPermission('live-monitoring')" class="overview-header-link" type="button" aria-label="进入监控回放" @click="openLiveOperations">监控回放 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <div class="resource-summary">
                 <DashboardRing :value="onlineUavCount ?? '—'" label="在线机组" :rate="fleetAvailabilityRate" :title="fleetAvailabilityRate === undefined ? '暂无机组总数' : `机组可用率 ${fleetAvailabilityRate}%`"><DashboardSymbol name="drone" /></DashboardRing>

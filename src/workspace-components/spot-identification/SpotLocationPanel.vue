@@ -14,7 +14,8 @@ const panelStyle = computed(() => layout.value ? {
   left: `${layout.value.left}px`, top: `${layout.value.top}px`, right: 'auto',
   width: `${layout.value.width}px`, height: `${layout.value.height}px`,
 } : {})
-const mapMode = ref<'image' | 'vector'>('image')
+/** 图斑位置面板默认使用电子底图（天地图 vec+cva），需要时再切到影像。 */
+const mapMode = ref<'image' | 'vector'>('vector')
 const target = ref<{ longitude: number; latitude: number; address: string }>()
 const { spotAddress, spotAddressLoading, spotAddressError } = useSpotAddress(() => props.longitude, () => props.latitude)
 const token = import.meta.env.VITE_TIANDITU_TOKEN || ''
