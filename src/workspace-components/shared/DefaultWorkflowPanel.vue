@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
 import { computed, ref, watch } from 'vue'
 import { useBackendTaskData } from './use-backend-task'
 import { useUserStore } from '@/stores/user'
@@ -119,21 +120,21 @@ async function submit() {
         <form @submit.prevent="submit">
           <fieldset :disabled="!canEdit">
             <template v-if="!acceptance && active">
-              <h4 class="section-heading">* {{ archive ? '结案结果' : '核查结论' }}</h4>
+              <h4 class="section-heading"><WorkbenchRequiredMark />{{ archive ? '结案结果' : '核查结论' }}</h4>
               <div class="ng-radio cols-2 default-choices"><label><input v-model="active.result" name="assessment" type="radio" value="PROBLEM" required />有问题图斑</label><label><input v-model="active.result" name="assessment" type="radio" value="NO_PROBLEM" required />无问题图斑</label></div>
               <p class="default-tip">请逐一填写所有图斑的结论及说明，填写结果会保留在对应图斑下。</p>
-              <label class="ng-field default-field">* {{ archive ? '结案说明' : '核查说明' }}<textarea v-model="active.description" required maxlength="2000" placeholder="填写实际情况及处理结果" /><small class="field-counter">{{ active.description.length }}/2000</small></label>
+              <label class="ng-field default-field"><span><WorkbenchRequiredMark />{{ archive ? '结案说明' : '核查说明' }}</span><textarea v-model="active.description" required maxlength="2000" placeholder="填写实际情况及处理结果" /><small class="field-counter">{{ active.description.length }}/2000</small></label>
             </template>
-            <label v-else-if="acceptance" class="ng-field default-field">* 受理说明<textarea v-model="opinion" required maxlength="2000" placeholder="填写受理意见与核查要求" /><small class="field-counter">{{ opinion.length }}/2000</small></label>
+            <label v-else-if="acceptance" class="ng-field default-field"><span><WorkbenchRequiredMark />受理说明</span><textarea v-model="opinion" required maxlength="2000" placeholder="填写受理意见与核查要求" /><small class="field-counter">{{ opinion.length }}/2000</small></label>
             <section v-if="!acceptance" class="default-materials">
-              <h4 class="section-heading">{{ archive ? '归档材料' : '* 现场核查材料' }}</h4>
+              <h4 class="section-heading"><WorkbenchRequiredMark v-if="!archive" />{{ archive ? '归档材料' : '现场核查材料' }}</h4>
               <div class="material-list"><article v-for="file in evidenceFiles" :key="file.id"><span>▤</span><div><b>{{ file.fileName }}</b><small>{{ text(file.createTime) }}</small></div></article></div>
               <label v-if="canEdit" class="material-upload"><span>＋</span><b>{{ archive ? '补充归档材料' : '上传现场核查材料' }}</b><small>支持 JPG、PNG、PDF、Word，可多选</small><input type="file" multiple accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" aria-label="上传办理材料" @change="upload" /></label>
               <p v-else-if="!evidenceFiles.length" class="default-tip">暂无上传材料</p>
             </section>
             <template v-if="!archive">
               <WorkflowAssigneePicker v-model="recipient" :node-id="selectedNode?.id" :dept-id="selectedNode?.deptId" :readonly="!canEdit" :saved-name="String(saved.targetAssigneeName || '')" :label="acceptance ? '现场核查办理人' : '结案归档办理人'" />
-              <label class="ng-field default-field deadline-field">* 办理期限<input v-model="deadline" type="datetime-local" required aria-label="办理期限" /></label>
+              <label class="ng-field default-field deadline-field"><span><WorkbenchRequiredMark />办理期限</span><input v-model="deadline" type="datetime-local" required aria-label="办理期限" /></label>
             </template>
             <footer class="default-actions"><button :disabled="!canEdit" type="submit">{{ busy ? '正在处理…' : selectedNode?.status === 'COMPLETED' ? '已完成办理' : archive ? '确认结案' : acceptance ? '确认下发' : '提交核查结果' }}</button></footer>
           </fieldset>

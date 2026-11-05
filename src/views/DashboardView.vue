@@ -6,8 +6,7 @@ import DashboardFlipNumber from '@/components/DashboardFlipNumber.vue'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import { Timer, Position } from '@element-plus/icons-vue'
 import DashboardMap from '@/components/DashboardMap.vue'
-import TopicStatisticsSummary from '@/components/TopicStatisticsSummary.vue'
-import { HIGH_STANDARD_TOPIC_ID } from '@/stores/geographic-topics'
+import DashboardTopicOverview from '@/components/DashboardTopicOverview.vue'
 import { isAgricultureTopicDepartment } from '@/utils/topic-access'
 import { useUserStore } from '@/stores/user'
 import { getGovernanceTaskGeometry, getGovernanceTaskPage, type GovernanceTask, type TaskGeometryFeatureCollection } from '@/api/governance-task'
@@ -213,10 +212,6 @@ function openFleetOverview() {
 
 function openLiveOperations() {
   router.push({ name: 'uav-tasks', params: { tab: 'live' } })
-}
-
-function openTopics() {
-  router.push({ name:'recognition',params:{tab:'topics'},query:{topic:HIGH_STANDARD_TOPIC_ID} })
 }
 
 function openDataManagement() {
@@ -591,9 +586,9 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
             <section v-if="isAgricultureTopicDepartment(user)" class="overview-float-panel topic-data-panel">
               <header>
                 <h2>专题分析</h2>
-                <button v-if="user.hasPermission('special-analysis')" class="overview-header-link" type="button" aria-label="进入专题地图" @click="openTopics">专题地图 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
+                <span class="topic-count">2 个专题</span>
               </header>
-              <TopicStatisticsSummary animated />
+              <DashboardTopicOverview />
             </section>
             <section class="overview-float-panel scene-count-panel governance-panel">
               <header>

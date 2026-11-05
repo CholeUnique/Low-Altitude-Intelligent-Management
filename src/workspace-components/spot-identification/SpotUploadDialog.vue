@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
 import { computed, reactive, ref, watch } from 'vue'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
@@ -193,7 +194,7 @@ function close() { if (!busy.value) emit('close') }
       <header><div><h2 id="spot-upload-title">线下AI识别结果上传</h2><small>先解析预览并核对类型映射，确认后才正式保存图斑</small></div><button type="button" aria-label="关闭" :disabled="busy" @click="close">×</button></header>
       <div class="upload-form">
         <div class="wide upload-file-field">
-          <span>图斑文件组 *</span>
+          <span>图斑文件组 <WorkbenchRequiredMark /></span>
           <label class="file-picker" :class="{ selected: files.length }">
             <input type="file" multiple accept=".shp,.dbf,.shx,.prj,.cpg" :disabled="busy" @change="chooseFiles" />
             <i aria-hidden="true">⇧</i><b>选择图斑文件</b><em>{{ files.length ? `已选择 ${files.length} 个文件` : '尚未选择文件' }}</em>
@@ -201,14 +202,14 @@ function close() { if (!busy.value) emit('close') }
           <small v-if="files.length" class="file-names" :title="fileNames">{{ fileNames }}</small>
           <small class="file-help">请同时选择 .shp、.dbf、.shx、.prj、.cpg 文件，<strong>至少包含 .shp 和 .dbf</strong>。</small>
         </div>
-        <label><span>所属场景 *</span><select v-model="form.sceneCode" :disabled="loading || busy"><option value="" disabled>请选择场景</option><option v-for="scene in scenes" :key="scene.id" :value="scene.code">{{ scene.name }}</option></select></label>
+        <label><span>所属场景 <WorkbenchRequiredMark /></span><select v-model="form.sceneCode" :disabled="loading || busy"><option value="" disabled>请选择场景</option><option v-for="scene in scenes" :key="scene.id" :value="scene.code">{{ scene.name }}</option></select></label>
         <label><span>图斑标题</span><input v-model="form.title" class="clear-hint-on-focus" placeholder="不填则使用默认标题" /></label>
         <label><span>发现时间</span><SpotDateTimePicker v-model="form.foundTime" /></label>
-        <fieldset class="wide"><legend>参考影像地图服务 *</legend><label v-for="service in imageryMapServices" :key="service.id"><input v-model="form.mapServiceIds" type="checkbox" :value="service.id" />{{ service.name }}</label><small v-if="!imageryMapServices.length">{{ loading ? '正在读取影像服务…' : '暂无已启用的影像地图服务' }}</small></fieldset>
+        <fieldset class="wide"><legend>参考影像地图服务 <WorkbenchRequiredMark /></legend><label v-for="service in imageryMapServices" :key="service.id"><input v-model="form.mapServiceIds" type="checkbox" :value="service.id" />{{ service.name }}</label><small v-if="!imageryMapServices.length">{{ loading ? '正在读取影像服务…' : '暂无已启用的影像地图服务' }}</small></fieldset>
         <label class="wide"><span>图斑描述</span><textarea v-model="form.description" class="clear-hint-on-focus" placeholder="请输入图斑情况或判定依据"></textarea></label>
         <section v-if="previewResult" class="preview-panel wide" aria-label="图斑解析预览">
           <div class="preview-heading"><div><b>解析预览</b><small>共 {{ previewResult.featureCount }} 条要素，以下最多展示前 50 条；批次有效期为 30 分钟。</small></div><span>尚未入库</span></div>
-          <label class="type-field"><span>违法类型来源字段 *</span><select v-model="typeField"><option value="" disabled>请选择包含类型信息的属性字段</option><option v-for="field in previewResult.fields" :key="field.name" :value="field.name">{{ field.name }}{{ field.type ? ` · ${field.type}` : '' }}（{{ field.distinctValues?.length || 0 }} 种取值）</option></select></label>
+          <label class="type-field"><span>违法类型来源字段 <WorkbenchRequiredMark /></span><select v-model="typeField"><option value="" disabled>请选择包含类型信息的属性字段</option><option v-for="field in previewResult.fields" :key="field.name" :value="field.name">{{ field.name }}{{ field.type ? ` · ${field.type}` : '' }}（{{ field.distinctValues?.length || 0 }} 种取值）</option></select></label>
           <div v-if="selectedField" class="mapping-panel"><strong>逐项确认类型映射</strong><small>该字段的每个不同取值都必须映射，未完成时不能入库。类型来自当前场景的可用异常类型配置。</small>
             <p v-if="abnormalTypesLoading" class="mapping-empty">正在读取当前场景的异常类型…</p>
             <p v-else-if="abnormalTypesError" class="mapping-empty">{{ abnormalTypesError }}</p>
