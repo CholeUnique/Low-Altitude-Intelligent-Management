@@ -713,7 +713,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="panel analysis">
-        <div class="panel-title"><span>多期影像 / 变化分析 <small class="analysis-title-hint">（点选下方影像可切换当前显示的起始期次）</small></span></div>
+        <div class="panel-title"><span>多期影像 / 变化分析 <small class="analysis-title-hint">（点选下方影像可切换当前显示的起始期次）</small></span><div class="analysis-actions"><button class="review-button" type="button" :disabled="!active || active.handleStatus !== -1 || reviewBusy" @click="openReview">审核通过</button><button class="detail-action detail-action--revoke" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('revoke')">撤销图斑</button><button class="detail-action detail-action--ignore" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('ignore')">忽略图斑</button></div></div>
         <div class="periods">
           <button v-for="n in [1, 2, 3, 4]" :key="n" :class="{ active: periods === n }" :disabled="n > displayableImagery.length" :title="n > displayableImagery.length ? `当前图斑仅有 ${displayableImagery.length} 期影像` : `显示 ${n} 期影像`" @click="selectPeriods(n)">{{ n }} 期影像</button>
           <span>当前对比：{{ active?.title || '未选择图斑' }}</span>
@@ -752,11 +752,7 @@ onBeforeUnmount(() => {
         @created="handleSpotCreated"
       />
       <section class="panel detail">
-        <div class="panel-title"><span>异常图斑详细信息<small v-if="detailLoading">正在读取…</small></span><button class="review-button" type="button" :disabled="!active || active.handleStatus !== -1 || reviewBusy" @click="openReview">审核通过</button></div>
-        <div class="detail-actions">
-          <button class="detail-action detail-action--ignore" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('ignore')">忽略图斑</button>
-          <button class="detail-action detail-action--revoke" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('revoke')">撤销图斑</button>
-        </div>
+        <div class="panel-title"><span>异常图斑详细信息<small v-if="detailLoading">正在读取…</small></span></div>
         <p v-if="reviewError && !pendingReview" class="review-feedback review-feedback--error" role="alert">{{ reviewError }}</p>
         <p v-if="detailError" class="review-feedback review-feedback--error" role="alert">{{ detailError }}</p>
         <template v-if="active">
@@ -923,21 +919,16 @@ onBeforeUnmount(() => {
 .detail {
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: #8aa9b7 #edf4f7;
 }
-.detail::-webkit-scrollbar { width: 8px; }
-.detail::-webkit-scrollbar-track { background: #edf4f7; }
-.detail::-webkit-scrollbar-thumb { background: #8aa9b7; border: 2px solid #edf4f7; border-radius: 8px; }
-.detail::-webkit-scrollbar-thumb:hover { background: #668b9c; }
 /* 新增表单可内部滚动，两个右侧面板均分可用高度。 */
 .right-column { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
 .review-button { flex: none; padding: 6px 10px; color: #08799d; background: #e8f6fa; border: 1px solid #9ed4e3; border-radius: 5px; font-size: 12px; font-weight: 700; line-height: 1.2; cursor: pointer; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .review-button:hover:not(:disabled) { color: #fff; background: #168eb3; border-color: #168eb3; box-shadow: 0 2px 8px #08779c32; }
 .review-button:focus-visible { outline: 2px solid #08799d; outline-offset: 2px; }
 .review-button:disabled { color: #91a7b2; background: #edf3f5; border-color: #d6e2e8; cursor: not-allowed; }
-.detail-actions { flex: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 9px 12px; border-bottom: 1px solid #e1ebf1; background: #f8fbfc; }
+.analysis-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
+.analysis .panel-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-actions .detail-action { min-height: 28px; padding: 4px 10px; }
 .detail-action { min-height: 30px; padding: 5px 7px; border: 1px solid; border-radius: 5px; background: #fff; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .detail-action--ignore { color: #567481; border-color: #afc7d2; }
 .detail-action--ignore:hover:not(:disabled) { color: #fff; background: #607e8b; border-color: #607e8b; box-shadow: 0 2px 8px #607e8b32; }

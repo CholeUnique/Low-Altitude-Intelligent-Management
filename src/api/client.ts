@@ -9,10 +9,54 @@ export function isMockMode() {
   return localStorage.getItem('auth_mode') === 'mock'
 }
 
-const BIG_INTEGER_PATTERN = /(:\s*)(-?\d{16,})(\s*[,}])/g
+/** 16 位以上的整数（int64 ID）在 JS 中会丢失精度，需要在 JSON.parse 前转成字符串。 */
+const LONG_INTEGER_HINT = /\d{16,}/
+
+/**
+ * 只在 JSON 字符串之外给长整数加引号。
+ * 之前的正则实现会命中字符串内部的 `"detailJson": "{\"userId\": 1234567890123456789}"`，
+ * 把内层数字包成引号，破坏转义后导致整个响应 JSON.parse 失败（操作日志页即为此）。
+ */
+function quoteLongIntegers(text: string) {
+  let out = ''
+  let index = 0
+  let inString = false
+  while (index < text.length) {
+    const char = text[index]!
+    if (inString) {
+      if (char === '\\') { out += char + (text[index + 1] ?? ''); index += 2; continue }
+      out += char
+      if (char === '"') inString = false
+      index += 1
+      continue
+    }
+    if (char === '"') { inString = true; out += char; index += 1; continue }
+    if (char !== '-' && (char < '0' || char > '9')) { out += char; index += 1; continue }
+    let end = char === '-' ? index + 1 : index
+    const digitsStart = end
+    while (end < text.length) {
+      const code = text.charCodeAt(end)
+      if (code < 48 || code > 57) break
+      end += 1
+    }
+    if (end === digitsStart) { out += char; index += 1; continue }
+    const raw = text.slice(index, end)
+    const next = text[end] ?? ''
+    const isStandalone = next === '' || next === ',' || next === '}' || next === ']' || /\s/.test(next)
+    if (raw.replace('-', '').length >= 16 && isStandalone) {
+      out += `"${raw}"`
+    } else {
+      out += raw
+    }
+    index = end
+  }
+  return out
+}
 
 export function parseJsonWithSafeIntegers(text: string) {
-  return JSON.parse(text.replace(BIG_INTEGER_PATTERN, '$1"$2"$3')) as unknown
+  // 无长整数时直接解析，避免对大响应逐字符扫描。
+  if (!LONG_INTEGER_HINT.test(text)) return JSON.parse(text) as unknown
+  return JSON.parse(quoteLongIntegers(text)) as unknown
 }
 
 export class ApiBusinessError extends Error {

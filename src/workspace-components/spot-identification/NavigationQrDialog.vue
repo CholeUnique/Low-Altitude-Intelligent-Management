@@ -5,7 +5,6 @@ import QRCode from 'qrcode'
 const props = defineProps<{ target: { longitude: number; latitude: number; address: string } }>()
 const emit = defineEmits<{ close: [] }>()
 const amapQr = ref('')
-const baiduQr = ref('')
 const error = ref('')
 const teleportTarget = document.fullscreenElement || document.body
 
@@ -30,15 +29,8 @@ onMounted(async () => {
   amap.searchParams.set('to', `${lng},${lat},${address.replace(/,/g, '，')}`)
   amap.searchParams.set('mode', 'car')
   amap.searchParams.set('callnative', '1')
-  const baidu = new URL('https://api.map.baidu.com/direction')
-  baidu.searchParams.set('origin', '我的位置')
-  baidu.searchParams.set('destination', `latlng:${latitude},${longitude}|name:${address.replace(/[|]/g, ' ')}`)
-  baidu.searchParams.set('coord_type', 'wgs84')
-  baidu.searchParams.set('mode', 'driving')
-  baidu.searchParams.set('output', 'html')
-  baidu.searchParams.set('src', 'webapp.geo.lowaltitude')
-  try { [amapQr.value, baiduQr.value] = await Promise.all([QRCode.toDataURL(amap.href, { width: 220, margin: 2 }), QRCode.toDataURL(baidu.href, { width: 220, margin: 2 })]) }
-  catch { error.value = '二维码生成失败，请重试' }
+  try { amapQr.value = await QRCode.toDataURL(amap.href, { width: 260, margin: 2 }) }
+  catch { error.value = '二维码生成失败，请重新打开弹窗' }
 })
 </script>
 
@@ -49,11 +41,11 @@ onMounted(async () => {
         <header><strong>扫码导航</strong><button type="button" aria-label="关闭" @click="emit('close')">×</button></header>
         <p>目的地：{{ target.address }}</p>
         <p v-if="error" role="alert">{{ error }}</p>
-        <div v-else class="navigation-qr-grid">
-          <div><img v-if="amapQr" :src="amapQr" alt="高德地图导航二维码" /><span>高德地图</span></div>
-          <div><img v-if="baiduQr" :src="baiduQr" alt="百度地图导航二维码" /><span>百度地图</span></div>
+        <div class="navigation-qr-grid">
+          <div v-if="amapQr"><img :src="amapQr" alt="高德地图导航二维码" /><span>高德地图</span></div>
+          <div v-else class="qr-placeholder" role="status">无法生成二维码</div>
         </div>
-        <small>打开手机微信或地图软件扫描相应二维码获取路线。</small>
+        <p class="origin-note">使用手机微信或高德地图 App 扫码获取导航路线。</p>
       </section>
     </div>
   </Teleport>
@@ -62,5 +54,7 @@ onMounted(async () => {
 <style scoped>
 .navigation-qr-mask{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;background:#00101bc9}
 .navigation-qr-dialog{width:min(480px,calc(100vw - 32px));box-sizing:border-box;padding:20px;color:#dff4fc;background:#102d40;border:1px solid #4a8ca5;border-radius:10px;box-shadow:0 12px 40px #0008;font-size:14px}
-header{display:flex;align-items:center;justify-content:space-between;font-size:17px}header button{border:0;background:transparent;color:#dff4fc;font-size:25px;cursor:pointer}p{overflow-wrap:anywhere;line-height:1.5;color:#b8d8e5}.navigation-qr-grid{display:flex;justify-content:center;gap:24px;margin:18px 0}.navigation-qr-grid div{display:grid;gap:8px;text-align:center}.navigation-qr-grid img{width:min(180px,35vw);height:min(180px,35vw);background:#fff;border-radius:5px}small{color:#9abac8} 
+header{display:flex;align-items:center;justify-content:space-between;font-size:17px}header button{border:0;background:transparent;color:#dff4fc;font-size:25px;cursor:pointer}p{overflow-wrap:anywhere;line-height:1.5;color:#b8d8e5}.navigation-qr-grid{display:flex;justify-content:center;gap:24px;margin:18px 0}.navigation-qr-grid div{display:grid;gap:8px;text-align:center}.navigation-qr-grid img{width:min(220px,60vw);height:min(220px,60vw);background:#fff;border-radius:5px}
+.navigation-qr-grid .qr-placeholder{width:min(220px,60vw);height:min(220px,60vw);place-items:center;box-sizing:border-box;padding:12px;background:#183b4d;border:1px solid #37677d;border-radius:5px;color:#b8d8e5}
+.origin-note{font-size:12px}
 </style>

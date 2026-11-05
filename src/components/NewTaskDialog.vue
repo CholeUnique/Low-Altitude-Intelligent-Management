@@ -230,7 +230,8 @@ watch(visible, (open) => {
 })
 
 function validateRealForm() {
-  if (!isEditing.value && user.currentUser?.role !== 'ADMIN') return '只有管理员可以创建任务。'
+  // 创建任务跟随菜单权限：拥有任务相关或智能研判菜单授权即可，不再要求系统管理员角色。
+  if (!isEditing.value && !user.hasAnyPermission(['task-overview', 'task-list', 'task-todo', 'smart-recognition'])) return '当前账号没有任务相关菜单权限，无法创建任务。'
   if (!form.name.trim() || !selectedScene.value) return '请填写任务名称并选择所属场景。'
   if (!form.deptId) return '请选择主责部门。管理员在全局视角下创建任务时必须明确指定部门。'
   if (schedule.value.length !== 2) return '请选择计划开始和结束时间。'

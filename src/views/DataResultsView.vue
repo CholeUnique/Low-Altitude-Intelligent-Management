@@ -528,10 +528,7 @@ onBeforeUnmount(() => {
 .task-group__header em { min-width:55px; text-align:center; font-weight:600; }
 .task-group__header span:not(.task-title) { color:#6f7f94; font-size:12px; }
 .task-group__body { padding:14px 16px 17px; background:linear-gradient(180deg,#f7faff,#fff 55px); }
-.media-grid { max-height:362px; grid-auto-rows:174px; align-content:start; gap:14px; overflow-y:auto; padding-right:6px; scrollbar-color:#b4c5d8 transparent; scrollbar-width:thin; }
-.media-grid::-webkit-scrollbar { width:7px; }
-.media-grid::-webkit-scrollbar-thumb { border-radius:5px; background:#b4c5d8; }
-.media-grid::-webkit-scrollbar-track { background:transparent; }
+.media-grid { max-height:362px; grid-auto-rows:174px; align-content:start; gap:14px; overflow-y:auto; padding-right:6px; }
 .media-card { height:174px; display:grid; grid-template-rows:122px 52px; border-radius:8px; box-shadow:0 4px 13px #263e5b16; }
 .collection-media-grid { min-height:0; max-height:none; flex:1; grid-auto-rows:214px; align-content:start; gap:14px; overflow-y:auto; padding:3px 5px 10px 3px; }
 .collection-media-grid .media-card { height:214px; grid-template-rows:140px 74px; }

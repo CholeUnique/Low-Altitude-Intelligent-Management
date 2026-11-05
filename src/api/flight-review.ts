@@ -23,6 +23,11 @@ export interface FlightReviewPlan {
   waylineType: string
   sn: string
   deviceType: string
+  /** 后端按航线轨迹自动判定的行政区划（6 位 adcode），未判定时为空。 */
+  regionCode: string
+  regionName: string
+  /** 1=开启轨迹记录；为 0 时后端拿不到航点，区划无法判定。 */
+  enableTrace: number
 }
 
 export interface FlightReviewTask {
@@ -89,7 +94,31 @@ export async function getFlightReviewPlans(deptId: string | undefined, pageNum: 
     waylineType: value(item, 'waylineType'),
     sn: value(item, 'sn'),
     deviceType: value(item, 'deviceType'),
+    regionCode: value(item, 'regionCode'),
+    regionName: value(item, 'regionName'),
+    enableTrace: Number(item.enableTrace ?? 0) || 0,
   }))
+}
+
+/** 按航线航点轨迹强制重算计划所属区划（管理员）；返回重算后的 6 位 adcode，未判定为 null。 */
+export function recalculateFlightPlanRegion(id: string, deptId?: string) {
+  return apiClient.post<never, string | null>('/v1/uav/flight-plan/region/recalculate', { id, deptId })
+}
+
+/** 区县边界就绪状态（管理员）。未导入边界时后端不做区划判定，重算结果必然为空。 */
+export async function getRegionBoundaryStatus() {
+  const data = await apiClient.post<never, Record<string, unknown>>('/v1/uav/region-boundary/status', {})
+  const raw = data || {}
+  const count = Number(raw.count ?? raw.boundaryCount ?? 0) || 0
+  const readyValue = raw.ready ?? raw.isReady
+  const ready = readyValue === true || readyValue === 1 || String(readyValue).toLowerCase() === 'true'
+  return { ready: ready || count > 0, count }
+}
+
+/** 重算后回读计划，取回区划名称用于即时刷新表格，避免整页重载。 */
+export async function getFlightReviewPlanRegion(id: string, deptId?: string) {
+  const data = await apiClient.post<never, RawRecord>('/v1/uav/flight-plan/detail', { id, deptId })
+  return { regionCode: value(data, 'regionCode'), regionName: value(data, 'regionName') }
 }
 
 export async function getFlightReviewTasks(deptId: string | undefined, pageNum: number) {

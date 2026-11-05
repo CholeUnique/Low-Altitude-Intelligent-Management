@@ -201,6 +201,16 @@ function canOperateSpot(item: ReviewSpot | undefined, kind: SpotAction) {
   if (!item?.fromRecognitionApi || item.derivedTaskId) return false
   return (kind === 'ignore' || kind === 'revoke') && item.handleStatus === 0
 }
+/** 按钮移入标题栏后，把原来的状态说明放到悬停提示里，避免丢失处置口径。 */
+function spotActionTitle(kind: SpotAction) {
+  const spot = active.value
+  if (!spot) return '请先选择左侧图斑'
+  if (spot.derivedTaskId) return '已关联核查任务，请在任务流程中处理'
+  if (spot.handleStatus === 4) return '已忽略 · 记录保留，不再派单'
+  if (!spot.fromRecognitionApi) return '该图斑未纳入识别图斑审核流程'
+  if (spot.handleStatus !== 0) return '当前状态无需审核或处置'
+  return kind === 'ignore' ? '忽略后不再派单，图斑记录保留' : '撤销后该图斑将从列表中移除，不可恢复'
+}
 function openSpotAction(kind: SpotAction) {
   const spot = active.value
   if (!spot || !canOperateSpot(spot, kind)) return
@@ -439,8 +449,9 @@ async function loadSpots(preferredSpotNo?: string) {
 }
 
 function openTaskCreateDialog() {
-  if (user.currentUser?.role !== 'ADMIN') {
-    operationError.value = '只有管理员可以创建任务。'
+  // 创建任务跟随菜单权限：能进智能研判并有该菜单授权即可，不再按角色限制。
+  if (!user.hasPermission('smart-recognition')) {
+    operationError.value = '当前账号没有智能研判菜单权限，无法创建任务。'
     return
   }
   if (!selected.value.length) return
@@ -486,8 +497,9 @@ async function matchCreatedTasksToSpots(tasks: GovernanceTask[], spotIds: string
 }
 
 async function createSelectedTasks() {
-  if (user.currentUser?.role !== 'ADMIN') {
-    taskCreateError.value = '只有管理员可以创建任务。'
+  // 与入口保持同一判据：按菜单权限，而不是角色。
+  if (!user.hasPermission('smart-recognition')) {
+    taskCreateError.value = '当前账号没有智能研判菜单权限，无法创建任务。'
     return
   }
   if (!selected.value.length || creatingTasks.value) return
@@ -630,7 +642,7 @@ onBeforeUnmount(() => {
         </main>
 
         <section class="analysis panel">
-          <header><b>多期影像 / 变化分析 <small class="analysis-title-hint">（点选下方影像可切换当前显示的起始期次）</small></b></header>
+          <header><b>多期影像 / 变化分析 <small class="analysis-title-hint">（点选下方影像可切换当前显示的起始期次）</small></b><div class="analysis-actions"><button class="spot-action-button spot-action-button--ignore" type="button" :disabled="!canOperateSpot(active, 'ignore') || spotActionBusy" :title="spotActionTitle('ignore')" @click="openSpotAction('ignore')">忽略图斑</button><button class="spot-action-button spot-action-button--revoke" type="button" :disabled="!canOperateSpot(active, 'revoke') || spotActionBusy" :title="spotActionTitle('revoke')" @click="openSpotAction('revoke')">撤销图斑</button></div></header>
           <div class="period-bar">
             <div><button v-for="count in [1, 2, 3, 4]" :key="count" :class="{ active: periods === count }" :disabled="count > displayableImagery.length" :title="count > displayableImagery.length ? `当前图斑仅有 ${displayableImagery.length} 期影像` : `显示 ${count} 期影像`" @click="selectPeriods(count)">{{ count }} 期影像</button></div>
             <span>当前对比：{{ active?.title || '未选择图斑' }}</span>
@@ -646,20 +658,6 @@ onBeforeUnmount(() => {
       </div>
 
       <aside class="right-column">
-        <section class="spot-action-card panel" aria-label="图斑审核与处置">
-          <header><b>图斑操作</b><span v-if="active">{{ statusLabel(active.handleStatus) }}</span></header>
-          <div class="spot-action-card__body">
-            <div v-if="active && canOperateSpot(active, 'ignore')" class="spot-action-card__buttons">
-              <button class="spot-action-button spot-action-button--ignore" type="button" @click="openSpotAction('ignore')">忽略图斑</button>
-              <button class="spot-action-button spot-action-button--revoke" type="button" @click="openSpotAction('revoke')">撤销图斑</button>
-            </div>
-            <p v-else-if="active?.derivedTaskId" class="spot-action-card__hint">已关联核查任务，请在任务流程中处理</p>
-            <p v-else-if="active?.handleStatus === 4" class="spot-action-card__hint">已忽略 · 记录保留，不再派单</p>
-            <p v-else-if="active && !active.fromRecognitionApi" class="spot-action-card__hint">该图斑未纳入识别图斑审核流程</p>
-            <p v-else-if="active" class="spot-action-card__hint">当前状态无需审核或处置</p>
-            <p v-else class="spot-action-card__hint">请选择左侧图斑</p>
-          </div>
-        </section>
         <section class="spot-detail panel">
           <header><b>异常图斑详细信息</b><span v-if="detailLoading">正在读取…</span></header>
           <p v-if="detailError" class="detail-load-error" role="alert">{{ detailError }}</p>
@@ -1056,6 +1054,14 @@ onBeforeUnmount(() => {
   font-weight: 500;
   white-space: nowrap;
 }
+/* 图斑处置按钮移到标题栏右侧并排展示。 */
+.analysis-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 12px;
+}
 
 .period-bar > span {
   overflow: hidden;
@@ -1235,33 +1241,6 @@ onBeforeUnmount(() => {
 .task-create-dialog footer button { height: 40px; font-size: 14px; }
 .task-create-dialog .dialog-error { font-size: 13px; line-height: 1.5; }
 
-.spot-action-card {
-  flex: 0 0 auto;
-  min-width: 0;
-  border-color: #c8e1e9;
-  background: linear-gradient(130deg, #f6fcfe 0%, #fff 72%);
-}
-.spot-action-card > header {
-  height: 37px;
-  padding-inline: 11px;
-  border-bottom-color: #e2edf1;
-}
-.spot-action-card > header b { color: #31566a; font-size: 13px; }
-.spot-action-card > header span {
-  padding: 3px 7px;
-  border-radius: 999px;
-  color: #8c651b;
-  background: #fff2d3;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.spot-action-card__body { padding: 9px 10px; }
-.spot-action-card__buttons {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
-  gap: 6px;
-}
-.spot-action-card__hint { margin: 2px 0; color: #758c99; font-size: 11px; line-height: 1.45; }
 .spot-action-button {
   min-width: 0;
   height: 33px;
@@ -1351,9 +1330,6 @@ onBeforeUnmount(() => {
 }
 .spot-detail dd.address-loading { color: #5f8495; font-weight: 500; }
 .spot-detail dd.address-error { color: #b14c58; font-weight: 500; }
-.spot-action-card > header b { font-size: 15px; }
-.spot-action-card__hint,
-.spot-action-button { font-size: 13px; }
 .stat-grid span,
 .stat-grid small { font-size: 13px; }
 .stat-grid .heading-actions button { font-size: 14px; }
