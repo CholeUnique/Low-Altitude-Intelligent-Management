@@ -28,6 +28,8 @@ declare module 'vue' {
     FacilityLedgerMap: typeof import('./src/components/FacilityLedgerMap.vue')['default']
     FacilityQrcodeDialog: typeof import('./src/components/FacilityQrcodeDialog.vue')['default']
     FacilityReportDialog: typeof import('./src/components/FacilityReportDialog.vue')['default']
+    FacilityReportImageGallery: typeof import('./src/components/FacilityReportImageGallery.vue')['default']
+    FacilityReportPhotos: typeof import('./src/components/FacilityReportPhotos.vue')['default']
     ManagementNavIcon: typeof import('./src/components/ManagementNavIcon.vue')['default']
     MapServiceManagementPanel: typeof import('./src/components/MapServiceManagementPanel.vue')['default']
     MetadataManagementPanel: typeof import('./src/components/MetadataManagementPanel.vue')['default']

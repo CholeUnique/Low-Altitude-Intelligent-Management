@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { reportFacilityIssue, type FacilityReportResult } from '@/api/facility'
+import FacilityReportPhotos from '@/components/FacilityReportPhotos.vue'
 
 const route = useRoute()
 const facilityId = computed(() => String(route.query.facilityId || '').trim())
@@ -13,6 +14,7 @@ const credentialReady = computed(() => Boolean(facilityId.value && ts.value && s
 const content = ref('')
 const reporterName = ref('')
 const reporterPhone = ref('')
+const photos = ref<File[]>([])
 const busy = ref(false)
 const error = ref('')
 const result = ref<FacilityReportResult>()
@@ -21,6 +23,8 @@ const errorHints: Record<string, string> = {
   '10801': '设施不存在，请核对二维码是否为最新版本',
   '10807': '二维码已过期或失效，请联系管理人员重新生成',
   '10810': '该设施已废弃，无需再上报问题',
+  '10811': '照片不符合上传要求，请检查格式、数量和大小',
+  '10812': '照片保存失败，上报未完成，请稍后重试',
 }
 
 async function submit() {
@@ -34,6 +38,7 @@ async function submit() {
     result.value = await reportFacilityIssue({
       facilityId: facilityId.value,
       reportContent: text,
+      files: photos.value,
       ...(reporterName.value.trim() ? { reporterName: reporterName.value.trim() } : {}),
       ...(reporterPhone.value.trim() ? { reporterPhone: reporterPhone.value.trim() } : {}),
       ts: ts.value,
@@ -67,9 +72,10 @@ async function submit() {
         <dl>
           <div><dt>工单编号</dt><dd>{{ result.taskNo || result.taskId || '—' }}</dd></div>
           <div><dt>设施当前状态</dt><dd class="warn">{{ result.facilityBizStatusName || result.facilityBizStatus || '异常' }}</dd></div>
+          <div><dt>上报照片</dt><dd>{{ result.imageCount ?? 0 }} 张</dd></div>
         </dl>
         <p>系统已自动创建核查任务，处置人员会跟进处理，请保持电话畅通。</p>
-        <button type="button" class="ghost" @click="result = undefined; content = ''">继续上报</button>
+        <button type="button" class="ghost" @click="result = undefined; content = ''; photos = []">继续上报</button>
       </div>
 
       <form v-else @submit.prevent="submit">
@@ -79,6 +85,7 @@ async function submit() {
         </label>
         <label>上报人<input v-model.trim="reporterName" maxlength="50" :disabled="busy" placeholder="选填" /></label>
         <label>联系电话<input v-model.trim="reporterPhone" type="tel" maxlength="32" :disabled="busy" placeholder="选填，便于核查人员联系" /></label>
+        <FacilityReportPhotos v-model="photos" :disabled="busy" />
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <button type="submit" class="primary" :disabled="busy">{{ busy ? '正在提交…' : '提交上报' }}</button>
         <p class="tip">提交后设施状态将转为「异常」，并自动生成核查任务。</p>
