@@ -38,9 +38,12 @@ const renderer = Vue.createRenderer({
 let source = readFileSync('src/workspace-components/spot-identification/FlightTaskReviewPanel.vue','utf8')
 source = source.replace('</script>', 'defineExpose({ pageRows, rows, currentPage, loadTaskMedia, mediaByTask, departmentMediaSummary, completedMediaTaskIds, resultTypeFilter, mediaLoading, filteredRows });\n</script>')
 const script = compileScript(parse(source).descriptor, {id:'review-lazy-test'}).content
+const regionUtil = load(readFileSync('src/utils/region-path.ts','utf8'),{})
+assert.equal(regionUtil.regionPaths([{code:'32',name:'江苏省',children:[{code:'3212',name:'泰州市',children:[{code:'321202',name:'海陵区'}]}]}]).get('321202'), '江苏省 / 泰州市 / 海陵区')
 const component = load(script, {
   vue: Vue, 'vue-router': {}, 'element-plus':{ElTooltip:{}}, '@element-plus/icons-vue':{},
   '@/api/client':{isMockMode:()=>false}, '@/api/patrol':{getUavMediaSummary:async()=>({photoCount:6896,videoCount:12})},
+  '@/api/metadata':{getMetadataOptions:async()=>[]}, '@/utils/region-path':regionUtil,
   '@/api/flight-review':{
     getFlightReviewPlans:async()=>({records:planList,total:18,pageSize:200}),
     getFlightReviewTasks:async()=>({records:taskList,total:18,pageSize:200}),

@@ -95,6 +95,8 @@ async function harness(records, options = {}) {
       },
     },
     '@/utils/collection-media-pager': pagerApi,
+    '@/api/flight-review': { flightReviewFileApiPath: path => path.replace(/^\/api/, '') },
+    '@/api/client': { apiClient: { defaults: { baseURL: '/api' } } },
     '@/workspace-components/spot-identification/SharedVideoPlayer.vue': { default: {} },
     '@/workspace-components/spot-identification/PhotoLocationControl.vue': { default: {} },
   }).default

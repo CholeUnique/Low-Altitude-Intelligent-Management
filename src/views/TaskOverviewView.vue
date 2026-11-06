@@ -279,7 +279,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <TaskCenterLayout title="任务总览" :subtitle="`${user.organization.name} · 任务运行与办理效能概览`">
+  <TaskCenterLayout class="task-overview-page" title="任务总览" :subtitle="`${user.organization.name} · 任务运行与办理效能概览`">
     <template #actions>
       <div class="overview-actions">
         <span v-if="refreshedAt">更新于 {{ refreshedAt }}</span>
@@ -344,7 +344,7 @@ onBeforeUnmount(() => {
       </article>
 
       <article class="panel efficiency-panel">
-        <header><div><h2>办理效能</h2><p>结合任务统计与前 100 条任务明细计算</p></div></header>
+        <header><div><h2>办理效能</h2><p>根据当前部门任务明细计算</p></div></header>
         <div v-if="tasksLoading && !statistics" class="panel-state standalone">正在计算办理效能…</div>
         <div v-else-if="tasksError && statisticsError" class="panel-state standalone error">办理效能暂不可用</div>
         <div v-else-if="!tasksLoading && !tasks.length && !taskSummary?.total" class="panel-state standalone">暂无可统计的任务</div>
@@ -500,5 +500,27 @@ onBeforeUnmount(() => {
   .panel { min-height: 265px; }
   .chart-wrap { height: 210px; }
   .panel-state.standalone, .efficiency-grid { min-height: 185px; }
+}
+
+/* 总览随内容区高度展开，空间不足时由内容区滚动。 */
+.task-overview-page :deep(.task-center-content) { display: flex; flex-direction: column; overflow: hidden; }
+.task-overview-page :deep(.content-heading) { flex: none; }
+.task-overview-page :deep(.content-body) { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: auto; }
+.kpi-grid { flex: none; }
+.kpi-card { border-radius: 8px; box-shadow: 0 4px 16px #2449690d; }
+.kpi-card strong { font-variant-numeric: tabular-nums; }
+.overview-grid { flex: 1; min-height: 560px; grid-template-rows: minmax(270px, 1fr) minmax(260px, 1fr); }
+.panel { min-height: 0; display: flex; flex-direction: column; border-radius: 8px; box-shadow: 0 4px 16px #2449690d; }
+.panel > header { flex: none; }
+.chart-wrap { flex: 1; min-height: 0; height: auto; }
+.ranking-list { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly; gap: 8px; overflow: auto; }
+.ranking-list li { min-height: 46px; }
+.ranking-list i { height: 7px; }
+.ranking-list strong { font-size: 13px; }
+.scene-statuses { font-size: 11px; }
+.efficiency-grid { flex: 1; min-height: 0; }
+.panel-state.standalone { flex: 1; min-height: 0; }
+@media (max-width: 900px) {
+  .overview-grid { grid-template-columns: 1fr; grid-template-rows: repeat(4, minmax(260px, auto)); }
 }
 </style>

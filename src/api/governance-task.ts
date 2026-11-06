@@ -64,6 +64,8 @@ export interface GovernanceTaskPageQuery {
   pageNum: number
   pageSize: number
   keyword?: string
+  /** 当前工作流节点办理人。 */
+  assigneeId?: string
   sceneCode?: string
   taskStatus?: GovernanceTaskStatus
   priority?: number
@@ -173,7 +175,7 @@ export interface GovernanceTaskOperateLog {
 export interface GovernanceTaskDetail {
   task: GovernanceTask
   facilityId?: string
-  reportImages?: import('./facility').FacilityReportImage[]
+  reportImages: import('./facility').FacilityReportImage[]
   /** 任务授权范围内返回的设施摘要，不依赖专题台账读取权限。 */
   facility?: import('./facility').FacilityRecord
   refSummary?: string
@@ -282,7 +284,7 @@ interface BizTaskDetailDto {
   task: BizTaskDto
   facilityId?: string | number
   facility?: import('./facility').FacilityRecord
-  reportImages?: import('./facility').FacilityReportImage[]
+  reportImages?: Array<Omit<import('./facility').FacilityReportImage, 'imageId'> & {imageId:string|number}>
   refSummary?: string
   abnormalCount?: number
   abnormalArea?: number
@@ -658,7 +660,7 @@ export async function getGovernanceTaskDetail(taskId: string): Promise<Governanc
     facilityId: optionalValue(detail.facilityId),
     facility: detail.facility,
     refSummary: detail.refSummary,
-    reportImages: detail.reportImages || [],
+    reportImages: (detail.reportImages || []).map(image => ({...image,imageId:String(image.imageId)})),
     abnormalCount: detail.abnormalCount,
     abnormalArea: detail.abnormalArea,
     statistics: detail.statistics,

@@ -58,8 +58,7 @@ export interface FacilityFormInput {
 
 export const getFacilityPage = (query: FacilityQuery) => apiClient.post<never, FacilityPage>('/v1/biz/facility/page', query)
 export const getFacilityDetail = (deptId: string, id: string | number) => apiClient.post<never, FacilityRecord>('/v1/biz/facility/detail', { deptId, id })
-export interface FacilityReportImage { imageId: string | number; fileName: string; fileExt?: string; fileSize?: number; sortNo?: number; createTime?: string }
-export const getFacilityReportImage = (imageId: string | number) => apiClient.post<never, Blob>('/v1/biz/facility/report/image/view', { imageId }, { responseType:'blob' })
+export interface FacilityReportImage { imageId: string; fileName: string; fileExt?: string; fileSize?: number; sortNo?: number; createTime?: string }
 export const getFacilityStatistics = (deptId: string) => apiClient.post<never, FacilityStatistics>('/v1/biz/facility/statistics/overall', { deptId })
 export const getFacilityRegionStatistics = (deptId: string) => apiClient.post<never, FacilityRegionStat[]>('/v1/biz/facility/statistics/by-region', { deptId })
 export const getFacilityTypes = () => apiClient.post<never, FacilityOption[]>('/v1/biz/facility/type/options', {})
@@ -86,6 +85,7 @@ export interface FacilityReportInput {
   /** 匿名扫码上报时由二维码携带。 */
   ts?: number
   sign?: string
+  files?: File[]
 }
 export interface FacilityReportResult {
   taskId: string | number
@@ -93,9 +93,29 @@ export interface FacilityReportResult {
   facilityId: string | number
   facilityBizStatus?: string
   facilityBizStatusName?: string
+  imageCount?: number
 }
 /** 问题上报：后端会自动创建核查任务、触发工作流，并把设施置为异常。 */
-export const reportFacilityIssue = (input: FacilityReportInput) => apiClient.post<never, FacilityReportResult>('/v1/biz/facility/report', input)
+export function reportFacilityIssue(input: FacilityReportInput) {
+  const form = new FormData()
+  for (const [key, value] of Object.entries(input)) {
+    if (key === 'files') continue
+    if (value !== undefined && value !== null) form.append(key, String(value))
+  }
+  input.files?.forEach(file => form.append('files', file))
+  return apiClient.post<never, FacilityReportResult>('/v1/biz/facility/report', form)
+}
+
+export async function getFacilityReportImage(imageId: string | number, deptId?: string) {
+  const blob = await apiClient.post<never, Blob>('/v1/biz/facility/report/image/view', { imageId, ...(deptId ? { deptId } : {}) }, { responseType: 'blob' })
+  if (!(blob instanceof Blob) || !blob.type.startsWith('image/')) {
+    if (blob instanceof Blob) {
+      try { const error = JSON.parse(await blob.text()); throw new Error(error.msg || '照片读取失败') } catch (error) { if (error instanceof Error && !(error instanceof SyntaxError)) throw error }
+    }
+    throw new Error('照片读取失败')
+  }
+  return blob
+}
 
 export interface FacilityQrcodeQuery { deptId: string; id: string | number; url?: string; size?: number }
 /** 设施二维码（PNG 二进制；失败时后端仍返回 JSON 错误体）。 */

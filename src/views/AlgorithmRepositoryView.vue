@@ -104,7 +104,7 @@ watch(pageCount, () => setPage(currentPage.value))
           <div class="card-visual" :class="`visual-${model.visual}`" :aria-label="`${model.name}场景示意`">
             <span class="visual-demo">{{ model.family === 'ai' ? '场景示意' : '模拟示意' }}</span>
             <div v-if="model.visual==='change'" class="compare-line"><b>2001-06</b><em>›</em><b>2004-04</b></div>
-            <svg v-else-if="family==='spatial'" class="spatial-overlay" viewBox="0 0 600 320" preserveAspectRatio="none" aria-hidden="true">
+            <svg v-else-if="family==='spatial'" class="spatial-overlay" viewBox="0 0 600 320" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
               <g v-if="model.visual==='overlay'">
                 <path class="overlay-blue" d="M125 83 258 66 301 146 270 237 154 221 103 151Z" />
                 <path class="overlay-green" d="M253 105 418 82 458 178 398 257 278 227 239 153Z" />
@@ -150,6 +150,9 @@ watch(pageCount, () => setPage(currentPage.value))
 .view-switch button svg{width:21px;height:21px}
 .view-switch button:hover:not(.active){color:#276be9;background:#f7faff}
 .view-switch button:focus-visible{position:relative;outline:2px solid #3478f6;outline-offset:-3px}
+.algorithm-results.view-grid{grid-auto-rows:auto;align-content:start}
+.view-grid .algorithm-card{grid-template-rows:auto auto 48px}
+.view-grid .card-visual{aspect-ratio:600 / 320;min-height:0}
 @media(max-width:1400px){.algorithm-page{grid-template-columns:235px minmax(0,1fr)}.repository-main{padding-inline:20px}.algorithm-results.view-grid{gap:11px}.toolbar{gap:10px}.toolbar>label:not(.search-box){grid-template-columns:1fr}.toolbar>label:not(.search-box) span{display:none}.algorithm-card>footer time{display:none}}
 @media(max-width:1050px){.algorithm-results.view-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.view-list .algorithm-card{grid-template-columns:190px minmax(0,1fr)}.view-list .algorithm-card>footer{display:none}}
 .toolbar select:hover,.toolbar select:focus{color:#fff;background:#315f91;border-color:#315f91}.toolbar select option{color:#53627a;background:#fff}

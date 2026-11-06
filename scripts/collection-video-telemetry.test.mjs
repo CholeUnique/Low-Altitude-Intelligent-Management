@@ -18,8 +18,9 @@ globalThis.ShadowRoot = class {}
 globalThis.document = { activeElement: null }
 globalThis.ResizeObserver = class { observe() {} disconnect() {} }
 const windowListeners = new Map()
-globalThis.window = { setTimeout, clearTimeout, innerWidth: 1600, innerHeight: 900,
+globalThis.window = { setTimeout, clearTimeout, innerWidth: 1600, innerHeight: 900, location: { origin: 'http://localhost' },
   addEventListener: (name, handler) => windowListeners.set(name, handler), removeEventListener: name => windowListeners.delete(name) }
+globalThis.localStorage = { getItem: () => 'test-token' }
 function node(type, text = '') {
   const listeners = new Map()
   return { type, text, tagName: type.toUpperCase(), children: [], props: {}, parent: null,
@@ -57,8 +58,8 @@ const SrtDialog = Vue.defineComponent({ props: ['planName', 'media'], emits: ['c
 const PhotoLocation = Vue.defineComponent({ props: ['media', 'fullscreen'], setup: () => () => Vue.h('section', { class: 'stub-photo-location' }) })
 const taskA = { id: '210987654321000001', name: '采集任务 A', createTime: '2026-10-13 13:00', deviceName: '设备 A', waylineName: '' }
 const taskB = { id: '210987654321000002', name: '采集任务 B', createTime: '2026-10-12 13:00', deviceName: '设备 B', waylineName: '' }
-const videoA = { id: '310987654321000001', name: 'DJI_SAME.mp4', capturedAt: '2026-10-13 13:34:12', thumbnail: '/a.jpg', originalUrl: 'https://video.test/a.mp4', mediaType: 'video' }
-const videoB = { ...videoA, id: '310987654321000002', capturedAt: '2026-10-12 12:34:12', originalUrl: 'https://video.test/b.mp4' }
+const videoA = { id: '310987654321000001', name: 'DJI_SAME.mp4', capturedAt: '2026-10-13 13:34:12', thumbnail: '/a.jpg', localThumbnailUrl: '/api/v1/uav/media/thumb/310987654321000001', originalUrl: 'https://video.test/a.mp4', localFileUrl: '/api/v1/uav/media/file/310987654321000001', mediaType: 'video' }
+const videoB = { ...videoA, id: '310987654321000002', capturedAt: '2026-10-12 12:34:12', originalUrl: 'https://video.test/b.mp4', localFileUrl: undefined, localThumbnailUrl: undefined }
 const imageA = { id: 'image', name: 'photo.jpg', capturedAt: '2026-10-11 11:00', thumbnail: '/image.jpg' }
 const noUrlVideo = { id: 'no-url', name: 'MISSING.mp4', capturedAt: '2026-10-10 11:00', thumbnail: '' }
 const attachment = { id: 'srt', name: 'DJI_SAME.SRT', capturedAt: '2026-10-09 11:00', thumbnail: '' }
@@ -80,6 +81,8 @@ const View = load(compileScript(descriptor, { id: 'collection-test', inlineTempl
     getFlightTaskMedia: async ({ taskId }) => ({ list: taskId === taskA.id ? [videoA, imageA, noUrlVideo, attachment] : [videoB], total: taskId === taskA.id ? 4 : 1 }),
   },
   '@/utils/collection-media-pager': load(readFileSync('src/utils/collection-media-pager.ts', 'utf8'), {}),
+  '@/api/flight-review': { flightReviewFileApiPath: path => path.replace(/^\/api/, '') },
+  '@/api/client': { apiClient: { defaults: { baseURL: '/api' } } },
   '@/workspace-components/spot-identification/SharedVideoPlayer.vue': { __esModule: true, default: SharedPlayer },
   '@/workspace-components/spot-identification/PhotoLocationControl.vue': { __esModule: true, default: PhotoLocation },
   '@/workspace-components/spot-identification/SrtInfoDialog.vue': { __esModule: true, default: SrtDialog },
@@ -94,6 +97,8 @@ function all(item, predicate) { return [...(predicate(item) ? [item] : []), ...i
 const byClass = name => all(root, item => String(item.props.class || '').split(' ').includes(name))
 const click = item => item.props.onClick({ stopPropagation() {} })
 assert.equal(byClass('media-card-srt').length, 3, 'Only videos get SRT actions, including videos without playback URLs')
+const localThumbnail = all(root, item => item.type === 'img' && item.props.alt === `${videoA.name} 视频缩略图`)[0]
+assert.equal(localThumbnail.props.src, 'http://localhost/api/v1/uav/media/thumb/310987654321000001?token=test-token', 'Thumbnail prefers the authenticated local service')
 assert(!byClass('media-card-srt').some(item => item.text.includes('↗')))
 assert(!all(root, item => item.type === 'button').some(item => all(item, child => child !== item && child.type === 'button').length), 'Card preview and SRT actions must not be nested buttons')
 click(byClass('media-card-srt')[0]); await flush()
@@ -109,6 +114,8 @@ assert.equal(vm.previewMedia.id, videoA.id)
 assert.equal(vm.previewTask.id, taskA.id)
 const firstVideo = all(root, item => item.type === 'video')[0]
 assert(firstVideo)
+assert.equal(firstVideo.props.src, 'http://localhost/api/v1/uav/media/file/310987654321000001?token=test-token', 'Playback prefers the authenticated local file')
+assert.equal(byClass('preview-video-download')[0].props.href, firstVideo.props.src, 'Download uses the same local file')
 click(byClass('collaboration-toggle')[0]); await flush()
 assert.equal(overlayInstances.at(-1).props.media.id, videoA.id)
 assert.equal(overlayInstances.at(-1).props.media.taskId, taskA.id)
@@ -127,6 +134,7 @@ click(byClass('collaboration-toggle')[0]); await flush()
 assert.equal(overlayInstances.at(-1).props.media.id, videoB.id)
 assert.equal(overlayInstances.at(-1).props.media.taskId, taskB.id)
 const secondVideo = all(root, item => item.type === 'video')[0]
+assert.equal(secondVideo.props.src, videoB.originalUrl, 'Playback falls back to the original URL when no local file is available')
 vm.openSrtInfo(videoB, taskB); await flush()
 assert.equal(secondVideo.pauses, 1, 'Opening SRT information pauses an existing preview')
 assert.equal(srtInstances.at(-1).props.media.id, videoB.id)

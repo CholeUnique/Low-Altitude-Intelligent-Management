@@ -11,7 +11,6 @@ import {
 import {
   getRecognitionSpotDetail,
   getRecognitionSpotPage,
-  getRecognitionSpotTypes,
   ignoreRecognitionSpots,
   revokeRecognitionSpots,
   type RecognitionSpotItem,
@@ -43,7 +42,7 @@ const detailError = ref('')
 const mapFullscreen = ref(false)
 const records = ref<ReviewSpot[]>([])
 const keyword = ref('')
-const typeFilter = ref('')
+const sceneFilter = ref('')
 const statusFilter = ref<number | ''>(0)
 
 function toggleMapFullscreen() {
@@ -56,6 +55,7 @@ function handleMapFullscreenKeydown(event: KeyboardEvent) {
 }
 const activeId = ref('')
 const selectedIds = ref<string[]>([])
+watch(sceneFilter, () => { selectedIds.value = [] })
 const creatingTasks = ref(false)
 const taskCreateVisible = ref(false)
 const taskPriority = ref(1)
@@ -82,7 +82,6 @@ const synchronizedMapView = ref<SynchronizedMapView>()
 const periods = ref(2)
 const activeImageIndex = ref(0)
 
-const abnormalTypes = ref<Array<{ value: string; label: string }>>([])
 const statuses = [
   { value: 0, label: '待核查' },
   { value: 1, label: '核查中' },
@@ -98,10 +97,13 @@ const spotActionCopy: Record<SpotAction, { title: string; description: string; c
 const pendingSpotActionCopy = computed(() => pendingSpotAction.value ? spotActionCopy[pendingSpotAction.value.kind] : undefined)
 
 const visibleRecords = computed(() => records.value.filter((item) => item.handleStatus !== -1))
+const sceneOptions = computed(() => [...new Map(visibleRecords.value.filter(item => item.sceneCode).map(item => [
+  item.sceneCode, { value: item.sceneCode, label: scenes.value.find(scene => scene.code === item.sceneCode)?.name || item.sourceSceneName || item.sceneCode },
+])).values()].sort((a, b) => a.label.localeCompare(b.label, 'zh-CN')))
 const filtered = computed(() => visibleRecords.value.filter((item) => {
   const text = `${item.spotNo} ${item.title} ${item.description} ${item.abnormalTypeDesc}`.toLowerCase()
   return (!keyword.value.trim() || text.includes(keyword.value.trim().toLowerCase()))
-    && (!typeFilter.value || item.abnormalType === typeFilter.value)
+    && (!sceneFilter.value || item.sceneCode === sceneFilter.value)
     && (statusFilter.value === '' || item.handleStatus === statusFilter.value)
 }))
 const active = computed(() => filtered.value.find((item) => item.id === activeId.value) || filtered.value[0])
@@ -401,14 +403,8 @@ async function loadSpots(preferredSpotNo?: string) {
     ])
     if (version !== spotLoadVersion) return
     scenes.value = sceneList.filter((scene) => scene.enabled)
-    const [taskSpotResults, sceneTypeResults] = await Promise.all([
-      Promise.allSettled(tasks.map(loadTaskSpots)),
-      Promise.allSettled(scenes.value.map((scene) => getRecognitionSpotTypes(scene.code))),
-    ])
+    const taskSpotResults = await Promise.allSettled(tasks.map(loadTaskSpots))
     if (version !== spotLoadVersion) return
-    abnormalTypes.value = [...new Map(sceneTypeResults.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
-      .map((item) => [item.code, { value: item.code, label: item.name }])).values()]
-    if (typeFilter.value && !abnormalTypes.value.some((item) => item.value === typeFilter.value)) typeFilter.value = ''
     const taskSpots = taskSpotResults.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
     const recognitionById = new Map(recognitionSpots.map((item) => [item.id, item]))
     const merged = new Map<string, ReviewSpot>()
@@ -433,6 +429,7 @@ async function loadSpots(preferredSpotNo?: string) {
     })
     const all = [...merged.values()].sort((left, right) => (right.foundTime || right.createTime || '').localeCompare(left.foundTime || left.createTime || ''))
     records.value = all
+    if (sceneFilter.value && !sceneOptions.value.some(item => item.value === sceneFilter.value)) sceneFilter.value = ''
     const nextActiveId = all.find((item) => item.spotNo === preferredSpotNo)?.id
       || (all.some((item) => item.id === activeId.value) ? activeId.value : all[0]?.id || '')
     activeId.value = nextActiveId
@@ -441,7 +438,6 @@ async function loadSpots(preferredSpotNo?: string) {
   } catch (error) {
     if (version !== spotLoadVersion) return
     records.value = []
-    abnormalTypes.value = []
     loadError.value = error instanceof Error ? error.message : '疑似异常图斑加载失败。'
   } finally {
     if (version === spotLoadVersion) loading.value = false
@@ -616,7 +612,7 @@ onBeforeUnmount(() => {
     <section class="review-layout">
       <aside class="spot-list panel">
         <header><b>问题图斑列表</b><span>{{ filtered.length }} / {{ visibleRecords.length }} 处</span></header>
-        <div class="filters"><input v-model="keyword" placeholder="搜索图斑编号、名称或类型" /><div><select v-model="typeFilter"><option value="">全部类型</option><option v-for="item in abnormalTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select><select v-model="statusFilter"><option value="">全部状态</option><option v-for="item in statuses" :key="item.value" :value="item.value">{{ item.label }}</option></select></div></div>
+        <div class="filters"><input v-model="keyword" placeholder="搜索图斑编号、名称或类型" /><div><select v-model="sceneFilter" aria-label="场景筛选"><option value="">全部场景</option><option v-for="item in sceneOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select><select v-model="statusFilter"><option value="">全部状态</option><option v-for="item in statuses" :key="item.value" :value="item.value">{{ item.label }}</option></select></div></div>
         <div class="spot-scroll">
           <button
             v-for="(item,index) in filtered"
@@ -1262,6 +1258,12 @@ onBeforeUnmount(() => {
 .spot-action-button--ignore:hover { color: #176f87; background: #edf8fa; border-color: #85bfce; }
 .spot-action-button--revoke { color: #b06052; border-color: #ebc9c1; }
 .spot-action-button--revoke:hover { color: #9d4239; background: #fff3f0; border-color: #d99a8f; }
+.analysis-actions .spot-action-button { height: 34px; padding: 0 13px; border-radius: 5px; font-size: 13px; font-weight: 700; }
+.analysis-actions .spot-action-button--ignore:not(:disabled) { color: #fff; background: #526f7e; border-color: #526f7e; }
+.analysis-actions .spot-action-button--revoke:not(:disabled) { color: #fff; background: #ad493e; border-color: #ad493e; }
+.analysis-actions .spot-action-button:not(:disabled):hover { filter: brightness(.88); }
+.analysis-actions .spot-action-button:disabled { color: #6e8590; background: #e6edef; border-color: #c0d0d7; opacity: 1; cursor: not-allowed; transform: none; box-shadow: none; }
+.spot-detail > header { flex: 0 0 46px; height: 46px; min-height: 46px; padding: 0 14px; color: #173c54; }
 .spot-row em.status-4 { color: #657d88; background: #eaf0f3; }
 
 .spot-action-dialog {

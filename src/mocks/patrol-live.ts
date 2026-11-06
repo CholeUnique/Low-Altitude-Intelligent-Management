@@ -15,7 +15,9 @@ export interface LiveMediaItem {
   name: string
   capturedAt: string
   thumbnail: string
+  localThumbnailUrl?: string
   originalUrl?: string
+  localFileUrl?: string
   mediaType?: string
   longitude?: number
   latitude?: number
