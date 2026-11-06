@@ -4,6 +4,8 @@ import { ElTooltip } from 'element-plus'
 import { Calendar, FolderOpened, Picture, VideoCamera } from '@element-plus/icons-vue'
 import { isMockMode } from '@/api/client'
 import { getUavMediaSummary, type UavMediaSummary } from '@/api/patrol'
+import { getMetadataOptions } from '@/api/metadata'
+import { regionPaths } from '@/utils/region-path'
 import type { RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import {
   getFlightReviewMedia,
@@ -81,6 +83,11 @@ const deviceFilter = ref('')
 /** 区划筛选的“未判定”哨兵值：后端按轨迹未判定区划时 regionCode 为空。 */
 const REGION_UNSET = '__unset__'
 const regionFilter = ref('')
+const regionPathLabels = ref(new Map<string, string>())
+function regionLabel(plan: FlightReviewPlan) {
+  if (!plan.regionCode) return '未判定'
+  return regionPathLabels.value.get(plan.regionCode) || plan.regionName || plan.regionCode
+}
 const startDate = ref('')
 const endDate = ref('')
 const resultTypeFilter = ref('')
@@ -597,7 +604,7 @@ const devices = computed(() => [...new Set(rows.value.map((row) => row.device).f
 const regions = computed(() => {
   const labels = new Map<string, string>()
   rows.value.forEach((row) => {
-    if (row.plan.regionCode) labels.set(row.plan.regionCode, row.plan.regionName || row.plan.regionCode)
+    if (row.plan.regionCode) labels.set(row.plan.regionCode, regionLabel(row.plan))
   })
   return [...labels].sort((left, right) => left[1].localeCompare(right[1], 'zh-CN')).map(([code, label]) => ({ code, label }))
 })
@@ -645,7 +652,10 @@ watch(() => loading.value || resultTypeFilter.value ? '' : pageRows.value.map(ro
 })
 watch([resultTypeFilter, planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, regionFilter, startDate, endDate], () => { void loadFilteredMedia() })
 watch(() => user.activeDeptId, () => { void loadData() }, { immediate: true })
-onMounted(() => window.addEventListener('keydown', handleDetailKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', handleDetailKeydown)
+  void getMetadataOptions('ADMIN_REGION').then(options => { regionPathLabels.value = regionPaths(options) }).catch(() => { regionPathLabels.value = new Map() })
+})
 onBeforeUnmount(() => {
   loadVersion += 1
   previewRequestVersion += 1
@@ -744,7 +754,7 @@ async function exportList() {
     }
   const headers = ['飞行计划', '计划ID', '所属区划', '关联需求工单', '航线类型', '任务类型', '执行设备SN', '完成时间', '时长(分钟)', '图片', '视频', '其他文件']
   const content = [headers, ...filteredRows.value.map((row) => [
-    row.plan.name, row.plan.id, row.plan.regionName || row.plan.regionCode || '未判定', '--', routeTypeLabel(row.routeType), taskTypeLabel(row.taskType), display(row.device),
+    row.plan.name, row.plan.id, regionLabel(row.plan), '--', routeTypeLabel(row.routeType), taskTypeLabel(row.taskType), display(row.device),
     dateTime(row.completedAt), row.durationMinutes ?? '--', row.imageCount, row.videoCount, row.otherCount,
   ])].map((line) => line.map(csvCell).join(',')).join('\r\n')
   const url = URL.createObjectURL(new Blob(['\ufeff', content], { type: 'text/csv;charset=utf-8' }))
@@ -795,7 +805,7 @@ async function exportList() {
         <div class="table-scroll"><table><thead><tr><th>飞行计划 / 结果目录</th><th>所属区划</th><th>关联需求工单</th><th>航线类型</th><th>任务类型</th><th>执行设备</th><th>完成时间</th><th>时长</th><th>成果文件</th><th>操作</th></tr></thead><tbody>
           <tr v-for="row in pageRows" :key="row.plan.id">
             <td><div class="plan-cell"><span class="folder-icon" aria-hidden="true"><FolderOpened /></span><div><b :title="row.plan.name">{{ display(row.plan.name) }}</b><small>计划 ID：{{ row.plan.id }}</small><small v-if="row.tasks.length">{{ row.tasks.length }} 个关联飞行任务</small></div></div></td>
-            <td :class="{ muted: !row.plan.regionCode }" :title="row.plan.regionCode || '后端未按轨迹判定所属区划'">{{ row.plan.regionName || row.plan.regionCode || '未判定' }}</td><td class="muted">--</td><td><span class="soft-tag">{{ routeTypeLabel(row.routeType) }}</span></td><td>{{ taskTypeLabel(row.taskType) }}</td><td>{{ display(row.device) }}<small v-if="row.plan.deviceType" class="cell-sub">{{ row.plan.deviceType }}</small></td><td>{{ dateTime(row.completedAt) }}</td><td>{{ row.durationMinutes === undefined ? '--' : `${row.durationMinutes} min` }}</td>
+            <td :class="{ muted: !row.plan.regionCode }" :title="row.plan.regionCode ? `${regionLabel(row.plan)}（${row.plan.regionCode}）` : '后端未按轨迹判定所属区划'">{{ regionLabel(row.plan) }}</td><td class="muted">--</td><td><span class="soft-tag">{{ routeTypeLabel(row.routeType) }}</span></td><td>{{ taskTypeLabel(row.taskType) }}</td><td>{{ display(row.device) }}<small v-if="row.plan.deviceType" class="cell-sub">{{ row.plan.deviceType }}</small></td><td>{{ dateTime(row.completedAt) }}</td><td>{{ row.durationMinutes === undefined ? '--' : `${row.durationMinutes} min` }}</td>
             <td><div v-if="row.mediaFailed && !row.media.length" class="media-count failed">素材读取失败</div><div v-else-if="!row.media.length" class="muted">{{ row.fileCount === undefined ? (row.countFailed ? '数量读取失败' : '数量读取中…') : row.fileCount ? `${row.fileCount} 个文件` : '--' }}</div><div v-else class="media-count"><span v-if="row.imageCount">图 {{ row.imageCount }}</span><span v-if="row.videoCount">视 {{ row.videoCount }}</span><span v-if="row.otherCount">其他 {{ row.otherCount }}</span><span v-if="row.mediaPending">统计中…</span><span v-else-if="row.mediaFailed" class="failed">部分读取失败</span></div></td>
             <td><div class="row-actions">
               <button class="view-button" type="button" :disabled="!!openingPlanId || row.fileCount === 0" @click="openDetail(row)">{{ openingPlanId === row.plan.id ? '正在读取…' : '查看成果' }}</button>

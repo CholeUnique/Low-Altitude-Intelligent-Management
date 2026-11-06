@@ -10,8 +10,21 @@ import {
   type FacilityStatistics,
 } from '@/api/facility'
 import { useUserStore } from '@/stores/user'
+import { useRouter } from 'vue-router'
+import { FACILITIES_TOPIC_ID } from '@/stores/geographic-topics'
 
 const user = useUserStore()
+const router = useRouter()
+function openCard(label: string) {
+  if (label === '设施总数' || label === '正常') {
+    void router.push({ name: 'recognition', params: { tab: 'topics' }, query: { topic: FACILITIES_TOPIC_ID, view: 'map' } })
+  } else if (label === '异常' || label === '核查中') {
+    void router.push({ name: 'task-list', query: { sceneCode: 'farmland-facilities' } })
+  }
+}
+function cardDestination(label: string) {
+  return label === '设施总数' || label === '正常' ? '工程设施地图' : label === '异常' || label === '核查中' ? '工程设施任务列表' : ''
+}
 const statistics = ref<FacilityStatistics>()
 const regions = ref<FacilityRegionStat[]>([])
 const recent = ref<FacilityRecord[]>([])
@@ -137,12 +150,12 @@ watch(() => user.activeDeptId, () => void loadData())
     <div v-if="error" class="notice" role="alert">{{ error }}<button type="button" @click="loadData">重试</button></div>
 
     <div class="kpi-grid">
-      <article v-for="card in statusCards" :key="card.label" class="kpi-card" :style="{ '--tone': card.color }">
+      <component :is="cardDestination(card.label) ? 'button' : 'article'" v-for="card in statusCards" :key="card.label" class="kpi-card" :class="{ 'kpi-card--link': cardDestination(card.label) }" :style="{ '--tone': card.color }" :type="cardDestination(card.label) ? 'button' : undefined" :aria-label="cardDestination(card.label) ? `${card.label}，查看${cardDestination(card.label)}` : undefined" @click="openCard(card.label)">
         <span>{{ card.label }}</span>
         <strong>{{ loading && card.label !== '设施总数' ? '—' : (card.value ?? 0).toLocaleString() }}</strong>
         <div class="kpi-track"><i :style="{ width: card.label === '设施总数' ? '100%' : `${share(card.value)}%` }" /></div>
         <small>{{ card.note }}{{ card.label === '设施总数' ? '' : ` · 占比 ${share(card.value)}%` }}</small>
-      </article>
+      </component>
     </div>
 
     <div class="board-grid">
@@ -221,6 +234,7 @@ watch(() => user.activeDeptId, () => void loadData())
 .kpi-card::before,.panel::before{position:absolute;top:0;left:18px;right:18px;height:1px;background:linear-gradient(90deg,transparent,#c4f4ff70 25%,#56bed736 70%,transparent);content:"";pointer-events:none}
 .kpi-grid{flex:none;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px}
 .kpi-card{position:relative;display:flex;flex-direction:column;gap:7px;padding:15px 17px 14px 20px;transition:transform .18s ease,border-color .18s ease}
+.kpi-card--link{width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}.kpi-card--link:hover{border-color:var(--tone);box-shadow:var(--panel-shadow),0 0 0 1px var(--tone)}.kpi-card--link:focus-visible{outline:2px solid var(--tone);outline-offset:3px}
 .kpi-card:hover{transform:translateY(-2px);border-color:#7dc8e55c}
 .kpi-card::after{position:absolute;top:16px;bottom:16px;left:0;width:3px;border-radius:3px;background:var(--tone);content:"";opacity:.9}
 .kpi-card span{color:#a9c8d8;font-size:12px;letter-spacing:.3px}
