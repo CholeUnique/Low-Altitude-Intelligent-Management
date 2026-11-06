@@ -26,6 +26,7 @@ import {
 import type { LiveStream } from '@/adapters/dasFly'
 import { findOrganizationScene, isTaskVisibleForOrganization } from '@/utils/scene-visibility'
 import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
+import { formatSquareMetresAsMu } from '@/utils/topic-area'
 import type { DashboardMapLayer } from '@/types'
 
 const router = useRouter()
@@ -224,10 +225,6 @@ function openRecognition() {
 
 function openTaskList() {
   router.push({ name: 'task-list' })
-}
-
-function formatNumber(value: number | undefined) {
-  return typeof value === 'number' ? value.toLocaleString('zh-CN', { maximumFractionDigits: 1 }) : '—'
 }
 
 function formatCount(value: number | undefined) {
@@ -580,7 +577,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <h2>智能识别成果</h2>
                 <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="recognition-summary"><DashboardRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :rate="recognitionHandledRate" :title="recognitionHandledRate === undefined ? '暂无图斑处置率' : `图斑处置率 ${recognitionHandledRate}%`" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatNumber(statistics?.abnormalSummary.areaTotal) }}㎡</dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview.resultCount ?? '—'" /></dd></div></dl></div>
+              <div class="recognition-summary"><DashboardRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :rate="recognitionHandledRate" :title="recognitionHandledRate === undefined ? '暂无图斑处置率' : `图斑处置率 ${recognitionHandledRate}%`" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatSquareMetresAsMu(statistics?.abnormalSummary.areaTotal) }}亩</dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview.resultCount ?? '—'" /></dd></div></dl></div>
               <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%` }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
             </section>
             <section v-if="isAgricultureTopicDepartment(user)" class="overview-float-panel topic-data-panel">

@@ -18,7 +18,7 @@ const pending = ref(false), error = ref(''), keyword = ref(''), typeFilter = ref
 const mapElement = ref<HTMLElement>(), listElement = ref<HTMLElement>()
 const scaleMap = shallowRef<L.Map>()
 const listOpen = ref(true)
-const pageSize = ref(12)
+const pageSize = 12
 const selected = computed(() => facilities.value.find(item => item.key === selectedKey.value))
 function facilityCoordinates(geometry?: GeoJSON.Geometry | null) {
   if (!geometry) return undefined
@@ -60,23 +60,14 @@ const filtered = computed(() => {
   const q = keyword.value.trim().toLocaleLowerCase()
   return facilities.value.filter(item => (!q || `${item.name} ${item.category} ${item.record.facilityNo || ''} ${item.record.villageName || ''} ${item.record.projectName || ''}`.toLocaleLowerCase().includes(q)) && (!typeFilter.value || item.category === typeFilter.value) && (!statusFilter.value || item.record.bizStatus === statusFilter.value))
 })
-const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
-const pageRows = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize)))
+const pageRows = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 watch([keyword, typeFilter, statusFilter], () => { page.value = 1 })
-let version = 0, map: L.Map | undefined, featureGroup: L.LayerGroup | undefined, selectionGroup: L.LayerGroup | undefined, boundaryLayer: L.GeoJSON | undefined, observer: ResizeObserver | undefined
+watch(page, () => { listElement.value?.scrollTo({ top: 0 }) })
+let version = 0, map: L.Map | undefined, featureGroup: L.LayerGroup | undefined, selectionGroup: L.LayerGroup | undefined, boundaryLayer: L.GeoJSON | undefined, facilityRenderer: L.Canvas | undefined, observer: ResizeObserver | undefined
 let fitted = false
 function geometryLabel(value?: string | null) { const type = (value || '').toUpperCase(); return type.includes('POINT') ? '点' : type.includes('LINE') ? '线' : type.includes('POLYGON') ? '面' : '未知' }
 function categoryColor(category: string) { return categoryColors.value.get(category) || '#9ab2b6' }
-function updatePageSize() {
-  const height = listElement.value?.clientHeight || 0
-  if (height < 52) return
-  // 行高按 56px 估算并留出底部余量，宁可少一两条，避免清单溢出面板。
-  const next = Math.max(1, Math.floor((height - 16) / 56))
-  if (next === pageSize.value) return
-  const firstIndex = (page.value - 1) * pageSize.value
-  pageSize.value = next
-  page.value = Math.min(Math.floor(firstIndex / next) + 1, pages.value)
-}
 /** 按图例实际高度给清单面板留出底部空间，保证图例完整可见。 */
 const root = ref<HTMLElement>()
 const drawerBottom = ref(252)
@@ -127,10 +118,11 @@ function featureLayer(item: Facility, selected = false): L.Layer | undefined {
   const g = item.geometry
   if (!g) return
   const color = categoryColor(item.category)
-  const fillColor = selected ? '#fff068' : color
+  const fillColor = selected ? '#ff4040' : color
   const pane = selected ? 'facility-selection' : 'facility-shapes'
-  const pointStyle: L.PathOptions = { pane, interactive: !selected, color: selected ? '#fff068' : '#08222f', weight: selected ? 2.5 : 1, opacity: 1, fill: true, fillColor, fillOpacity: 1 }
-  const areaStyle: L.PathOptions = { pane, interactive: !selected, color: selected ? '#fff068' : color, weight: selected ? 5 : 2.5, opacity: 1, fillColor, fillOpacity: selected ? .3 : .25 }
+  const renderer = selected ? undefined : facilityRenderer
+  const pointStyle: L.PathOptions = { pane, renderer, interactive: !selected, color: selected ? '#ff4040' : '#08222f', weight: selected ? 2.5 : 1, opacity: 1, fill: true, fillColor, fillOpacity: 1 }
+  const areaStyle: L.PathOptions = { pane, renderer, interactive: !selected, color: selected ? '#ff4040' : color, weight: selected ? 5 : 2.5, opacity: 1, fillColor, fillOpacity: selected ? .3 : .25 }
   return L.geoJSON({ type: 'Feature', properties: {}, geometry: g } as GeoJSON.Feature, {
     pane,
     // Leaflet 会对每个图层重新套用 style；点要素必须显式返回实心样式，否则会被面样式覆盖成空心。
@@ -190,6 +182,8 @@ onMounted(() => {
   if (!mapElement.value) return
   map = L.map(mapElement.value, { center: [32.49, 119.85], zoom: 12, attributionControl: false, zoomControl: false, preferCanvas: true })
   map.createPane('facility-shapes').style.zIndex = '400'
+  // 扩大点、线要素的点击容差，不改变实际绘制尺寸。
+  facilityRenderer = L.canvas({ pane: 'facility-shapes', tolerance: 8 })
   map.createPane('facility-selection').style.zIndex = '420'
   map.getPane('facility-selection')!.style.pointerEvents = 'none'
   scaleMap.value = map
@@ -206,9 +200,7 @@ onMounted(() => {
       fitted = true
     }
   }
-  observer = new ResizeObserver(() => { map?.invalidateSize({ pan: false }); updatePageSize() }); observer.observe(mapElement.value)
-  if (listElement.value) observer.observe(listElement.value)
-  updatePageSize()
+  observer = new ResizeObserver(() => { map?.invalidateSize({ pan: false }) }); observer.observe(mapElement.value)
   renderMap()
 })
 watch(() => user.activeDeptId, () => { statusFilter.value = ''; typeFilter.value = ''; keyword.value = ''; void load() }, { immediate: true })
@@ -229,7 +221,7 @@ onBeforeUnmount(() => { version++; observer?.disconnect(); legendObserver?.disco
         <div class="filters"><label class="search-field"><span aria-hidden="true">⌕</span><input v-model="keyword" type="search" placeholder="搜索名称、编号、项目或行政村" aria-label="搜索设施" /></label><div class="filter-row"><select v-model="statusFilter" aria-label="设施状态"><option value="">全部状态</option><option value="NORMAL">正常</option><option value="ABNORMAL">异常</option><option value="CHECKING">核查中</option><option value="DISCARDED">废弃</option></select><select v-model="typeFilter" aria-label="设施分类"><option value="">全部分类</option><option v-for="[name,count] in types" :key="name" :value="name">{{ name }}（{{ count }}）</option></select></div></div>
         <div class="list-heading"><b>设施清单</b><span>点击定位</span></div>
         <div ref="listElement" class="facility-list"><button v-for="item in pageRows" :key="item.key" type="button" class="facility-item" :class="{active:selectedKey===item.key}" @click="selectFacility(item)"><span class="facility-symbol" :style="{color:categoryColor(item.category)}">{{ item.geometryType }}</span><span class="facility-copy"><strong :title="item.name">{{ item.name }}</strong><small>{{ item.category }} · {{ item.record.bizStatusName || item.record.bizStatus || '状态未知' }}</small></span><span v-if="!item.geometry" class="facility-action">无位置</span></button><p v-if="!pageRows.length" class="empty">{{ pending ? '正在读取设施…' : '暂无符合条件的设施' }}</p></div>
-        <footer><span>{{ page }} / {{ pages }} 页</span><div><button type="button" :disabled="page<=1" @click="page--">上一页</button><button type="button" :disabled="page>=pages" @click="page++">下一页</button></div></footer>
+        <footer><span>{{ pageSize }} 条/页　{{ page }} / {{ pages }} 页</span><div><button type="button" :disabled="page<=1" @click="page--">上一页</button><button type="button" :disabled="page>=pages" @click="page++">下一页</button></div></footer>
       </div>
     </aside>
     <aside v-if="selected" class="category-panel" aria-label="要素详情">
@@ -245,6 +237,8 @@ onBeforeUnmount(() => { version++; observer?.disconnect(); legendObserver?.disco
 .facilities-overview{--details-width:310px;position:relative;height:100%;min-height:450px;overflow:hidden;background:#102d39;color:#def2f5}.facility-map{position:absolute;inset:0;z-index:0}.page-title{position:absolute;z-index:450;top:22px;left:24px;pointer-events:none;text-shadow:0 2px 9px #00141e}.page-title span{font-size:11px;color:#a3d0dd}.page-title h1{font-size:23px;line-height:1.25;margin:8px 0 4px}.page-title p{margin:0;color:#d0e6e9;font-size:11px}.facilities-overview button{font:inherit;cursor:pointer}.map-link{position:absolute;z-index:500;right:20px;top:20px;padding:10px 14px;border:1px solid #5eafbf66;border-radius:7px;background:#0b3142eb;color:#d5eff4;box-shadow:0 6px 22px #00182055}.status-toast{position:absolute;z-index:540;top:80px;left:50%;transform:translateX(-50%);max-width:50%;padding:10px 14px;border:1px solid #467b88;border-radius:6px;background:#0b3040ef;color:#cee9ef;font-size:12px}.status-toast.is-error{color:#ffb7a7}.status-toast button{border:0;background:none;color:#75ddea}.facility-drawer,.category-panel{position:absolute;z-index:500;display:flex;flex-direction:column;overflow:hidden;border:1px solid #7ab7c33b;border-radius:10px;background:linear-gradient(145deg,#143d4bf2,#092936f2);box-shadow:0 10px 35px #00182166;backdrop-filter:blur(16px)}.facility-drawer{top:118px;bottom:var(--drawer-bottom,252px);left:20px;width:310px}.category-panel{top:80px;right:20px;bottom:180px;width:270px}.facility-drawer.is-collapsed{bottom:auto;width:auto}.drawer-header,.category-header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:15px 16px;border-bottom:1px solid #7fa9b529}.drawer-header small,.category-header small{display:block;color:#74afbc;font-size:9px;letter-spacing:1.2px}.drawer-header h2,.category-header h2{margin:5px 0 0;font-size:15px;color:#e7f8fa}.drawer-header h2 span{margin-left:5px;color:#72dce2;font-size:11px;font-weight:400}.icon-button{width:28px;height:28px;border:1px solid #719da53b;border-radius:5px;background:#39687a35;color:#c3e9ee;font-size:20px!important;line-height:20px}.icon-button:hover{background:#337b8d70}.drawer-content{display:flex;flex:1;min-height:0;flex-direction:column}.drawer-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:14px 14px 7px}.drawer-summary div{display:grid;gap:5px;padding:10px 8px;border-radius:6px;background:#4584931c}.drawer-summary strong{font-size:19px;color:#61dfe2;font-variant-numeric:tabular-nums}.drawer-summary span,.count-note{font-size:10px;color:#9ac0ca}.count-note{margin:0;padding:0 15px 11px}.filters{padding:0 14px 10px}.search-field{display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #6595a260;border-radius:6px;background:#0b2c39a8}.search-field span{font-size:20px;color:#9dc9d3}.search-field input{height:34px;width:100%;min-width:0;border:0;outline:0;background:none;color:#e5f5f6;font:inherit;font-size:12px}.search-field input::placeholder{color:#8bb0bd}.filter-row{display:flex;gap:7px;margin-top:8px}.filter-row select{width:50%;min-width:0;height:33px;padding:0 7px;border:1px solid #6595a260;border-radius:5px;background:#103542;color:#cde7ed;font-size:11px}.filter-row option{background:#103542}.list-heading{display:flex;justify-content:space-between;padding:10px 15px;border-top:1px solid #719dab2a;border-bottom:1px solid #719dab2a;font-size:12px}.list-heading span{color:#83adba;font-size:10px}.facility-list{flex:1;min-height:0;overflow:auto;padding:4px 8px;scrollbar-width:thin;scrollbar-color:#548391 transparent}.facility-item{height:52px;box-sizing:border-box;display:flex;align-items:center;gap:9px;width:100%;padding:10px 7px;border:0;border-radius:5px;background:transparent;color:#d7edf0;text-align:left}.facility-item:hover,.facility-item.active{background:#37859a47}.facility-symbol{display:grid;place-items:center;width:29px;height:29px;flex:none;border:1px solid #60cbd66b;border-radius:7px;background:#39bfcb21;color:#6ae0e5;font-size:11px}.facility-copy{display:grid;gap:4px;min-width:0;flex:1}.facility-copy strong,.facility-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.facility-copy strong{font-size:12px;font-weight:500}.facility-copy small{color:#8db7c2;font-size:10px}.facility-action{color:#6ecdd8;font-size:10px;white-space:nowrap}.empty{padding:20px 5px;text-align:center;color:#95bac4;font-size:11px}.drawer-content footer{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid #719dab2a;color:#9bbfc8;font-size:11px}.drawer-content footer div{display:flex;gap:6px}.drawer-content footer button{border:1px solid #507f8d;border-radius:4px;background:#214e5e;color:#c1e2e8;padding:5px 8px;font-size:10px}.drawer-content footer button:disabled{opacity:.4;cursor:default}@media(max-width:1100px){.facility-drawer{width:270px}.category-panel{width:230px}}@media(max-width:700px){.facility-drawer{left:10px;top:108px;bottom:150px;width:230px}.category-panel{right:10px;top:70px;bottom:auto;width:190px;max-height:45%}.page-title{top:15px;left:14px}.page-title h1{font-size:19px}.page-title span{font-size:9px}.map-link{right:10px;top:12px;padding:7px 9px;font-size:11px}.status-toast{top:65px;max-width:70%}}
 .feature-details{overflow:auto;min-height:0;padding:14px;scrollbar-width:thin;scrollbar-color:#548391 transparent}.feature-summary{display:grid;gap:7px;padding:14px;border:1px solid #6ac4cd35;border-radius:6px;background:#2d728635}.feature-summary small{font-size:10px;color:#8dc4cf}.feature-summary strong{font-size:15px;color:#e5f6f7;overflow-wrap:anywhere}.feature-details dl{margin:12px 0 0}.feature-details dl>div{display:grid;grid-template-columns:minmax(70px,.8fr) minmax(0,1.2fr);gap:10px;padding:10px 2px;border-bottom:1px solid #719dab2a;font-size:11px;line-height:1.6}.feature-details dt{color:#91bbc5}.feature-details dd{margin:0;color:#d8edf0;overflow-wrap:anywhere}
 .filter-row select:focus { outline: none; box-shadow: none; }
+.facility-drawer { top: 50px; }
+@media(max-width:700px) { .facility-drawer { top: 43px; } }
 .filter-row select:focus-visible { border-color: #a2c9d1; }
 @media(max-width:1100px){.facilities-overview{--details-width:270px}}
 @media(max-width:700px){.facilities-overview{--details-width:230px}.facilities-overview :deep(.map-symbol-legend){left:10px}}

@@ -3,6 +3,8 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallo
 import { getFlightTaskMedia, getUavFlightTaskOptions, getUavMediaSummary, type UavFlightTaskOption } from '@/api/patrol'
 import { createCollectionMediaPager, type CollectionMediaEntry, type CollectionMediaFilter } from '@/utils/collection-media-pager'
 import type { FlightReviewMedia } from '@/api/flight-review'
+import { flightReviewFileApiPath } from '@/api/flight-review'
+import { apiClient } from '@/api/client'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
 import SharedVideoPlayer from '@/workspace-components/spot-identification/SharedVideoPlayer.vue'
 import PhotoLocationControl from '@/workspace-components/spot-identification/PhotoLocationControl.vue'
@@ -101,7 +103,7 @@ const previewTaskMedia = computed(() => previewTask.value ? taskReviewMedia(prev
 
 function toReviewMedia(media: LiveMediaItem, task: UavFlightTaskOption): FlightReviewMedia {
   return { id: media.id, taskId: task.id, fileName: media.name, type: isVideoMedia(media) ? 'video' : media.mediaType || 'image',
-    thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: '', shootTime: media.capturedAt,
+    thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: media.localFileUrl || '', shootTime: media.capturedAt,
     longitude: media.longitude, latitude: media.latitude }
 }
 function taskReviewMedia(task: UavFlightTaskOption) {
@@ -163,7 +165,40 @@ function setPage(page: number) {
   closePreview()
   void loadMediaPage(Math.min(Math.max(1, Math.trunc(page)), pageCount.value))
 }
-function mediaSource(media: LiveMediaItem) { return media.thumbnail || media.originalUrl || '' }
+function localMediaUrl(media: LiveMediaItem) {
+  if (!media.localFileUrl) return ''
+  try {
+    const path = flightReviewFileApiPath(media.localFileUrl).split('?')[0]
+    const base = new URL(apiClient.defaults.baseURL || '/api', window.location.origin)
+    if (base.origin !== window.location.origin) return ''
+    const url = new URL(`${base.pathname.replace(/\/$/, '')}${path}`, base.origin)
+    const token = localStorage.getItem('access_token')
+    if (token) url.searchParams.set('token', token)
+    return url.href
+  } catch { return '' }
+}
+function localThumbnailUrl(media: LiveMediaItem) {
+  if (!media.localThumbnailUrl) return ''
+  try {
+    const path = new URL(media.localThumbnailUrl, window.location.origin).pathname.replace(/^\/api(?=\/v1\/uav\/media\/thumb\/)/, '')
+    if (!/^\/v1\/uav\/media\/thumb\/[\w-]+\/?$/.test(path) || path.split('/').filter(Boolean).at(-1) !== media.id) return ''
+    const base = new URL(apiClient.defaults.baseURL || '/api', window.location.origin)
+    if (base.origin !== window.location.origin) return ''
+    const url = new URL(`${base.pathname.replace(/\/$/, '')}${path}`, base.origin)
+    const token = localStorage.getItem('access_token')
+    if (token) url.searchParams.set('token', token)
+    return url.href
+  } catch { return '' }
+}
+function mediaSource(media: LiveMediaItem) { return localThumbnailUrl(media) || media.thumbnail || localMediaUrl(media) || media.originalUrl || '' }
+function thumbnailFailed(event: Event, media: LiveMediaItem) {
+  const image = event.target as HTMLImageElement
+  if (!image.dataset.fallback && media.thumbnail && localThumbnailUrl(media)) {
+    image.dataset.fallback = 'true'
+    image.src = media.thumbnail
+  } else image.style.visibility = 'hidden'
+}
+function videoSource(media: LiveMediaItem) { return localMediaUrl(media) || media.originalUrl || '' }
 function mediaTimestamp(media: LiveMediaItem, task: UavFlightTaskOption) {
   const captured = Date.parse((media.capturedAt || '').replace(' ', 'T'))
   if (Number.isFinite(captured)) return captured
@@ -193,12 +228,12 @@ function beginVideoPlaybackCheck() {
   }, 20_000)
 }
 function openMedia(media: LiveMediaItem, task: UavFlightTaskOption, items: CollectionMediaEntry[]) {
-  if (!media.originalUrl && !media.thumbnail) return
+  if (!media.originalUrl && !media.thumbnail && !media.localFileUrl) return
   previewVersion++
   previewFilter = currentFilter()
   previewSwitching.value = false
   previewNotice.value = ''
-  previewItems.value = items.filter(({ media: item }) => item.originalUrl || item.thumbnail)
+  previewItems.value = items.filter(({ media: item }) => item.originalUrl || item.thumbnail || item.localFileUrl)
   previewIndex.value = previewItems.value.findIndex((item) => item.task.id === task.id && item.media.id === media.id)
   const entry = previewItems.value[previewIndex.value]
   previewMedia.value = entry?.media || media
@@ -237,7 +272,7 @@ async function switchPreview(step: number) {
       filteredMedia.value = result.entries
       hasMoreMedia.value = result.hasMore
       mediaCacheVersion.value++
-      previewItems.value = result.entries.filter(({ media }) => media.originalUrl || media.thumbnail)
+      previewItems.value = result.entries.filter(({ media }) => media.originalUrl || media.thumbnail || media.localFileUrl)
       index = previewIndex.value + step
     }
     if (!active()) return
@@ -424,7 +459,7 @@ onBeforeUnmount(() => {
         <div v-else-if="!pageMedia.length" class="page-state">没有符合筛选条件的图片或视频</div>
         <section v-else class="collection-media-grid media-grid" aria-label="采集数据列表">
           <article v-for="{ media, task } in pageMedia" :key="`${task.id}-${media.id}`" class="media-card" :class="{ 'has-srt': isVideoMedia(media) }"><button type="button" class="media-card-open" :aria-label="`预览 ${media.name}`" @click="openMedia(media, task, filteredMedia)">
-            <div class="media-preview" :class="{ 'video-preview':isVideoMedia(media), 'has-thumbnail':isVideoMedia(media) && Boolean(media.thumbnail) }"><template v-if="isVideoMedia(media)"><img v-if="media.thumbnail" :src="media.thumbnail" :alt="`${media.name} 视频缩略图`" loading="lazy" /><span class="video-preview__play"><i>▶</i><em>视频</em></span></template><img v-else-if="mediaSource(media)" :src="mediaSource(media)" :alt="media.name" loading="lazy" /><span v-else>暂无缩略图</span></div>
+            <div class="media-preview" :class="{ 'video-preview':isVideoMedia(media), 'has-thumbnail':isVideoMedia(media) && Boolean(localThumbnailUrl(media) || media.thumbnail) }"><template v-if="isVideoMedia(media)"><img v-if="localThumbnailUrl(media) || media.thumbnail" :src="localThumbnailUrl(media) || media.thumbnail" :alt="`${media.name} 视频缩略图`" loading="lazy" referrerpolicy="no-referrer" @error="thumbnailFailed($event, media)" /><span class="video-preview__play"><i>▶</i><em>视频</em></span></template><img v-else-if="mediaSource(media)" :src="mediaSource(media)" :alt="media.name" loading="lazy" referrerpolicy="no-referrer" @error="thumbnailFailed($event, media)" /><span v-else>暂无缩略图</span></div>
             <div class="media-card__info"><strong :title="media.name">{{ media.name }}</strong><small>{{ isVideoMedia(media) ? '视频' : '图片' }} · {{ media.capturedAt || task.createTime }}</small><small class="media-card__task" :title="task.name">来源任务：{{ task.name }}</small></div>
           </button><button v-if="isVideoMedia(media)" type="button" class="media-card-srt" :aria-label="`${media.name}：SRT 信息`" @click.stop="openSrtInfo(media, task)">SRT 信息</button></article>
         </section>
@@ -441,13 +476,13 @@ onBeforeUnmount(() => {
       <button class="preview-close" title="退出全屏（Esc）" aria-label="退出全屏" @click="closePreview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
       <button class="preview-nav preview-prev" :disabled="previewSwitching" title="上一张（← / ↑）" aria-label="上一张" @click.stop="switchPreview(-1)">‹</button>
       <section v-if="isVideoMedia(previewMedia)" class="preview-video-stage" @click.stop>
-        <SharedVideoPlayer v-if="previewMedia.originalUrl && previewReviewMedia && !videoPlaybackFailed" ref="videoPlayer" :key="`${previewTask?.id}:${previewMedia.id}:${videoPlayerVersion}`" :media="previewReviewMedia" :media-list="previewTaskMedia" :src="previewMedia.originalUrl" autoplay fullscreen @ready="markVideoReady" @error="markVideoFailed" />
-        <div v-if="previewMedia.originalUrl && !videoPlaybackReady && !videoPlaybackFailed" class="video-loading"><i></i><span>正在读取原视频…</span></div>
-        <section v-if="videoPlaybackFailed || !previewMedia.originalUrl" class="hevc-notice">
+        <SharedVideoPlayer v-if="videoSource(previewMedia) && previewReviewMedia && !videoPlaybackFailed" ref="videoPlayer" :key="`${previewTask?.id}:${previewMedia.id}:${videoPlayerVersion}`" :media="previewReviewMedia" :media-list="previewTaskMedia" :src="videoSource(previewMedia)" autoplay fullscreen @ready="markVideoReady" @error="markVideoFailed" />
+        <div v-if="videoSource(previewMedia) && !videoPlaybackReady && !videoPlaybackFailed" class="video-loading"><i></i><span>正在读取原视频…</span></div>
+        <section v-if="videoPlaybackFailed || !videoSource(previewMedia)" class="hevc-notice">
           <i>!</i>
-          <h2>{{ !previewMedia.originalUrl ? '后端未返回视频播放地址' : videoFailureReason === 'timeout' ? '视频分段读取超时' : '当前浏览器无法播放该视频' }}</h2>
-          <p>{{ !previewMedia.originalUrl ? '当前仅有视频缩略图，需后端提供原视频或网页兼容预览地址。' : videoFailureReason === 'timeout' ? '浏览器已尝试边缓冲边播放，但未能在 20 秒内取得可播放数据。请检查视频服务是否支持 HTTP Range、Content-Length 及 MP4 Fast Start。' : '可能由 HEVC/H.265 编码、视频地址跨域或服务端响应格式异常导致，可下载原视频后使用本地播放器打开。' }}</p>
-          <button v-if="previewMedia.originalUrl" type="button" @click="retryVideoPlayback">重新尝试</button>
+          <h2>{{ !videoSource(previewMedia) ? '后端未返回视频播放地址' : videoFailureReason === 'timeout' ? '视频分段读取超时' : '当前浏览器无法播放该视频' }}</h2>
+          <p>{{ !videoSource(previewMedia) ? '当前仅有视频缩略图，需后端提供原视频或网页兼容预览地址。' : videoFailureReason === 'timeout' ? '浏览器已尝试边缓冲边播放，但未能在 20 秒内取得可播放数据。请检查视频服务是否支持 HTTP Range、Content-Length 及 MP4 Fast Start。' : '可能由 HEVC/H.265 编码、视频地址跨域或服务端响应格式异常导致，可下载原视频后使用本地播放器打开。' }}</p>
+          <button v-if="videoSource(previewMedia)" type="button" @click="retryVideoPlayback">重新尝试</button>
         </section>
       </section>
       <div
@@ -467,7 +502,7 @@ onBeforeUnmount(() => {
       </div>
       <button class="preview-nav preview-next" :disabled="previewSwitching" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
       <p v-if="previewNotice" class="preview-notice" role="status">{{ previewNotice }}</p>
-      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}{{ hasMoreMedia ? '+' : '' }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small><a v-if="isVideoMedia(previewMedia) && previewMedia.originalUrl" class="preview-video-download" :href="previewMedia.originalUrl" target="_blank" rel="noopener" download>下载原视频</a></footer>
+      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}{{ hasMoreMedia ? '+' : '' }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small><a v-if="isVideoMedia(previewMedia) && videoSource(previewMedia)" class="preview-video-download" :href="videoSource(previewMedia)" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" download>下载原视频</a></footer>
     </div>
     <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" @close="srtContext = undefined" />
   </div>

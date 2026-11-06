@@ -59,6 +59,8 @@ export interface GovernanceTaskPageQuery {
   pageNum: number
   pageSize: number
   keyword?: string
+  /** 当前工作流节点办理人。 */
+  assigneeId?: string
   sceneCode?: string
   taskStatus?: GovernanceTaskStatus
   priority?: number

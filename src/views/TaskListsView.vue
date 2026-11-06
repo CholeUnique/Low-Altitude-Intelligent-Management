@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
 import TaskRangeThumbnail from '@/components/TaskRangeThumbnail.vue'
@@ -8,7 +8,7 @@ import { collectPages } from '@/api/pagination'
 import { getTaskWorkflow } from '@/api/task-workflow'
 import { projectTaskListWorkflow } from '@/utils/task-list-workflow'
 import { getGovernanceTaskGeometry, getGovernanceTaskPage } from '@/api/governance-task'
-import { getDepartmentList, type DepartmentInfo } from '@/api/account-management'
+import { getDepartmentList, getDeptUserPage, type DepartmentInfo, type UserOption } from '@/api/account-management'
 import { getSceneDictionary } from '@/api/scene'
 import { useUserStore } from '@/stores/user'
 import type { GovernanceTask, GovernanceTaskStatus, TaskGeometryFeatureCollection } from '@/api/governance-task'
@@ -23,6 +23,10 @@ const status = ref<GovernanceTaskStatus | ''>('')
 const priority = ref<number | ''>('')
 const parentDeptId = ref('')
 const childDeptId = ref('')
+const handlerFilter = ref('')
+const handlerOptions = ref<UserOption[]>([])
+const handlerLoading = ref(false)
+const handlerError = ref('')
 const departments = ref<DepartmentInfo[]>([])
 const departmentLoading = ref(false)
 const departmentError = ref('')
@@ -40,9 +44,15 @@ const sceneLoading = ref(true)
 const sceneError = ref('')
 const taskRangeGeometries = ref<Record<string, TaskGeometryFeatureCollection>>({})
 const taskRangePreviewLoading = ref(false)
+const tableElement = ref<HTMLElement>()
+const requestPageSize = ref(7)
+const currentHandlers = ref<Record<string, string>>({})
+let projectedTasks: GovernanceTask[] = []
+let tableObserver: ResizeObserver | undefined
 let latestRequest = 0
 let latestSceneRequest = 0
 let latestRangePreviewRequest = 0
+let latestHandlerRequest = 0
 
 const selectedScene = computed(() => sceneOptions.value.find((scene) => scene.id === sceneFilter.value))
 const selectedOrganizationSceneId = computed(() => selectedScene.value
@@ -55,7 +65,6 @@ const rootDepartments = computed(() => {
 const childDepartments = computed(() =>
   departments.value.filter((item) => item.parentId === parentDeptId.value))
 const selectedDeptId = computed(() => childDeptId.value || parentDeptId.value || user.activeDeptId)
-const requestPageSize = computed(() => 7)
 const pageCount = computed(() => Math.max(1, Math.ceil(taskTotal.value / requestPageSize.value)))
 const paginationItems = computed<(number | 'ellipsis')[]>(() => {
   const total = pageCount.value
@@ -124,10 +133,10 @@ function filteredTaskRecords(apiRecords: GovernanceTask[], filterStatus = true) 
 function applyTaskRecords(records: GovernanceTask[], requestId: number) {
   const visibleRecords = filteredTaskRecords(records)
   taskTotal.value = visibleRecords.length
+  if (currentPage.value > Math.max(1, Math.ceil(visibleRecords.length / requestPageSize.value))) setPage(1)
   const start = (currentPage.value - 1) * requestPageSize.value
   taskRows.value = visibleRecords.slice(start, start + requestPageSize.value)
   void loadTaskRangePreviews(taskRows.value, requestId)
-  if (currentPage.value > Math.max(1, Math.ceil(visibleRecords.length / requestPageSize.value))) setPage(1)
 }
 
 async function loadTasks() {
@@ -143,6 +152,7 @@ async function loadTasks() {
       pageNum,
       pageSize,
       keyword: keyword.value || undefined,
+      assigneeId: handlerFilter.value || undefined,
       // 流程已启动时业务 taskStatus 可能仍为 0，状态筛选须在合并流程后执行。
       priority: selectedPriority,
       deptId: selectedDeptId.value,
@@ -152,21 +162,30 @@ async function loadTasks() {
     // 后端切换部门后仍可能返回历史跨单位任务；前端按当前单位场景再做一层隔离。
     const candidates = filteredTaskRecords(records, false)
     const projected = [...candidates]
+    const handlers: Record<string, string> = {}
     const failures: string[] = []
     let next = 0
     await Promise.all(Array.from({ length: Math.min(6, candidates.length) }, async () => {
       while (next < candidates.length && requestId === latestRequest) {
         const index = next++
         const task = candidates[index]!
-        try { projected[index] = projectTaskListWorkflow(task, await getTaskWorkflow(task.id)) }
-        catch (error) { failures.push(`${task.taskNo}：${error instanceof Error ? error.message : '读取失败'}`) }
+        try {
+          const flow = await getTaskWorkflow(task.id)
+          projected[index] = projectTaskListWorkflow(task, flow)
+          const node = flow?.status === 'RUNNING' && ![3, 4, 5].includes(task.taskStatus) ? flow.currentNode : undefined
+          handlers[task.id] = node ? node.assigneeName || (node.assigneeId ? `用户 #${node.assigneeId}` : '未指派') : '—'
+        } catch (error) { handlers[task.id] = '读取失败'; failures.push(`${task.taskNo}：${error instanceof Error ? error.message : '读取失败'}`) }
       }
     }))
     if (requestId !== latestRequest) return
     if (failures.length) workflowError.value = `部分任务流程读取失败，相关任务暂按业务状态显示：${failures.join('；')}`
-    applyTaskRecords(projected, requestId)
+    currentHandlers.value = handlers
+    projectedTasks = projected
+    applyTaskRecords(projectedTasks, requestId)
   } catch (error) {
     if (requestId !== latestRequest) return
+    projectedTasks = []
+    currentHandlers.value = {}
     applyTaskRecords([], requestId)
     taskError.value = error instanceof Error ? error.message : '真实任务加载失败，请重试。'
   } finally {
@@ -221,18 +240,33 @@ async function loadDepartments() {
   }
 }
 
+async function loadHandlers(deptId?: string) {
+  const version = ++latestHandlerRequest
+  handlerOptions.value = []
+  handlerError.value = ''
+  if (!deptId) { handlerLoading.value = false; return }
+  handlerLoading.value = true
+  try {
+    const people = await collectPages((pageNum, pageSize) => getDeptUserPage({ deptId, pageNum, pageSize, includeChild: true }))
+    if (version === latestHandlerRequest) handlerOptions.value = people
+  } catch (error) {
+    if (version === latestHandlerRequest) handlerError.value = error instanceof Error ? error.message : '处理人列表读取失败'
+  } finally { if (version === latestHandlerRequest) handlerLoading.value = false }
+}
+
 function openTask(task: GovernanceTask) {
   router.push(`/tasks/${task.id}`)
 }
 
-watch([keyword, status, priority, sceneFilter, parentDeptId, childDeptId], () => {
+watch([keyword, status, priority, sceneFilter, parentDeptId, childDeptId, handlerFilter], () => {
   if (currentPage.value !== 1) setPage(1)
-  else void loadTasks()
+  void loadTasks()
 })
 watch(parentDeptId, () => {
   if (!childDepartments.value.some((item) => item.id === childDeptId.value)) childDeptId.value = ''
 })
-watch([currentPage, requestPageSize], () => void loadTasks())
+watch(selectedDeptId, (deptId) => { handlerFilter.value = ''; void loadHandlers(deptId) }, { immediate: true })
+watch([currentPage, requestPageSize], () => applyTaskRecords(projectedTasks, latestRequest))
 watch(selectedScene, () => {
   if (sceneFilter.value) void loadTasks()
 })
@@ -246,9 +280,17 @@ watch([() => user.organizationId, () => user.activeDeptId], async () => {
 watch(pageCount, () => setPage(currentPage.value))
 
 onMounted(async () => {
+  if (tableElement.value) {
+    tableObserver = new ResizeObserver(() => {
+      const height = tableElement.value?.clientHeight || 0
+      if (height > 36) requestPageSize.value = Math.max(1, Math.floor((height - 36) / 62))
+    })
+    tableObserver.observe(tableElement.value)
+  }
   await Promise.all([loadSceneDictionary(), loadDepartments()])
   void loadTasks()
 })
+onBeforeUnmount(() => { latestRequest++; latestRangePreviewRequest++; latestHandlerRequest++; tableObserver?.disconnect() })
 </script>
 
 <template>
@@ -272,21 +314,24 @@ onMounted(async () => {
           </select>
         </div>
       </label>
+      <label>当前处理人<select v-model="handlerFilter" :disabled="handlerLoading || !!handlerError"><option value="">{{ handlerLoading ? '人员加载中…' : '全部处理人' }}</option><option v-for="person in handlerOptions" :key="person.id" :value="person.id">{{ person.realName || person.nickname || person.username }}（{{ person.username }}）</option></select></label>
       <label>优先级<select v-model.number="priority"><option value="">全部优先级</option><option :value="2">高</option><option :value="1">中</option><option :value="0">低</option></select></label>
     </section>
     <p v-if="sceneError" class="scene-dictionary-error">场景字典加载失败：{{ sceneError }}。请检查登录状态与网络后刷新页面。</p>
     <p v-if="departmentError" class="scene-dictionary-error">部门列表加载失败：{{ departmentError }}。筛选将使用当前登录部门。</p>
+    <p v-if="handlerError" class="scene-dictionary-error" role="alert">处理人列表加载失败：{{ handlerError }} <button type="button" @click="loadHandlers(selectedDeptId)">重试</button></p>
     <p v-if="workflowError" class="scene-dictionary-error" role="alert">{{ workflowError }}</p>
 
-    <section class="task-table">
+    <section ref="tableElement" class="task-table">
       <div class="task-table-row task-table-head">
-        <span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
+        <span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建单位 / 负责人</span><span>当前处理人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
       </div>
       <div v-for="task in taskRows" :key="task.id" class="task-table-row">
         <span class="task-name"><b :title="task.name">{{ task.name }}</b><small>{{ task.taskNo }}</small></span>
         <span><em class="scene-tag">{{ task.sceneName }}</em></span>
         <span><em class="status-tag" :class="taskStatusClass(task)" :title="task.taskStatusDesc">{{ task.taskStatusDesc }}</em></span>
         <span class="task-owner"><b>{{ task.deptName }}</b><small v-if="task.assigneeName || task.assigneeId">{{ task.assigneeName || `负责人 #${task.assigneeId}` }}</small></span>
+        <span :title="currentHandlers[task.id] || '—'">{{ currentHandlers[task.id] || '—' }}</span>
         <span class="task-created" :title="formatTime(task.createTime)">{{ formatTime(task.createTime) }}</span>
         <span class="task-range">
           <TaskRangeThumbnail v-if="taskRangeGeometries[task.id]" :geo-json="taskRangeGeometries[task.id]!" />
@@ -398,6 +443,8 @@ onMounted(async () => {
   .task-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 .task-list-page .search-box{min-width:0;overflow:hidden;height:34px;border:1px solid #d8e0e7;background:#fff;align-items:center}.task-list-page .search-box input{height:100%;min-width:0;flex:1;align-self:stretch;background:transparent;border:0;border-radius:0;padding:0;box-shadow:none}
+.task-filters{grid-template-columns:1.35fr repeat(5,minmax(135px,1fr))}
+@media(max-width:1320px){.task-filters{grid-template-columns:repeat(3,minmax(0,1fr))}}
 </style>
 
 <style scoped>
@@ -409,7 +456,7 @@ onMounted(async () => {
 .task-table-row{flex:1;min-height:48px;max-height:62px}
 .task-list-page .task-table-row>span{padding:2px 8px}
 .task-table-row{box-sizing:border-box}
-.task-list-page .task-table-row{grid-template-columns:1.2fr .85fr .75fr .8fr .85fr 65px minmax(250px,2.5fr) 65px}
+.task-list-page .task-table-row{grid-template-columns:1.2fr .85fr .75fr .8fr .65fr .85fr 65px minmax(250px,2.5fr) 65px}
 .task-table-row>span{overflow:hidden}
 .task-owner small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .status-tag{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
