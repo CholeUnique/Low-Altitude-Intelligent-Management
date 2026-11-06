@@ -8,6 +8,7 @@ const props = defineProps<{
   geometry?: TaskGeometryFeatureCollection
   repairGeometry?: TaskGeometryFeatureCollection
   editable?: boolean
+  facilityLocation?: boolean
 }>()
 const emit = defineEmits<{ 'update:repairGeometry': [value: TaskGeometryFeatureCollection | undefined] }>()
 const container = ref<HTMLElement>()
@@ -26,8 +27,10 @@ function render() {
   try {
     if (props.geometry?.features.length) {
       facilityLayer = L.geoJSON(props.geometry as GeoJSON.FeatureCollection, {
-        style: feature => ({ color: '#9aeefe', weight: 4, opacity: 1, fill: !/LineString/i.test(feature?.geometry?.type || ''), fillColor: '#66b9da', fillOpacity: .25 }),
-        pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 9, color: '#9aeefe', weight: 3, fillColor: '#135888', fillOpacity: .85 }),
+        style: feature => /Point/i.test(feature?.geometry?.type || '')
+          ? { color: '#9aeefe', weight: 3, opacity: 1, fill: true, fillColor: '#135888', fillOpacity: 1 }
+          : { color: '#9aeefe', weight: 4, opacity: 1, fill: !/LineString/i.test(feature?.geometry?.type || ''), fillColor: '#66b9da', fillOpacity: .25 },
+        pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 9, color: '#9aeefe', weight: 3, fillColor: '#135888', fillOpacity: 1 }),
       }).addTo(map)
     }
     if (props.repairGeometry?.features.length) {
@@ -65,7 +68,7 @@ onMounted(() => {
   if (!container.value) return
   const token = import.meta.env.VITE_TIANDITU_TOKEN
   if (!token) { error.value = '地图底图尚未配置'; return }
-  map = L.map(container.value, { center: [32.455, 119.923], zoom: 10, zoomControl: true, attributionControl: false })
+  map = L.map(container.value, { center: [32.455, 119.923], zoom: 10, zoomControl: !props.facilityLocation, attributionControl: false })
   const url = (layer: string) => `https://t{s}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}&tk=${token}`
   L.tileLayer(url('img'), { subdomains: '01234567', maxNativeZoom: 18, maxZoom: 21 }).addTo(map)
   L.tileLayer(url('cia'), { subdomains: '01234567', maxNativeZoom: 18, maxZoom: 21 }).addTo(map)
@@ -95,7 +98,7 @@ onBeforeUnmount(() => { observer?.disconnect(); map?.remove(); map = undefined }
       <button v-if="mode || repairGeometry" type="button" @click="clear">清除</button>
     </div>
     <p v-if="error" class="facility-map-error" role="alert">{{ error }}</p>
-    <small class="facility-map-legend">蓝色：任务关联几何　橙色：本次故障位置。关联几何不自动等同设施档案。</small>
+    <small v-if="!facilityLocation" class="facility-map-legend">蓝色：任务关联几何　橙色：本次故障位置。关联几何不自动等同设施档案。</small>
   </div>
 </template>
 

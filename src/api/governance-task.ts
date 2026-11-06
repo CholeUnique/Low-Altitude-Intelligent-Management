@@ -169,6 +169,7 @@ export interface GovernanceTaskOperateLog {
 
 export interface GovernanceTaskDetail {
   task: GovernanceTask
+  reportImages: Array<{ imageId: string; fileName: string; fileExt?: string; fileSize?: number; sortNo?: number; createTime?: string }>
   refSummary?: string
   abnormalCount?: number
   /** 当前任务异常图斑总面积，单位 m²。 */
@@ -273,6 +274,7 @@ interface BizTaskDto {
 
 interface BizTaskDetailDto {
   task: BizTaskDto
+  reportImages?: Array<{ imageId: string | number; fileName: string; fileExt?: string; fileSize?: number; sortNo?: number; createTime?: string }>
   refSummary?: string
   abnormalCount?: number
   abnormalArea?: number
@@ -644,6 +646,7 @@ export async function getGovernanceTaskDetail(taskId: string): Promise<Governanc
   const detail = await apiClient.post<never, BizTaskDetailDto>('/v1/biz/task/detail', { id: taskId })
   return {
     task: toGovernanceTask(detail.task),
+    reportImages: (detail.reportImages || []).map(image => ({ ...image, imageId: String(image.imageId) })),
     refSummary: detail.refSummary,
     abnormalCount: detail.abnormalCount,
     abnormalArea: detail.abnormalArea,

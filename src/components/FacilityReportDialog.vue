@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { reportFacilityIssue, type FacilityRecord, type FacilityReportResult } from '@/api/facility'
+import FacilityReportPhotos from './FacilityReportPhotos.vue'
 
 const props = defineProps<{ record: FacilityRecord; deptId?: string }>()
 const emit = defineEmits<{ close: []; reported: [FacilityReportResult] }>()
@@ -8,6 +9,7 @@ const emit = defineEmits<{ close: []; reported: [FacilityReportResult] }>()
 const content = ref('')
 const reporterName = ref('')
 const reporterPhone = ref('')
+const photos = ref<File[]>([])
 const busy = ref(false)
 const error = ref('')
 const result = ref<FacilityReportResult>()
@@ -23,6 +25,7 @@ async function submit() {
     const payload = await reportFacilityIssue({
       facilityId: props.record.id,
       reportContent: text,
+      files: photos.value,
       ...(reporterName.value.trim() ? { reporterName: reporterName.value.trim() } : {}),
       ...(reporterPhone.value.trim() ? { reporterPhone: reporterPhone.value.trim() } : {}),
     })
@@ -52,6 +55,7 @@ async function submit() {
         <dl>
           <div><dt>任务编号</dt><dd>{{ result.taskNo || result.taskId || '—' }}</dd></div>
           <div><dt>设施最新状态</dt><dd class="status">{{ result.facilityBizStatusName || result.facilityBizStatus || '异常' }}</dd></div>
+          <div><dt>上报照片</dt><dd>{{ result.imageCount ?? 0 }} 张</dd></div>
         </dl>
         <p>任务已进入任务中心，可在「任务中心 / 我的待办」中跟进处置进度。</p>
         <footer><button type="button" class="primary" @click="emit('close')">完成</button></footer>
@@ -65,6 +69,7 @@ async function submit() {
           </label>
           <label>上报人<input v-model.trim="reporterName" :disabled="busy" maxlength="50" placeholder="选填" /></label>
           <label>联系电话<input v-model.trim="reporterPhone" :disabled="busy" maxlength="32" placeholder="选填" /></label>
+          <FacilityReportPhotos v-model="photos" :disabled="busy" />
         </div>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <p class="hint">提交后系统会自动创建核查任务并触发处置流程，该设施状态将变为「异常」。</p>
