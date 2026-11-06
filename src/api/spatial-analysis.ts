@@ -16,7 +16,7 @@ export interface SpatialOverlaySummary {
 export type SpatialGeometry = GeoJSON.Polygon | GeoJSON.MultiPolygon
 export type SpatialCollection = GeoJSON.FeatureCollection<SpatialGeometry>
 export type SpatialDifferenceType = 'A_ONLY' | 'B_ONLY'
-export interface SpatialResultLegend { id:string; name:string; symbols:{label:string;color:string}[] }
+export interface SpatialResultLegend { id:string; name:string; symbols:{label:string;color:string;mode?:'filled'|'boundary'}[] }
 export interface SpatialCompareGroup {areaSqm:number;areaMu?:number;spotCount:number;featureCollection:SpatialCollection}
 export interface SpatialGeometryCompare {areaA:number;areaB:number;crsUsed:string;minAreaSqm:number;both:SpatialCompareGroup;aOnly:SpatialCompareGroup;bOnly:SpatialCompareGroup}
 export interface SpatialSpot { seqNo:number; diffType:string; areaSqm:number; centerLng:number; centerLat:number; geometry:SpatialGeometry }

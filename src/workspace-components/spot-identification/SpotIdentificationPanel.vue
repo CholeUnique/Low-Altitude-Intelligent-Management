@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { getTaskAbnormalPage } from '@/api/governance-task'
@@ -815,7 +816,7 @@ onBeforeUnmount(() => {
           <div v-else-if="servicePickerError" class="service-picker-state service-picker-state--error">{{ servicePickerError }}</div>
           <div v-else-if="!imageryMapServices.length" class="service-picker-state">暂无已启用的非矢量影像地图服务</div>
           <fieldset v-else>
-            <legend>参考影像地图服务 <em>*</em></legend>
+            <legend>参考影像地图服务 <WorkbenchRequiredMark /></legend>
             <label v-for="service in imageryMapServices" :key="service.id" :class="{ added: isMapServiceAdded(service) }">
               <input v-model="selectedMapServiceIds" type="checkbox" :value="String(service.id)" :disabled="isMapServiceAdded(service)" />
               <span><b>{{ service.name }}</b><small>{{ isMapServiceAdded(service) ? '已关联到当前图斑' : service.type }}</small></span>

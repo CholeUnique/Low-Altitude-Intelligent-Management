@@ -150,7 +150,7 @@ function submit() {
 .new-route-dialog .el-dialog__body { padding: 0 18px 2px; }
 .new-route-dialog .el-dialog__footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 18px 18px; }
 .new-route-dialog .field-label { display: block; margin: 13px 0 7px; color: #e5e5eb; font-size: 14px; font-weight: 600; }
-.new-route-dialog .field-label.required::before { content: '*'; margin-right: 5px; color: #ff696b; }
+.new-route-dialog .field-label.required::before { content: '*'; margin-right: .2em; color: #e53935; font-size: 1.3em; font-weight: 700; line-height: 1; }
 .new-route-dialog .field-control { width: 100%; height: 34px; padding: 0 10px; color: #e9e9ef; background: #3b3b45; border: 1px solid #3f404b; border-radius: 4px; outline: none; font-size: 14px; }
 .new-route-dialog .field-control:focus { border-color: #5c9dff; box-shadow: 0 0 0 1px #5c9dff; }
 .new-route-dialog .field-control:disabled { color: #7f8290; cursor: wait; }

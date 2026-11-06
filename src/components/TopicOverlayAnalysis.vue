@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, markRaw, type Raw } from 'vue'
 import L from 'leaflet'
-import { analyzeSpatialOverlay, compareSpatialGeometries, getSpatialLayers, getSpatialOverlayDetail, type SpatialCollection, type SpatialDifferenceType, type SpatialLayer, type SpatialInput, type SpatialResultLegend, type SpatialSource } from '@/api/spatial-analysis'
+import { analyzeSpatialOverlay, compareSpatialGeometries, getSpatialLayers, getSpatialOverlayDetail, getSpatialOverlayGeoJson, type SpatialCollection, type SpatialDifferenceType, type SpatialLayer, type SpatialInput, type SpatialResultLegend, type SpatialSource } from '@/api/spatial-analysis'
 import { annotateSpatialDifference, loadSpatialOverlayResult, spatialFilters, spatialDifferenceLabel, SPATIAL_DIFFERENCE_COLORS } from '@/utils/spatial-overlay-result'
 import { geometryAnalysisResult, COVERAGE_COLORS, type SpatialAnalysisOperation, type SpatialAnalysisSummary } from '@/utils/spatial-geometry-result'
 import { filterUploadedGeometry, geometryRequestInputs } from '@/utils/spatial-geometry-input'
@@ -9,29 +9,42 @@ import type { UploadedTopicLayer } from '@/utils/topic-upload'
 import { createLocalId } from '@/utils/local-id'
 import { featureHoverCaption } from '@/utils/feature-hover-caption'
 import { bindTopicFeatureHover } from '@/utils/topic-feature-hover'
-import { squareMetresToMu, muToSquareMetres, formatSquareMetresAsMu, topicAreaAttribute } from '@/utils/topic-area'
+import { squareMetresToMu, muToSquareMetres, formatSquareMetresAsMu } from '@/utils/topic-area'
+import { splitFarmlandOverlay, partitionUploadedRange, type FarmlandPartition, type AnalysisStatistic, type AnalysisStatistics } from '@/utils/farmland-analysis'
+import TopicLayerCard from './TopicLayerCard.vue'
+import TopicLayerDisplayMode from './TopicLayerDisplayMode.vue'
 import { useUserStore } from '@/stores/user'
+import { useFarmlandComparisonStore } from '@/stores/farmland-comparison'
 interface FilterRow { id:number; field:string; op:'EQ'|'IN'; values:string }
 interface Selection { label:'A'|'B'; serviceId:string; layerId:string; layers:SpatialLayer[]; filters:FilterRow[]; loading:boolean; error:string; revision:number }
-interface Result { id:string; name:string; operation:SpatialAnalysisOperation;remote:boolean;summary:SpatialAnalysisSummary; data:Raw<SpatialCollection>; difference:Raw<SpatialCollection>; layer:Raw<L.GeoJSON>; visible:boolean; restore:string[]; details:boolean; refreshing:boolean; error:string }
-const props=withDefaults(defineProps<{map:L.Map; open:boolean; context:string; sources:{id:string;name:string}[]; visibleKeys:string[];uploads?:UploadedTopicLayer[];operation?:SpatialAnalysisOperation;loadGeometry?:(input:SpatialInput,signal:AbortSignal)=>Promise<SpatialCollection>}>(),{uploads:()=>[],operation:'difference'})
-const emit=defineEmits<{close:[];upload:[];hide:[keys:string[]];restore:[keys:string[]];legend:[items:SpatialResultLegend[]]}>()
-const user=useUserStore(),dialog=ref<HTMLDialogElement>()
+interface ResultGroup extends FarmlandPartition { id:string; layer:Raw<L.GeoJSON>; visible:boolean; mode:'filled'|'boundary' }
+interface Result { id:string; name:string; operation:SpatialAnalysisOperation;remote:boolean;groups?:ResultGroup[];statistics?:AnalysisStatistic[];uploadName?:string;summary:SpatialAnalysisSummary; data:Raw<SpatialCollection>; difference:Raw<SpatialCollection>; layer:Raw<L.GeoJSON>; visible:boolean; restore:string[]; details:boolean; refreshing:boolean; error:string }
+const props=withDefaults(defineProps<{map:L.Map; open:boolean; context:string; sources:{id:string;name:string}[]; visibleKeys:string[];uploads?:UploadedTopicLayer[];farmland?:boolean;defaults?:{a?:SpatialInput;b?:SpatialInput};keyword?:string;layerOrder?:Record<string,number>;operation?:SpatialAnalysisOperation;loadGeometry?:(input:SpatialInput,signal:AbortSignal)=>Promise<SpatialCollection>}>(),{uploads:()=>[],operation:'difference'})
+const emit=defineEmits<{close:[];upload:[];hide:[keys:string[]];restore:[keys:string[]];legend:[items:SpatialResultLegend[]];layerkeys:[keys:string[]];statistics:[items:AnalysisStatistics[]]}>()
+const user=useUserStore(),comparisonStore=useFarmlandComparisonStore(),dialog=ref<HTMLDialogElement>()
 const selection=(label:'A'|'B'):Selection=>({label,serviceId:'',layerId:'',layers:[],filters:[],loading:false,error:'',revision:0})
 const a=reactive(selection('A')),b=reactive(selection('B')),selections=[a,b]
+const rangeId=ref('')
 const minAreaMu=ref<number|string>(squareMetresToMu(4))
 const busy=ref(false),stage=ref(''),validation=ref(''),notice=ref(''),failed=ref(false),results=ref<Result[]>([])
-const canFinish=computed(()=>!busy.value&&selections.every(side=>!side.loading&&selected(side)?.analyzable))
-const coverage=computed(()=>props.operation==='coverage'),title=computed(()=>coverage.value?'范围覆盖分析':'对称差分 / 交集取反')
+const canFinish=computed(()=>!busy.value&&selections.every(side=>!side.loading&&selected(side)?.analyzable)&&(!props.farmland||!coverage.value||props.uploads.some(item=>item.id===rangeId.value&&item.analyzable)))
+const coverage=computed(()=>props.operation==='coverage'),title=computed(()=>coverage.value?'范围覆盖分析':props.farmland?'高标田与永农对比分析':'对称差分 / 交集取反')
 const availableUploads=computed(()=>props.uploads.filter(item=>item.analyzable))
-let job=0,filterSequence=0,controller:AbortController|undefined,toastTimer:ReturnType<typeof setTimeout>|undefined
+let job=0,analysisSequence=0,filterSequence=0,controller:AbortController|undefined,toastTimer:ReturnType<typeof setTimeout>|undefined
 const layerControllers=new Map<Selection,AbortController>(),detailControllers=new Set<AbortController>()
 const colors=SPATIAL_DIFFERENCE_COLORS
 function resultTypes(result:Result){return (result.operation==='coverage'?['INSIDE','OUTSIDE']:['A_ONLY','B_ONLY']).filter(type=>result.difference.features.some(feature=>resultType(result,feature)===type))}
 function resultType(result:Pick<Result,'operation'>,feature:GeoJSON.Feature){return String(result.operation==='coverage'?feature.properties?.analysisCoverage:feature.properties?.diffType)}
 function typeColor(type:string){return {...colors,...COVERAGE_COLORS}[type as keyof typeof colors|keyof typeof COVERAGE_COLORS]}
 function typeLabel(type:string,summary:SpatialAnalysisSummary){return type==='INSIDE'?`位于${summary.sourceB.layerName}范围内`:type==='OUTSIDE'?`位于${summary.sourceB.layerName}范围外`:spatialDifferenceLabel(type as SpatialDifferenceType,summary)}
-watch(()=>results.value.filter(result=>result.visible).map(result=>({id:result.id,name:result.name,symbols:resultTypes(result).map(type=>({label:typeLabel(type,result.summary),color:typeColor(type)}))})),items=>emit('legend',items),{immediate:true})
+function publishResults(){
+  if(!props.farmland){emit('legend',results.value.filter(result=>result.visible).map(result=>({id:result.id,name:result.name,symbols:resultTypes(result).map(type=>({label:typeLabel(type,result.summary),color:typeColor(type)}))})));return}
+  emit('layerkeys',results.value.map(result=>`analysis:${result.id}`))
+  emit('legend',results.value.filter(result=>result.groups?.some(group=>group.visible&&group.data.features.length)).map(result=>({id:result.id,name:result.name,symbols:result.groups!.filter(group=>group.visible&&group.data.features.length).map(group=>({label:group.name,color:group.color,mode:group.mode}))})))
+  emit('statistics',results.value.filter(result=>result.groups?.some(group=>group.visible)).map(result=>({id:result.id,title:result.name,sources:[result.summary.sourceA.layerName,result.summary.sourceB.layerName],metrics:[...(result.statistics||[]),...(result.operation==='difference'?[{label:'差异面积',areaSqm:result.summary.diffArea},{label:'差异率',ratio:result.summary.diffRate}]:[])]})))
+}
+watch(()=>results.value.map(result=>[result.id,result.visible,result.summary,...(result.groups?.flatMap(group=>[group.id,group.visible,group.mode])||[])]),publishResults,{immediate:true})
+
 function selected(side:Selection){return side.layers.find(layer=>String(layer.layerId)===side.layerId)}
 function uploaded(side:Selection){return props.uploads.find(item=>`upload:${item.id}`===side.serviceId)}
 function sourceKey(side:Selection){return uploaded(side)?side.serviceId:`${side.serviceId}/${side.layerId}`}
@@ -58,6 +71,17 @@ async function loadLayers(side:Selection){
 }
 async function initialize(){
   const context=props.context
+  if(props.farmland){
+    if(!props.uploads.some(item=>item.id===rangeId.value))rangeId.value=availableUploads.value[0]?.id||''
+    for(const [side,preferred] of [[a,props.defaults?.a],[b,props.defaults?.b]] as const){
+      if(!preferred){side.error=`未找到${side.label==='A'?'高标准农田':'永久基本农田'}基准图层，请核对场景配置和部门服务`;continue}
+      side.serviceId=preferred.serviceId;await loadLayers(side)
+      if(context!==props.context)return
+      if(side.layers.some(layer=>layer.layerId===preferred.layerId&&layer.analyzable))side.layerId=String(preferred.layerId)
+      else side.error='后端基准图层不可用于面积分析'
+    }
+    return
+  }
   if(coverage.value){
     if(!uploaded(a)){a.serviceId=availableUploads.value[0]?`upload:${availableUploads.value[0].id}`:'';await loadLayers(a)}
     if(context!==props.context)return
@@ -83,9 +107,10 @@ function clear(){
   stopWaiting(false)
   selections.forEach(side=>{side.revision++;layerControllers.get(side)?.abort();Object.assign(side,{serviceId:'',layerId:'',layers:[],filters:[],loading:false,error:''})})
   detailControllers.forEach(abort=>abort.abort());detailControllers.clear()
-  results.value.forEach(result=>result.layer.remove());results.value=[];emit('close');notice.value='';clearTimeout(toastTimer)
+  results.value.forEach(result=>result.layer.remove());results.value=[];analysisSequence=0;emit('close');notice.value='';clearTimeout(toastTimer)
 }
 watch(()=>props.context,clear)
+watch(()=>props.defaults,()=>{if(props.farmland&&props.open&&!busy.value)void initialize()})
 watch(()=>props.operation,()=>{stopWaiting(false);validation.value='';if(props.open)void initialize()})
 watch(()=>props.uploads.map(item=>item.id).join(','),()=>{
   for(const side of selections)if(side.serviceId.startsWith('upload:')&&!uploaded(side)){if(busy.value){stopWaiting(false);toast('输入上传图层已移除，已停止等待分析结果',true)};side.serviceId='';side.layerId='';side.layers=[];side.filters=[]}
@@ -101,39 +126,61 @@ function download(result:Result){
 async function refreshDetail(result:Result){
   if(result.refreshing||!result.remote)return
   const abort=new AbortController();detailControllers.add(abort);result.refreshing=true;result.error=''
-  try{const detail=await getSpatialOverlayDetail(result.id,user.activeDeptId,{signal:abort.signal});if(!abort.signal.aborted)result.summary=detail}
+  try{const detail=await getSpatialOverlayDetail(result.summary.resultId||result.id,user.activeDeptId,{signal:abort.signal});if(!abort.signal.aborted)result.summary=detail}
   catch(error){if(!abort.signal.aborted)result.error=errorText(error)}
   finally{result.refreshing=false;detailControllers.delete(abort)}
 }
-function display(data:SpatialCollection,summary:SpatialAnalysisSummary,restore:string[],operation:SpatialAnalysisOperation='difference',remote=true){
-  const difference=operation==='coverage'?data:annotateSpatialDifference(data,summary)
-  if(!difference.features.length)throw new Error('后端统计存在差异，但未返回差分图斑，请后端检查结果完整性')
-  // Only the current analysis is initially visible; older results stay available in the list.
-  const hidePrevious=()=>results.value.forEach(result=>{result.layer.remove();result.visible=false})
-  const id=summary.resultId||createLocalId(),existing=results.value.find(result=>result.id===id)
+function display(data:SpatialCollection,summary:SpatialAnalysisSummary,restore:string[],operation:SpatialAnalysisOperation='difference',remote=true,partitions?:FarmlandPartition[],uploadName?:string){
+  const difference=partitions?{type:'FeatureCollection' as const,features:partitions.flatMap(group=>group.data.features)}:operation==='coverage'?data:annotateSpatialDifference(data,summary)
+  if(!difference.features.length&&!partitions)throw new Error('后端未返回可显示的分析图斑')
+  const id=props.farmland?createLocalId():summary.resultId||createLocalId()
   if(!props.map.getPane('topic-analysis'))props.map.createPane('topic-analysis').style.zIndex='370'
-  const title=operation==='coverage'?`${summary.sourceA.layerName} · ${summary.sourceB.layerName}覆盖分析`:`${summary.sourceA.layerName} ↔ ${summary.sourceB.layerName}`
-  const layer=L.geoJSON(difference,{pane:'topic-analysis',style:feature=>({color:typeColor(resultType({operation},feature!)),weight:2,fillOpacity:.65}),onEachFeature(feature,shape){
-    const properties=feature.properties||{},type=typeLabel(resultType({operation},feature),summary)
-    bindTopicFeatureHover(shape,props.map,()=>featureHoverCaption(properties,[],type),()=>layer.resetStyle(shape as L.Path))
-    const body=document.createElement('div');body.className='overlay-result-properties'
-    const heading=document.createElement('b');heading.textContent=type;body.appendChild(heading)
-    for(const [label,source] of [['A',summary.sourceA],['B',summary.sourceB]] as const){const row=document.createElement('p');row.textContent=`${label} 图层：${source.layerName}（${source.serviceName}）`;body.appendChild(row)}
-    const aliases:Record<string,string>={seqNo:'图斑序号',diffType:'后端分组',areaSqm:'结果面积',areaMu:'结果面积',partCount:'子图斑数',centerLng:'中心经度',centerLat:'中心纬度',analysisSourceSide:'来源侧',analysisSourceLayerName:'所属图层',analysisExcludedLayerName:'不属于图层',analysisTargetLayerName:'目标图层',analysisCoverage:'覆盖分组',analysisSourceServiceId:'来源服务编号',analysisSourceLayerId:'来源子图层编号',analysisMembership:'归属说明'}
-    Object.entries(properties).forEach(([key,value])=>{
-      if(key==='areaMu'&&properties.areaSqm!=null)return
-      const area=topicAreaAttribute(key,aliases[key]||key,value)
-      const row=document.createElement('p');row.textContent=`${area?.label||aliases[key]||key}：${area?.value??(key==='diffType'?type:value??'—')}`;body.appendChild(row)
+  const name=props.farmland?`${operation==='coverage'?'范围覆盖分析':'高标田与永农对比分析'} ${++analysisSequence}${uploadName?` · ${uploadName}`:''}`:operation==='coverage'?`${summary.sourceA.layerName} · ${summary.sourceB.layerName}覆盖分析`:`${summary.sourceA.layerName} ↔ ${summary.sourceB.layerName}`
+  function makeLayer(collection:SpatialCollection,color?:(feature:GeoJSON.Feature)=>string,mode:()=>string=()=> 'filled'){
+    const style=(feature?:GeoJSON.Feature)=>({color:color?color(feature!):typeColor(resultType({operation},feature!)),weight:mode()==='boundary'?3:2,fillOpacity:mode()==='boundary'?0:.65})
+    const native=L.geoJSON(collection,{pane:'topic-analysis',bubblingMouseEvents:false,style,onEachFeature(feature,shape){
+      const properties=feature.properties||{},type=String(properties.analysisMembership||typeLabel(resultType({operation},feature),summary))
+      bindTopicFeatureHover(shape,props.map,()=>featureHoverCaption(properties,[],type),()=>native.resetStyle(shape as L.Path))
+      const body=document.createElement('dl');body.className='overlay-result-properties'
+      const coordinate=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?value.toFixed(6):'—'
+      const values=[['所属图层',properties.analysisSourceLayerName||summary.sourceA.layerName],['图斑序号',properties.seqNo??'—'],['结果面积',`${formatSquareMetresAsMu(properties.areaSqm)} 亩`],['中心坐标',`${coordinate(properties.centerLng)}, ${coordinate(properties.centerLat)}`]]
+      values.forEach(([label,value])=>{const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=String(label);dd.textContent=String(value);row.append(dt,dd);body.appendChild(row)})
+      shape.bindPopup(body,{className:'topic-analysis-popup',minWidth:280,maxWidth:310,maxHeight:260})
+    }})
+    return native
+  }
+  let layer:L.GeoJSON,groups:ResultGroup[]|undefined
+  if(partitions){
+    layer=L.geoJSON()
+    groups=partitions.map(part=>{
+      const group:ResultGroup={...part,data:markRaw(part.data),id:`analysis:${id}:${part.kind}`,layer:markRaw(L.geoJSON()),visible:!!part.data.features.length,mode:'filled'}
+      group.layer=markRaw(makeLayer(group.data,()=>group.color,()=>group.mode));if(group.visible)layer.addLayer(group.layer)
+      return group
     })
-    shape.bindPopup(body,{maxWidth:320,maxHeight:260})
-  }})
+  }else layer=makeLayer(difference)
   try{if(difference.features.length)layer.addTo(props.map)}catch(error){layer.remove();throw error}
-  hidePrevious()
-  if(existing)results.value=results.value.filter(result=>result.id!==existing.id)
-  results.value.unshift({id,name:title,operation,remote,summary,data:markRaw(data),difference:markRaw(difference),layer:markRaw(layer),visible:difference.features.length>0,restore,details:true,refreshing:false,error:''})
+  if(!props.farmland)results.value.forEach(result=>{result.layer.remove();result.visible=false})
+  const result:Result={id,name,operation,remote,summary,groups,statistics:partitions?.map(group=>({label:group.name,areaSqm:group.areaSqm})),uploadName,data:markRaw(data),difference:markRaw(difference),layer:markRaw(layer),visible:difference.features.length>0,restore,details:true,refreshing:false,error:''}
+  if(props.farmland)results.value.push(result)
+  else {results.value=results.value.filter(item=>item.id!==id);results.value.unshift(result)}
   if(layer.getBounds().isValid())props.map.fitBounds(layer.getBounds(),{padding:[80,80],maxZoom:17})
   return difference.features.length
 }
+function toggleGroup(result:Result,group:ResultGroup,visible:boolean){
+  group.visible=visible&&!!group.data.features.length
+  if(group.visible){result.layer.addLayer(group.layer);if(!props.map.hasLayer(result.layer))result.layer.addTo(props.map)}else result.layer.removeLayer(group.layer)
+  result.visible=!!result.groups?.some(item=>item.visible)
+}
+function groupMode(group:ResultGroup,mode:'filled'|'boundary'){group.mode=mode;group.layer.setStyle({color:group.color,weight:mode==='boundary'?3:2,fillOpacity:mode==='boundary'?0:.65})}
+function groupMatches(group:ResultGroup){return !props.keyword?.trim()||group.name.toLocaleLowerCase().includes(props.keyword.trim().toLocaleLowerCase())}
+function resultMatches(result:Result){return !props.keyword?.trim()||result.name.toLocaleLowerCase().includes(props.keyword.trim().toLocaleLowerCase())||result.groups?.some(groupMatches)}
+function categoryMatches(result:Result,group:ResultGroup){return !props.keyword?.trim()||result.name.toLocaleLowerCase().includes(props.keyword.trim().toLocaleLowerCase())||groupMatches(group)}
+function selectableGroups(result:Result){return result.groups?.filter(group=>group.data.features.length)||[]}
+function resultAllSelected(result:Result){const groups=selectableGroups(result);return groups.length>0&&groups.every(group=>group.visible)}
+function resultPartSelected(result:Result){return !resultAllSelected(result)&&selectableGroups(result).some(group=>group.visible)}
+function selectResult(result:Result,selection:'all'|'none'|'invert'){selectableGroups(result).forEach(group=>toggleGroup(result,group,selection==='invert'?!group.visible:selection==='all'))}
+function locateResult(result:Result){const bounds=(result.groups||[]).reduce((bounds,group)=>bounds.extend(group.layer.getBounds()),L.latLngBounds([]));if(bounds.isValid())props.map.fitBounds(bounds,{padding:[80,80],maxZoom:17})}
+
 function input(side:Selection):SpatialInput{
   const layer=selected(side)
   if(!side.serviceId||!layer?.analyzable)throw new Error(`请选择可分析的图层 ${side.label}`)
@@ -146,23 +193,38 @@ async function finish(){
   const area=muToSquareMetres(Number(minAreaMu.value))
   try{
     sourceA=input(a);sourceB=input(b)
-    if(coverage.value&&!uploaded(a))throw new Error('范围覆盖分析需要选择上传的面图层作为范围 U')
+    if(coverage.value&&!props.farmland&&!uploaded(a))throw new Error('范围覆盖分析需要选择上传的面图层作为范围 U')
     if(sourceA.serviceId===sourceB.serviceId&&sourceA.layerId===sourceB.layerId)throw new Error('请选择两个不同的面图层')
     if(String(minAreaMu.value).trim()===''||!Number.isFinite(area)||area<0||area>10000)throw new Error('最小图斑面积须在 0–15 亩之间')
   }catch(error){validation.value=errorText(error);return}
   const operation=props.operation,keys=[sourceKey(a),sourceKey(b)],restore=keys.filter(key=>props.visibleKeys.includes(key)),deptId=user.activeDeptId
   const snapshot=(side:Selection):SpatialSource=>({serviceId:side.serviceId,serviceName:uploaded(side)?'本机上传':props.sources.find(source=>source.id===side.serviceId)?.name||side.serviceId,layerId:selected(side)!.layerId,layerName:selected(side)!.name,filters:spatialFilters(side.filters,selected(side)!.fields)})
-  const sources={sourceA:snapshot(a),sourceB:snapshot(b)},locals=[uploaded(a),uploaded(b)]
+  const sources={sourceA:snapshot(a),sourceB:snapshot(b)},locals=[uploaded(a),uploaded(b)],comparisonScope=comparisonStore.scope
   const request=++job,abort=new AbortController();controller=abort;busy.value=true;stage.value='正在读取完整输入图层…';notice.value='';emit('close')
   try{
     let summary:SpatialAnalysisSummary,data:SpatialCollection
     const remote=operation==='difference'&&!locals.some(Boolean)
+    if(props.farmland&&operation==='coverage'){
+      const range=availableUploads.value.find(item=>item.id===rangeId.value)
+      if(!range)throw new Error('请选择上传的面图层作为规划范围')
+      if(!props.loadGeometry)throw new Error('未配置基准图层几何读取')
+      stage.value='正在读取高标田、永农完整几何…'
+      const resolve=(side:Selection,input:SpatialInput)=>uploaded(side)?Promise.resolve(filterUploadedGeometry(uploaded(side)!.data,input.filters)):props.loadGeometry!(input,abort.signal)
+      const [high,permanent]=await Promise.all([resolve(a,sourceA),resolve(b,sourceB)])
+      const check=()=>{abort.signal.throwIfAborted();if(request!==job)throw new Error('分析上下文已变化')}
+      check();stage.value='后端正在将上传范围裁切为四类区域…'
+      const result=await partitionUploadedRange(filterUploadedGeometry(range.data,[]),high,permanent,area,{high:sources.sourceA,permanent:sources.sourceB,uploadName:range.name},input=>compareSpatialGeometries(input,{signal:abort.signal}),check)
+      check()
+      summary={...sources,areaA:result.areaSqm,areaB:0,overlapArea:0,onlyAArea:0,onlyBArea:0,diffArea:0,minAreaSqm:area,crsUsed:result.crsUsed,featureCountA:range.data.features.length,featureCountB:0,spotCount:result.partitions.reduce((sum,group)=>sum+group.data.features.length,0)}
+      data={type:'FeatureCollection',features:result.partitions.flatMap(group=>group.data.features)}
+      display(data,summary,restore,operation,false,result.partitions,range.name);emit('hide',[...keys,`upload:${range.id}`]);toast('范围覆盖分析完成');return
+    }
     if(remote){
-      stage.value='后端正在执行对称差分分析…'
-      const response=await analyzeSpatialOverlay({deptId,sourceA,sourceB,minAreaSqm:area,includeOverlapSpots:false},{signal:abort.signal})
+      stage.value=props.farmland?'后端正在执行高标田与永农对比分析…':'后端正在执行对称差分分析…'
+      const response=await analyzeSpatialOverlay({deptId,sourceA,sourceB,minAreaSqm:area,includeOverlapSpots:!!props.farmland},{signal:abort.signal})
       if(request!==job)return
-      summary=response;stage.value='正在读取后端差分图层及来源分类…'
-      data=await loadSpatialOverlayResult(response.resultId,deptId,{signal:abort.signal})
+      summary=response;stage.value=props.farmland?'正在读取高标田、永农及交集三类图斑…':'正在读取后端差分图层及来源分类…'
+      data=props.farmland?await getSpatialOverlayGeoJson(response.resultId,deptId,{signal:abort.signal}):await loadSpatialOverlayResult(response.resultId,deptId,{signal:abort.signal})
     }else{
       const resolve=async(input:SpatialInput,index:number):Promise<SpatialCollection>=>{
         const local=locals[index]
@@ -179,18 +241,34 @@ async function finish(){
       summary=result.summary;data=result.data
     }
     if(request!==job)return
+    if(props.farmland&&operation==='difference'){
+      if(!remote)throw new Error('高标田与永农对比分析需要使用已发布的两类基准图层')
+      const partitions=splitFarmlandOverlay(data,summary as import('@/api/spatial-analysis').SpatialOverlaySummary)
+      display(data,summary,restore,operation,true,partitions);comparisonStore.remember(summary as import('@/api/spatial-analysis').SpatialOverlaySummary,'analysis',comparisonScope);emit('hide',keys);toast('高标田与永农对比分析完成');return
+    }
     if(!data.features.length){if(operation==='difference'&&summary.diffArea>0)throw new Error('后端未返回统计中存在的不重叠区域');toast('分析完成：没有满足面积阈值的结果图斑，输入图层保持显示');return}
     display(data,summary,restore,operation,remote)
     emit('hide',keys)
     toast(operation==='coverage'?'范围覆盖分析完成：绿色为范围内，橙色为范围外；原图层已取消勾选，配置保留':`对称差分完成：一个结果图层按“仅 A / 仅 B”分色，已隐藏原始图层${summary.cached?'（命中后端缓存）':''}`)
-  }catch(error){if(request===job&&!abort.signal.aborted){toast(`${operation==='coverage'?'范围覆盖':'对称差分'}分析失败：${errorText(error)}`,true);abort.abort()}}
+  }catch(error){if(request===job&&!abort.signal.aborted){toast(`${operation==='coverage'?'范围覆盖':props.farmland?'高标田与永农对比':'对称差分'}分析失败：${errorText(error)}`,true);abort.abort()}}
   finally{if(request===job){controller=undefined;busy.value=false}}
 }
 const metrics=[['onlyAArea','A 中非 B 面积'],['onlyBArea','B 中非 A 面积'],['overlapArea','重叠面积'],['diffArea','差异面积']] as const
 const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围内面积'],['onlyAArea','范围外面积'],['unreturnedArea','阈值未输出面积']] as const
 </script>
 <template>
-  <section v-if="results.length" class="overlay-results" aria-label="对称差分分析结果">
+  <div v-if="farmland" class="farmland-result-layers">
+    <TopicLayerCard v-for="result in results" v-show="resultMatches(result)" :key="result.id" v-model:expanded="result.details" :title="result.name" :checked="resultAllSelected(result)" :indeterminate="resultPartSelected(result)" :disabled="!selectableGroups(result).length" class="analysis-result-group" :data-layer-key="`analysis:${result.id}`" :style="{order:layerOrder?.[`analysis:${result.id}`] ?? 10000}" @select="selectResult(result,$event?'all':'none')" @invert="selectResult(result,'invert')">
+      <div class="analysis-result-children" role="group" :aria-label="`${result.name}分类`">
+        <section v-for="group in result.groups" v-show="categoryMatches(result,group)" :key="group.id" class="analysis-layer-item" :data-analysis-group="group.kind">
+          <label class="analysis-group-switch"><input type="checkbox" :checked="group.visible" :disabled="!group.data.features.length" :aria-label="`${group.name}显示`" @change="toggleGroup(result,group,($event.target as HTMLInputElement).checked)" /><span>{{ group.name }}</span><small>{{ group.data.features.length }}</small></label>
+          <TopicLayerDisplayMode :mode="group.mode" :name="`analysis-mode-${group.id}`" :label="`${group.name}显示模式`" :color="group.color" @change="groupMode(group,$event)" />
+        </section>
+      </div>
+      <template #actions><button type="button" :disabled="!result.difference.features.length" @click="locateResult(result)">定位</button><button type="button" @click="download(result)">导出结果图层</button><button type="button" @click="remove(result)">移除</button></template>
+    </TopicLayerCard>
+  </div>
+  <section v-else-if="results.length" class="overlay-results" aria-label="对称差分分析结果">
     <h3>后端分析结果 <small>{{ results.length }}</small></h3>
     <div v-for="result in results" :key="result.id" class="overlay-result-row">
       <label><input v-model="result.visible" type="checkbox" :disabled="!result.difference.features.length" @change="toggle(result)" /><span :title="result.name">{{ result.operation==='coverage'?'范围覆盖结果':'不重叠区域' }}</span><small>独立图层</small></label>
@@ -214,12 +292,13 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
   <Teleport :to="map.getContainer().parentElement!">
   <dialog ref="dialog" class="overlay-dialog" aria-labelledby="overlay-title" @cancel.prevent="emit('close')" @close="emit('close')">
     <form @submit.prevent="finish">
-      <header><div><small>SPATIAL ANALYSIS / {{ coverage?'COVERAGE':'SYMMETRICAL DIFFERENCE' }}</small><h2 id="overlay-title">{{ title }}</h2></div><button type="button" aria-label="关闭空间分析" @click="emit('close')">×</button></header>
+      <header><div><small>SPATIAL ANALYSIS / {{ coverage?'COVERAGE':farmland?'FARMLAND COMPARISON':'SYMMETRICAL DIFFERENCE' }}</small><h2 id="overlay-title">{{ title }}</h2></div><button type="button" aria-label="关闭空间分析" @click="emit('close')">×</button></header>
       <div class="overlay-dialog-body">
-        <div class="overlay-intro"><svg viewBox="0 0 120 64" aria-hidden="true"><path d="M10 10h62v42H10z" fill="#f8c36b55" stroke="#f8c36b"/><path d="M45 24h62v35H45z" fill="#a998ff55" stroke="#a998ff"/><path d="M45 24h27v28H45z" :fill="coverage?'#57d2a3':'#102f3b'"/></svg><div><b>{{ coverage?'上传范围与目标图层的覆盖关系':'两图层对称差分（保留来源）' }}</b><p>{{ coverage?'将上传范围裁切为目标范围内、外两部分，显示各自面积和占比。':'输出一个不重叠区域图层：黄色为仅 A，紫色为仅 B。图例和点击详情显示具体图层名称。' }}</p></div></div>
+        <div class="overlay-intro"><svg viewBox="0 0 120 64" aria-hidden="true"><path d="M10 10h62v42H10z" fill="#f8c36b55" stroke="#f8c36b"/><path d="M45 24h62v35H45z" fill="#a998ff55" stroke="#a998ff"/><path d="M45 24h27v28H45z" :fill="coverage?'#57d2a3':'#102f3b'"/></svg><div><b>{{ coverage?(farmland?'上传范围与高标田、永农的覆盖关系':'上传范围与目标图层的覆盖关系'):(farmland?'高标田与永农对比分析':'两图层对称差分（保留来源）') }}</b><p>{{ farmland?(coverage?'将上传范围裁切为仅在永农、仅在高标田、同时满足、同时不满足四类区域。':'输出高标田独有、永农独有及两者交集，分别控制显示；统计在右侧展示。'):(coverage?'将上传范围裁切为目标范围内、外两部分，显示各自面积和占比。':'输出一个不重叠区域图层：黄色为仅 A，紫色为仅 B。图例和点击详情显示具体图层名称。') }}</p></div></div>
         <p v-if="coverage&&!availableUploads.length" class="overlay-error">请先上传一个面图层。<button type="button" class="text-button" @click="emit('close');emit('upload')">上传 SHP</button></p>
-        <fieldset v-for="side in selections" :key="side.label"><legend>图层 {{ side.label }} · {{ side.label==='A'?'基准数据':'对比数据' }}</legend>
-          <div class="overlay-output-grid"><label>{{ coverage&&side.label==='A'?'上传范围 U':'数据来源' }} <em>*</em><select v-model="side.serviceId" required :aria-label="`图层${side.label}地图服务`" @change="loadLayers(side)"><option value="" disabled>请选择图层来源</option><optgroup v-if="!coverage||side.label==='B'" label="已发布服务"><option v-for="source in sources" :key="source.id" :value="source.id">{{ source.name }}</option></optgroup><optgroup label="本机上传面图层"><option v-for="item in availableUploads" :key="item.id" :value="`upload:${item.id}`">{{ item.name }}</option></optgroup></select></label>
+        <label v-if="farmland&&coverage">上传范围 U <em>*</em><select v-model="rangeId" aria-label="上传分析范围" required><option value="" disabled>请选择上传的面图层</option><option v-for="item in availableUploads" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+        <fieldset v-for="side in selections" :key="side.label"><legend>{{ farmland?(side.label==='A'?'高标田基准数据':'永农基准数据'):`图层 ${side.label} · ${side.label==='A'?'基准数据':'对比数据'}` }}</legend>
+          <div class="overlay-output-grid"><label>{{ coverage&&!farmland&&side.label==='A'?'上传范围 U':'数据来源' }} <em>*</em><select v-model="side.serviceId" required :aria-label="`图层${side.label}地图服务`" @change="loadLayers(side)"><option value="" disabled>请选择图层来源</option><optgroup v-if="farmland||!coverage||side.label==='B'" label="已发布服务"><option v-for="source in sources" :key="source.id" :value="source.id">{{ source.name }}</option></optgroup><optgroup v-if="!farmland" label="本机上传面图层"><option v-for="item in availableUploads" :key="item.id" :value="`upload:${item.id}`">{{ item.name }}</option></optgroup></select></label>
           <label>分析图层 <em>*</em><select v-model="side.layerId" required :disabled="side.loading||!side.layers.length" :aria-label="`图层${side.label}分析图层`" @change="side.filters=[]"><option value="" disabled>{{ side.loading?'正在读取后端图层…':'请选择面图层' }}</option><option v-for="layer in side.layers" :key="layer.layerId" :value="String(layer.layerId)" :disabled="!layer.analyzable">{{ layer.name }}{{ layer.analyzable?'':`（${layer.geometryType}，不可分析）` }}</option></select></label></div>
           <p v-if="side.error" class="overlay-error" role="alert">{{ side.error }} <button type="button" class="text-button" @click="loadLayers(side)">重试</button></p>
           <div v-for="filter in side.filters" :key="filter.id" class="attribute-filter">
@@ -228,12 +307,12 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
             <label class="filter-values">{{ filter.op==='IN'?'取值（一行一个，最多 50 个）':'取值' }}<textarea v-if="filter.op==='IN'" v-model="filter.values" rows="2" :aria-label="`图层${side.label}筛选值`"></textarea><input v-else v-model="filter.values" :aria-label="`图层${side.label}筛选值`" /></label>
             <button type="button" class="text-button" :aria-label="`删除图层${side.label}筛选条件`" @click="side.filters=side.filters.filter(row=>row.id!==filter.id)">删除</button>
           </div>
-          <button type="button" class="text-button add-filter" :disabled="!selected(side)?.analyzable||!selected(side)?.fields.length" @click="addFilter(side)">＋ 添加图层 {{ side.label }} 属性筛选</button><p>未添加条件时分析整个图层；多条条件同时满足。</p>
+          <button type="button" class="text-button add-filter" :disabled="!selected(side)?.analyzable||!selected(side)?.fields.length" @click="addFilter(side)">＋ 添加{{ farmland?(side.label==='A'?'高标田':'永农'):`图层 ${side.label}` }}属性筛选</button><p>未添加条件时分析整个图层；多条条件同时满足。</p>
         </fieldset>
-        <fieldset><legend>输出设置</legend><label>最小结果图斑面积（亩）<input v-model="minAreaMu" type="number" required min="0" max="15" step="any" aria-label="最小差异图斑面积" /></label><p>{{ coverage?'后端输出 A∩B 和 A−B，在同一结果图层中以绿色、橙色区分；占比以完整上传范围面积为分母。':'后端输出（A − B）∪（B − A），在同一结果图层中保留 A_ONLY / B_ONLY 归属。' }} 小于阈值的碎片不输出，过滤面积单独列出。导出包含来源图层名称。</p><p>面积按后端 CGCS2000 3° 带投影计算，结果图斑以 WGS 84 显示。源数据不作修改。</p></fieldset>
+        <fieldset><legend>输出设置</legend><label>最小结果图斑面积（亩）<input v-model="minAreaMu" type="number" required min="0" max="15" step="any" aria-label="最小差异图斑面积" /></label><p v-if="!farmland">{{ coverage?'后端输出 A∩B 和 A−B，在同一结果图层中以绿色、橙色区分；占比以完整上传范围面积为分母。':'后端输出（A − B）∪（B − A），在同一结果图层中保留 A_ONLY / B_ONLY 归属。' }} 小于阈值的碎片不输出，过滤面积单独列出。导出包含来源图层名称。</p><p>面积按后端 CGCS2000 3° 带投影计算，结果图斑以 WGS 84 显示。源数据不作修改。</p></fieldset>
         <p v-if="validation" class="overlay-error" role="alert">{{ validation }}</p>
       </div>
-      <footer><span>{{ coverage?'完成后显示上传范围内、外的结果':'完成后仅显示两图层不同的区域' }}</span><button type="button" @click="emit('close')">取消</button><button class="primary" type="submit" :disabled="!canFinish">Finish · 开始分析</button></footer>
+      <footer><span>{{ farmland?'完成后追加分类结果，右侧显示统计':coverage?'完成后显示上传范围内、外的结果':'完成后仅显示两图层不同的区域' }}</span><button type="button" @click="emit('close')">取消</button><button class="primary" type="submit" :disabled="!canFinish">Finish · 开始分析</button></footer>
     </form>
   </dialog>
     <div v-if="busy" class="overlay-running" role="status" aria-live="polite"><div class="analysis-earth" aria-hidden="true"><div class="earth-land"></div><i></i><i></i></div><div><b>后端空间分析运行中</b><span>{{ stage }}</span></div><button type="button" title="仅停止前端等待，不取消后端计算" @click="stopWaiting()">停止等待</button></div>
@@ -246,4 +325,7 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
 .overlay-results{border-top:1px solid #7395a229;padding-top:12px;margin-bottom:14px}.overlay-results h3{display:flex;align-items:center;gap:8px;font-size:12px;margin:0 0 10px;color:#f6d69a}.overlay-results h3 small{font-size:10px;color:#bda981}.overlay-result-row{padding:8px 0;border-top:1px solid #7395a21a}.overlay-result-row label{display:flex;gap:8px;align-items:center;font-size:12px}.overlay-result-row label span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.overlay-result-row small{font-size:10px;color:#9db9c5}.overlay-result-row>div{display:flex;gap:12px;padding:8px 0 0 22px}.overlay-result-row button{border:0;padding:0;background:none;color:#8bcedb;font-size:10px;cursor:pointer}.overlay-result-row button:disabled{opacity:.35;cursor:default}
 .overlay-dialog{width:620px;max-width:calc(100vw - 40px);max-height:calc(100dvh - 40px);padding:0;border:1px solid #81ccdf40;border-radius:16px;background:linear-gradient(145deg,#153c4ff5,#0b2436fa);color:#e3f2f7;box-shadow:0 30px 100px #00131c99;font-family:inherit;font-size:13px;line-height:1.6;overflow:auto;scrollbar-width:none}.overlay-dialog::backdrop{background:#00152088;backdrop-filter:blur(6px)}.overlay-dialog form{margin:0}.overlay-dialog header{display:flex;align-items:center;justify-content:space-between;padding:22px 26px;border-bottom:1px solid #94c5d524}.overlay-dialog header small{font-size:9px;letter-spacing:2px;color:#82bacb}.overlay-dialog h2{margin:4px 0 0;font-size:21px;font-weight:600}.overlay-dialog button{cursor:pointer;font:inherit;color:inherit}.overlay-dialog header button{width:32px;height:32px;border:0;border-radius:6px;background:#91cad414;font-size:24px}.overlay-dialog-body{padding:20px 26px}.overlay-intro{display:flex;align-items:center;gap:18px;padding:14px;background:#64b1c40b;border:1px solid #8ec4d216;border-radius:9px}.overlay-intro svg{width:110px;height:64px;flex:none}.overlay-intro b{font-size:13px;color:#a9e4ed}.overlay-dialog p{font-size:11px;line-height:1.8;color:#98b6c5;margin:6px 0 0}.overlay-dialog fieldset{padding:16px 0 0;margin:18px 0 0;border:0;border-top:1px solid #94c5d524;min-width:0}.overlay-dialog legend{padding:0 10px 0 0;font-size:11px;color:#79c6d9;letter-spacing:1px}.overlay-dialog label{display:block;font-size:12px;color:#bcd1dc;margin:0 0 12px}.overlay-dialog em{font-style:normal;color:#ffab88}.overlay-dialog select,.overlay-dialog input{box-sizing:border-box;display:block;width:100%;height:38px;margin-top:6px;padding:0 10px;background:#071e2d80;border:1px solid #6598ac48;border-radius:6px;color:#e1f2f8;font:inherit;outline:none}.overlay-dialog select option{background:#103144;color:#d6eaf1}.overlay-dialog select:focus,.overlay-dialog input:focus{border-color:#69cce5;box-shadow:0 0 0 3px #45bed315}.overlay-dialog input:read-only{color:#83a5b8}.overlay-output-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:14px}.overlay-dialog footer{padding:16px 26px;display:flex;align-items:center;justify-content:flex-end;gap:10px;border-top:1px solid #94c5d524;background:#021b2a30}.overlay-dialog footer span{flex:1;max-width:210px;font-size:10px;color:#87a9bc}.overlay-dialog footer button{padding:9px 13px;border:1px solid #779eb63d;background:#34576a33;border-radius:6px;font-size:12px}.overlay-dialog footer .primary{background:linear-gradient(120deg,#127fa8,#146c90);border-color:#3ea0c5}.overlay-dialog button:disabled{opacity:.4;cursor:not-allowed}.overlay-dialog .overlay-error{color:#ffb49b}.overlay-running{position:absolute;right:72px;bottom:30px;z-index:570;display:flex;align-items:center;gap:14px;width:310px;box-sizing:border-box;padding:16px;border:1px solid #76cce33d;border-radius:12px;background:#0b2c40ed;backdrop-filter:blur(16px);box-shadow:0 10px 40px #00132166;color:#d6eef8}.overlay-running>div:nth-child(2){display:grid;gap:5px;flex:1;min-width:0}.overlay-running b{font-size:12px;font-weight:500}.overlay-running span{font-size:10px;line-height:1.6;color:#93bfce}.overlay-running button,.overlay-toast button{border:0;background:none;color:#8bbaca;cursor:pointer;font:inherit;font-size:11px}.analysis-earth{position:relative;width:46px;height:46px;flex:none;border:1px solid #70def0;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 30% 25%,#1a6f86,#0b2946 75%);box-shadow:inset -8px -2px 12px #001421aa,0 0 16px #3dc9ec24}.earth-land{position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 24px,#60e8d0aa 25px 34px,transparent 36px 44px);clip-path:polygon(0 20%,15% 10%,24% 25%,38% 18%,44% 36%,59% 31%,67% 16%,86% 25%,100% 42%,100% 65%,85% 63%,76% 88%,62% 65%,43% 87%,38% 61%,21% 54%,0 70%);background-size:90px 100%;animation:earth-turn 4s linear infinite}.analysis-earth i{position:absolute;inset:0 11px;border:1px solid #8edff14a;border-radius:50%}.analysis-earth i+i{inset:13px -1px}.overlay-toast{position:absolute;top:86px;left:50%;translate:-50% 0;z-index:800;display:flex;align-items:center;gap:10px;padding:13px 16px;max-width:min(560px,80%);border:1px solid #6fddc949;border-radius:9px;background:#0d3547f5;color:#d1f0ed;box-shadow:0 10px 40px #00162166}.overlay-toast>span{color:#67e1c5;font-size:18px}.overlay-toast p{margin:0;font-size:12px;line-height:1.8}.overlay-toast.is-error{border-color:#d89f784f}.overlay-toast.is-error>span{color:#ffc09c}:global(.overlay-result-properties){max-height:240px;overflow:auto;scrollbar-width:none;font-size:11px}:global(.overlay-result-properties p){margin:7px 0;overflow-wrap:anywhere}@keyframes earth-turn{to{background-position:90px 0}}@media(prefers-reduced-motion:reduce){.earth-land{animation:none}}@media(max-width:700px){.overlay-output-grid{grid-template-columns:1fr}.overlay-dialog header,.overlay-dialog-body,.overlay-dialog footer{padding:16px}.overlay-dialog footer span{display:none}.overlay-intro svg{width:70px}.overlay-running{right:60px;width:270px}}
 .overlay-result-row>.result-actions{flex-wrap:wrap;gap:10px;padding-left:0}.overlay-result-row>.result-summary{display:block;padding:10px 0 0}.result-summary>p{font-size:10px;line-height:1.8;color:#9bbbc8;overflow-wrap:anywhere;margin:6px 0}.result-summary dl{display:grid;grid-template-columns:1fr 1fr;gap:9px 10px;margin:10px 0}.result-summary dl div{min-width:0}.result-summary dt{font-size:10px;color:#9bbbc8}.result-summary dd{display:flex;align-items:baseline;gap:5px;margin:4px 0 0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.result-summary .metric-value{min-width:0;font-size:16px;font-weight:600;line-height:1.4;color:#8ae8e4;overflow-wrap:anywhere}.result-summary dd small{flex:none;font-size:10px;font-weight:400;color:#91afba}.result-summary .difference-rate{grid-column:1/-1;display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-top:10px;border-top:1px solid #7395a229}.result-summary .difference-rate dd{margin:0}.result-types{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0;font-size:10px;color:#afc9d3}.result-types span{display:flex;align-items:center;gap:5px}.result-types i{width:9px;height:9px;border-radius:2px}.overlay-dialog .text-button{padding:0;border:0;background:none;color:#8bd3e3;font-size:11px}.overlay-dialog .text-button:disabled{opacity:.4;cursor:not-allowed}.add-filter{margin-bottom:6px}.attribute-filter{display:grid;grid-template-columns:minmax(0,1fr) 90px auto;gap:10px;align-items:center;padding:12px;margin-bottom:10px;border:1px solid #83bbc329;border-radius:8px;background:#00182820}.attribute-filter .filter-values{grid-column:1/3}.attribute-filter>button{grid-column:3;grid-row:2}.overlay-dialog textarea{box-sizing:border-box;display:block;width:100%;min-width:0;margin-top:6px;padding:8px 10px;background:#071e2d80;border:1px solid #6598ac48;border-radius:6px;color:#e1f2f8;font:inherit;resize:vertical}.overlay-dialog input,.overlay-dialog select{min-width:0}.overlay-dialog .difference-option{display:flex;align-items:center;gap:8px;margin-top:20px}.overlay-dialog input[type=checkbox]{display:inline-block;width:14px;height:14px;margin:0;accent-color:#39c7d5;flex:none}.overlay-error,.overlay-dialog .overlay-error,.overlay-toast p{overflow-wrap:anywhere}.result-summary .overlay-error{color:#ffb49b}.overlay-dialog footer{position:sticky;bottom:0;background:#0c2c3ff5}.overlay-dialog fieldset{margin-top:16px}@media(max-width:700px){.attribute-filter{grid-template-columns:minmax(0,1fr) 80px auto}}
+.farmland-result-layers{display:contents}.analysis-result-children{margin-left:6px;padding-left:10px;border-left:1px solid #719dad38}.analysis-layer-item{padding:4px 0 10px;min-width:0}.analysis-layer-item+.analysis-layer-item{border-top:1px solid #719dad20;padding-top:12px}.analysis-group-switch{display:flex;align-items:center;gap:7px;cursor:pointer}.analysis-group-switch>input{margin:0;width:12px;height:12px;flex:none;accent-color:#39c7d5}.analysis-group-switch>span{flex:1;min-width:0;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.analysis-group-switch>small{flex:none;color:#8fb4c1;font-size:10px;font-variant-numeric:tabular-nums}.analysis-layer-item>.layer-display-mode{margin-top:7px;padding-left:19px}
+
+:global(.topic-analysis-popup .leaflet-popup-content-wrapper),:global(.topic-analysis-popup .leaflet-popup-tip){background:#103342f7;color:#dceff3;box-shadow:0 8px 26px #00131b66}:global(.topic-analysis-popup .leaflet-popup-content){margin:14px 16px}:global(.topic-analysis-popup .leaflet-popup-close-button){color:#bddae5}:global(.topic-analysis-popup .overlay-result-properties){margin:0;max-height:240px;overflow:auto;scrollbar-width:none;font-size:12px;line-height:1.7}:global(.topic-analysis-popup .overlay-result-properties>div){display:grid;grid-template-columns:64px minmax(0,1fr);gap:12px;padding:8px 0;border-bottom:1px solid #87b6c429}:global(.topic-analysis-popup .overlay-result-properties>div:last-child){border-bottom:0}:global(.topic-analysis-popup dt){color:#94bdc9}:global(.topic-analysis-popup dd){margin:0;color:#e2f2f6;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 </style>
