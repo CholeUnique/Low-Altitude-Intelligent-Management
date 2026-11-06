@@ -1,6 +1,7 @@
 <script setup lang="ts">
-withDefaults(defineProps<{title:string;subtitle?:string;expanded?:boolean;checked:boolean;indeterminate?:boolean;disabled?:boolean}>(),{expanded:false})
-const emit=defineEmits<{'update:expanded':[expanded:boolean];select:[checked:boolean];invert:[]}>()
+import TopicSelectionCheckbox from './TopicSelectionCheckbox.vue'
+withDefaults(defineProps<{title:string;subtitle?:string;expanded?:boolean;checked:boolean;indeterminate?:boolean;disabled?:boolean;categoryCount?:number}>(),{expanded:false,categoryCount:0})
+const emit=defineEmits<{'update:expanded':[expanded:boolean];select:[checked:boolean]}>()
 </script>
 <template>
   <section class="topic-layer-card" :aria-label="title">
@@ -9,8 +10,7 @@ const emit=defineEmits<{'update:expanded':[expanded:boolean];select:[checked:boo
         <i class="layer-card-disclosure" :class="{expanded}" aria-hidden="true"></i><span><b>{{ title }}</b><small v-if="subtitle">{{ subtitle }}</small></span>
       </button>
       <div class="layer-card-selection" role="group" :aria-label="`${title}分类选择`">
-        <label><input type="checkbox" :checked="checked" :indeterminate="indeterminate" :disabled="disabled" :aria-label="`${title}全选`" @change="emit('select',($event.target as HTMLInputElement).checked)" />全选</label>
-        <label><input type="checkbox" :checked="false" :disabled="disabled" :aria-label="`${title}反选`" @change="($event.target as HTMLInputElement).checked=false;emit('invert')" />反选</label>
+        <TopicSelectionCheckbox :title="title" :count="categoryCount" :checked="checked" :indeterminate="indeterminate" :disabled="disabled" @change="emit('select',$event)" />
       </div>
     </div>
     <div v-show="expanded" class="layer-card-body">

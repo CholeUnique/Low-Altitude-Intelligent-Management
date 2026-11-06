@@ -6,6 +6,7 @@ import { useUserStore } from '@/stores/user'
 defineProps<{
   title: string
   subtitle?: string
+  hideHeading?: boolean
 }>()
 
 const route = useRoute()
@@ -37,7 +38,7 @@ const activeEntry = computed(() => entries.value.find((entry) => entry.name === 
       </aside>
 
       <main class="task-center-content">
-        <header class="content-heading">
+        <header v-if="!hideHeading" class="content-heading">
           <div>
             <h1>{{ title }}</h1>
             <p v-if="subtitle">{{ subtitle }}</p>

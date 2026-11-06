@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict'
+import { build } from 'esbuild'
+const bundle=await build({entryPoints:['src/utils/facility-task.ts'],bundle:true,platform:'node',format:'esm',write:false,tsconfig:'tsconfig.app.json'})
+const {isFacilityTask,facilityGeometry,facilityFacts,facilityTaskReference}=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`)
+assert(isFacilityTask({sceneCode:'HIGH_STANDARD_FARMLAND_FACILITY',sceneName:'工程设施'}))
+assert(isFacilityTask({sceneCode:'other',sceneName:'高标准农田工程设施管理'}))
+assert(!isFacilityTask({sceneCode:'NON_GRAIN',sceneName:'非粮化动态监测'}))
+const facility={id:1,name:'一号泵站',facilityNo:'SS-1',typeName:'灌溉泵站',bizStatus:'ABNORMAL',projectName:'九龙镇项目',regionName:'九龙镇',villageName:'界沟村',geometryJson:JSON.stringify({type:'Point',coordinates:[119.9,32.4]})}
+assert.equal(facilityGeometry(facility).features[0].geometry.type,'Point')
+assert.equal(facilityGeometry({...facility,geometryJson:'invalid'}).features.length,0)
+const facts=Object.fromEntries(facilityFacts({description:'检查泵站电机',contactName:'张三'},facility))
+assert.equal(facts['建设 / 检修需求'],'检查泵站电机');assert.equal(facts['建设 / 检修位置'],'九龙镇 · 界沟村')
+assert.equal(facts['设施状态'],'异常');assert.equal(facts['设施名称'],'一号泵站')
+const construction=Object.fromEntries(facilityFacts({description:'西侧田块新建沟渠',rangeName:'九龙镇西侧田块'}))
+assert.equal(construction['设施名称'],undefined,'Do not invent an existing facility for a construction task')
+assert.equal(construction['建设 / 检修位置'],'九龙镇西侧田块')
+const report={sceneCode:'HIGH_STANDARD_FARMLAND_FACILITY',sceneName:'高标准农田工程设施管理',refType:'NONE',description:'工程设施问题上报（扫码/PC）。\n设施：test2（ID: 1419）\n问题描述：疑似异常'}
+assert.deepEqual(facilityTaskReference(report),{id:'1419',expectedName:'test2',source:'report-description'})
+assert.equal(Object.fromEntries(facilityFacts(report))['设施名称'],'test2','A denied ledger request must not discard the original report name')
+assert.equal(facilityTaskReference({...report,facilityId:'22'}).id,'22','Structured fields take priority over compatibility text')
+assert.equal(facilityTaskReference({...report,refType:'FACILITY',refId:'23'}).id,'23')
+assert.equal(facilityTaskReference(report,'24').id,'24')
+assert.equal(facilityTaskReference({...report,description:'请检修 ID: 1419 的设施'}),undefined,'Do not guess links from arbitrary user descriptions')
+assert.equal(facilityTaskReference({...report,sceneCode:'NON_GRAIN',sceneName:'非粮化'}),undefined)
+console.log('facility task details: exact scene identity, facility geometry, repair dossier and construction location passed')

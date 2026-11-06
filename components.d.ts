@@ -30,6 +30,7 @@ declare module 'vue' {
     FacilityReportDialog: typeof import('./src/components/FacilityReportDialog.vue')['default']
     FacilityReportImageGallery: typeof import('./src/components/FacilityReportImageGallery.vue')['default']
     FacilityReportPhotos: typeof import('./src/components/FacilityReportPhotos.vue')['default']
+    FacilityTaskDetail: typeof import('./src/components/task-center/FacilityTaskDetail.vue')['default']
     ManagementNavIcon: typeof import('./src/components/ManagementNavIcon.vue')['default']
     MapServiceManagementPanel: typeof import('./src/components/MapServiceManagementPanel.vue')['default']
     MetadataManagementPanel: typeof import('./src/components/MetadataManagementPanel.vue')['default']
@@ -56,8 +57,10 @@ declare module 'vue' {
     TopicMapLegend: typeof import('./src/components/TopicMapLegend.vue')['default']
     TopicMapToolbar: typeof import('./src/components/TopicMapToolbar.vue')['default']
     TopicOverlayAnalysis: typeof import('./src/components/TopicOverlayAnalysis.vue')['default']
+    TopicSelectionCheckbox: typeof import('./src/components/TopicSelectionCheckbox.vue')['default']
     TopicStatisticsSummary: typeof import('./src/components/TopicStatisticsSummary.vue')['default']
     TopicUploadedLayers: typeof import('./src/components/TopicUploadedLayers.vue')['default']
     UserAccountMenu: typeof import('./src/components/UserAccountMenu.vue')['default']
+    WorkflowActorBadge: typeof import('./src/components/WorkflowActorBadge.vue')['default']
   }
 }

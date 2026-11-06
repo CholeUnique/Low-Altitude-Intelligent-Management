@@ -2,11 +2,11 @@ import type { SpatialCollection, SpatialGeometryCompare, SpatialInput, SpatialOv
 import { validateCompareGroup } from './spatial-geometry-result'
 import { geometryRequestInputs } from './spatial-geometry-input'
 
-export type FarmlandGroupKind = 'A_ONLY' | 'B_ONLY' | 'OVERLAP' | 'NEITHER'
-export interface FarmlandPartition { kind:FarmlandGroupKind; name:string; color:string; areaSqm:number; data:SpatialCollection; sources:string[] }
+export type FarmlandGroupKind = 'A_ONLY' | 'B_ONLY' | 'OVERLAP' | 'NEITHER' | 'IN_HIGH' | 'IN_PERMANENT'
+export interface FarmlandPartition { kind:FarmlandGroupKind; name:string; color:string; areaSqm:number; data:SpatialCollection; sources:string[]; aggregate?:boolean }
 export interface AnalysisStatistic { label:string; areaSqm?:number; ratio?:number|null }
 export interface AnalysisStatistics { id:string; title:string; sources:string[]; metrics:AnalysisStatistic[] }
-const colors:Record<FarmlandGroupKind,string> = {A_ONLY:'#ffb81c',B_ONLY:'#9b5cff',OVERLAP:'#00e6a0',NEITHER:'#ff8238'}
+const colors:Record<FarmlandGroupKind,string> = {A_ONLY:'#ffb81c',B_ONLY:'#9b5cff',OVERLAP:'#00e6a0',NEITHER:'#ff8238',IN_HIGH:'#25cce5',IN_PERMANENT:'#6f9cff'}
 const empty = ():SpatialCollection => ({type:'FeatureCollection',features:[]})
 const area = (data:SpatialCollection) => data.features.reduce((sum,feature)=>sum+Number(feature.properties?.areaSqm||0),0)
 function partition(kind:FarmlandGroupKind,name:string,data:SpatialCollection,sources:string[]):FarmlandPartition {
@@ -53,7 +53,11 @@ export async function partitionUploadedRange(upload:SpatialCollection,high:Spati
     return {inside:validateCompareGroup(result.both,'OVERLAP'),outside:validateCompareGroup(result.aOnly,'A_ONLY')}
   }
   const [inside,outside] = await Promise.all([split(inHigh),split(outsideHigh)]);check()
-  const partitions = [partition('B_ONLY','仅在永农范围内部分',outside.inside,[sources.permanent.layerName]),partition('A_ONLY','仅在高标田范围内部分',inside.outside,[sources.high.layerName]),partition('OVERLAP','同时满足部分',inside.inside,[sources.high.layerName,sources.permanent.layerName]),partition('NEITHER','同时不满足部分',outside.outside,[`${sources.uploadName}（不属于高标田、永农）`])]
-  if(partitions.reduce((sum,item)=>sum+item.areaSqm,0)>first.areaA+Math.max(.05,first.areaA*1e-7))throw new Error('后端四类裁切面积超过上传范围，请检查结果')
+  const atoms = [partition('A_ONLY','仅高标非永农',inside.outside,[sources.high.layerName]),partition('B_ONLY','仅永农非高标',outside.inside,[sources.permanent.layerName]),partition('OVERLAP','同时满足',inside.inside,[sources.high.layerName,sources.permanent.layerName]),partition('NEITHER','都不满足',outside.outside,[`${sources.uploadName}（不属于高标田、永农）`])]
+  atoms.forEach(group => group.data.features.forEach((feature,index) => { feature.properties!.coverageAtom = `${group.kind}:${index}` }))
+  const combine = (kind:FarmlandGroupKind,name:string,members:FarmlandGroupKind[],source:string):FarmlandPartition => ({...partition(kind,name,{type:'FeatureCollection',features:atoms.filter(item=>members.includes(item.kind)).flatMap(item=>item.data.features)},[source]),aggregate:true})
+  // 汇总分类仅复用后端裁切结果，保留四个互斥原子区域，面积和导出不重复相加。
+  const partitions = [combine('IN_HIGH','高标范围内（含重叠）',['A_ONLY','OVERLAP'],sources.high.layerName),combine('IN_PERMANENT','永农范围内（含重叠）',['B_ONLY','OVERLAP'],sources.permanent.layerName),...atoms]
+  if(atoms.reduce((sum,item)=>sum+item.areaSqm,0)>first.areaA+Math.max(.05,first.areaA*1e-7))throw new Error('后端四类裁切面积超过上传范围，请检查结果')
   return {partitions,areaSqm:first.areaA,crsUsed:first.crsUsed}
 }

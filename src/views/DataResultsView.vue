@@ -181,7 +181,7 @@ function localThumbnailUrl(media: LiveMediaItem) {
   if (!media.localThumbnailUrl) return ''
   try {
     const path = new URL(media.localThumbnailUrl, window.location.origin).pathname.replace(/^\/api(?=\/v1\/uav\/media\/thumb\/)/, '')
-    if (!/^\/v1\/uav\/media\/thumb\/[\w-]+\/?$/.test(path) || path.split('/').filter(Boolean).at(-1) !== media.id) return ''
+    if (!/^\/v1\/uav\/media\/thumb\/[\w-]+\/?$/.test(path) || path.split('/').filter(Boolean).slice(-1)[0] !== media.id) return ''
     const base = new URL(apiClient.defaults.baseURL || '/api', window.location.origin)
     if (base.origin !== window.location.origin) return ''
     const url = new URL(`${base.pathname.replace(/\/$/, '')}${path}`, base.origin)

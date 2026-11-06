@@ -1,10 +1,9 @@
 <script setup lang="ts">
+import FacilityTaskDetail from '@/components/task-center/FacilityTaskDetail.vue'
+import { isFacilityTask } from '@/utils/facility-task'
 import TaskHistory from '@/components/task-center/TaskHistory.vue'
 import TaskLinkedMedia from '@/components/task-center/TaskLinkedMedia.vue'
 import FacilityReportImageGallery from '@/components/FacilityReportImageGallery.vue'
-import FacilityGeometryMap from '@/workspace-components/farmland-facilities/FacilityGeometryMap.vue'
-import { getFacilityDetail, getFacilityGeoJson } from '@/api/facility'
-import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
 import { useUserStore } from '@/stores/user'
 import { projectTaskListWorkflow } from '@/utils/task-list-workflow'
 import { workflowNodeDisplayName } from '@/utils/task-workflow-state'
@@ -48,32 +47,7 @@ let mapAbnormalRequestVersion = 0
 let taskRequestVersion = 0
 let abnormalRequestVersion = 0
 const task = computed(() => detail.value?.task)
-const isFacilityTask = computed(() => task.value?.sceneCode === 'HIGH_STANDARD_FARMLAND_FACILITY' || (task.value && resolveWorkspaceSceneId(task.value.sceneCode, task.value.sceneName) === 'farmland-facilities'))
-const facilityGeometry = ref<TaskGeometryFeatureCollection>()
-const facilityLocationState = ref('')
-async function loadFacilityLocation(current: GovernanceTaskDetail, version: number) {
-  facilityGeometry.value = undefined
-  const task = current.task
-  const facilityId = task.refType === 'FACILITY' ? task.refId : task.description?.match(/设施[：:]\s*[^\n]*?[（(]ID[：:]\s*(\d+)[）)]/i)?.[1]
-  if (!facilityId || !task.deptId) { facilityLocationState.value = '任务未提供可识别的设施关联信息'; return }
-  facilityLocationState.value = '正在读取设施位置…'
-  try {
-    const record = await getFacilityDetail(task.deptId, facilityId)
-    let geo: GeoJSON.Geometry | undefined
-    if (record.geometryJson) {
-      const parsed = JSON.parse(record.geometryJson)
-      geo = parsed.type === 'Feature' ? parsed.geometry : parsed
-    }
-    if (!geo?.type || !('coordinates' in geo)) {
-      const collection = await getFacilityGeoJson({ deptId: task.deptId })
-      geo = collection.features.find(item => String(item.properties?.facilityId) === String(facilityId))?.geometry || undefined
-    }
-    if (version !== taskRequestVersion) return
-    if (!geo?.type || !('coordinates' in geo)) { facilityLocationState.value = '该设施暂无位置数据'; return }
-    facilityGeometry.value = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: geo as TaskGeometryFeatureCollection['features'][number]['geometry'], properties: {} }] }
-    facilityLocationState.value = ''
-  } catch (reason) { if (version === taskRequestVersion) facilityLocationState.value = `设施位置读取失败：${reason instanceof Error ? reason.message : '请稍后重试'}` }
-}
+const facilityTask = computed(()=>isFacilityTask(task.value))
 const abnormalPageCount = computed(() => Math.max(1, Math.ceil(abnormalTotal.value / 10)))
 const logs = ref<GovernanceTaskOperateLog[]>([])
 const logsLoading = ref(false)
@@ -165,7 +139,6 @@ async function loadTask() {
   const version = ++taskRequestVersion
   abnormalRequestVersion += 1
   detail.value = undefined
-  facilityGeometry.value = undefined; facilityLocationState.value = ''
   geometry.value = { type: 'FeatureCollection', features: [] }
   abnormalRecords.value = []; abnormalTotal.value = 0; abnormalPage.value = 1; activeAbnormalId.value = ''
   flow.value = undefined
@@ -189,15 +162,13 @@ async function loadTask() {
     if (detailResult.status === 'rejected') throw detailResult.reason
     const nextDetail = detailResult.value
     detail.value = nextDetail
-    if (nextDetail && (nextDetail.task.sceneCode === 'HIGH_STANDARD_FARMLAND_FACILITY' || resolveWorkspaceSceneId(nextDetail.task.sceneCode, nextDetail.task.sceneName) === 'farmland-facilities')) void loadFacilityLocation(nextDetail, version)
     geometry.value = geometryResult.status === 'fulfilled'
       ? geometryResult.value
       : { type: 'FeatureCollection', features: [] }
     if (!nextDetail) error.value = '未找到该任务或当前账号无查看权限。'
     else {
       if (logVersion === logsRequestVersion) void loadOperateLogs(taskId, nextDetail.task.deptId, logVersion)
-      void loadAbnormals(taskId)
-      void loadAllMapAbnormals(taskId)
+      if(!isFacilityTask(nextDetail.task)){void loadAbnormals(taskId);void loadAllMapAbnormals(taskId)}
     }
   } catch (reason) {
     if (version !== taskRequestVersion) return
@@ -307,12 +278,13 @@ onMounted(() => void loadTask())
   <CockpitPageLayout title="低空治理任务详情" back-to="/tasks/list">
     <div v-if="loading" class="task-not-found"><h2>正在加载真实任务详情…</h2></div>
     <div v-else-if="error || !task" class="task-not-found"><h2>{{ error || '未找到任务' }}</h2><button @click="router.push('/tasks/list')">返回任务列表</button></div>
+    <FacilityTaskDetail v-else-if="facilityTask && detail" :detail="detail" :geometry="geometry" :flow="flow" :logs="logs" :history-loading="logsLoading" :history-error="logsError"><template #actions><div class="task-action-toolbar"><button class="enter-workspace" @click="router.push('/tasks/list')">返回任务列表</button><button class="task-action-primary" @click="router.push({name:'workspace',params:{sceneId:task.sceneCode,taskId:task.id}})">进入工作台</button><button v-if="![4,5].includes(task.taskStatus)" class="task-action-edit" @click="editVisible=true">编辑任务</button><button v-if="task.taskStatus===0" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('execute')">执行任务</button><button v-if="[0,1].includes(task.taskStatus)" class="task-action-danger" :disabled="actionLoading" @click="requestTaskAction('cancel')">取消任务</button><button v-if="task.taskStatus===2" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('finish')">核查完成</button></div></template></FacilityTaskDetail>
     <div v-else class="detail-layout">
       <aside class="detail-left">
         <section class="detail-panel basic-info">
           <div class="detail-title">任务基本信息<button v-if="task.taskStatus !== 4 && task.taskStatus !== 5" @click="editVisible = true">编辑</button></div>
           <div class="basic-scroll" tabindex="0" aria-label="任务基本信息，可滚动查看"><h2>{{ task.name }}</h2><div class="basic-badges"><em>{{ taskPriorityLabel(task.priority) }}优先级</em><em :class="statusClass(displayedTask?.taskStatus)">{{ displayedTask?.taskStatusDesc }}</em></div>
-          <dl><template v-for="[label, value] in basicFields" :key="label"><dt>{{ label }}</dt><dd>{{ value == null || value === '' ? '暂无数据' : value }}</dd></template></dl><FacilityReportImageGallery v-if="!isFacilityTask && detail?.reportImages.length" :images="detail.reportImages" :dept-id="task.deptId" /><TaskLinkedMedia v-if="task.imageCount && !isFacilityTask" :task-id="task.id" :dept-id="task.deptId" :image-count="task.imageCount" :editable="user.hasPermission('smart-recognition') && ![3, 4, 5].includes(task.taskStatus)" @changed="loadTask" /></div>
+          <dl><template v-for="[label, value] in basicFields" :key="label"><dt>{{ label }}</dt><dd>{{ value == null || value === '' ? '暂无数据' : value }}</dd></template></dl><FacilityReportImageGallery v-if="detail?.reportImages.length" :images="detail.reportImages" :dept-id="task.deptId" /><TaskLinkedMedia v-if="task.imageCount" :task-id="task.id" :dept-id="task.deptId" :image-count="task.imageCount" :editable="user.hasPermission('smart-recognition') && ![3, 4, 5].includes(task.taskStatus)" @changed="loadTask" /></div>
         </section>
       </aside>
 
@@ -327,8 +299,7 @@ onMounted(() => void loadTask())
           <div class="task-action-toolbar"><button class="enter-workspace" @click="router.push('/tasks/list')">返回任务列表</button><template ><button v-if="task.taskStatus !== 4 && task.taskStatus !== 5" class="task-action-edit" @click="editVisible = true">编辑任务</button><button v-if="task.taskStatus === 0" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('execute')">执行任务</button><button v-if="task.taskStatus === 0 || task.taskStatus === 1" class="task-action-danger" :disabled="actionLoading" @click="requestTaskAction('cancel')">取消任务</button><button v-if="task.taskStatus === 2" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('finish')">核查完成</button></template></div>
         </div>
         <section class="map-info-grid">
-          <article v-if="isFacilityTask" class="detail-panel task-map-panel"><div class="task-map-compare"><section class="task-map-compare__pane"><header>设施定位</header><div class="facility-location"><FacilityGeometryMap v-if="facilityGeometry" :geometry="facilityGeometry" facility-location /><div v-else class="facility-evidence-state">{{ facilityLocationState || '正在读取设施位置…' }}</div></div></section><section class="task-map-compare__pane"><header>上报现场照片</header><div class="facility-photo-pane"><FacilityReportImageGallery v-if="detail?.reportImages.length" :images="detail.reportImages" :dept-id="task.deptId" /><div v-else class="facility-evidence-state">本次上报暂无现场照片</div></div></section></div></article>
-          <article v-else class="detail-panel task-map-panel"><div class="task-map-compare"><section class="task-map-compare__pane"><header>任务范围与异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :fit-abnormal-points="true" :auto-fit="false" :fit-request="taskMapFitRequest" show-dom-imagery :imagery-service="taskImageryService(task?.comparisonImages, 'history')" :view="taskMapView" @view-change="syncTaskMapView" /></section><section class="task-map-compare__pane"><header>异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :show-task-range="false" :abnormal-fill-opacity="0" :show-dom-imagery="true" :imagery-service="taskImageryService(task?.comparisonImages)" :auto-fit="false" :view="taskMapView" @view-change="syncTaskMapView" /></section></div></article>
+          <article class="detail-panel task-map-panel"><div class="task-map-compare"><section class="task-map-compare__pane"><header>任务范围与异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :fit-abnormal-points="true" :auto-fit="false" :fit-request="taskMapFitRequest" show-dom-imagery :imagery-service="taskImageryService(task?.comparisonImages, 'history')" :view="taskMapView" @view-change="syncTaskMapView" /></section><section class="task-map-compare__pane"><header>异常图斑</header><TaskRangeMap :geo-json="geometry" :abnormal-points="mapAbnormalRecords" :active-abnormal-id="activeAbnormalId" :show-task-range="false" :abnormal-fill-opacity="0" :show-dom-imagery="true" :imagery-service="taskImageryService(task?.comparisonImages)" :auto-fit="false" :view="taskMapView" @view-change="syncTaskMapView" /></section></div></article>
         </section>
         <section class="detail-bottom">
           <section class="detail-panel abnormal-panel">
@@ -355,7 +326,6 @@ onMounted(() => void loadTask())
 </template>
 
 <style scoped lang="scss">
-.facility-location,.facility-photo-pane{min-height:0;overflow:auto;background:#031a31}.facility-location :deep(.facility-map){border-radius:0}.facility-photo-pane{padding:12px}.facility-photo-pane :deep(.report-gallery){border:0;background:transparent;padding:0}.facility-photo-pane :deep(.gallery-item){width:150px}.facility-photo-pane :deep(.gallery-item img),.facility-photo-pane :deep(.gallery-state){width:150px;height:110px}.facility-evidence-state{height:100%;min-height:120px;display:grid;place-items:center;padding:12px;box-sizing:border-box;color:#8fb9c8;font-size:13px;text-align:center}
 .task-action-toolbar { min-width: 0; height: 100%; display: flex; align-items: stretch; gap: 6px; white-space: nowrap; }.enter-workspace,.enter-patrol,.task-action-edit,.task-action-primary,.task-action-danger { height: 100%; padding: 0 11px; color: white; border: 1px solid #2fa9ff; border-radius: 3px; cursor: pointer; font-size: 13px; }.enter-workspace,.task-action-primary { background: #087fe7; box-shadow: 0 0 8px #138deb55; }.enter-patrol { color: #bff8e9; background: #075d58; border-color: #22bfae; box-shadow: 0 0 8px #16bfa744; }.task-action-edit { color: #bdeeff; background: #063958; border-color: #2581a8; }.task-action-danger { color: #ffc1c8; background: #5d1b2b; border-color: #ba5260; }.task-action-toolbar button:disabled { opacity: .55; cursor: wait; }.task-action-error { margin: 7px 0 0; padding: 8px 12px; color: #ffb3ab; background: #4e19252e; border: 1px solid #893444; font-size: 13px; }
 .action-confirm-mask { position: fixed; z-index: 3200; inset: 0; display: grid; place-items: center; padding: 20px; background: #00121acc; backdrop-filter: blur(3px); }.action-confirm-dialog { width: min(430px, calc(100vw - 40px)); overflow: hidden; color: #c7eaf5; background: linear-gradient(145deg,#063454,#031c33); border: 1px solid #1b92c2; border-radius: 5px; box-shadow: 0 14px 40px #000a1ee0, 0 0 24px #078fd060; }.action-confirm-dialog header { display: flex; gap: 11px; align-items: center; padding: 15px 18px; background: linear-gradient(90deg,#095982,#063455); border-bottom: 1px solid #1376a1; }.action-confirm-dialog header i { width: 33px; height: 33px; display: grid; place-items: center; color: #092d43; background: #4de0e9; border-radius: 50%; box-shadow: 0 0 12px #25d6e599; font-style: normal; font-weight: 800; }.action-confirm-dialog header span,.action-confirm-dialog header b,.action-confirm-dialog header small { min-width: 0; display: block; }.action-confirm-dialog header b { color: #e3fbff; font-size: 17px; }.action-confirm-dialog header small { margin-top: 3px; overflow: hidden; color: #8ec5d7; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.action-confirm-dialog>p { margin: 18px; color: #b0d7e4; font-size: 14px; line-height: 1.7; }.action-confirm-dialog footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; background: #03192d; border-top: 1px solid #0b5375; }.action-confirm-dialog footer button { min-width: 92px; padding: 8px 13px; color: #bce6f0; background: #073553; border: 1px solid #19759c; border-radius: 3px; cursor: pointer; }.action-confirm-dialog footer button:last-child { color: #fff; background: #087fe7; border-color: #36aeff; box-shadow: 0 0 9px #0b91e766; }.action-confirm-dialog footer button.danger { background: #922f42; border-color: #ec6678; box-shadow: 0 0 9px #d3425866; }.action-confirm-dialog footer button:disabled { opacity: .6; cursor: wait; }.action-confirm-dialog .action-confirm-error { margin: 0 18px 14px; padding: 8px 10px; color: #ffc0c7; background: #531927; border-left: 2px solid #f05d70; font-size: 13px; }
 .detail-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: clamp(240px, 22vw, 310px) minmax(0,1fr); gap: 7px; overflow: hidden; }.detail-left { display: grid; align-content: stretch; grid-template-rows: minmax(0,1fr); gap: 7px; min-height: 0; }.detail-main { min-width: 0; min-height: 0; display: grid; grid-template-rows: clamp(62px, 8vh, 76px) minmax(220px,1fr) minmax(260px,.85fr); gap: 7px; }

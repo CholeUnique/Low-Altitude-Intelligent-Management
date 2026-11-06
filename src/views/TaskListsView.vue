@@ -24,9 +24,10 @@ const priority = ref<number | ''>('')
 const parentDeptId = ref('')
 const childDeptId = ref('')
 const handlerFilter = ref('')
-const handlerOptions = ref<UserOption[]>([])
-const handlerLoading = ref(false)
-const handlerError = ref('')
+const projectedTasks = ref<GovernanceTask[]>([])
+const departmentHandlers = ref<UserOption[]>([])
+const handlerLoading = ref(false), handlerError = ref('')
+const handlerReadErrors = ref<Record<string,boolean>>({})
 const departments = ref<DepartmentInfo[]>([])
 const departmentLoading = ref(false)
 const departmentError = ref('')
@@ -44,15 +45,17 @@ const sceneLoading = ref(true)
 const sceneError = ref('')
 const taskRangeGeometries = ref<Record<string, TaskGeometryFeatureCollection>>({})
 const taskRangePreviewLoading = ref(false)
-const tableElement = ref<HTMLElement>()
-const requestPageSize = ref(7)
-const currentHandlers = ref<Record<string, string>>({})
-let projectedTasks: GovernanceTask[] = []
-let tableObserver: ResizeObserver | undefined
 let latestRequest = 0
 let latestSceneRequest = 0
 let latestRangePreviewRequest = 0
-let latestHandlerRequest = 0
+
+function handlerKey(task: GovernanceTask) { return task.currentHandlerId ? `id:${task.currentHandlerId}` : task.currentHandlerName ? `name:${task.currentHandlerName}` : '' }
+const handlerOptions = computed(() => {
+  const people=new Map(projectedTasks.value.filter(task=>handlerKey(task)).map(task=>[handlerKey(task),{key:handlerKey(task),name:task.currentHandlerName || `处理人 #${task.currentHandlerId}`}]))
+  departmentHandlers.value.forEach(person=>people.set(`id:${person.id}`,{key:`id:${person.id}`,name:`${person.realName || person.nickname || person.username}（${person.username}）`}))
+  return [...people.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'))
+})
+function handlerName(task:GovernanceTask){return handlerReadErrors.value[task.id] ? '读取失败' : task.currentHandlerName || (task.currentHandlerId ? `#${task.currentHandlerId}` : '—')}
 
 const selectedScene = computed(() => sceneOptions.value.find((scene) => scene.id === sceneFilter.value))
 const selectedOrganizationSceneId = computed(() => selectedScene.value
@@ -65,6 +68,10 @@ const rootDepartments = computed(() => {
 const childDepartments = computed(() =>
   departments.value.filter((item) => item.parentId === parentDeptId.value))
 const selectedDeptId = computed(() => childDeptId.value || parentDeptId.value || user.activeDeptId)
+const tableElement = ref<HTMLElement>()
+const requestPageSize = ref(7)
+let tableObserver: ResizeObserver | undefined
+let latestHandlerRequest = 0
 const pageCount = computed(() => Math.max(1, Math.ceil(taskTotal.value / requestPageSize.value)))
 const paginationItems = computed<(number | 'ellipsis')[]>(() => {
   const total = pageCount.value
@@ -118,12 +125,13 @@ async function loadTaskRangePreviews(tasks: GovernanceTask[], taskRequestId: num
   taskRangePreviewLoading.value = false
 }
 
-function filteredTaskRecords(apiRecords: GovernanceTask[], filterStatus = true) {
+function filteredTaskRecords(apiRecords: GovernanceTask[], filterStatus = true, filterHandler = true) {
   const normalizedKeyword = keyword.value.trim().toLocaleLowerCase()
   const selectedPriority = priority.value === '' ? undefined : Number(priority.value)
   return apiRecords.filter((task) =>
     isTaskVisibleForOrganization(user.organization, task, selectedDeptId.value)
     && (selectedPriority === undefined || task.priority === selectedPriority)
+    && (!filterHandler || !handlerFilter.value || handlerKey(task) === handlerFilter.value)
     && (!filterStatus || status.value === '' || task.taskStatus === status.value)
     && (!normalizedKeyword || `${task.name} ${task.taskNo} ${task.sceneName} ${task.deptName}`.toLocaleLowerCase().includes(normalizedKeyword))
     && (!selectedScene.value || task.sceneCode === selectedScene.value.code
@@ -152,7 +160,6 @@ async function loadTasks() {
       pageNum,
       pageSize,
       keyword: keyword.value || undefined,
-      assigneeId: handlerFilter.value || undefined,
       // 流程已启动时业务 taskStatus 可能仍为 0，状态筛选须在合并流程后执行。
       priority: selectedPriority,
       deptId: selectedDeptId.value,
@@ -160,32 +167,27 @@ async function loadTasks() {
     }))
     if (requestId !== latestRequest) return
     // 后端切换部门后仍可能返回历史跨单位任务；前端按当前单位场景再做一层隔离。
-    const candidates = filteredTaskRecords(records, false)
+    const candidates = filteredTaskRecords(records, false, false)
     const projected = [...candidates]
-    const handlers: Record<string, string> = {}
     const failures: string[] = []
+    const failedHandlers: Record<string,boolean> = {}
     let next = 0
     await Promise.all(Array.from({ length: Math.min(6, candidates.length) }, async () => {
       while (next < candidates.length && requestId === latestRequest) {
         const index = next++
         const task = candidates[index]!
-        try {
-          const flow = await getTaskWorkflow(task.id)
-          projected[index] = projectTaskListWorkflow(task, flow)
-          const node = flow?.status === 'RUNNING' && ![3, 4, 5].includes(task.taskStatus) ? flow.currentNode : undefined
-          handlers[task.id] = node ? node.assigneeName || (node.assigneeId ? `用户 #${node.assigneeId}` : '未指派') : '—'
-        } catch (error) { handlers[task.id] = '读取失败'; failures.push(`${task.taskNo}：${error instanceof Error ? error.message : '读取失败'}`) }
+        try { projected[index] = projectTaskListWorkflow(task, await getTaskWorkflow(task.id)) }
+        catch (error) { failedHandlers[task.id]=true; failures.push(`${task.taskNo}：${error instanceof Error ? error.message : '读取失败'}`) }
       }
     }))
     if (requestId !== latestRequest) return
     if (failures.length) workflowError.value = `部分任务流程读取失败，相关任务暂按业务状态显示：${failures.join('；')}`
-    currentHandlers.value = handlers
-    projectedTasks = projected
-    applyTaskRecords(projectedTasks, requestId)
+    handlerReadErrors.value=failedHandlers
+    projectedTasks.value = projected
+    applyTaskRecords(projected, requestId)
   } catch (error) {
     if (requestId !== latestRequest) return
-    projectedTasks = []
-    currentHandlers.value = {}
+    projectedTasks.value = []; handlerReadErrors.value={}
     applyTaskRecords([], requestId)
     taskError.value = error instanceof Error ? error.message : '真实任务加载失败，请重试。'
   } finally {
@@ -242,31 +244,33 @@ async function loadDepartments() {
 
 async function loadHandlers(deptId?: string) {
   const version = ++latestHandlerRequest
-  handlerOptions.value = []
+  departmentHandlers.value = []
   handlerError.value = ''
   if (!deptId) { handlerLoading.value = false; return }
   handlerLoading.value = true
   try {
     const people = await collectPages((pageNum, pageSize) => getDeptUserPage({ deptId, pageNum, pageSize, includeChild: true }))
-    if (version === latestHandlerRequest) handlerOptions.value = people
+    if (version === latestHandlerRequest) departmentHandlers.value = people
   } catch (error) {
     if (version === latestHandlerRequest) handlerError.value = error instanceof Error ? error.message : '处理人列表读取失败'
   } finally { if (version === latestHandlerRequest) handlerLoading.value = false }
 }
 
+
 function openTask(task: GovernanceTask) {
   router.push(`/tasks/${task.id}`)
 }
 
-watch([keyword, status, priority, sceneFilter, parentDeptId, childDeptId, handlerFilter], () => {
-  if (currentPage.value !== 1) setPage(1)
+watch([keyword, status, priority, sceneFilter, parentDeptId, childDeptId], () => {
+  currentPage.value = 1
   void loadTasks()
 })
 watch(parentDeptId, () => {
   if (!childDepartments.value.some((item) => item.id === childDeptId.value)) childDeptId.value = ''
 })
-watch(selectedDeptId, (deptId) => { handlerFilter.value = ''; void loadHandlers(deptId) }, { immediate: true })
-watch([currentPage, requestPageSize], () => applyTaskRecords(projectedTasks, latestRequest))
+watch([currentPage, requestPageSize], () => applyTaskRecords(projectedTasks.value, latestRequest))
+watch(handlerFilter, () => { currentPage.value = 1; applyTaskRecords(projectedTasks.value, latestRequest) })
+watch(selectedDeptId, deptId => { handlerFilter.value = ''; projectedTasks.value = []; handlerReadErrors.value={}; void loadHandlers(deptId) }, {immediate:true})
 watch(selectedScene, () => {
   if (sceneFilter.value) void loadTasks()
 })
@@ -280,25 +284,28 @@ watch([() => user.organizationId, () => user.activeDeptId], async () => {
 watch(pageCount, () => setPage(currentPage.value))
 
 onMounted(async () => {
-  if (tableElement.value) {
-    tableObserver = new ResizeObserver(() => {
-      const height = tableElement.value?.clientHeight || 0
-      if (height > 36) requestPageSize.value = Math.max(1, Math.floor((height - 36) / 62))
+  if(tableElement.value){
+    tableObserver=new ResizeObserver(()=>{
+      const table=tableElement.value
+      if(!table)return
+      const header=table.querySelector('.task-table-head')?.getBoundingClientRect().height || 36
+      const row=table.querySelector('.task-table-row:not(.task-table-head)')?.getBoundingClientRect().height || 68
+      if(table.clientHeight>header)requestPageSize.value=Math.max(1,Math.floor((table.clientHeight-header)/row))
     })
     tableObserver.observe(tableElement.value)
   }
   await Promise.all([loadSceneDictionary(), loadDepartments()])
   void loadTasks()
 })
-onBeforeUnmount(() => { latestRequest++; latestRangePreviewRequest++; latestHandlerRequest++; tableObserver?.disconnect() })
+onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRequest++;tableObserver?.disconnect()})
 </script>
 
 <template>
-  <TaskCenterLayout class="task-list-page" title="任务列表" :subtitle="`${user.organization.name} · ${sceneFilter ? selectedScene?.name || '已选场景' : '全部场景'}`">
+  <TaskCenterLayout hide-heading class="task-list-page" title="任务列表" :subtitle="`${user.organization.name} · ${sceneFilter ? selectedScene?.name || '已选场景' : '全部场景'}`">
     <section class="task-filters">
       <label class="search-filter">
         <span>搜索任务</span>
-        <span class="search-box"><i class="search-box__icon" aria-hidden="true"></i><input v-model="keyword" placeholder="请输入任务名称、编号或关键词" /></span>
+        <span class="search-box"><i class="search-box__icon" aria-hidden="true"></i><input v-model="keyword" placeholder="任务名称、编号" /></span>
       </label>
       <label>所属场景<select v-model="sceneFilter" :disabled="sceneLoading"><option value="">{{ sceneLoading ? '场景字典加载中…' : '全部场景' }}</option><option v-for="scene in sceneOptions" :key="scene.id" :value="scene.id">{{ scene.shortName }}</option></select></label>
       <label>任务状态<select v-model="status"><option value="">全部状态</option><option :value="0">待执行</option><option :value="1">执行中</option><option :value="2">待核查</option><option :value="3">已失败</option><option :value="4">已取消</option><option :value="5">已完成</option></select></label>
@@ -314,7 +321,7 @@ onBeforeUnmount(() => { latestRequest++; latestRangePreviewRequest++; latestHand
           </select>
         </div>
       </label>
-      <label>当前处理人<select v-model="handlerFilter" :disabled="handlerLoading || !!handlerError"><option value="">{{ handlerLoading ? '人员加载中…' : '全部处理人' }}</option><option v-for="person in handlerOptions" :key="person.id" :value="person.id">{{ person.realName || person.nickname || person.username }}（{{ person.username }}）</option></select></label>
+      <label>当前处理人<select v-model="handlerFilter" aria-label="当前处理人筛选" :disabled="taskLoading || handlerLoading"><option value="">{{ handlerLoading ? '人员加载中…' : '全部处理人' }}</option><option v-for="person in handlerOptions" :key="person.key" :value="person.key">{{ person.name }}</option></select></label>
       <label>优先级<select v-model.number="priority"><option value="">全部优先级</option><option :value="2">高</option><option :value="1">中</option><option :value="0">低</option></select></label>
     </section>
     <p v-if="sceneError" class="scene-dictionary-error">场景字典加载失败：{{ sceneError }}。请检查登录状态与网络后刷新页面。</p>
@@ -324,14 +331,14 @@ onBeforeUnmount(() => { latestRequest++; latestRangePreviewRequest++; latestHand
 
     <section ref="tableElement" class="task-table">
       <div class="task-table-row task-table-head">
-        <span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建单位 / 负责人</span><span>当前处理人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
+        <span>任务名称</span><span>所属场景</span><span>当前状态</span><span>当前处理人</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
       </div>
       <div v-for="task in taskRows" :key="task.id" class="task-table-row">
         <span class="task-name"><b :title="task.name">{{ task.name }}</b><small>{{ task.taskNo }}</small></span>
         <span><em class="scene-tag">{{ task.sceneName }}</em></span>
         <span><em class="status-tag" :class="taskStatusClass(task)" :title="task.taskStatusDesc">{{ task.taskStatusDesc }}</em></span>
+        <span class="task-handler" :title="handlerName(task)">{{ handlerName(task) }}</span>
         <span class="task-owner"><b>{{ task.deptName }}</b><small v-if="task.assigneeName || task.assigneeId">{{ task.assigneeName || `负责人 #${task.assigneeId}` }}</small></span>
-        <span :title="currentHandlers[task.id] || '—'">{{ currentHandlers[task.id] || '—' }}</span>
         <span class="task-created" :title="formatTime(task.createTime)">{{ formatTime(task.createTime) }}</span>
         <span class="task-range">
           <TaskRangeThumbnail v-if="taskRangeGeometries[task.id]" :geo-json="taskRangeGeometries[task.id]!" />
@@ -443,8 +450,6 @@ onBeforeUnmount(() => { latestRequest++; latestRangePreviewRequest++; latestHand
   .task-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 .task-list-page .search-box{min-width:0;overflow:hidden;height:34px;border:1px solid #d8e0e7;background:#fff;align-items:center}.task-list-page .search-box input{height:100%;min-width:0;flex:1;align-self:stretch;background:transparent;border:0;border-radius:0;padding:0;box-shadow:none}
-.task-filters{grid-template-columns:1.35fr repeat(5,minmax(135px,1fr))}
-@media(max-width:1320px){.task-filters{grid-template-columns:repeat(3,minmax(0,1fr))}}
 </style>
 
 <style scoped>
@@ -456,7 +461,7 @@ onBeforeUnmount(() => { latestRequest++; latestRangePreviewRequest++; latestHand
 .task-table-row{flex:1;min-height:48px;max-height:62px}
 .task-list-page .task-table-row>span{padding:2px 8px}
 .task-table-row{box-sizing:border-box}
-.task-list-page .task-table-row{grid-template-columns:1.2fr .85fr .75fr .8fr .65fr .85fr 65px minmax(250px,2.5fr) 65px}
+.task-list-page .task-table-row{grid-template-columns:1.2fr .85fr .75fr .8fr .85fr 65px minmax(250px,2.5fr) 65px}
 .task-table-row>span{overflow:hidden}
 .task-owner small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .status-tag{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -465,4 +470,23 @@ onBeforeUnmount(() => { latestRequest++; latestRangePreviewRequest++; latestHand
 .task-pagination{flex:none;padding:8px 0;gap:8px}
 @media(max-height:740px){.task-list-page :deep(.content-heading){min-height:54px}.task-list-page :deep(.content-body){padding-block:8px}.task-filters{padding-block:7px}.task-table-row:not(.task-table-head){min-height:43px}.task-pagination{padding-block:5px}}
 .task-list-page .search-box{min-width:0;overflow:hidden;height:34px;border:1px solid #d8e0e7;background:#fff;align-items:center}.task-list-page .search-box input{height:100%;min-width:0;flex:1;align-self:stretch;background:transparent;border:0;border-radius:0;padding:0;box-shadow:none}
+</style>
+
+<style scoped>
+/* Nine compact columns share a fixed row height, with wrapping inside each cell. */
+.task-list-page .task-filters{grid-template-columns:minmax(130px,1.1fr) minmax(100px,.9fr) minmax(90px,.8fr) minmax(170px,1.4fr) minmax(100px,.9fr) minmax(76px,.65fr)}
+.task-list-page .task-filters select{min-width:0;width:100%}
+.task-list-page .task-table{overflow-x:hidden;overflow-y:auto;scrollbar-width:thin}
+.task-list-page .task-table-row{min-width:0;width:100%;grid-template-columns:minmax(0,.85fr) minmax(0,.95fr) 86px 76px minmax(0,.9fr) 104px 54px minmax(180px,1.6fr) 44px;flex:0 0 68px;height:68px;min-height:68px;max-height:68px}
+.task-list-page .task-table-head{flex:0 0 36px;height:36px;min-height:36px;max-height:36px}
+.task-list-page .task-table-row>span{padding:4px 5px;font-size:11px;line-height:15px;white-space:normal;overflow-wrap:anywhere}
+.task-list-page .task-name b,.task-list-page .task-owner b{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;white-space:normal;font-size:12px;line-height:16px}
+.task-list-page .task-name small,.task-list-page .task-owner small{font-size:10px;line-height:13px;margin-top:2px}
+.task-list-page .task-handler{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;color:#327bac}
+.task-list-page .status-tag,.task-list-page .scene-tag{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;max-width:100%;overflow:hidden;white-space:normal;overflow-wrap:anywhere;text-overflow:clip;font-size:10px;line-height:14px;padding:3px 4px}
+.task-list-page .task-actions button{padding:4px 5px;font-size:11px;white-space:nowrap}
+.task-list-page .task-created{font-size:10px;line-height:15px}
+.task-list-page .task-table-head>span:nth-child(7){font-size:10px;white-space:nowrap}
+.task-list-page .task-table-row>span:nth-child(4){white-space:normal}
+@media(max-width:1100px){.task-list-page .task-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.task-list-page .task-filters .search-box{grid-column:auto}.task-list-page .task-table-row{grid-template-columns:minmax(0,.8fr) minmax(0,.85fr) 72px 62px minmax(0,.8fr) 70px 38px minmax(125px,1.3fr) 40px}}
 </style>

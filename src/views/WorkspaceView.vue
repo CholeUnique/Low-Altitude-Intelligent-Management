@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkflowActorBadge from '@/components/WorkflowActorBadge.vue'
 import { getTaskWorkflow, type TaskWorkflow } from '@/api/task-workflow'
 import { isDefaultWorkflow } from '@/utils/default-workflow'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -139,6 +140,10 @@ function nodeState(key: string) {
   }
 }
 
+function workflowInstance(node: WorkspaceNodeConfig) {
+  return [...(contextFlow.value?.timeline || []), ...(contextFlow.value?.currentNode ? [contextFlow.value.currentNode] : [])].reverse().find(item => item.nodeKey === node.key || item.nodeName === node.name || item.nodeName === node.shortName)
+}
+
 function selectNode(node: WorkspaceNodeConfig) {
   if (!isNodeAvailable(node)) return
   router.replace({
@@ -243,7 +248,7 @@ onMounted(() => void loadTaskContext())
               :disabled="!nodeState(node.key).accessible"
               @click="selectNode(node)"
             >
-              <i>{{ nodeState(node.key).done ? '✓' : node.order }}</i>
+              <div class="workflow-step-symbol"><i>{{ nodeState(node.key).done ? '✓' : node.order }}</i><WorkflowActorBadge v-if="node.key !== 'task-acceptance'" :node="workflowInstance(node)" :user-id="String(user.currentUser?.id || '')" /></div>
               <span>{{ node.shortName }}</span>
             </button>
           </div>
@@ -259,7 +264,7 @@ onMounted(() => void loadTaskContext())
               :disabled="!nodeState(node.key).accessible"
               @click="selectNode(node)"
             >
-              <i>{{ nodeState(node.key).done ? '✓' : node.order }}</i>
+              <div class="workflow-step-symbol"><i>{{ nodeState(node.key).done ? '✓' : node.order }}</i><WorkflowActorBadge v-if="node.key !== 'task-acceptance'" :node="workflowInstance(node)" :user-id="String(user.currentUser?.id || '')" /></div>
               <span>{{ node.shortName }}</span>
             </button>
           </div>
@@ -501,4 +506,8 @@ onMounted(() => void loadTaskContext())
   .workspace-brand--moved { left: 105px; }.module-label { display: none; }.module-nodes button { min-width: 64px; }.module-nodes span { font-size: 10px; }.workspace-user { gap: 7px; font-size: 11px; }
 }
 @media (max-height: 700px) { .workspace-context { flex-basis: 62px; } }
+</style>
+
+<style scoped>
+.workflow-step-symbol{position:relative;display:grid;place-items:center;width:28px;height:28px;z-index:2;overflow:visible}
 </style>

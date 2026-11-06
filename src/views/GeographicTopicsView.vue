@@ -6,6 +6,7 @@ import { FullScreen, Setting, Close, Collection, Refresh, Search, Upload } from 
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
 import TopicLayerCard from '@/components/TopicLayerCard.vue'
+import TopicSelectionCheckbox from '@/components/TopicSelectionCheckbox.vue'
 import TopicLayerDisplayMode from '@/components/TopicLayerDisplayMode.vue'
 import TopicFeatureDetails from '@/components/TopicFeatureDetails.vue'
 import TopicAnalysisStatistics from '@/components/TopicAnalysisStatistics.vue'
@@ -150,10 +151,10 @@ function applyLegendSelection(item: TopicLayer) {
     else void setVisible(item,true)
   }
 }
-function selectLegend(item: TopicLayer, mode: 'all' | 'none' | 'invert') {
-  if(!item.categories.length)item.analysisHidden=mode==='invert'?!item.analysisHidden:mode!=='all'
+function selectLegend(item: TopicLayer, mode: 'all' | 'none') {
+  if(!item.categories.length)item.analysisHidden=mode!=='all'
   item.categories.forEach(category => {
-    category.checked = mode === 'invert' ? !category.checked : mode === 'all'
+    category.checked = mode === 'all'
   })
   // 一次批量操作只对当前图层提交一次筛选，不影响其他层。
   applyLegendSelection(item)
@@ -162,10 +163,10 @@ function setCategoryVisible(item: TopicLayer,category: Category,checked: boolean
   category.checked=checked
   applyLegendSelection(item)
 }
-async function selectBusinessLayers(mode: 'all' | 'none' | 'invert') {
+async function selectBusinessLayers(mode: 'all' | 'none') {
   if (businessBatchPending.value) return
   businessBatchPending.value = true
-  const targets = vectorLayers.value.map(item => ({ item, visible:mode === 'invert' ? !item.visible : mode === 'all' }))
+  const targets = vectorLayers.value.map(item => ({ item, visible:mode === 'all' }))
   try { await Promise.all(targets.map(({item,visible}) => setVisible(item,visible,true))) }
   finally { businessBatchPending.value = false }
 }
@@ -176,11 +177,6 @@ async function selectSource(group:{layers:TopicLayer[]},visible:boolean) {
   businessBatchPending.value = true
   try { await Promise.all(group.layers.map(item => setVisible(item,visible,true))) }
   finally { businessBatchPending.value = false }
-}
-function invertSelection(event: Event) {
-  // 反选是一次性操作，完成后复位，允许再次点击反转当前状态。
-  ;(event.target as HTMLInputElement).checked = false
-  void selectBusinessLayers('invert')
 }
 function clearFeatureSelection() {
   featureHover?.clear()
@@ -437,7 +433,7 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
         <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :farmland="isFarmland" :defaults="baselineInputs" :keyword="layerKeyword" :layer-order="detailLayerOrder" @layerkeys="rememberAddedLayers" @statistics="analysisStatistics=$event" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
         <TopicUploadedLayers v-if="toolsMap&&topic.id===HIGH_STANDARD_TOPIC_ID" ref="uploadPanel" :map="toolsMap" :scope="uploadScope" :keyword="layerKeyword" integrated :layer-order="detailLayerOrder" @change="updateUploads" @dialog="uploadDialogOpen=$event" @imported="uploaded" />
         <p v-if="!legendLayers.length && !pending">{{ layerKeyword.trim() ? '没有匹配的已开启图层，可在场景配置中查找并开启。' : '暂无已开启的分类图层，可在场景配置中选择。' }}</p>
-        <TopicLayerCard v-for="item in legendLayers" :key="item.key" v-model:expanded="expandedLegendLayers[item.key]" :title="item.service.name" :subtitle="item.service.name!==item.sourceName?item.sourceName:undefined" :checked="legendAllSelected(item)" :indeterminate="legendPartSelected(item)" class="published-layer" :data-layer-key="`published:${item.key}`" :style="{order:layers.findIndex(layer=>layer.key===item.key)}" @select="selectLegend(item,$event?'all':'none')" @invert="selectLegend(item,'invert')">
+        <TopicLayerCard v-for="item in legendLayers" :key="item.key" v-model:expanded="expandedLegendLayers[item.key]" :title="item.service.name" :subtitle="item.service.name!==item.sourceName?item.sourceName:undefined" :category-count="item.categories.length" :checked="legendAllSelected(item)" :indeterminate="legendPartSelected(item)" class="published-layer" :data-layer-key="`published:${item.key}`" :style="{order:layers.findIndex(layer=>layer.key===item.key)}" @select="selectLegend(item,$event?'all':'none')">
           <TopicLayerDisplayMode v-if="item.service.arcGisGeometryType || item.role==='boundary'" :mode="layerUsesMode(item,'filled')?'filled':layerUsesMode(item,'boundary')?'boundary':'mixed'" :name="`legend-mode-${item.key}`" :label="`${item.service.name}图例显示模式`" :class="{'has-categories':item.categories.length>0}" :color="item.handle?.color" @change="setLayerMode(item,$event)" />
           <div v-for="category in item.categories" :key="category.value" class="category-entry">
           <label class="topic-category">
@@ -463,8 +459,7 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
         <section><h3>背景影像</h3><select aria-label="背景影像" :value="imageryLayers.find(item=>item.visible)?.key || ''" @change="selectImagery(($event.target as HTMLSelectElement).value)"><option value="">仅基础底图</option><option v-for="item in imageryLayers" :key="item.key" :value="item.key">{{ item.service.name }}</option></select></section>
         <section><h3>业务数据 <small>{{ configSourceGroups.length }} 个服务 · {{ vectorLayers.length }} 个图层</small></h3>
           <div class="selection-actions" role="group" aria-label="业务数据批量选择">
-            <label><input type="checkbox" :checked="businessAllSelected" :indeterminate="businessPartSelected" :disabled="pending || businessBatchPending || !vectorLayers.length" @change="selectBusinessLayers(($event.target as HTMLInputElement).checked ? 'all' : 'none')" />全选</label>
-            <label><input type="checkbox" :checked="false" :disabled="pending || businessBatchPending || !vectorLayers.length" @change="invertSelection($event)" />反选</label>
+            <TopicSelectionCheckbox title="业务数据" :count="vectorLayers.length" :checked="businessAllSelected" :indeterminate="businessPartSelected" :disabled="pending || businessBatchPending || !vectorLayers.length" @change="selectBusinessLayers($event?'all':'none')" />
             <small v-if="businessBatchPending" role="status">正在应用…</small>
           </div>
           <p v-if="!vectorLayers.length && layerKeyword.trim()">没有匹配的业务图层。</p>

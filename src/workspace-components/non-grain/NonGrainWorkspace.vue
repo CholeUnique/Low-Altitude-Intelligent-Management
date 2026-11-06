@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkflowActorBadge from '@/components/WorkflowActorBadge.vue'
 import { defaultWorkflow } from '@/utils/default-workflow'
 import DefaultWorkflowPanel from '@/workspace-components/shared/DefaultWorkflowPanel.vue'
 import { computed, ref, watch } from 'vue'
@@ -99,12 +100,12 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
           :key="node.key"
           :class="[node.status, { selected: node.key === selectedKey, mine: isMyNode(node) }]"
 
-          :title="nodeHint(node)"
+          :aria-label="nodeHint(node)"
           :aria-disabled="!node.viewable"
           @click="selectNode(node)"
         >
-          <i>{{ node.status === 'completed' ? '✓' : node.order }}</i>
-          <span>{{ node.name }}<em v-if="isMyNode(node)">我</em></span>
+          <div class="workflow-step-symbol"><i>{{ node.status === 'completed' ? '✓' : node.order }}</i><WorkflowActorBadge v-if="node.key !== 'task-acceptance'" :node="node.instance" :user-id="String(user.currentUser?.id || '')" /></div>
+          <span>{{ node.name }}</span>
         </button>
       </nav>
 
@@ -571,4 +572,8 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
     max-width: 135px;
   }
 }
+</style>
+
+<style scoped>
+.workflow-step-symbol{position:relative;display:grid;place-items:center;width:28px;height:28px;z-index:2;overflow:visible}
 </style>

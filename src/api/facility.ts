@@ -58,6 +58,7 @@ export interface FacilityFormInput {
 
 export const getFacilityPage = (query: FacilityQuery) => apiClient.post<never, FacilityPage>('/v1/biz/facility/page', query)
 export const getFacilityDetail = (deptId: string, id: string | number) => apiClient.post<never, FacilityRecord>('/v1/biz/facility/detail', { deptId, id })
+export interface FacilityReportImage { imageId: string; fileName: string; fileExt?: string; fileSize?: number; sortNo?: number; createTime?: string }
 export const getFacilityStatistics = (deptId: string) => apiClient.post<never, FacilityStatistics>('/v1/biz/facility/statistics/overall', { deptId })
 export const getFacilityRegionStatistics = (deptId: string) => apiClient.post<never, FacilityRegionStat[]>('/v1/biz/facility/statistics/by-region', { deptId })
 export const getFacilityTypes = () => apiClient.post<never, FacilityOption[]>('/v1/biz/facility/type/options', {})
@@ -105,7 +106,7 @@ export function reportFacilityIssue(input: FacilityReportInput) {
   return apiClient.post<never, FacilityReportResult>('/v1/biz/facility/report', form)
 }
 
-export async function getFacilityReportImage(imageId: string, deptId?: string) {
+export async function getFacilityReportImage(imageId: string | number, deptId?: string) {
   const blob = await apiClient.post<never, Blob>('/v1/biz/facility/report/image/view', { imageId, ...(deptId ? { deptId } : {}) }, { responseType: 'blob' })
   if (!(blob instanceof Blob) || !blob.type.startsWith('image/')) {
     if (blob instanceof Blob) {
