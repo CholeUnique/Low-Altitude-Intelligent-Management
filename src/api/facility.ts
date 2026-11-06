@@ -58,6 +58,8 @@ export interface FacilityFormInput {
 
 export const getFacilityPage = (query: FacilityQuery) => apiClient.post<never, FacilityPage>('/v1/biz/facility/page', query)
 export const getFacilityDetail = (deptId: string, id: string | number) => apiClient.post<never, FacilityRecord>('/v1/biz/facility/detail', { deptId, id })
+export interface FacilityReportImage { imageId: string | number; fileName: string; fileExt?: string; fileSize?: number; sortNo?: number; createTime?: string }
+export const getFacilityReportImage = (imageId: string | number) => apiClient.post<never, Blob>('/v1/biz/facility/report/image/view', { imageId }, { responseType:'blob' })
 export const getFacilityStatistics = (deptId: string) => apiClient.post<never, FacilityStatistics>('/v1/biz/facility/statistics/overall', { deptId })
 export const getFacilityRegionStatistics = (deptId: string) => apiClient.post<never, FacilityRegionStat[]>('/v1/biz/facility/statistics/by-region', { deptId })
 export const getFacilityTypes = () => apiClient.post<never, FacilityOption[]>('/v1/biz/facility/type/options', {})

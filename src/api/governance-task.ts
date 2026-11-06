@@ -15,6 +15,8 @@ export interface GovernanceTask {
   deptName: string
   refType: string
   refId?: string
+  /** 工程设施任务的专用关联；兼容后端后续补充的结构化字段。 */
+  facilityId?: string
   executeMode: string
   taskStatus: GovernanceTaskStatus
   taskStatusDesc: string
@@ -25,6 +27,9 @@ export interface GovernanceTask {
   actualEndTime?: string
   assigneeId?: string
   assigneeName?: string
+  /** 列表由工作流当前节点投影，区别于任务执行负责人。 */
+  currentHandlerId?: string
+  currentHandlerName?: string
   description?: string
   contactName?: string
   contactPhone?: string
@@ -167,6 +172,10 @@ export interface GovernanceTaskOperateLog {
 
 export interface GovernanceTaskDetail {
   task: GovernanceTask
+  facilityId?: string
+  reportImages?: import('./facility').FacilityReportImage[]
+  /** 任务授权范围内返回的设施摘要，不依赖专题台账读取权限。 */
+  facility?: import('./facility').FacilityRecord
   refSummary?: string
   abnormalCount?: number
   /** 当前任务异常图斑总面积，单位 m²。 */
@@ -271,6 +280,9 @@ interface BizTaskDto {
 
 interface BizTaskDetailDto {
   task: BizTaskDto
+  facilityId?: string | number
+  facility?: import('./facility').FacilityRecord
+  reportImages?: import('./facility').FacilityReportImage[]
   refSummary?: string
   abnormalCount?: number
   abnormalArea?: number
@@ -442,6 +454,7 @@ function toGovernanceTask(item: BizTaskDto): GovernanceTask {
     deptName: item.deptName || '-',
     refType: item.refType || 'NONE',
     refId: optionalValue(item.refId),
+    facilityId: optionalValue(item.facilityId),
     executeMode: item.executeMode || 'MANUAL',
     taskStatus: status,
     taskStatusDesc: item.taskStatusDesc || taskStatusText[status],
@@ -642,7 +655,10 @@ export async function getGovernanceTaskDetail(taskId: string): Promise<Governanc
   const detail = await apiClient.post<never, BizTaskDetailDto>('/v1/biz/task/detail', { id: taskId })
   return {
     task: toGovernanceTask(detail.task),
+    facilityId: optionalValue(detail.facilityId),
+    facility: detail.facility,
     refSummary: detail.refSummary,
+    reportImages: detail.reportImages || [],
     abnormalCount: detail.abnormalCount,
     abnormalArea: detail.abnormalArea,
     statistics: detail.statistics,

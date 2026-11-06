@@ -79,6 +79,7 @@ const sceneAliases: Record<string, string> = {
   '农田设施': 'farmland-facilities',
   '高标准农田工程设施管理': 'farmland-facilities',
   FARMLAND_FACILITIES: 'farmland-facilities',
+  HIGH_STANDARD_FARMLAND_FACILITY: 'farmland-facilities',
   '在建农田': 'farmland-construction',
   '高标准农田在建工程管理': 'farmland-construction',
   FARMLAND_CONSTRUCTION: 'farmland-construction',

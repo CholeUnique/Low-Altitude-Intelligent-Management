@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import FacilityTaskDetail from '@/components/task-center/FacilityTaskDetail.vue'
+import { isFacilityTask } from '@/utils/facility-task'
 import TaskHistory from '@/components/task-center/TaskHistory.vue'
 import TaskLinkedMedia from '@/components/task-center/TaskLinkedMedia.vue'
 import { useUserStore } from '@/stores/user'
@@ -44,6 +46,7 @@ let mapAbnormalRequestVersion = 0
 let taskRequestVersion = 0
 let abnormalRequestVersion = 0
 const task = computed(() => detail.value?.task)
+const facilityTask = computed(()=>isFacilityTask(task.value))
 const abnormalPageCount = computed(() => Math.max(1, Math.ceil(abnormalTotal.value / 10)))
 const logs = ref<GovernanceTaskOperateLog[]>([])
 const logsLoading = ref(false)
@@ -164,8 +167,7 @@ async function loadTask() {
     if (!nextDetail) error.value = '未找到该任务或当前账号无查看权限。'
     else {
       if (logVersion === logsRequestVersion) void loadOperateLogs(taskId, nextDetail.task.deptId, logVersion)
-      void loadAbnormals(taskId)
-      void loadAllMapAbnormals(taskId)
+      if(!isFacilityTask(nextDetail.task)){void loadAbnormals(taskId);void loadAllMapAbnormals(taskId)}
     }
   } catch (reason) {
     if (version !== taskRequestVersion) return
@@ -275,6 +277,7 @@ onMounted(() => void loadTask())
   <CockpitPageLayout title="低空治理任务详情" back-to="/tasks/list">
     <div v-if="loading" class="task-not-found"><h2>正在加载真实任务详情…</h2></div>
     <div v-else-if="error || !task" class="task-not-found"><h2>{{ error || '未找到任务' }}</h2><button @click="router.push('/tasks/list')">返回任务列表</button></div>
+    <FacilityTaskDetail v-else-if="facilityTask && detail" :detail="detail" :geometry="geometry" :flow="flow" :logs="logs" :history-loading="logsLoading" :history-error="logsError"><template #actions><div class="task-action-toolbar"><button class="enter-workspace" @click="router.push('/tasks/list')">返回任务列表</button><button class="task-action-primary" @click="router.push({name:'workspace',params:{sceneId:task.sceneCode,taskId:task.id}})">进入工作台</button><button v-if="![4,5].includes(task.taskStatus)" class="task-action-edit" @click="editVisible=true">编辑任务</button><button v-if="task.taskStatus===0" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('execute')">执行任务</button><button v-if="[0,1].includes(task.taskStatus)" class="task-action-danger" :disabled="actionLoading" @click="requestTaskAction('cancel')">取消任务</button><button v-if="task.taskStatus===2" class="task-action-primary" :disabled="actionLoading" @click="requestTaskAction('finish')">核查完成</button></div></template></FacilityTaskDetail>
     <div v-else class="detail-layout">
       <aside class="detail-left">
         <section class="detail-panel basic-info">

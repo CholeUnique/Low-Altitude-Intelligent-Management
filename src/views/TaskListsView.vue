@@ -23,6 +23,8 @@ const status = ref<GovernanceTaskStatus | ''>('')
 const priority = ref<number | ''>('')
 const parentDeptId = ref('')
 const childDeptId = ref('')
+const handlerFilter = ref('')
+const projectedTasks = ref<GovernanceTask[]>([])
 const departments = ref<DepartmentInfo[]>([])
 const departmentLoading = ref(false)
 const departmentError = ref('')
@@ -44,6 +46,8 @@ let latestRequest = 0
 let latestSceneRequest = 0
 let latestRangePreviewRequest = 0
 
+function handlerKey(task: GovernanceTask) { return task.currentHandlerId ? `id:${task.currentHandlerId}` : task.currentHandlerName ? `name:${task.currentHandlerName}` : '' }
+const handlerOptions = computed(() => [...new Map(projectedTasks.value.filter(task => handlerKey(task)).map(task => [handlerKey(task), { key: handlerKey(task), name: task.currentHandlerName || `处理人 #${task.currentHandlerId}` }])).values()].sort((a,b) => a.name.localeCompare(b.name, 'zh-CN')))
 const selectedScene = computed(() => sceneOptions.value.find((scene) => scene.id === sceneFilter.value))
 const selectedOrganizationSceneId = computed(() => selectedScene.value
   ? findOrganizationScene(user.organization, selectedScene.value.code, selectedScene.value.name)?.id
@@ -109,12 +113,13 @@ async function loadTaskRangePreviews(tasks: GovernanceTask[], taskRequestId: num
   taskRangePreviewLoading.value = false
 }
 
-function filteredTaskRecords(apiRecords: GovernanceTask[], filterStatus = true) {
+function filteredTaskRecords(apiRecords: GovernanceTask[], filterStatus = true, filterHandler = true) {
   const normalizedKeyword = keyword.value.trim().toLocaleLowerCase()
   const selectedPriority = priority.value === '' ? undefined : Number(priority.value)
   return apiRecords.filter((task) =>
     isTaskVisibleForOrganization(user.organization, task, selectedDeptId.value)
     && (selectedPriority === undefined || task.priority === selectedPriority)
+    && (!filterHandler || !handlerFilter.value || handlerKey(task) === handlerFilter.value)
     && (!filterStatus || status.value === '' || task.taskStatus === status.value)
     && (!normalizedKeyword || `${task.name} ${task.taskNo} ${task.sceneName} ${task.deptName}`.toLocaleLowerCase().includes(normalizedKeyword))
     && (!selectedScene.value || task.sceneCode === selectedScene.value.code
@@ -150,7 +155,7 @@ async function loadTasks() {
     }))
     if (requestId !== latestRequest) return
     // 后端切换部门后仍可能返回历史跨单位任务；前端按当前单位场景再做一层隔离。
-    const candidates = filteredTaskRecords(records, false)
+    const candidates = filteredTaskRecords(records, false, false)
     const projected = [...candidates]
     const failures: string[] = []
     let next = 0
@@ -164,9 +169,11 @@ async function loadTasks() {
     }))
     if (requestId !== latestRequest) return
     if (failures.length) workflowError.value = `部分任务流程读取失败，相关任务暂按业务状态显示：${failures.join('；')}`
+    projectedTasks.value = projected
     applyTaskRecords(projected, requestId)
   } catch (error) {
     if (requestId !== latestRequest) return
+    projectedTasks.value = []
     applyTaskRecords([], requestId)
     taskError.value = error instanceof Error ? error.message : '真实任务加载失败，请重试。'
   } finally {
@@ -226,13 +233,15 @@ function openTask(task: GovernanceTask) {
 }
 
 watch([keyword, status, priority, sceneFilter, parentDeptId, childDeptId], () => {
-  if (currentPage.value !== 1) setPage(1)
-  else void loadTasks()
+  currentPage.value = 1
+  void loadTasks()
 })
 watch(parentDeptId, () => {
   if (!childDepartments.value.some((item) => item.id === childDeptId.value)) childDeptId.value = ''
 })
-watch([currentPage, requestPageSize], () => void loadTasks())
+watch([currentPage, requestPageSize], () => applyTaskRecords(projectedTasks.value, latestRequest))
+watch(handlerFilter, () => { currentPage.value = 1; applyTaskRecords(projectedTasks.value, latestRequest) })
+watch(selectedDeptId, () => { handlerFilter.value = ''; projectedTasks.value = [] })
 watch(selectedScene, () => {
   if (sceneFilter.value) void loadTasks()
 })
@@ -252,11 +261,11 @@ onMounted(async () => {
 </script>
 
 <template>
-  <TaskCenterLayout class="task-list-page" title="任务列表" :subtitle="`${user.organization.name} · ${sceneFilter ? selectedScene?.name || '已选场景' : '全部场景'}`">
+  <TaskCenterLayout hide-heading class="task-list-page" title="任务列表" :subtitle="`${user.organization.name} · ${sceneFilter ? selectedScene?.name || '已选场景' : '全部场景'}`">
     <section class="task-filters">
       <label class="search-filter">
         <span>搜索任务</span>
-        <span class="search-box"><i class="search-box__icon" aria-hidden="true"></i><input v-model="keyword" placeholder="请输入任务名称、编号或关键词" /></span>
+        <span class="search-box"><i class="search-box__icon" aria-hidden="true"></i><input v-model="keyword" placeholder="任务名称、编号" /></span>
       </label>
       <label>所属场景<select v-model="sceneFilter" :disabled="sceneLoading"><option value="">{{ sceneLoading ? '场景字典加载中…' : '全部场景' }}</option><option v-for="scene in sceneOptions" :key="scene.id" :value="scene.id">{{ scene.shortName }}</option></select></label>
       <label>任务状态<select v-model="status"><option value="">全部状态</option><option :value="0">待执行</option><option :value="1">执行中</option><option :value="2">待核查</option><option :value="3">已失败</option><option :value="4">已取消</option><option :value="5">已完成</option></select></label>
@@ -272,6 +281,7 @@ onMounted(async () => {
           </select>
         </div>
       </label>
+      <label>当前处理人<select v-model="handlerFilter" aria-label="当前处理人筛选" :disabled="taskLoading"><option value="">全部处理人</option><option v-for="person in handlerOptions" :key="person.key" :value="person.key">{{ person.name }}</option></select></label>
       <label>优先级<select v-model.number="priority"><option value="">全部优先级</option><option :value="2">高</option><option :value="1">中</option><option :value="0">低</option></select></label>
     </section>
     <p v-if="sceneError" class="scene-dictionary-error">场景字典加载失败：{{ sceneError }}。请检查登录状态与网络后刷新页面。</p>
@@ -280,12 +290,13 @@ onMounted(async () => {
 
     <section class="task-table">
       <div class="task-table-row task-table-head">
-        <span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
+        <span>任务名称</span><span>所属场景</span><span>当前状态</span><span>当前处理人</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
       </div>
       <div v-for="task in taskRows" :key="task.id" class="task-table-row">
         <span class="task-name"><b :title="task.name">{{ task.name }}</b><small>{{ task.taskNo }}</small></span>
         <span><em class="scene-tag">{{ task.sceneName }}</em></span>
         <span><em class="status-tag" :class="taskStatusClass(task)" :title="task.taskStatusDesc">{{ task.taskStatusDesc }}</em></span>
+        <span class="task-handler" :title="task.currentHandlerName || (task.currentHandlerId ? `处理人 #${task.currentHandlerId}` : '暂无当前处理人')">{{ task.currentHandlerName || (task.currentHandlerId ? `#${task.currentHandlerId}` : '—') }}</span>
         <span class="task-owner"><b>{{ task.deptName }}</b><small v-if="task.assigneeName || task.assigneeId">{{ task.assigneeName || `负责人 #${task.assigneeId}` }}</small></span>
         <span class="task-created" :title="formatTime(task.createTime)">{{ formatTime(task.createTime) }}</span>
         <span class="task-range">
@@ -418,4 +429,23 @@ onMounted(async () => {
 .task-pagination{flex:none;padding:8px 0;gap:8px}
 @media(max-height:740px){.task-list-page :deep(.content-heading){min-height:54px}.task-list-page :deep(.content-body){padding-block:8px}.task-filters{padding-block:7px}.task-table-row:not(.task-table-head){min-height:43px}.task-pagination{padding-block:5px}}
 .task-list-page .search-box{min-width:0;overflow:hidden;height:34px;border:1px solid #d8e0e7;background:#fff;align-items:center}.task-list-page .search-box input{height:100%;min-width:0;flex:1;align-self:stretch;background:transparent;border:0;border-radius:0;padding:0;box-shadow:none}
+</style>
+
+<style scoped>
+/* Nine compact columns share a fixed row height, with wrapping inside each cell. */
+.task-list-page .task-filters{grid-template-columns:minmax(130px,1.1fr) minmax(100px,.9fr) minmax(90px,.8fr) minmax(170px,1.4fr) minmax(100px,.9fr) minmax(76px,.65fr)}
+.task-list-page .task-filters select{min-width:0;width:100%}
+.task-list-page .task-table{overflow-x:hidden;overflow-y:auto;scrollbar-width:thin}
+.task-list-page .task-table-row{min-width:0;width:100%;grid-template-columns:minmax(0,.85fr) minmax(0,.95fr) 86px 76px minmax(0,.9fr) 104px 54px minmax(180px,1.6fr) 44px;flex:0 0 68px;height:68px;min-height:68px;max-height:68px}
+.task-list-page .task-table-head{flex:0 0 36px;height:36px;min-height:36px;max-height:36px}
+.task-list-page .task-table-row>span{padding:4px 5px;font-size:11px;line-height:15px;white-space:normal;overflow-wrap:anywhere}
+.task-list-page .task-name b,.task-list-page .task-owner b{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;white-space:normal;font-size:12px;line-height:16px}
+.task-list-page .task-name small,.task-list-page .task-owner small{font-size:10px;line-height:13px;margin-top:2px}
+.task-list-page .task-handler{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;color:#327bac}
+.task-list-page .status-tag,.task-list-page .scene-tag{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;max-width:100%;overflow:hidden;white-space:normal;overflow-wrap:anywhere;text-overflow:clip;font-size:10px;line-height:14px;padding:3px 4px}
+.task-list-page .task-actions button{padding:4px 5px;font-size:11px;white-space:nowrap}
+.task-list-page .task-created{font-size:10px;line-height:15px}
+.task-list-page .task-table-head>span:nth-child(7){font-size:10px;white-space:nowrap}
+.task-list-page .task-table-row>span:nth-child(4){white-space:normal}
+@media(max-width:1100px){.task-list-page .task-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.task-list-page .task-filters .search-box{grid-column:auto}.task-list-page .task-table-row{grid-template-columns:minmax(0,.8fr) minmax(0,.85fr) 72px 62px minmax(0,.8fr) 70px 38px minmax(125px,1.3fr) 40px}}
 </style>

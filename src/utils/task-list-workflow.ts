@@ -24,8 +24,11 @@ export function projectTaskListWorkflow(task: GovernanceTask, flow?: TaskWorkflo
   const terminalTask = [3, 4, 5].includes(task.taskStatus)
   const running = !terminalTask && flow.status === 'RUNNING'
   const finished = ![3, 4].includes(task.taskStatus) && flow.status === 'FINISHED'
+  const handler = running && current && ['PROCESSING', 'PENDING'].includes(current.status) ? current : undefined
   return {
     ...task,
+    currentHandlerId: handler?.assigneeId,
+    currentHandlerName: handler?.assigneeName,
     taskStatus: finished ? 5 : running ? 1 : task.taskStatus,
     taskStatusDesc: finished ? '已完成' : running
       ? current ? `${workflowNodeDisplayName(current, task.sceneCode)}处理中` : '流程办理中'

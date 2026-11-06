@@ -41,4 +41,8 @@ assert.doesNotThrow(() => buildTaskHistory(task, [{ ...logs[0], operateDesc: '{b
 assert.equal(buildTaskHistory(task, [], undefined, [])[0].actor, '创建人未记录', 'Do not fabricate users')
 const normal = buildTaskHistory({ ...task, sceneCode: 'OTHER' }, [], flow, [])
 assert.ok(normal.some(entry => entry.title === '完成市级审核'), 'Other scenes keep backend node names')
+const facilityHistory=buildTaskHistory({...task,sceneCode:'HIGH_STANDARD_FARMLAND_FACILITY',sceneName:'高标准农田工程设施管理'},[],{timeline:[{id:'facility-check',nodeKey:'UAV_RECHECK',nodeName:'复核',status:'COMPLETED',assigneeName:'设施复核人',submitTime:'2026-11-06T12:00:00',resultData:{result:'NO_PROBLEM',recheckOpinion:'维修验收合格'}},{id:'facility-repair',nodeKey:'RECTIFY',nodeName:'维修处置',status:'COMPLETED',submitTime:'2026-11-06T11:00:00',resultData:{result:'DONE',repairAction:'更换接口',testResult:'通水无渗漏'}}]},[])
+assert(facilityHistory.some(entry=>entry.title==='完成部门复核'&&entry.content.join('').includes('维修结果通过复核')))
+assert(facilityHistory.some(entry=>entry.content.join('').includes('更换接口')))
+assert(!JSON.stringify(facilityHistory).includes('复耕'))
 console.log('PASS: business-readable task history, opinions/recipients/plot outcomes, no raw JSON, chronology, skew/deduplication, loops and missing data')

@@ -131,7 +131,7 @@ async function refreshDetail(result:Result){
   finally{result.refreshing=false;detailControllers.delete(abort)}
 }
 function display(data:SpatialCollection,summary:SpatialAnalysisSummary,restore:string[],operation:SpatialAnalysisOperation='difference',remote=true,partitions?:FarmlandPartition[],uploadName?:string){
-  const difference=partitions?{type:'FeatureCollection' as const,features:partitions.flatMap(group=>group.data.features)}:operation==='coverage'?data:annotateSpatialDifference(data,summary)
+  const difference=partitions?{type:'FeatureCollection' as const,features:partitions.filter(group=>!group.aggregate).flatMap(group=>group.data.features)}:operation==='coverage'?data:annotateSpatialDifference(data,summary)
   if(!difference.features.length&&!partitions)throw new Error('后端未返回可显示的分析图斑')
   const id=props.farmland?createLocalId():summary.resultId||createLocalId()
   if(!props.map.getPane('topic-analysis'))props.map.createPane('topic-analysis').style.zIndex='370'
@@ -154,22 +154,41 @@ function display(data:SpatialCollection,summary:SpatialAnalysisSummary,restore:s
     layer=L.geoJSON()
     groups=partitions.map(part=>{
       const group:ResultGroup={...part,data:markRaw(part.data),id:`analysis:${id}:${part.kind}`,layer:markRaw(L.geoJSON()),visible:!!part.data.features.length,mode:'filled'}
-      group.layer=markRaw(makeLayer(group.data,()=>group.color,()=>group.mode));if(group.visible)layer.addLayer(group.layer)
+      group.layer=markRaw(makeLayer(group.data,()=>group.color,()=>group.mode))
       return group
     })
   }else layer=makeLayer(difference)
   try{if(difference.features.length)layer.addTo(props.map)}catch(error){layer.remove();throw error}
   if(!props.farmland)results.value.forEach(result=>{result.layer.remove();result.visible=false})
   const result:Result={id,name,operation,remote,summary,groups,statistics:partitions?.map(group=>({label:group.name,areaSqm:group.areaSqm})),uploadName,data:markRaw(data),difference:markRaw(difference),layer:markRaw(layer),visible:difference.features.length>0,restore,details:true,refreshing:false,error:''}
+  if(groups) { try { syncResultLayers(result) } catch(error) { layer.remove(); throw error } }
   if(props.farmland)results.value.push(result)
   else {results.value=results.value.filter(item=>item.id!==id);results.value.unshift(result)}
   if(layer.getBounds().isValid())props.map.fitBounds(layer.getBounds(),{padding:[80,80],maxZoom:17})
   return difference.features.length
 }
+function syncResultLayers(result:Result){
+  result.layer.clearLayers()
+  const seen = new Set<string>()
+  const ordered = [...(result.groups||[])].sort((a,b)=>Number(!!a.aggregate)-Number(!!b.aggregate))
+  for(const group of ordered){
+    if(!group.visible)continue
+    const features=group.data.features.filter(feature=>{
+      const key=feature.properties?.coverageAtom
+      if(!key)return true
+      if(seen.has(String(key)))return false
+      seen.add(String(key));return true
+    })
+    group.layer.clearLayers();group.layer.addData({type:'FeatureCollection',features} as SpatialCollection)
+    if(features.length)result.layer.addLayer(group.layer)
+  }
+  result.visible=!!result.groups?.some(group=>group.visible)
+  if(result.visible&&!props.map.hasLayer(result.layer))result.layer.addTo(props.map)
+  else if(!result.visible)result.layer.remove()
+}
 function toggleGroup(result:Result,group:ResultGroup,visible:boolean){
   group.visible=visible&&!!group.data.features.length
-  if(group.visible){result.layer.addLayer(group.layer);if(!props.map.hasLayer(result.layer))result.layer.addTo(props.map)}else result.layer.removeLayer(group.layer)
-  result.visible=!!result.groups?.some(item=>item.visible)
+  syncResultLayers(result)
 }
 function groupMode(group:ResultGroup,mode:'filled'|'boundary'){group.mode=mode;group.layer.setStyle({color:group.color,weight:mode==='boundary'?3:2,fillOpacity:mode==='boundary'?0:.65})}
 function groupMatches(group:ResultGroup){return !props.keyword?.trim()||group.name.toLocaleLowerCase().includes(props.keyword.trim().toLocaleLowerCase())}
@@ -178,8 +197,8 @@ function categoryMatches(result:Result,group:ResultGroup){return !props.keyword?
 function selectableGroups(result:Result){return result.groups?.filter(group=>group.data.features.length)||[]}
 function resultAllSelected(result:Result){const groups=selectableGroups(result);return groups.length>0&&groups.every(group=>group.visible)}
 function resultPartSelected(result:Result){return !resultAllSelected(result)&&selectableGroups(result).some(group=>group.visible)}
-function selectResult(result:Result,selection:'all'|'none'|'invert'){selectableGroups(result).forEach(group=>toggleGroup(result,group,selection==='invert'?!group.visible:selection==='all'))}
-function locateResult(result:Result){const bounds=(result.groups||[]).reduce((bounds,group)=>bounds.extend(group.layer.getBounds()),L.latLngBounds([]));if(bounds.isValid())props.map.fitBounds(bounds,{padding:[80,80],maxZoom:17})}
+function selectResult(result:Result,selection:'all'|'none'){selectableGroups(result).forEach(group=>{group.visible=selection==='all'});syncResultLayers(result)}
+function locateResult(result:Result){const bounds=(result.groups||[]).reduce((bounds,group)=>bounds.extend(L.geoJSON(group.data).getBounds()),L.latLngBounds([]));if(bounds.isValid())props.map.fitBounds(bounds,{padding:[80,80],maxZoom:17})}
 
 function input(side:Selection):SpatialInput{
   const layer=selected(side)
@@ -215,8 +234,8 @@ async function finish(){
       check();stage.value='后端正在将上传范围裁切为四类区域…'
       const result=await partitionUploadedRange(filterUploadedGeometry(range.data,[]),high,permanent,area,{high:sources.sourceA,permanent:sources.sourceB,uploadName:range.name},input=>compareSpatialGeometries(input,{signal:abort.signal}),check)
       check()
-      summary={...sources,areaA:result.areaSqm,areaB:0,overlapArea:0,onlyAArea:0,onlyBArea:0,diffArea:0,minAreaSqm:area,crsUsed:result.crsUsed,featureCountA:range.data.features.length,featureCountB:0,spotCount:result.partitions.reduce((sum,group)=>sum+group.data.features.length,0)}
-      data={type:'FeatureCollection',features:result.partitions.flatMap(group=>group.data.features)}
+      summary={...sources,areaA:result.areaSqm,areaB:0,overlapArea:0,onlyAArea:0,onlyBArea:0,diffArea:0,minAreaSqm:area,crsUsed:result.crsUsed,featureCountA:range.data.features.length,featureCountB:0,spotCount:result.partitions.filter(group=>!group.aggregate).reduce((sum,group)=>sum+group.data.features.length,0)}
+      data={type:'FeatureCollection',features:result.partitions.filter(group=>!group.aggregate).flatMap(group=>group.data.features)}
       display(data,summary,restore,operation,false,result.partitions,range.name);emit('hide',[...keys,`upload:${range.id}`]);toast('范围覆盖分析完成');return
     }
     if(remote){
@@ -258,7 +277,7 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
 </script>
 <template>
   <div v-if="farmland" class="farmland-result-layers">
-    <TopicLayerCard v-for="result in results" v-show="resultMatches(result)" :key="result.id" v-model:expanded="result.details" :title="result.name" :checked="resultAllSelected(result)" :indeterminate="resultPartSelected(result)" :disabled="!selectableGroups(result).length" class="analysis-result-group" :data-layer-key="`analysis:${result.id}`" :style="{order:layerOrder?.[`analysis:${result.id}`] ?? 10000}" @select="selectResult(result,$event?'all':'none')" @invert="selectResult(result,'invert')">
+    <TopicLayerCard v-for="result in results" v-show="resultMatches(result)" :key="result.id" v-model:expanded="result.details" :title="result.name" :category-count="result.groups?.length || 0" :checked="resultAllSelected(result)" :indeterminate="resultPartSelected(result)" :disabled="!selectableGroups(result).length" class="analysis-result-group" :data-layer-key="`analysis:${result.id}`" :style="{order:layerOrder?.[`analysis:${result.id}`] ?? 10000}" @select="selectResult(result,$event?'all':'none')">
       <div class="analysis-result-children" role="group" :aria-label="`${result.name}分类`">
         <section v-for="group in result.groups" v-show="categoryMatches(result,group)" :key="group.id" class="analysis-layer-item" :data-analysis-group="group.kind">
           <label class="analysis-group-switch"><input type="checkbox" :checked="group.visible" :disabled="!group.data.features.length" :aria-label="`${group.name}显示`" @change="toggleGroup(result,group,($event.target as HTMLInputElement).checked)" /><span>{{ group.name }}</span><small>{{ group.data.features.length }}</small></label>

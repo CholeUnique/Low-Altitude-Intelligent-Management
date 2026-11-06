@@ -37,18 +37,20 @@ assert.equal(calls.length,3,'Use three backend clips, not whole-upload intersect
 assert.equal(calls[0].geometryA,upload);assert.equal(calls[0].geometryB,highData)
 assert.equal(calls[1].geometryA,responses[0].both.featureCollection);assert.equal(calls[2].geometryA,responses[0].aOnly.featureCollection)
 assert.equal(calls[1].geometryB,permData);assert(calls.every(c=>c.minAreaSqm===4))
-assert.deepEqual(result.partitions.map(g=>g.areaSqm),[10,40,20,30],'Four mutually exclusive upload portions, no B-only target geometry leaks outside U')
-assert.equal(result.partitions.reduce((sum,g)=>sum+g.areaSqm,0),100)
-assert.equal(result.partitions[2].sources.length,2)
-assert.deepEqual(result.partitions.flatMap(g=>g.data.features.map(f=>f.properties.seqNo)),[7,5,4,8])
+assert.deepEqual(result.partitions.map(g=>g.areaSqm),[60,30,40,10,20,30],'Two inclusive summaries and four exclusive upload portions')
+assert.equal(result.partitions.filter(g=>!g.aggregate).reduce((sum,g)=>sum+g.areaSqm,0),100)
+assert.equal(result.partitions[4].sources.length,2)
+assert.deepEqual(result.partitions.filter(g=>!g.aggregate).flatMap(g=>g.data.features.map(f=>f.properties.seqNo)),[5,7,4,8])
 let emptyCalls=0
 const emptyBranch=await partitionUploadedRange(upload,highData,permData,4,{high,permanent,uploadName:'规划'},async input=>{
   assert(input.geometryA.features.length,'Never submit an empty range to the backend')
   return ++emptyCalls===1?{...responses[0],both:group('OVERLAP',0,0),aOnly:group('A_ONLY',100,2)}:{...responses[2],areaA:100,both:group('OVERLAP',25,7),aOnly:group('A_ONLY',75,8)}
 })
 assert.equal(emptyCalls,2,'Skip only the mathematically empty branch')
-assert.deepEqual(emptyBranch.partitions.map(g=>g.areaSqm),[25,0,0,75])
+assert.deepEqual(emptyBranch.partitions.map(g=>g.areaSqm),[0,25,0,25,0,75])
 await assert.rejects(partitionUploadedRange(upload,highData,permData,4,{high,permanent,uploadName:'规划'},async()=>{throw Error('backend failure')}),/backend failure/)
 let checks=0
 await assert.rejects(partitionUploadedRange(upload,highData,permData,4,{high,permanent,uploadName:'规划'},async()=>responses[0],()=>{if(++checks)throw Error('cancelled')}),/cancelled/)
-console.log('farmland analysis: canonical defaults, three independent backend groups, four-way clipped upload partition, provenance and cancellation passed')
+console.log('farmland analysis: canonical defaults, three independent backend groups, four-way clipped upload partition, inclusive views, provenance and cancellation passed')
+
+assert.equal(new Set(result.partitions.flatMap(g=>g.data.features.map(f=>f.properties.coverageAtom))).size,4,'Inclusive categories share stable atoms for deduplicated rendering')

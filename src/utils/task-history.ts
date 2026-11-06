@@ -1,6 +1,9 @@
 import type { GovernanceTask, GovernanceTaskOperateLog, TaskAbnormal } from '@/api/governance-task'
 import type { TaskWorkflow, WorkflowNode } from '@/api/task-workflow'
 import { workflowNodeDisplayName } from './task-workflow-state'
+import { isFacilityTask } from './facility-task'
+import { facilityNodeKey } from './farmland-facility-workflow'
+import { FARMLAND_FACILITY_STEPS } from '../workspace/config/farmland-facilities'
 
 export interface TaskHistoryEntry { id: string; time?: string; title: string; actor: string; content: string[] }
 function object(value: unknown): Record<string, unknown> {
@@ -17,10 +20,12 @@ export function buildTaskHistory(task?: GovernanceTask, logs: GovernanceTaskOper
   const nodes = flow?.timeline || []
   const allLogs = [...logs]
   for (const node of nodes) for (const log of node.operateLogs || []) if (!allLogs.some(item => item.id && String(item.id) === String(log.id))) allLogs.push(log)
-  const nodeName = (node: WorkflowNode) => workflowNodeDisplayName(node, task?.sceneCode || '')
+  const facility = isFacilityTask(task)
+  const nodeName = (node: WorkflowNode) => facility ? FARMLAND_FACILITY_STEPS.find(step=>step.key===facilityNodeKey(node))?.name || node.nodeName : workflowNodeDisplayName(node, task?.sceneCode || '')
   const userName = (id: unknown) => nodes.find(node => id != null && String(node.assigneeId) === String(id))?.assigneeName || (id != null && String(id) === task?.assigneeId ? task.assigneeName : undefined) || allLogs.find(log => id != null && String(log.operatorId) === String(id))?.operatorName
   const replaceNodes = (value: string) => nodes.reduce((result, node) => result.split(node.nodeKey).join(nodeName(node)).split(node.nodeName).join(nodeName(node)), value)
   const resultLabel = (value: unknown, node: WorkflowNode) => {
+    if(facility) return ({FORWARD:'审核通过并派单',REJECT:'审核不通过',PROBLEM:facilityNodeKey(node)==='department-recheck'?'复核未通过，退回维修':'故障属实，需维修处置',NO_PROBLEM:facilityNodeKey(node)==='department-recheck'?'维修结果通过复核':'现场核查未发现故障',DONE:'维修处置完成'} as Record<string,string>)[String(value)] || text(value).replace(/^[A-Z_]+$/, '')
     const labels: Record<string, string> = { FORWARD: '同意下发', REJECT: '退回', DONE: '已完成整改', IN_PROGRESS: '整改进行中', NOT_READY: '暂不具备整改条件', RESTORED: '整改完成并复耕复种', SPECIAL: '特殊情形结案', COMPLETED: '已完成治理', NO_PROBLEM: node.nodeKey === 'UAV_RECHECK' ? '完成治理' : node.nodeKey === 'FINISH' ? '现场核查无问题，直接结案' : '无问题图斑', PROBLEM: node.nodeKey === 'UAV_RECHECK' ? '整改不到位' : '有问题图斑' }
     return labels[String(value)] || text(value).replace(/^[A-Z_]+$/, '')
   }
@@ -52,6 +57,7 @@ export function buildTaskHistory(task?: GovernanceTask, logs: GovernanceTaskOper
       if (summary) content.push(`${name}：${summary}`)
     }
     if (text(data.description) && !plots.some(plot => text(plot.description))) content.push(`办理说明：${text(data.description)}`)
+    if(facility) for(const [key,label] of [['repairAction','维修措施'],['testResult','测试结果'],['closureConclusion','结案结论'],['closureSummary','结案说明']] as const) if(text(data[key]))content.push(`${label}：${text(data[key])}`)
     if (text(data.remark)) content.push(`备注：${text(data.remark)}`)
     const next = nodes.find(item => item.prevNodeInstId != null && String(item.prevNodeInstId) === String(node.id))
     const recipient = text(data.targetAssigneeName) || next?.assigneeName || userName(data.targetAssigneeId)
