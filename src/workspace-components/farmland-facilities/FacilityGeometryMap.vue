@@ -28,7 +28,7 @@ function render() {
     if (props.geometry?.features.length) {
       facilityLayer = L.geoJSON(props.geometry as GeoJSON.FeatureCollection, {
         style: feature => /Point/i.test(feature?.geometry?.type || '')
-          ? { color: '#9aeefe', weight: 3, opacity: 1, fill: true, fillColor: '#135888', fillOpacity: 1 }
+          ? { color: props.facilityLocation ? '#30d6f0' : '#9aeefe', weight: 3, opacity: 1, fill: true, fillColor: props.facilityLocation ? '#30d6f0' : '#135888', fillOpacity: 1 }
           : { color: '#9aeefe', weight: 4, opacity: 1, fill: !/LineString/i.test(feature?.geometry?.type || ''), fillColor: '#66b9da', fillOpacity: .25 },
         pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 9, color: '#9aeefe', weight: 3, fillColor: '#135888', fillOpacity: 1 }),
       }).addTo(map)

@@ -937,6 +937,12 @@ onBeforeUnmount(() => {
 .detail-action--revoke:hover:not(:disabled) { color: #fff; background: #b96051; border-color: #b96051; box-shadow: 0 2px 8px #b9605132; }
 .detail-action:focus-visible { outline: 2px solid #08799d; outline-offset: 2px; }
 .detail-action:disabled { color: #91a7b2; background: #edf3f5; border-color: #d6e2e8; cursor: not-allowed; }
+.analysis-actions .review-button,.analysis-actions .detail-action { min-height: 34px; padding: 0 13px; border-radius: 5px; font-size: 13px; font-weight: 700; }
+.analysis-actions .review-button:not(:disabled) { color: #fff; background: #087e9f; border-color: #087e9f; }
+.analysis-actions .detail-action--ignore:not(:disabled) { color: #fff; background: #526f7e; border-color: #526f7e; }
+.analysis-actions .detail-action--revoke:not(:disabled) { color: #fff; background: #ad493e; border-color: #ad493e; }
+.analysis-actions button:not(:disabled):hover { filter: brightness(.88); }
+.analysis-actions button:disabled { color: #6e8590; background: #e6edef; border-color: #c0d0d7; opacity: 1; }
 .detail > p.review-feedback { margin: 9px 14px 0; padding: 8px 10px; font-size: 12px; }
 .review-success-toast {
   position: fixed;

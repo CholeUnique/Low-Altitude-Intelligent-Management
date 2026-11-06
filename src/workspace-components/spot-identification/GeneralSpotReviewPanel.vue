@@ -1258,6 +1258,12 @@ onBeforeUnmount(() => {
 .spot-action-button--ignore:hover { color: #176f87; background: #edf8fa; border-color: #85bfce; }
 .spot-action-button--revoke { color: #b06052; border-color: #ebc9c1; }
 .spot-action-button--revoke:hover { color: #9d4239; background: #fff3f0; border-color: #d99a8f; }
+.analysis-actions .spot-action-button { height: 34px; padding: 0 13px; border-radius: 5px; font-size: 13px; font-weight: 700; }
+.analysis-actions .spot-action-button--ignore:not(:disabled) { color: #fff; background: #526f7e; border-color: #526f7e; }
+.analysis-actions .spot-action-button--revoke:not(:disabled) { color: #fff; background: #ad493e; border-color: #ad493e; }
+.analysis-actions .spot-action-button:not(:disabled):hover { filter: brightness(.88); }
+.analysis-actions .spot-action-button:disabled { color: #6e8590; background: #e6edef; border-color: #c0d0d7; opacity: 1; cursor: not-allowed; transform: none; box-shadow: none; }
+.spot-detail > header { flex: 0 0 46px; height: 46px; min-height: 46px; padding: 0 14px; color: #173c54; }
 .spot-row em.status-4 { color: #657d88; background: #eaf0f3; }
 
 .spot-action-dialog {
