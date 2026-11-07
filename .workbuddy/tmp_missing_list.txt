@@ -1,0 +1,38 @@
+/v1/biz/facility/import/layers  ->  图层要素导入（部门管理员）
+/v1/biz/facility/import/layers/preview  ->  图层要素导入预览
+/v1/biz/facility/statistics/by-status  ->  按状态统计
+/v1/biz/recognition/spot/api-import  ->  接口导入识别图斑（预留）
+/v1/biz/result/download  ->  下载成果文件
+/v1/biz/result/parse  ->  手动触发解析（管理员）
+/v1/biz/result/upload  ->  上传成果（管理员，multipart）
+/v1/biz/statistics/count-by-dept  ->  部门横向对比（管理员）
+/v1/biz/statistics/flight-summary  ->  飞行统计（透传无人机）
+/v1/spatial/spot/compare/upload  ->  shp 上传对比分析
+/v1/uav/asset/detail  ->  建模成果详情
+/v1/uav/asset/download  ->  手动触发模型下载（管理员）
+/v1/uav/asset/download/file  ->  手动下载单个文件（管理员）
+/v1/uav/asset/page  ->  建模成果分页
+/v1/uav/dept-exclude/add  ->  新增排除项
+/v1/uav/dept-exclude/batch  ->  批量排除/恢复
+/v1/uav/dept-exclude/page  ->  例外项分页查询
+/v1/uav/dept-exclude/preview  ->  级联影响预览
+/v1/uav/dept-exclude/remove  ->  移除排除项（恢复可见）
+/v1/uav/device/detail  ->  设备详情
+/v1/uav/media/clean  ->  手动触发清理（管理员）
+/v1/uav/media/clean/config  ->  查询清理配置（管理员）
+/v1/uav/media/clean/record/page  ->  清理记录分页（管理员）
+/v1/uav/media/download  ->  手动触发素材下载
+/v1/uav/media/file/{mediaId}  ->  本地素材文件服务（GET 二进制流）
+/v1/uav/media/srt/{mediaId}  ->  本地 SRT 字幕文件服务（GET 二进制流）
+/v1/uav/project/detail  ->  项目详情
+/v1/uav/project/page  ->  项目分页查询
+/v1/uav/region-boundary/import  ->  导入边界 GeoJSON（管理员）
+/v1/uav/statistics/count-by-dept  ->  按部门统计（管理员）
+/v1/uav/sync/all  ->  全量同步
+/v1/uav/sync/device  ->  单设备同步
+/v1/uav/sync/flight-plan  ->  单计划同步
+/v1/uav/sync/flight-task  ->  单任务同步
+/v1/uav/sync/project  ->  单项目同步
+/v1/uav/sync/record  ->  同步记录详情
+/v1/user/dept/save  ->  调整用户部门归属（管理员/部门管理员/本人）
+/v1/workflow/transfer  ->  转办

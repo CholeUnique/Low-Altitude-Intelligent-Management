@@ -68,6 +68,8 @@ export interface BusinessAbnormalSummary {
   total: number
   /** 异常图斑总面积，单位 m²。 */
   areaTotal: number
+  /** 异常图斑总面积（亩，后端由 areaTotal ㎡ 换算并保留 2 位；旧版本可能缺省）。 */
+  areaTotalMu?: number | null
   typeCounts: BusinessStatItem[]
   levelCounts: BusinessStatItem[]
   handleStatusCounts: BusinessStatItem[]
