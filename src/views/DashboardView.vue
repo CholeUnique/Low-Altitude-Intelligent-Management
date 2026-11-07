@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import DashboardRing from '@/components/DashboardRing.vue'
+import DashboardCategoryRing from '@/components/DashboardCategoryRing.vue'
 import DashboardFlipNumber from '@/components/DashboardFlipNumber.vue'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import { Timer, Position } from '@element-plus/icons-vue'
 import DashboardMap from '@/components/DashboardMap.vue'
 import DashboardTopicOverview from '@/components/DashboardTopicOverview.vue'
-import { formatSquareMetresAsMu } from '@/utils/topic-area'
+import { formatMu, formatSquareMetresAsMu } from '@/utils/topic-area'
 import { isAgricultureTopicDepartment } from '@/utils/topic-access'
 import { useUserStore } from '@/stores/user'
 import { getGovernanceTaskGeometry, getGovernanceTaskPage, type GovernanceTask, type TaskGeometryFeatureCollection } from '@/api/governance-task'
@@ -157,21 +157,12 @@ const taskStatusLegend = computed(() => [
   { name: '已失败', count: unitTaskSummary.value.failed, color: '#ec8298' },
   { name: '已取消', count: unitTaskSummary.value.canceled, color: '#64879b' },
 ].filter((item, index) => index < 3 || item.count > 0))
-const mediaPhotoRate = computed(() => percentage(uavMediaSummary.value?.photoCount, uavMediaSummary.value?.totalCount))
-const fleetAvailabilityRate = computed(() => percentage(
-  uavDeviceSummary.value?.onlineCount,
-  uavDeviceSummary.value?.totalCount,
-))
+const fleetRingItems = computed(() => [{ name: '在线', count: uavDeviceSummary.value?.onlineCount, color: '#38e0c1' }, { name: '离线', count: uavDeviceSummary.value?.offlineCount, color: '#64879b' }])
+const mediaRingItems = computed(() => [{ name: '照片', count: uavMediaSummary.value?.photoCount, color: '#45a8ff' }, { name: '视频', count: uavMediaSummary.value?.videoCount, color: '#55e5cf' }, { name: '其他', count: uavMediaSummary.value?.otherCount, color: '#9b8cff' }])
 const governanceCompletionRate = computed(() => percentage(
   unitTaskSummary.value?.finished,
   unitTaskSummary.value?.total,
 ))
-const recognitionHandledRate = computed(() => {
-  const total = statistics.value?.abnormalSummary.total
-  const pending = statistics.value?.overview.abnormalPendingCount
-  if (typeof total !== 'number' || typeof pending !== 'number') return undefined
-  return percentage(Math.max(total - pending, 0), total)
-})
 const abnormalTypeLabels: Record<string, string> = {
   OTHER: '其他',
   ILLEGAL_OCCUPY: '违法占用',
@@ -182,7 +173,12 @@ const abnormalTypeLabels: Record<string, string> = {
 }
 const recognitionItems = computed(() => (statistics.value?.abnormalSummary.typeCounts || [])
   .map((item) => ({ ...item, name: abnormalTypeLabels[item.key] || abnormalTypeLabels[item.name] || item.name }))
-  .sort((a, b) => b.count - a.count))
+  .sort((a, b) => b.count - a.count).map((item, index) => ({ ...item, color: ['#45a8ff','#55e5cf','#a17cff','#ffbd4a','#ff738d','#57d68d'][index % 6]! })))
+// 优先采用后端亩口径（areaTotalMu，已按 2 位小数换算）；旧版接口缺省时回退到面积合计（㎡）前端换算。
+const formatRecognitionArea = computed(() => {
+  const mu = statistics.value?.abnormalSummary.areaTotalMu
+  return typeof mu === 'number' && Number.isFinite(mu) ? formatMu(mu) : formatSquareMetresAsMu(statistics.value?.abnormalSummary.areaTotal)
+})
 const sceneTaskRingColors = ['#37ead7', '#45a8ff', '#a17cff', '#ffbd4a', '#ff738d', '#57d68d']
 const sceneTaskTotal = computed(() => sceneBusinessStats.value.reduce((total, item) => total + Math.max(item.taskCount, 0), 0))
 const hoveredSceneTaskId = ref('')
@@ -534,8 +530,8 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <button v-if="user.hasPermission('live-monitoring')" class="overview-header-link" type="button" aria-label="进入监控回放" @click="openLiveOperations">监控回放 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <div class="resource-summary">
-                <DashboardRing :value="onlineUavCount ?? '—'" label="在线机组" :rate="fleetAvailabilityRate" :title="fleetAvailabilityRate === undefined ? '暂无机组总数' : `机组可用率 ${fleetAvailabilityRate}%`"><DashboardSymbol name="drone" /></DashboardRing>
-                <div class="resource-states"><span><i class="online"></i>直播中 <b><DashboardFlipNumber :value="livePreviews.filter(item => item.status === 'ONLINE').length" /></b></span><span><i class="starting"></i>连接中 <b><DashboardFlipNumber :value="livePreviews.filter(item => item.status === 'STARTING').length" /></b></span><span><i class="offline"></i>离线 <b><DashboardFlipNumber :value="formatCount(uavDeviceSummary?.offlineCount)" /></b></span></div>
+                <DashboardCategoryRing :value="onlineUavCount ?? '—'" label="在线机组" :total="uavDeviceSummary?.totalCount" :items="fleetRingItems"><DashboardSymbol name="drone" /></DashboardCategoryRing>
+                <div class="resource-states"><span><i class="online"></i>在线 <b><DashboardFlipNumber :value="formatCount(uavDeviceSummary?.onlineCount)" /></b></span><span><i class="offline"></i>离线 <b><DashboardFlipNumber :value="formatCount(uavDeviceSummary?.offlineCount)" /></b></span><span><i class="starting"></i>机组总数 <b><DashboardFlipNumber :value="formatCount(uavDeviceSummary?.totalCount)" /></b></span></div>
               </div>
               <p class="summary-foot">{{ livePreviewLoading ? '正在获取设备状态…' : '设备状态实时刷新' }}<span>已接入 {{ livePreviews.length }} 路直播画面</span></p>
             </section>
@@ -556,11 +552,11 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <button v-if="user.hasPermission('data-management')" class="overview-header-link" type="button" aria-label="进入采集数据" @click="openDataManagement">采集数据 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <div class="media-summary">
-                <DashboardRing :value="formatCount(uavMediaSummary?.totalCount)" label="素材总数" tone="blue" :rate="mediaPhotoRate" title="圆环展示照片在素材总数中的占比" />
+                <DashboardCategoryRing :value="formatCount(uavMediaSummary?.totalCount)" label="素材总数" :total="uavMediaSummary?.totalCount" :items="mediaRingItems" />
                 <dl class="metric-legend">
                   <div><dt><i class="legend-blue"></i>照片</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.photoCount)" /></dd></div>
                   <div><dt><i class="legend-mint"></i>视频</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.videoCount)" /></dd></div>
-                  <div><dt><i class="legend-violet"></i>其他素材</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.otherCount)" /></dd></div>
+                  <div><dt><i class="legend-violet"></i>其他</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.otherCount)" /></dd></div>
                   <div><dt><i class="legend-muted"></i>素材容量</dt><dd><DashboardFlipNumber :value="formatFileSize(uavMediaSummary?.totalFileSize)" /></dd></div>
                 </dl>
               </div>
@@ -577,8 +573,8 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <h2>智能识别成果</h2>
                 <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="recognition-summary"><DashboardRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :rate="recognitionHandledRate" :title="recognitionHandledRate === undefined ? '暂无图斑处置率' : `图斑处置率 ${recognitionHandledRate}%`" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatSquareMetresAsMu(statistics?.abnormalSummary.areaTotal) }}<small>亩</small></dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview.resultCount ?? '—'" /></dd></div></dl></div>
-              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%` }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
+              <div class="recognition-summary"><DashboardCategoryRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :total="statistics?.abnormalSummary.total" :items="recognitionItems" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatRecognitionArea }}<small>亩</small></dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview.resultCount ?? '—'" /></dd></div></dl></div>
+              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%`, background: item.color }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
             </section>
             <section v-if="isAgricultureTopicDepartment(user)" class="overview-float-panel topic-data-panel">
               <header>

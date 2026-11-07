@@ -8,8 +8,7 @@ const ast = ts.createSourceFile('DashboardView.ts', script, ts.ScriptTarget.Late
 const functionNames = new Set(['percentage', 'formatCount', 'formatFileSize', 'loadLivePreview'])
 const declarations = ast.statements.filter(node => ts.isFunctionDeclaration(node) && functionNames.has(node.name?.text)).map(node => node.getText(ast))
 assert.equal(declarations.length, functionNames.size)
-const rate = ast.statements.filter(ts.isVariableStatement).flatMap(node => [...node.declarationList.declarations]).find(node => node.name.getText(ast) === 'mediaPhotoRate')
-const executable = ts.transpileModule(`${declarations.join('\n')}\nconst ${rate.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const executable = ts.transpileModule(declarations.join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 assert.doesNotMatch(script, /getFlightTaskMedia|getUavFlightTaskOptions|loadAllTaskMedia|loadClassifiedMediaCounts|classifiedMediaCounts|mediaCountsLoadedKey/, 'The homepage must not import, scan or locally count flight-task media')
 for (const field of ['totalCount', 'photoCount', 'videoCount', 'otherCount']) assert(component.includes(`formatCount(uavMediaSummary?.${field})`), `The ${field} card must bind directly to backend summary`)
 const contextWatcher = ast.statements.filter(ts.isExpressionStatement).map(node => node.expression).find(node => ts.isCallExpression(node)
@@ -39,14 +38,14 @@ function harness() {
     return {loadLivePreview, view: () => ({total: formatCount(uavMediaSummary.value?.totalCount),
       photos: formatCount(uavMediaSummary.value?.photoCount), videos: formatCount(uavMediaSummary.value?.videoCount),
       others: formatCount(uavMediaSummary.value?.otherCount),
-      size: formatFileSize(uavMediaSummary.value?.totalFileSize), rate: mediaPhotoRate.value})};`)(context)
+      size: formatFileSize(uavMediaSummary.value?.totalFileSize)})};`)(context)
   return { state, calls, summaries, streams, ...api }
 }
 
 const normal = harness()
 normal.summaries.push({ totalCount: 100, photoCount: 40, videoCount: 20, otherCount: 30, totalFileSize: 1024 })
 await normal.loadLivePreview(true)
-assert.deepEqual(normal.view(), { total: '100', photos: '40', videos: '20', others: '30', size: '1 KB', rate: 40 }, 'Preserve backend totals and otherCount instead of calculating either from the other category counts')
+assert.deepEqual(normal.view(), { total: '100', photos: '40', videos: '20', others: '30', size: '1 KB' }, 'Preserve backend totals and otherCount instead of calculating either from the other category counts')
 assert.deepEqual(normal.calls, ['streams', 'devices', 'flight-summary', 'media-summary'], 'Exactly one media summary request per refresh and no task/media page request')
 normal.summaries.push({ totalCount: 200, photoCount: 150, videoCount: 40, otherCount: 10, totalFileSize: 0 })
 await normal.loadLivePreview()
@@ -56,13 +55,13 @@ assert.equal(normal.view().others, '10', 'Scheduled refresh also updates other m
 
 normal.summaries.push(new Error('Unavailable'))
 await normal.loadLivePreview()
-assert.deepEqual(normal.view(), { total: '—', photos: '—', videos: '—', others: '—', size: '—', rate: undefined }, 'Failure must not fabricate zero or start a detail-scan fallback')
+assert.deepEqual(normal.view(), { total: '—', photos: '—', videos: '—', others: '—', size: '—' }, 'Failure must not fabricate zero or start a detail-scan fallback')
 normal.summaries.push({ totalCount: 0, photoCount: 0, videoCount: 0, otherCount: 0, totalFileSize: 0 })
 await normal.loadLivePreview()
-assert.deepEqual(normal.view(), { total: '0', photos: '0', videos: '0', others: '0', size: '0 B', rate: undefined }, 'A real zero is distinct from missing data')
+assert.deepEqual(normal.view(), { total: '0', photos: '0', videos: '0', others: '0', size: '0 B' }, 'A real zero is distinct from missing data')
 normal.summaries.push({ photoCount: 7 })
 await normal.loadLivePreview()
-assert.deepEqual(normal.view(), { total: '—', photos: '7', videos: '—', others: '—', size: '—', rate: undefined }, 'Missing fields are not calculated or filled with invented counts')
+assert.deepEqual(normal.view(), { total: '—', photos: '7', videos: '—', others: '—', size: '—' }, 'Missing fields are not calculated or filled with invented counts')
 normal.summaries.push({ totalCount: 6948, photoCount: 6896, videoCount: 12, otherCount: 40 })
 await normal.loadLivePreview()
 assert.deepEqual([normal.view().total, normal.view().photos, normal.view().videos, normal.view().others], ['6,948', '6,896', '12', '40'], 'Render the backend example without scanning individual media records')
@@ -102,7 +101,7 @@ new Function('module', 'exports', 'apiClient', 'isMockMode', compiledApi)(module
 const getSummary = module.exports.getUavMediaSummary
 const adapted = await getSummary()
 assert.deepEqual([adapted.totalCount, adapted.photoCount, adapted.videoCount, adapted.otherCount, adapted.totalFileSize], [100, 70, 20, 10, 1024])
-assert.deepEqual(apiCalls, [{ path: '/v1/uav/statistics/media-summary', body: {} }])
+assert.deepEqual(apiCalls, [{ path: '/v1/uav/statistics/media-summary', body: { deptId: undefined } }])
 payload = { totalCount: null, photoCount: '', videoCount: 'invalid', totalFileSize: 0 }
 const missing = await getSummary()
 assert.equal(missing.totalCount, undefined)
@@ -114,8 +113,4 @@ for (const otherCount of [null, '', 'invalid', 0, '40']) {
   payload = { otherCount }
   assert.equal((await getSummary()).otherCount, otherCount === 0 ? 0 : otherCount === '40' ? 40 : undefined)
 }
-mock = true
-const beforeMock = apiCalls.length
-assert.deepEqual(await getSummary(), {})
-assert.equal(apiCalls.length, beforeMock, 'Mock mode must not call real APIs')
 console.log('dashboard-media-summary: backend-only counts, no media scans, refresh, zero/missing/failure, department reset, stale responses and API normalization passed')

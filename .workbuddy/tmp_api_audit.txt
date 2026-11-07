@@ -1,0 +1,311 @@
+=== 1. 未接入的后端接口 (38 / 191) ===
+/v1/biz/facility/import/layers
+   POST   [专题分析-高标准农田设施管理] 图层要素导入（部门管理员）
+   > 正式导入（upsert）：按来源关联三键（服务+图层+要素 OID）识别已有记录，重导为更新不重复新增；dept_id 归属操作者视角部门（ADMIN 可显式指定 deptId）。缺失的村名/行政区划不填充；三图层独立导入互不合并，台账设施总数 ≠ 图层要素总数（以来源关联与疑似重复对为准）。错误码：10201 服务不
+
+/v1/biz/facility/import/layers/preview
+   POST   [专题分析-高标准农田设施管理] 图层要素导入预览
+   > 拉取指定地图服务图层要素（如 Point_项目工程设施/项目工程设施/关联工程设施），完成属性映射与类型识别分析，<b>不落库</b>。报告含：分层新增/重导更新统计、无法识别类型清单（落 OTHER 并记 remark）、跨图层疑似重复对（名称相同/几何范围重叠，仅提示不合并）。属性字段默认探测：名称=含"名称"、项
+
+/v1/biz/facility/statistics/by-status
+   POST   [专题分析-高标准农田设施管理] 按状态统计
+   > 正常/异常/核查中/废弃四态计数。
+
+/v1/biz/recognition/spot/api-import
+   POST   [智能识别-异常图斑] 接口导入识别图斑（预留）
+   > **预留占位**（Q4）：等第三方平台提供接口后启用，当前调用返回 10216。
+
+/v1/biz/result/download
+   POST   [业务成果] 下载成果文件
+   > **本接口返回二进制流（非 BaseRsp JSON），为文件下载的必要例外。**按文件 ID 下载（D15 文件粒度），会校验该文件所属批次的归属任务在当前视角可见。错误码（以 JSON 形式返回）：10201 文件不存在或已被清理；10107 无权访问该部门数据。
+
+/v1/biz/result/parse
+   POST   [业务成果] 手动触发解析（管理员）
+   > 手动触发成果解析（R7），用于失败重试。本期解析器为空实现（R7 预留框架），预期结果为「暂未支持」。错误码：10211 该成果正在解析中或已超重试上限；10201 成果不存在；10107 无权访问该部门数据。
+
+/v1/biz/result/upload
+   POST   [业务成果] 上传成果（管理员，multipart）
+   > **本接口为全项目唯一使用 multipart/form-data 的接口（D4）。**表单字段：bizTaskId / sceneCode / resultType / collectTime / operator（D14 五必传） + keyInfoJson（扩展 KV，D9-C） + deptId（部门视角，可选
+
+/v1/biz/statistics/count-by-dept
+   POST   [业务统计] 部门横向对比（管理员）
+   > D2-B：大屏部门对比 —— 各业务部门的场景数/任务数/异常数/违占面积/成果数。错误码：403 非管理员。
+
+/v1/biz/statistics/flight-summary
+   POST   [业务统计] 飞行统计（透传无人机）
+   > R2：无人机飞行统计（架次/里程/时长/完成任务数/未执行数）。<b>透传</b> UavStatisticsService 并传同一 deptId，与 /api/v1/uav/statistics/flight-summary 传相同 deptId 时<b>数字一致</b>（不重复实现 SQL，避免两套口径打架）。
+
+/v1/spatial/spot/compare/upload
+   POST   [智能研判-空间分析] shp 上传对比分析
+   > 上传 shp 图层（multipart，files 字段至少含 .shp + .dbf，源坐标系本期固定 CGCS2000_3_Degree_GK_CM_120E），与前端已选定的 A、B 几何（JSON 字符串表单字段）对比，<b>即时计算、不落库</b>。每个面要素四分类：inA（仅与 A 相交）/ inB（仅与 
+
+/v1/uav/asset/detail
+   POST   [建模成果] 建模成果详情
+   > 模型信息 + 文件清单（含各文件下载状态与本地就绪标志）。错误码：10201 建模成果不存在。
+
+/v1/uav/asset/download
+   POST   [建模成果] 手动触发模型下载（管理员）
+   > 下载该模型下全部文件；幂等：已下载完成且本地文件存在的自动跳过（A4），不受下载白名单与重试上限限制。错误码：10201 建模成果不存在；403 无权限。
+
+/v1/uav/asset/download/file
+   POST   [建模成果] 手动下载单个文件（管理员）
+   > 入参为文件记录 ID（uav_asset_file.id，见 /detail 的 files[].id）；幂等：已完成且文件存在的直接视为成功。
+
+/v1/uav/asset/page
+   POST   [建模成果] 建模成果分页
+   > 建模成果为项目级公共资料（Q5），不做部门过滤；支持关键字/类型/采集时间筛选。
+
+/v1/uav/dept-exclude/add
+   POST   [无人机-部门可见性例外] 新增排除项
+   > 将某部门的某业务数据标记为不可见。bizType 仅支持 PLAN/TASK/DEVICE/WAYLINE。错误码：10107 无权访问该部门数据；10203 不支持的业务类型。
+
+/v1/uav/dept-exclude/batch
+   POST   [无人机-部门可见性例外] 批量排除/恢复
+   > action=EXCLUDE 批量排除，action=RESTORE 批量恢复。单次最多 500 条。
+
+/v1/uav/dept-exclude/page
+   POST   [无人机-部门可见性例外] 例外项分页查询
+   > 查询各部门的可见性排除项。DEPT_ADMIN 仅可查询本部门。
+
+/v1/uav/dept-exclude/preview
+   POST   [无人机-部门可见性例外] 级联影响预览
+   > 预览排除某业务对象会连带影响哪些任务/素材/轨迹（Q8）。
+
+/v1/uav/dept-exclude/remove
+   POST   [无人机-部门可见性例外] 移除排除项（恢复可见）
+   > 删除例外记录，使该数据对该部门恢复可见。错误码：10202 例外项不存在；10107 无权访问该部门数据。
+
+/v1/uav/device/detail
+   POST   [无人机-设备] 设备详情
+   > 按 SN 查询设备。错误码：10201 数据不存在。
+
+/v1/uav/media/clean
+   POST   [无人机-媒体素材] 手动触发清理（管理员）
+   > 手动执行素材清理。dryRun 不传则取配置值（默认 true 仅统计）。清理策略：只删文件、记录打标 file_cleaned=1、缩略图保留（Q3）。
+
+/v1/uav/media/clean/config
+   POST   [无人机-媒体素材] 查询清理配置（管理员）
+   > 返回开关/频率/保留天数/是否 dry-run 等配置摘要。
+
+/v1/uav/media/clean/record/page
+   POST   [无人机-媒体素材] 清理记录分页（管理员）
+   > 分页查询历史清理记录（审计用）。
+
+/v1/uav/media/download
+   POST   [无人机-媒体素材] 手动触发素材下载
+   > 按素材 ID 触发下载，用于弥补自动重试失败（Q13）。已下载完成或已被清理的素材不重复下载。
+
+/v1/uav/media/file/{mediaId}
+   GET    [无人机-媒体素材] 本地素材文件服务（GET 二进制流）
+   > **本接口为约定例外：GET + 路径参数 + 二进制流**（img/video 标签无法携带 JSON Body 与认证头）。按素材 ID 返回本地已下载文件的二进制流（inline），用于三方临时签名 URL 失效后的稳定访问；支持 Authorization 头或 token 查询参数两种认证方式（img 标签场
+
+/v1/uav/media/srt/{mediaId}
+   GET    [无人机-媒体素材] 本地 SRT 字幕文件服务（GET 二进制流）
+   > **本接口为约定例外：GET + 路径参数 + 二进制流**（与 /file/{mediaId} 同款，播放器 track 标签无法携带 JSON Body 与认证头）。按素材 ID 返回视频对应字幕文件（application/x-subrip;charset=UTF-8，inline，文件名与视频同名，播放器可自动
+
+/v1/uav/project/detail
+   POST   [无人机-项目] 项目详情
+   > 按项目 ID 查询详情。错误码：10201 数据不存在。
+
+/v1/uav/project/page
+   POST   [无人机-项目] 项目分页查询
+   > 支持名称关键字与组织筛选。项目级别不参与部门排除（Q8）。
+
+/v1/uav/region-boundary/import
+   POST   [无人机-行政区划边界] 导入边界 GeoJSON（管理员）
+   > 上传 DataV GeoJSON（FeatureCollection，properties 含 adcode/name/level/parent），按 region_code upsert 幂等导入；导入后自动失效区划判定缓存。文件建议离线下载后简化精度（全国简化后仍较大，建议分省拆分多文件上传）。
+
+/v1/uav/statistics/count-by-dept
+   POST   [无人机-统计] 按部门统计（管理员）
+   > 按采集归属部门分组统计设备数，供管理员总览数据分布。错误码：10107 无权访问（非管理员）。
+
+/v1/uav/sync/all
+   POST   [无人机-同步触发] 全量同步
+   > 按依赖顺序执行完整同步链：项目→设备→航线→计划→任务→健康→轨迹→素材。异步提交，重复触发返回 10204。
+
+/v1/uav/sync/device
+   POST   [无人机-同步触发] 单设备同步
+   > 同步指定设备：设备信息 + HMS + 物模型 + 飞行统计。
+
+/v1/uav/sync/flight-plan
+   POST   [无人机-同步触发] 单计划同步
+   > 同步指定计划及其下任务列表。
+
+/v1/uav/sync/flight-task
+   POST   [无人机-同步触发] 单任务同步
+   > 同步指定任务：任务详情 + 轨迹 + 媒体素材（含文件下载）。
+
+/v1/uav/sync/project
+   POST   [无人机-同步触发] 单项目同步
+   > 同步指定项目及其依赖数据（设备/航线/计划/在飞任务）。
+
+/v1/uav/sync/record
+   POST   [无人机-同步触发] 同步记录详情
+   > 按记录 ID 查询同步执行状态（0进行中 1成功 2失败）。
+
+/v1/user/dept/save
+   POST   [用户认证与用户管理] 调整用户部门归属（管理员/部门管理员/本人）
+   > 全量替换目标用户的所属部门（deptIdList 至少一个，P4）。 权限口径（P6）： - ADMIN：任意用户（除系统管理员 10017）； - 部门管理员：仅限本一级部门内用户，新部门须全部位于管辖树内（10107 越界），   且不得移除目标用户的管理员标志部门（403）； - 本人：可调整自身子部门归属，但新
+
+/v1/workflow/transfer
+   POST   [工作流] 转办
+   > 把当前待办转给同级同部门同事（同部门内不校验层级，跨部门须同 parent 兄弟部门）。
+
+
+=== 2. 前端调用但后端找不到的路径 (1) ===
+/v1/biz/facility/report/image/view                                     api\facility.ts
+
+=== 3. 已接入清单 (153) ===
+/v1/biz/facility/add                                           api\facility.ts
+/v1/biz/facility/delete                                        api\facility.ts
+/v1/biz/facility/detail                                        api\facility.ts
+/v1/biz/facility/geojson                                       api\facility.ts
+/v1/biz/facility/page                                          api\facility.ts
+/v1/biz/facility/qrcode                                        api\facility.ts
+/v1/biz/facility/report                                        api\facility.ts
+/v1/biz/facility/statistics/by-region                          api\facility.ts
+/v1/biz/facility/statistics/overall                            api\facility.ts
+/v1/biz/facility/type/options                                  api\facility.ts
+/v1/biz/facility/update                                        api\facility.ts
+/v1/biz/recognition/spot/add                                   api\recognition-spot.ts
+/v1/biz/recognition/spot/detail                                api\recognition-spot.ts
+/v1/biz/recognition/spot/ignore                                api\recognition-spot.ts
+/v1/biz/recognition/spot/page                                  api\recognition-spot.ts
+/v1/biz/recognition/spot/review                                api\recognition-spot.ts
+/v1/biz/recognition/spot/revoke                                api\recognition-spot.ts
+/v1/biz/recognition/spot/type/list                             api\recognition-spot.ts
+/v1/biz/recognition/spot/upload/confirm                        api\recognition-spot.ts
+/v1/biz/recognition/spot/upload/preview                        api\recognition-spot.ts
+/v1/biz/result/detail                                          api\governance-result.ts
+/v1/biz/result/image/list                                      api\governance-result.ts
+/v1/biz/result/page                                            api\governance-result.ts
+/v1/biz/scene/add                                              api\scene.ts
+/v1/biz/scene/assignee/add                                     api\scene.ts
+/v1/biz/scene/assignee/query                                   api\scene.ts
+/v1/biz/scene/assignee/update                                  api\scene.ts
+/v1/biz/scene/delete                                           api\scene.ts
+/v1/biz/scene/detail                                           api\scene.ts
+/v1/biz/scene/list                                             api\scene.ts
+/v1/biz/scene/status                                           api\scene.ts
+/v1/biz/scene/update                                           api\scene.ts
+/v1/biz/statistics/abnormal-summary                            api\business-statistics.ts
+/v1/biz/statistics/custom-stat                                 api\business-statistics.ts
+/v1/biz/statistics/overview                                    api\business-statistics.ts
+/v1/biz/statistics/scene-stat                                  api\business-statistics.ts
+/v1/biz/statistics/task-summary                                api\business-statistics.ts
+/v1/biz/statistics/trend                                       api\business-statistics.ts
+/v1/biz/task/abnormal/create                                   api\governance-task.ts
+/v1/biz/task/abnormal/page                                     api\governance-task.ts
+/v1/biz/task/cancel                                            api\governance-task.ts
+/v1/biz/task/create                                            api\governance-task.ts
+/v1/biz/task/delete                                            api\governance-task.ts
+/v1/biz/task/detail                                            api\governance-task.ts
+/v1/biz/task/execute                                           api\governance-task.ts
+/v1/biz/task/finish                                            api\governance-task.ts
+/v1/biz/task/geometry/geojson                                  api\governance-task.ts
+/v1/biz/task/geometry/upsert                                   api\governance-task.ts
+/v1/biz/task/media/bind                                        api\governance-task.ts
+/v1/biz/task/media/set-cover                                   api\governance-task.ts
+/v1/biz/task/media/unbind                                      api\governance-task.ts
+/v1/biz/task/my-todo/page                                      api\governance-task.ts
+/v1/biz/task/operate-log                                       api\governance-task.ts
+/v1/biz/task/page                                              api\governance-task.ts
+/v1/biz/task/update                                            api\governance-task.ts
+/v1/dept/add                                                   api\account-management.ts
+/v1/dept/delete                                                api\account-management.ts
+/v1/dept/detail                                                api\account-management.ts
+/v1/dept/list                                                  api\account-management.ts
+/v1/dept/options                                               api\auth.ts
+/v1/dept/status                                                api\account-management.ts
+/v1/dept/update                                                api\account-management.ts
+/v1/map/service/add                                            api\map-service.ts
+/v1/map/service/delete                                         api\map-service.ts
+/v1/map/service/detail                                         api\map-service.ts
+/v1/map/service/list                                           api\map-service.ts
+/v1/map/service/region/tree                                    api\map-service.ts
+/v1/map/service/status                                         api\map-service.ts
+/v1/map/service/type/options                                   api\map-service.ts
+/v1/map/service/update                                         api\map-service.ts
+/v1/metadata/abnormal-type/item/add                            api\metadata.ts
+/v1/metadata/abnormal-type/item/delete                         api\metadata.ts
+/v1/metadata/abnormal-type/item/status                         api\metadata.ts
+/v1/metadata/abnormal-type/item/update                         api\metadata.ts
+/v1/metadata/abnormal-type/list                                api\metadata.ts
+/v1/metadata/item/add                                          api\metadata.ts
+/v1/metadata/item/delete                                       api\metadata.ts
+/v1/metadata/item/detail                                       api\metadata.ts
+/v1/metadata/item/list                                         api\metadata.ts
+/v1/metadata/item/status                                       api\metadata.ts
+/v1/metadata/item/update                                       api\metadata.ts
+/v1/metadata/options                                           api\metadata.ts
+/v1/metadata/tree                                              api\metadata.ts
+/v1/metadata/type/add                                          api\metadata.ts
+/v1/metadata/type/delete                                       api\metadata.ts
+/v1/metadata/type/detail                                       api\metadata.ts
+/v1/metadata/type/list                                         api\metadata.ts
+/v1/metadata/type/status                                       api\metadata.ts
+/v1/metadata/type/update                                       api\metadata.ts
+/v1/oper-log/page                                              api\operation-log.ts
+/v1/perm/menu/list                                             api\permission-management.ts
+/v1/perm/user/perm/grant                                       api\permission-management.ts
+/v1/perm/user/perm/list                                        api\permission-management.ts
+/v1/perm/user/perm/revoke                                      api\permission-management.ts
+/v1/perm/user/perm/save                                        api\permission-management.ts
+/v1/spatial/layer/list                                         api\spatial-analysis.ts
+/v1/spatial/overlay                                            api\spatial-analysis.ts
+/v1/spatial/overlay/detail                                     api\spatial-analysis.ts
+/v1/spatial/overlay/geojson                                    api\spatial-analysis.ts
+/v1/spatial/overlay/spot/page                                  api\spatial-analysis.ts
+/v1/spatial/spot/compare                                       api\spatial-analysis.ts
+/v1/uav/component/url                                          api\patrol.ts
+/v1/uav/device/hms/page                                        api\patrol.ts
+/v1/uav/device/page                                            api\patrol.ts
+/v1/uav/device/state                                           api\patrol.ts
+/v1/uav/device/statistics                                      api\patrol.ts
+/v1/uav/flight-plan/detail                                     api\flight-review.ts,api\patrol.ts
+/v1/uav/flight-plan/page                                       api\flight-review.ts,api\patrol.ts
+/v1/uav/flight-plan/region/recalculate                         api\flight-review.ts
+/v1/uav/flight-task/detail                                     api\patrol.ts
+/v1/uav/flight-task/media/page                                 api\flight-review.ts,api\patrol.ts
+/v1/uav/flight-task/page                                       api\flight-review.ts,api\patrol.ts
+/v1/uav/flight-task/progressing                                api\patrol.ts
+/v1/uav/flight-task/trace                                      api\patrol.ts
+/v1/uav/live/share-code                                        api\patrol.ts
+/v1/uav/media/srt/generate                                     api\flight-review.ts
+/v1/uav/project/options                                        api\patrol.ts
+/v1/uav/region-boundary/status                                 api\flight-review.ts
+/v1/uav/request-ticket/add                                     api\request-ticket.ts
+/v1/uav/request-ticket/delete                                  api\request-ticket.ts
+/v1/uav/request-ticket/detail                                  api\request-ticket.ts
+/v1/uav/request-ticket/page                                    api\request-ticket.ts
+/v1/uav/request-ticket/type/options                            api\request-ticket.ts
+/v1/uav/statistics/device-summary                              api\patrol.ts
+/v1/uav/statistics/flight-summary                              api\patrol.ts
+/v1/uav/statistics/media-summary                               api\patrol.ts
+/v1/uav/statistics/overview                                    api\patrol.ts
+/v1/uav/wayline/detail                                         api\patrol.ts
+/v1/uav/wayline/page                                           api\patrol.ts
+/v1/user/add                                                   api\account-management.ts
+/v1/user/delete                                                api\account-management.ts
+/v1/user/dept-admin/set                                        api\account-management.ts
+/v1/user/dept/list                                             api\auth.ts
+/v1/user/dept/page                                             api\account-management.ts
+/v1/user/dept/switch                                           api\auth.ts
+/v1/user/detail                                                api\account-management.ts
+/v1/user/info                                                  api\auth.ts
+/v1/user/info/update                                           api\account-management.ts
+/v1/user/login                                                 api\auth.ts
+/v1/user/login/public-key                                      api\auth.ts
+/v1/user/logout                                                api\auth.ts
+/v1/user/page                                                  api\account-management.ts
+/v1/user/password                                              api\account-management.ts
+/v1/user/password/reset                                        api\account-management.ts
+/v1/user/status                                                api\account-management.ts
+/v1/user/update                                                api\account-management.ts
+/v1/workflow/file/delete                                       api\task-workflow.ts
+/v1/workflow/file/upload                                       api\task-workflow.ts
+/v1/workflow/flow/detail                                       api\task-workflow.ts
+/v1/workflow/reassign                                          api\non-grain-assignment.ts
+/v1/workflow/start                                             api\non-grain-assignment.ts
+/v1/workflow/submit                                            api\task-workflow.ts
+/v1/workflow/todo/page                                         api\task-workflow.ts

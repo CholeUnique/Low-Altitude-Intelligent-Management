@@ -1,0 +1,1124 @@
+== TOTALS ==
+paths=191 schemas=365
+
+== ALL PATHS ==
+/api/v1/biz/facility/add                                   POST               新增设施
+/api/v1/biz/facility/delete                                POST               删除设施
+/api/v1/biz/facility/detail                                POST               设施详情
+/api/v1/biz/facility/geojson                               POST               设施地图范围查询（GeoJSON）
+/api/v1/biz/facility/import/layers                         POST               图层要素导入（部门管理员）
+/api/v1/biz/facility/import/layers/preview                 POST               图层要素导入预览
+/api/v1/biz/facility/page                                  POST               设施分页
+/api/v1/biz/facility/qrcode                                POST               生成设施二维码（PNG）
+/api/v1/biz/facility/report                                POST               设施问题上报
+/api/v1/biz/facility/statistics/by-region                  POST               按区划统计
+/api/v1/biz/facility/statistics/by-status                  POST               按状态统计
+/api/v1/biz/facility/statistics/overall                    POST               总体统计
+/api/v1/biz/facility/type/options                          POST               设施类型选项
+/api/v1/biz/facility/update                                POST               修改设施
+/api/v1/biz/recognition/spot/add                           POST               手工新增识别图斑
+/api/v1/biz/recognition/spot/api-import                    POST               接口导入识别图斑（预留）
+/api/v1/biz/recognition/spot/detail                        POST               识别图斑详情
+/api/v1/biz/recognition/spot/ignore                        POST               忽略识别图斑
+/api/v1/biz/recognition/spot/page                          POST               识别图斑分页
+/api/v1/biz/recognition/spot/review                        POST               人工审核识别图斑
+/api/v1/biz/recognition/spot/revoke                        POST               撤销识别图斑
+/api/v1/biz/recognition/spot/type/list                     POST               场景可用异常类型列表
+/api/v1/biz/recognition/spot/upload/confirm                POST               上传导入识别图斑-第二步：映射确认落库
+/api/v1/biz/recognition/spot/upload/preview                POST               上传导入识别图斑-第一步：解析预览（multipart）
+/api/v1/biz/result/detail                                  POST               成果详情（按角色裁剪）
+/api/v1/biz/result/download                                POST               下载成果文件
+/api/v1/biz/result/image/list                              POST               任务影像清单
+/api/v1/biz/result/page                                    POST               成果批次分页
+/api/v1/biz/result/parse                                   POST               手动触发解析（管理员）
+/api/v1/biz/result/upload                                  POST               上传成果（管理员，multipart）
+/api/v1/biz/scene/add                                      POST               新增场景（管理员/部门管理员）
+/api/v1/biz/scene/assignee/add                             POST               新增场景初始派发负责人（管理员/部门管理员）
+/api/v1/biz/scene/assignee/query                           POST               场景初始派发负责人查询
+/api/v1/biz/scene/assignee/update                          POST               修改场景初始派发负责人（管理员/部门管理员）
+/api/v1/biz/scene/delete                                   POST               删除场景（管理员/部门管理员）
+/api/v1/biz/scene/detail                                   POST               场景详情
+/api/v1/biz/scene/list                                     POST               场景列表
+/api/v1/biz/scene/status                                   POST               启用/停用场景（管理员/部门管理员）
+/api/v1/biz/scene/update                                   POST               修改场景（管理员/部门管理员）
+/api/v1/biz/statistics/abnormal-summary                    POST               异常汇总
+/api/v1/biz/statistics/count-by-dept                       POST               部门横向对比（管理员）
+/api/v1/biz/statistics/custom-stat                         POST               部门定制统计
+/api/v1/biz/statistics/flight-summary                      POST               飞行统计（透传无人机）
+/api/v1/biz/statistics/overview                            POST               部门业务总览
+/api/v1/biz/statistics/scene-stat                          POST               场景级统计
+/api/v1/biz/statistics/task-summary                        POST               任务汇总
+/api/v1/biz/statistics/trend                               POST               业务趋势
+/api/v1/biz/task/abnormal/create                           POST               图斑派生核查任务
+/api/v1/biz/task/abnormal/page                             POST               任务异常/图斑分页
+/api/v1/biz/task/cancel                                    POST               取消任务
+/api/v1/biz/task/create                                    POST               创建任务
+/api/v1/biz/task/delete                                    POST               删除任务
+/api/v1/biz/task/detail                                    POST               任务详情（按角色裁剪）
+/api/v1/biz/task/execute                                   POST               触发执行
+/api/v1/biz/task/finish                                    POST               完成任务
+/api/v1/biz/task/geometry/geojson                          POST               任务几何 FeatureCollection
+/api/v1/biz/task/geometry/upsert                           POST               保存任务范围
+/api/v1/biz/task/media/bind                                POST               关联任务影像
+/api/v1/biz/task/media/set-cover                           POST               设置任务封面
+/api/v1/biz/task/media/unbind                              POST               解绑任务影像
+/api/v1/biz/task/my-todo/page                              POST               我的待办任务
+/api/v1/biz/task/operate-log                               POST               任务操作留痕
+/api/v1/biz/task/page                                      POST               任务分页
+/api/v1/biz/task/update                                    POST               修改任务
+/api/v1/dept/add                                           POST               新增部门（管理员/部门管理员）
+/api/v1/dept/delete                                        POST               删除部门（管理员/部门管理员）
+/api/v1/dept/detail                                        POST               部门详情
+/api/v1/dept/list                                          POST               部门列表
+/api/v1/dept/options                                       POST               部门下拉选项
+/api/v1/dept/status                                        POST               启用/禁用部门（管理员/部门管理员）
+/api/v1/dept/update                                        POST               修改部门（管理员/部门管理员）
+/api/v1/map/service/add                                    POST               新增地图服务（管理员）
+/api/v1/map/service/delete                                 POST               删除地图服务（管理员）
+/api/v1/map/service/detail                                 POST               地图服务详情
+/api/v1/map/service/list                                   POST               地图服务列表
+/api/v1/map/service/region/tree                            POST               地图服务行政区划树
+/api/v1/map/service/status                                 POST               启用/停用地图服务（管理员）
+/api/v1/map/service/type/options                           POST               服务类型/数据类型枚举下拉
+/api/v1/map/service/update                                 POST               修改地图服务（管理员）
+/api/v1/metadata/abnormal-type/item/add                    POST               新增违法类型（部门管理员）
+/api/v1/metadata/abnormal-type/item/delete                 POST               删除违法类型（部门管理员）
+/api/v1/metadata/abnormal-type/item/status                 POST               启用/停用违法类型（部门管理员）
+/api/v1/metadata/abnormal-type/item/update                 POST               修改违法类型（部门管理员）
+/api/v1/metadata/abnormal-type/list                        POST               场景违法类型列表
+/api/v1/metadata/item/add                                  POST               新增元数据条目（管理员）
+/api/v1/metadata/item/delete                               POST               删除元数据条目（管理员）
+/api/v1/metadata/item/detail                               POST               条目详情
+/api/v1/metadata/item/list                                 POST               条目列表（管理视图）
+/api/v1/metadata/item/status                               POST               启用/停用元数据条目（管理员）
+/api/v1/metadata/item/update                               POST               修改元数据条目（管理员）
+/api/v1/metadata/options                                   POST               下拉选项
+/api/v1/metadata/tree                                      POST               条目树
+/api/v1/metadata/type/add                                  POST               新增元数据类型（管理员）
+/api/v1/metadata/type/delete                               POST               删除元数据类型（管理员）
+/api/v1/metadata/type/detail                               POST               元数据类型详情
+/api/v1/metadata/type/list                                 POST               元数据类型列表
+/api/v1/metadata/type/status                               POST               启用/停用元数据类型（管理员）
+/api/v1/metadata/type/update                               POST               修改元数据类型（管理员）
+/api/v1/oper-log/page                                      POST               操作日志分页（管理员）
+/api/v1/perm/menu/list                                     POST               权限菜单树
+/api/v1/perm/user/perm/grant                               POST               授予用户部门权限（管理员/部门管理员）
+/api/v1/perm/user/perm/list                                POST               查询用户权限明细
+/api/v1/perm/user/perm/revoke                              POST               回收用户部门权限（管理员/部门管理员）
+/api/v1/perm/user/perm/save                                POST               保存用户部门权限（管理员/部门管理员）
+/api/v1/spatial/layer/list                                 POST               可分析图层清单
+/api/v1/spatial/overlay                                    POST               两图层叠加面积差异
+/api/v1/spatial/overlay/detail                             POST               叠加结果详情
+/api/v1/spatial/overlay/geojson                            POST               差异图层 FeatureCollection
+/api/v1/spatial/overlay/spot/page                          POST               差异图斑分页
+/api/v1/spatial/spot/compare                               POST               图斑对比分析
+/api/v1/spatial/spot/compare/upload                        POST               shp 上传对比分析
+/api/v1/uav/asset/detail                                   POST               建模成果详情
+/api/v1/uav/asset/download                                 POST               手动触发模型下载（管理员）
+/api/v1/uav/asset/download/file                            POST               手动下载单个文件（管理员）
+/api/v1/uav/asset/page                                     POST               建模成果分页
+/api/v1/uav/component/url                                  POST               获取开放组件访问URL
+/api/v1/uav/dept-exclude/add                               POST               新增排除项
+/api/v1/uav/dept-exclude/batch                             POST               批量排除/恢复
+/api/v1/uav/dept-exclude/page                              POST               例外项分页查询
+/api/v1/uav/dept-exclude/preview                           POST               级联影响预览
+/api/v1/uav/dept-exclude/remove                            POST               移除排除项（恢复可见）
+/api/v1/uav/device/detail                                  POST               设备详情
+/api/v1/uav/device/hms/page                                POST               设备 HMS 告警分页
+/api/v1/uav/device/page                                    POST               设备分页查询
+/api/v1/uav/device/state                                   POST               设备最新物模型
+/api/v1/uav/device/statistics                              POST               设备飞行统计
+/api/v1/uav/flight-plan/detail                             POST               计划详情
+/api/v1/uav/flight-plan/page                               POST               计划分页查询
+/api/v1/uav/flight-plan/region/recalculate                 POST               区划强制重算（管理员）
+/api/v1/uav/flight-task/detail                             POST               任务详情
+/api/v1/uav/flight-task/media/page                         POST               任务媒体素材分页
+/api/v1/uav/flight-task/page                               POST               任务分页查询
+/api/v1/uav/flight-task/progressing                        POST               正在执行的任务
+/api/v1/uav/flight-task/trace                              POST               任务轨迹
+/api/v1/uav/live/share-code                                POST               获取直播分享码
+/api/v1/uav/media/clean                                    POST               手动触发清理（管理员）
+/api/v1/uav/media/clean/config                             POST               查询清理配置（管理员）
+/api/v1/uav/media/clean/record/page                        POST               清理记录分页（管理员）
+/api/v1/uav/media/download                                 POST               手动触发素材下载
+/api/v1/uav/media/file/{mediaId}                           GET                本地素材文件服务（GET 二进制流）
+/api/v1/uav/media/srt/generate                             POST               手动触发 SRT 字幕就绪
+/api/v1/uav/media/srt/{mediaId}                            GET                本地 SRT 字幕文件服务（GET 二进制流）
+/api/v1/uav/project/detail                                 POST               项目详情
+/api/v1/uav/project/options                                POST               项目下拉选项
+/api/v1/uav/project/page                                   POST               项目分页查询
+/api/v1/uav/region-boundary/import                         POST               导入边界 GeoJSON（管理员）
+/api/v1/uav/region-boundary/status                         POST               边界就绪状态（管理员）
+/api/v1/uav/request-ticket/add                             POST               提交需求工单
+/api/v1/uav/request-ticket/delete                          POST               删除需求工单
+/api/v1/uav/request-ticket/detail                          POST               需求工单详情
+/api/v1/uav/request-ticket/page                            POST               需求工单分页查询
+/api/v1/uav/request-ticket/type/options                    POST               工单类型下拉选项
+/api/v1/uav/statistics/count-by-dept                       POST               按部门统计（管理员）
+/api/v1/uav/statistics/device-summary                      POST               设备汇总
+/api/v1/uav/statistics/flight-summary                      POST               飞行汇总
+/api/v1/uav/statistics/media-summary                       POST               素材汇总
+/api/v1/uav/statistics/overview                            POST               总览统计
+/api/v1/uav/sync/all                                       POST               全量同步
+/api/v1/uav/sync/device                                    POST               单设备同步
+/api/v1/uav/sync/flight-plan                               POST               单计划同步
+/api/v1/uav/sync/flight-task                               POST               单任务同步
+/api/v1/uav/sync/project                                   POST               单项目同步
+/api/v1/uav/sync/record                                    POST               同步记录详情
+/api/v1/uav/wayline/detail                                 POST               航线详情
+/api/v1/uav/wayline/page                                   POST               航线分页查询
+/api/v1/user/add                                           POST               新增用户（管理员/部门管理员）
+/api/v1/user/delete                                        POST               删除用户（管理员/部门管理员）
+/api/v1/user/dept-admin/set                                POST               设置/撤销部门管理员（管理员）
+/api/v1/user/dept/list                                     POST               我的部门列表
+/api/v1/user/dept/page                                     POST               部门用户分页（选人场景）
+/api/v1/user/dept/save                                     POST               调整用户部门归属（管理员/部门管理员/本人）
+/api/v1/user/dept/switch                                   POST               切换进入部门
+/api/v1/user/detail                                        POST               查询用户详情（管理员）
+/api/v1/user/info                                          POST               查询本人信息
+/api/v1/user/info/update                                   POST               修改本人资料
+/api/v1/user/login                                         POST               登录（密码登录，支持 RSA 加密传输）
+/api/v1/user/login/public-key                              POST               获取登录加密公钥（一次性）
+/api/v1/user/logout                                        POST               退出登录
+/api/v1/user/page                                          POST               分页查询用户（管理员/部门管理员）
+/api/v1/user/password                                      POST               修改本人密码
+/api/v1/user/password/reset                                POST               重置用户密码（管理员）
+/api/v1/user/status                                        POST               启用/禁用用户（管理员/部门管理员）
+/api/v1/user/update                                        POST               修改用户（管理员/部门管理员）
+/api/v1/workflow/file/delete                               POST               删除节点附件
+/api/v1/workflow/file/upload                               POST               上传节点附件
+/api/v1/workflow/flow/detail                               POST               工作流详情
+/api/v1/workflow/reassign                                  POST               改派
+/api/v1/workflow/start                                     POST               启动工作流
+/api/v1/workflow/submit                                    POST               节点提交
+/api/v1/workflow/todo/page                                 POST               我的待办分页
+/api/v1/workflow/transfer                                  POST               转办
+
+== PATHS WITH KEYWORDS ==
+/api/v1/biz/facility/qrcode
+   POST   生成设施二维码（PNG） | 前端提供移动端上报页基础地址 url，服务端拼接 facilityId/ts/sign（HMAC-SHA256 签名，匿名上报防伪造，默认 24h 时效）后生成 PNG。返回二进制流（ResponseEntity），错误仍为 BaseRsp JSON（全项目下载类例外惯例）。错误码：10801 设施不存在、10809 生成失败。
+        body: {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/BizFacilityQrcodeReq"}}}, "required": true}
+/api/v1/uav/live/share-code
+   POST   获取直播分享码 | 按设备 SN 获取直播分享码。命中 Redis 缓存则直接返回（fromCache=true）。无数据返回 data=null。
+        body: {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/UavSnReq"}}}, "required": true}
+
+== SCHEMAS CONTAINING CODE-LIKE FIELDS ==
+BaseRspVoid -> code
+BaseRspPageVOWfNodeInstanceVO -> code
+WfNodeInstanceVO -> taskNo
+BaseRspWfFlowDetailVO -> code
+WfNodeDetailVO -> taskNo
+BaseRspPageVOUserInfoVO -> code
+UserDeptItemVO -> deptCode
+BaseRspLoginRsp -> code
+BaseRspLoginPublicKeyVO -> code
+BaseRspUserInfoVO -> code
+BaseRspUserDeptSwitchRsp -> code
+BaseRspPageVOUserOptionVO -> code
+BaseRspListUserDeptItemVO -> code
+BaseRspPageVOUavWayline -> code
+BaseRspUavWayline -> code
+BaseRspUavSyncRecord -> code
+BaseRspUavSyncRsp -> code
+UavSyncDeviceReq -> sn
+BaseRspUavOverviewVO -> code
+BaseRspUavMediaSummaryVO -> code
+BaseRspUavFlightSummaryVO -> code
+BaseRspUavDeviceSummaryVO -> code
+BaseRspListUavDeptStatItemVO -> code
+BaseRspListDasFlyRequestTicketTypeRsp -> code
+BaseRspPageVODasFlyRequestTicketListRsp -> code
+BaseRspDasFlyRequestTicketDetailRsp -> code
+BaseRspLong -> code
+BaseRspMapStringObject -> code
+BaseRspInteger -> code
+BaseRspPageVOUavProject -> code
+BaseRspListUavProject -> code
+BaseRspUavProject -> code
+BaseRspBoolean -> code
+BaseRspUavMediaCleanRecord -> code
+BaseRspPageVOUavMediaCleanRecord -> code
+BaseRspCleanConfigVO -> code
+UavSnReq -> sn
+BaseRspUavShareLiveVO -> code
+UavShareLiveVO -> sn, code
+BaseRspUavFlightTrace -> code
+BaseRspListUavFlightTask -> code
+UavFlightTask -> sn, errorCode, errorCodeDesc
+UavFlightTaskPageReq -> sn
+BaseRspPageVOUavFlightTask -> code
+BaseRspPageVOUavMediaFile -> code
+BaseRspUavFlightTask -> code
+BaseRspString -> code
+UavFlightPlanPageReq -> sn, regionCode
+BaseRspPageVOUavFlightPlan -> code
+UavFlightPlan -> sn, regionCode
+BaseRspUavFlightPlan -> code
+BaseRspListUavFlightStatistics -> code
+UavFlightStatistics -> sn
+BaseRspUavDeviceState -> code
+UavDeviceState -> modeCode
+BaseRspPageVOUavDevice -> code
+UavDevice -> sn, modeCode
+UavHmsPageReq -> sn
+BaseRspPageVOUavDeviceHms -> code
+UavDeviceHms -> sn
+BaseRspUavDevice -> code
+BaseRspCascadePreview -> code
+BaseRspPageVODeptExcludeVO -> code
+BaseRspDeptExcludeVO -> code
+BaseRspPageVOUavAssetVO -> code
+BaseRspUavAssetVO -> code
+BaseRspSpatialSpotCompareVO -> code
+BaseRspSpatialSpotUploadCompareVO -> code
+BaseRspSpatialOverlayVO -> code
+BaseRspPageVOSpatialSpotVO -> code
+SpatialSpotVO -> seqNo
+BaseRspJsonNode -> code
+BaseRspListSpatialLayerVO -> code
+BaseRspListPermUserDeptVO -> code
+PermMenuItemVO -> code, moduleCode
+BaseRspListPermMenuVO -> code
+PermMenuVO -> code
+BaseRspPageVOOperLogVO -> code
+MetaTypeUpdateReq -> code
+BaseRspListMetaTypeVO -> code
+MetaTypeVO -> code
+BaseRspMetaTypeVO -> code
+MetaTypeAddReq -> code
+MetaTreeReq -> typeCode
+BaseRspListMetaTreeVO -> code
+MetaTreeVO -> code
+BaseRspListMetaOptionVO -> code
+MetaOptionVO -> code
+MetaItemUpdateReq -> code
+MetaItemListReq -> typeCode
+BaseRspListMetaItemVO -> code
+MetaItemVO -> code
+BaseRspMetaItemVO -> code
+MetaItemAddReq -> code
+AbnormalTypeListReq -> sceneCode
+AbnormalTypeMetaVO -> sceneCode, typeCode
+BaseRspAbnormalTypeMetaVO -> code
+EffectiveOption -> code
+AbnormalTypeItemAddReq -> sceneCode, code
+BaseRspEffectiveOption -> code
+MapServiceUpdateReq -> topicCode, regionCode
+BaseRspMapServiceEnumOptionsVO -> code
+BaseRspListMapServiceRegionGroupVO -> code
+MapServiceRegionNodeVO -> code
+MapServiceListReq -> topicCode, regionCode
+BaseRspListMapServiceVO -> code
+MapServiceVO -> topicCode, regionCode
+BaseRspMapServiceVO -> code
+MapServiceAddReq -> topicCode, regionCode
+DeptUpdateReq -> code
+BaseRspListDeptOptionVO -> code
+DeptOptionVO -> code
+BaseRspListDeptVO -> code
+DeptVO -> code
+BaseRspDeptVO -> code
+DeptAddReq -> code
+BizTaskPageReq -> sceneCode
+BaseRspPageVOBizTaskVO -> code
+BizTaskVO -> taskNo, sceneCode
+BaseRspListBizTaskOperateLogVO -> code
+BaseRspListBizImageVO -> code
+BaseRspBizTaskDetailVO -> code
+BizAbnormalVO -> sceneCode
+BizTaskCreateReq -> sceneCode
+BaseRspBizTaskVO -> code
+BaseRspPageVOBizAbnormalVO -> code
+BaseRspListBizTaskVO -> code
+BizStatisticsReq -> sceneCode
+BaseRspBizTrendVO -> code
+BaseRspBizTaskSummaryVO -> code
+BaseRspListBizSceneStatVO -> code
+BizSceneStatVO -> sceneCode
+BaseRspBizOverviewVO -> code
+BaseRspBizCustomStatVO -> code
+BizCustomStatVO -> deptCode
+Group -> groupCode
+BaseRspListBizDeptStatItemVO -> code
+BaseRspBizAbnormalSummaryVO -> code
+BaseRspListBizSceneVO -> code
+BizSceneResultTypeVO -> code
+BizSceneVO -> sceneCode
+BaseRspBizSceneVO -> code
+BizSceneAssigneeUpdateReq -> sceneCode
+BizSceneAssigneeQueryReq -> sceneCode
+BaseRspListBizSceneAssigneeVO -> code
+BizSceneAssigneeVO -> sceneCode
+BizSceneAssigneeAddReq -> sceneCode
+BizSceneAddReq -> sceneCode
+BizResultUploadReq -> sceneCode
+BaseRspBizResultVO -> code
+BizResultVO -> sceneCode
+BizResultPageReq -> sceneCode
+BaseRspPageVOBizResultVO -> code
+BizSpotPreviewReq -> sceneCode
+BaseRspBizSpotPreviewVO -> code
+BizSpotPreviewVO -> batchNo
+BizSpotConfirmReq -> batchNo
+BaseRspBizSpotCreateVO -> code
+BizSpotTypeListReq -> sceneCode
+BaseRspListBizAbnormalTypeOptionVO -> code
+BizAbnormalTypeOptionVO -> code
+BaseRspBizSpotOperateVO -> code
+BizSpotPageReq -> sceneCode
+BaseRspPageVOBizSpotVO -> code
+BizSpotVO -> spotNo, sceneCode
+BaseRspBizSpotVO -> code
+BizSpotAddReq -> sceneCode
+BizFacilityUpdateReq -> regionCode
+BaseRspBizFacilityStatisticsVO -> code
+BaseRspListBizStatItemVO -> code
+BaseRspListBizFacilityRegionStatVO -> code
+BizFacilityRegionStatVO -> regionCode
+BaseRspBizFacilityReportVO -> code
+BizFacilityReportVO -> taskNo
+BizFacilityPageReq -> regionCode
+BaseRspPageVOBizFacilityVO -> code
+BizFacilityVO -> facilityNo, regionCode
+BaseRspBizFacilityLayerImportVO -> code
+BaseRspBizFacilityVO -> code
+BizFacilityAddReq -> regionCode
+
+== FACILITY SCHEMAS FULL ==
+--- BizFacilityUpdateReq ---
+{
+ "type": "object",
+ "description": "工程设施修改请求",
+ "properties": {
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "部门 ID（部门视角筛选；为空则取登录时进入的部门。ADMIN 可指定任意部门，其他角色仅可传自身所属部门）"
+  },
+  "id": {
+   "type": "integer",
+   "format": "int64",
+   "description": "设施 ID"
+  },
+  "name": {
+   "type": "string",
+   "description": "设施名称",
+   "maxLength": 100,
+   "minLength": 0
+  },
+  "villageName": {
+   "type": "string",
+   "description": "所属行政村",
+   "maxLength": 100,
+   "minLength": 0
+  },
+  "projectName": {
+   "type": "string",
+   "description": "所属项目",
+   "maxLength": 100,
+   "minLength": 0
+  },
+  "facilityType": {
+   "type": "string",
+   "description": "设施类型编码（值域见元数据 FACILITY_TYPE）"
+  },
+  "bizStatus": {
+   "type": "string",
+   "description": "设施状态：NORMAL 正常 / ABNORMAL 异常 / CHECKING 核查中 / DISCARDED 废弃（非法值报 400）"
+  },
+  "regionCode": {
+   "type": "string",
+   "description": "所属行政区划编码（6 位 adcode）"
+  },
+  "geometryType": {
+   "type": "string",
+   "description": "几何类型：POINT / LINESTRING / POLYGON"
+  },
+  "geometryJson": {
+   "type": "string",
+   "description": "设施几何（GeoJSON geometry，WGS84）"
+  },
+  "remark": {
+   "type": "string",
+   "description": "备注",
+   "maxLength": 500,
+   "minLength": 0
+  }
+ },
+ "required": [
+  "id"
+ ]
+}
+--- BizFacilityIdReq ---
+{
+ "type": "object",
+ "description": "工程设施 ID 请求",
+ "properties": {
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "部门 ID（部门视角筛选；为空则取登录时进入的部门。ADMIN 可指定任意部门，其他角色仅可传自身所属部门）"
+  },
+  "id": {
+   "type": "integer",
+   "format": "int64",
+   "description": "设施 ID"
+  }
+ },
+ "required": [
+  "id"
+ ]
+}
+--- BaseRspBizFacilityStatisticsVO ---
+{
+ "type": "object",
+ "description": "统一响应包装",
+ "properties": {
+  "code": {
+   "type": "string",
+   "description": "业务结果码：0 成功，其余为业务/系统错误码",
+   "example": "0"
+  },
+  "msg": {
+   "type": "string",
+   "description": "结果描述信息"
+  },
+  "data": {
+   "$ref": "#/components/schemas/BizFacilityStatisticsVO",
+   "description": "业务数据（随接口变化，可为 null）"
+  }
+ }
+}
+--- BizFacilityStatisticsVO ---
+{
+ "type": "object",
+ "description": "工程设施总体统计（含按状态/按类型分组）",
+ "properties": {
+  "totalCount": {
+   "type": "integer",
+   "format": "int64",
+   "description": "设施总数"
+  },
+  "normalCount": {
+   "type": "integer",
+   "format": "int64",
+   "description": "正常数"
+  },
+  "abnormalCount": {
+   "type": "integer",
+   "format": "int64",
+   "description": "异常数（问题上报后）"
+  },
+  "checkingCount": {
+   "type": "integer",
+   "format": "int64",
+   "description": "核查中数"
+  },
+  "discardedCount": {
+   "type": "integer",
+   "format": "int64",
+   "description": "废弃数"
+  },
+  "statusCounts": {
+   "type": "array",
+   "description": "按状态分组（同上四态，供渲染）",
+   "items": {
+    "$ref": "#/components/schemas/BizStatItemVO"
+   }
+  },
+  "typeCounts": {
+   "type": "array",
+   "description": "按设施类型分组（元数据 FACILITY_TYPE）",
+   "items": {
+    "$ref": "#/components/schemas/BizStatItemVO"
+   }
+  }
+ }
+}
+--- BaseRspListBizFacilityRegionStatVO ---
+{
+ "type": "object",
+ "description": "统一响应包装",
+ "properties": {
+  "code": {
+   "type": "string",
+   "description": "业务结果码：0 成功，其余为业务/系统错误码",
+   "example": "0"
+  },
+  "msg": {
+   "type": "string",
+   "description": "结果描述信息"
+  },
+  "data": {
+   "type": "array",
+   "description": "业务数据（随接口变化，可为 null）",
+   "items": {
+    "$ref": "#/components/schemas/BizFacilityRegionStatVO"
+   }
+  }
+ }
+}
+--- BizFacilityRegionStatVO ---
+{
+ "type": "object",
+ "description": "工程设施按区划统计项",
+ "properties": {
+  "regionCode": {
+   "type": "string",
+   "description": "行政区划编码（6 位 adcode；空=未判定）"
+  },
+  "regionName": {
+   "type": "string",
+   "description": "行政区划名称（元数据 ADMIN_REGION 补全；空码显示「未判定」）"
+  },
+  "totalCount": {
+   "type": "integer",
+   "format": "int64",
+   "description": "设施总数"
+  },
+  "abnormalCount": {
+   "type": "integer",
+   "format": "int64",
+   "description": "异常数（ABNORMAL）"
+  },
+  "checkingCount": {
+   "type": "integer",
+   "format": "int64",
+   "description": "核查中数（CHECKING）"
+  }
+ }
+}
+--- BizFacilityReportReq ---
+{
+ "type": "object",
+ "description": "设施问题上报请求（登录直调或匿名扫码带签名）",
+ "properties": {
+  "facilityId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "设施 ID"
+  },
+  "reportContent": {
+   "type": "string",
+   "description": "问题描述",
+   "maxLength": 1000,
+   "minLength": 0
+  },
+  "reporterName": {
+   "type": "string",
+   "description": "上报人姓名（匿名扫码时建议填写）",
+   "maxLength": 50,
+   "minLength": 0
+  },
+  "reporterPhone": {
+   "type": "string",
+   "description": "联系电话",
+   "maxLength": 32,
+   "minLength": 0
+  },
+  "ts": {
+   "type": "integer",
+   "format": "int64",
+   "description": "签名时间戳（毫秒；匿名扫码必传，来自二维码）"
+  },
+  "sign": {
+   "type": "string",
+   "description": "上报签名（HMAC-SHA256；匿名扫码必传，来自二维码）"
+  }
+ },
+ "required": [
+  "facilityId",
+  "reportContent"
+ ]
+}
+--- BaseRspBizFacilityReportVO ---
+{
+ "type": "object",
+ "description": "统一响应包装",
+ "properties": {
+  "code": {
+   "type": "string",
+   "description": "业务结果码：0 成功，其余为业务/系统错误码",
+   "example": "0"
+  },
+  "msg": {
+   "type": "string",
+   "description": "结果描述信息"
+  },
+  "data": {
+   "$ref": "#/components/schemas/BizFacilityReportVO",
+   "description": "业务数据（随接口变化，可为 null）"
+  }
+ }
+}
+--- BizFacilityReportVO ---
+{
+ "type": "object",
+ "description": "设施问题上报结果（自动生成的任务与设施最新状态）",
+ "properties": {
+  "taskId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "自动生成的业务任务 ID（biz_task.id，任务相关接口走通用任务权限）"
+  },
+  "taskNo": {
+   "type": "string",
+   "description": "任务编号"
+  },
+  "facilityId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "设施 ID"
+  },
+  "facilityBizStatus": {
+   "type": "string",
+   "description": "设施最新状态（上报后为 ABNORMAL 异常）"
+  },
+  "facilityBizStatusName": {
+   "type": "string",
+   "description": "设施状态名称"
+  }
+ }
+}
+--- BizFacilityQrcodeReq ---
+{
+ "type": "object",
+ "description": "设施二维码生成请求",
+ "properties": {
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "部门 ID（部门视角筛选；为空则取登录时进入的部门。ADMIN 可指定任意部门，其他角色仅可传自身所属部门）"
+  },
+  "id": {
+   "type": "integer",
+   "format": "int64",
+   "description": "设施 ID"
+  },
+  "url": {
+   "type": "string",
+   "description": "移动端上报页基础地址（如 https://xxx/facility-report），服务端拼接签名参数",
+   "minLength": 1
+  },
+  "size": {
+   "type": "integer",
+   "format": "int32",
+   "description": "二维码边长（像素，默认 300，范围 120-1000）"
+  }
+ },
+ "required": [
+  "id",
+  "url"
+ ]
+}
+--- BizFacilityPageReq ---
+{
+ "type": "object",
+ "description": "工程设施分页查询请求",
+ "properties": {
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "部门 ID（部门视角筛选；为空则取登录时进入的部门。ADMIN 可指定任意部门，其他角色仅可传自身所属部门）"
+  },
+  "pageNum": {
+   "type": "integer",
+   "format": "int64",
+   "description": "页码，从 1 开始",
+   "minimum": 1
+  },
+  "pageSize": {
+   "type": "integer",
+   "format": "int64",
+   "description": "每页条数，1-200",
+   "maximum": 200,
+   "minimum": 1
+  },
+  "keyword": {
+   "type": "string",
+   "description": "关键字：对设施名称/编号/所属项目/行政村模糊匹配"
+  },
+  "regionCode": {
+   "type": "string",
+   "description": "所属行政区划筛选（6 位 adcode 等值，字典见元数据 ADMIN_REGION）"
+  },
+  "facilityType": {
+   "type": "string",
+   "description": "设施类型筛选（精确匹配编码，值域见元数据 FACILITY_TYPE）"
+  },
+  "bizStatus": {
+   "type": "string",
+   "description": "设施状态筛选：NORMAL 正常 / ABNORMAL 异常 / CHECKING 核查中 / DISCARDED 废弃"
+  }
+ }
+}
+--- BaseRspPageVOBizFacilityVO ---
+{
+ "type": "object",
+ "description": "统一响应包装",
+ "properties": {
+  "code": {
+   "type": "string",
+   "description": "业务结果码：0 成功，其余为业务/系统错误码",
+   "example": "0"
+  },
+  "msg": {
+   "type": "string",
+   "description": "结果描述信息"
+  },
+  "data": {
+   "$ref": "#/components/schemas/PageVOBizFacilityVO",
+   "description": "业务数据（随接口变化，可为 null）"
+  }
+ }
+}
+--- BizFacilityVO ---
+{
+ "type": "object",
+ "description": "工程设施信息",
+ "properties": {
+  "id": {
+   "type": "integer",
+   "format": "int64",
+   "description": "设施 ID"
+  },
+  "facilityNo": {
+   "type": "string",
+   "description": "设施编号（SS-{部门code}-{yyyyMMdd}-{序号}）"
+  },
+  "name": {
+   "type": "string",
+   "description": "设施名称"
+  },
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "业务归属部门 ID（隔离依据）"
+  },
+  "regionCode": {
+   "type": "string",
+   "description": "所属行政区划编码（6 位 adcode；空=未判定）"
+  },
+  "regionName": {
+   "type": "string",
+   "description": "所属行政区划名称（服务层批量补全）"
+  },
+  "villageName": {
+   "type": "string",
+   "description": "所属行政村"
+  },
+  "projectName": {
+   "type": "string",
+   "description": "所属项目"
+  },
+  "facilityType": {
+   "type": "string",
+   "description": "设施类型编码（元数据 FACILITY_TYPE）"
+  },
+  "typeName": {
+   "type": "string",
+   "description": "设施类型名称（服务层批量补全）"
+  },
+  "bizStatus": {
+   "type": "string",
+   "description": "设施状态：NORMAL 正常 / ABNORMAL 异常 / CHECKING 核查中 / DISCARDED 废弃"
+  },
+  "bizStatusName": {
+   "type": "string",
+   "description": "设施状态名称（前端直显）"
+  },
+  "geometryType": {
+   "type": "string",
+   "description": "几何类型：POINT / LINESTRING / POLYGON"
+  },
+  "geometryJson": {
+   "type": "string",
+   "description": "设施几何（GeoJSON geometry，WGS84）"
+  },
+  "remark": {
+   "type": "string",
+   "description": "备注"
+  },
+  "createTime": {
+   "type": "string",
+   "format": "date-time",
+   "description": "创建时间"
+  },
+  "updateTime": {
+   "type": "string",
+   "format": "date-time",
+   "description": "更新时间"
+  }
+ }
+}
+--- PageVOBizFacilityVO ---
+{
+ "type": "object",
+ "description": "分页返回结构",
+ "properties": {
+  "records": {
+   "type": "array",
+   "description": "当前页数据列表",
+   "items": {
+    "$ref": "#/components/schemas/BizFacilityVO"
+   }
+  },
+  "total": {
+   "type": "integer",
+   "format": "int64",
+   "description": "总记录数"
+  },
+  "pageNum": {
+   "type": "integer",
+   "format": "int64",
+   "description": "当前页码（从 1 开始）"
+  },
+  "pageSize": {
+   "type": "integer",
+   "format": "int64",
+   "description": "每页条数"
+  }
+ }
+}
+--- BizFacilityLayerImportReq ---
+{
+ "type": "object",
+ "description": "图层要素导入设施台账请求",
+ "properties": {
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "部门 ID（部门视角筛选；为空则取登录时进入的部门。ADMIN 可指定任意部门，其他角色仅可传自身所属部门）"
+  },
+  "serviceId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "地图服务 ID（sys_map_service.id，需为部门可见的 ArcGIS 矢量服务）"
+  },
+  "layerIds": {
+   "type": "array",
+   "description": "图层 ID 列表（ArcGIS MapServer 图层编号，多图层独立导入互不合并）",
+   "items": {
+    "type": "integer",
+    "format": "int32"
+   },
+   "minItems": 1
+  },
+  "nameField": {
+   "type": "string",
+   "description": "名称字段覆盖（默认探测属性键含\"名称\"，兜底候选键 GCMC）"
+  },
+  "projectNameField": {
+   "type": "string",
+   "description": "项目名称字段覆盖（默认探测含\"项目\"）"
+  },
+  "villageField": {
+   "type": "string",
+   "description": "行政村字段覆盖（默认探测含\"村\"）"
+  },
+  "typeField": {
+   "type": "string",
+   "description": "设施类型字段覆盖（默认探测含\"类型\"，兜底候选键 GCMC）"
+  }
+ },
+ "required": [
+  "layerIds",
+  "serviceId"
+ ]
+}
+--- BaseRspBizFacilityLayerImportVO ---
+{
+ "type": "object",
+ "description": "统一响应包装",
+ "properties": {
+  "code": {
+   "type": "string",
+   "description": "业务结果码：0 成功，其余为业务/系统错误码",
+   "example": "0"
+  },
+  "msg": {
+   "type": "string",
+   "description": "结果描述信息"
+  },
+  "data": {
+   "$ref": "#/components/schemas/BizFacilityLayerImportVO",
+   "description": "业务数据（随接口变化，可为 null）"
+  }
+ }
+}
+--- BizFacilityLayerImportVO ---
+{
+ "type": "object",
+ "description": "图层要素导入报告（分层统计 + 无法识别类型清单 + 疑似重复对）",
+ "properties": {
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "部门视角（导入归属部门）"
+  },
+  "inserted": {
+   "type": "integer",
+   "format": "int64",
+   "description": "本次新导入（新增）台账记录数"
+  },
+  "updated": {
+   "type": "integer",
+   "format": "int64",
+   "description": "同源重导命中（按来源关联更新，未新增）记录数"
+  },
+  "skipped": {
+   "type": "integer",
+   "format": "int64",
+   "description": "跳过要素数（几何缺失/解析失败）"
+  },
+  "typeUnrecognized": {
+   "type": "integer",
+   "format": "int64",
+   "description": "无法识别类型要素数（facility_type 落 OTHER，remark 记录原始值）"
+  },
+  "layers": {
+   "type": "array",
+   "description": "分层导入明细",
+   "items": {
+    "$ref": "#/components/schemas/LayerReport"
+   }
+  },
+  "suspectDuplicates": {
+   "type": "array",
+   "description": "疑似重复对（跨要素名称相同或几何范围重叠；仅提示，不自动合并；超上限时为前 200 对）",
+   "items": {
+    "$ref": "#/components/schemas/SuspectPair"
+   }
+  },
+  "suspectTotal": {
+   "type": "integer",
+   "format": "int64",
+   "description": "疑似重复对总数（suspectDuplicates 截断前；用于识别报告是否达 200 对上限）"
+  }
+ }
+}
+--- BizFacilityGeojsonReq ---
+{
+ "type": "object",
+ "description": "设施地图范围查询请求（WGS84 包围盒）",
+ "properties": {
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "部门 ID（部门视角筛选；为空则取登录时进入的部门。ADMIN 可指定任意部门，其他角色仅可传自身所属部门）"
+  },
+  "minLng": {
+   "type": "number",
+   "format": "double",
+   "description": "最小经度",
+   "maximum": 180,
+   "minimum": -180
+  },
+  "minLat": {
+   "type": "number",
+   "format": "double",
+   "description": "最小纬度",
+   "maximum": 90,
+   "minimum": -90
+  },
+  "maxLng": {
+   "type": "number",
+   "format": "double",
+   "description": "最大经度",
+   "maximum": 180,
+   "minimum": -180
+  },
+  "maxLat": {
+   "type": "number",
+   "format": "double",
+   "description": "最大纬度",
+   "maximum": 90,
+   "minimum": -90
+  },
+  "bizStatus": {
+   "type": "string",
+   "description": "设施状态筛选（NORMAL/ABNORMAL/CHECKING/DISCARDED，可空=全部）"
+  }
+ }
+}
+--- BaseRspBizFacilityVO ---
+{
+ "type": "object",
+ "description": "统一响应包装",
+ "properties": {
+  "code": {
+   "type": "string",
+   "description": "业务结果码：0 成功，其余为业务/系统错误码",
+   "example": "0"
+  },
+  "msg": {
+   "type": "string",
+   "description": "结果描述信息"
+  },
+  "data": {
+   "$ref": "#/components/schemas/BizFacilityVO",
+   "description": "业务数据（随接口变化，可为 null）"
+  }
+ }
+}
+--- BizFacilityAddReq ---
+{
+ "type": "object",
+ "description": "工程设施新增请求",
+ "properties": {
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "部门 ID（部门视角筛选；为空则取登录时进入的部门。ADMIN 可指定任意部门，其他角色仅可传自身所属部门）"
+  },
+  "name": {
+   "type": "string",
+   "description": "设施名称",
+   "maxLength": 100,
+   "minLength": 0
+  },
+  "villageName": {
+   "type": "string",
+   "description": "所属行政村",
+   "maxLength": 100,
+   "minLength": 0
+  },
+  "projectName": {
+   "type": "string",
+   "description": "所属项目",
+   "maxLength": 100,
+   "minLength": 0
+  },
+  "facilityType": {
+   "type": "string",
+   "description": "设施类型编码（值域见元数据 FACILITY_TYPE，如 DITCH 沟渠 / IRRIGATION_STATION 灌溉站）",
+   "minLength": 1
+  },
+  "bizStatus": {
+   "type": "string",
+   "description": "设施状态：NORMAL 正常 / ABNORMAL 异常 / CHECKING 核查中 / DISCARDED 废弃（缺省=NORMAL；非法值报 400）"
+  },
+  "regionCode": {
+   "type": "string",
+   "description": "所属行政区划编码（6 位 adcode，区县级；可空=未判定）"
+  },
+  "geometryType": {
+   "type": "string",
+   "description": "几何类型：POINT / LINESTRING / POLYGON（可空=暂无几何）"
+  },
+  "geometryJson": {
+   "type": "string",
+   "description": "设施几何（GeoJSON geometry，WGS84；与 geometryType 成对出现）"
+  },
+  "remark": {
+   "type": "string",
+   "description": "备注",
+   "maxLength": 500,
+   "minLength": 0
+  }
+ },
+ "required": [
+  "facilityType",
+  "name"
+ ]
+}
