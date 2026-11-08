@@ -25,6 +25,7 @@ declare module 'vue' {
     ElOption: typeof import('element-plus/es')['ElOption']
     ElPopover: typeof import('element-plus/es')['ElPopover']
     ElSelect: typeof import('element-plus/es')['ElSelect']
+    ElTooltip: typeof import('element-plus/es')['ElTooltip']
     FacilityEditDialog: typeof import('./src/components/FacilityEditDialog.vue')['default']
     FacilityLedgerMap: typeof import('./src/components/FacilityLedgerMap.vue')['default']
     FacilityQrcodeDialog: typeof import('./src/components/FacilityQrcodeDialog.vue')['default']
