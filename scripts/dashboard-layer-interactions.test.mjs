@@ -5,7 +5,7 @@ import ts from 'typescript'
 const compile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const script = readFileSync('src/components/DashboardMap.vue','utf8').split('<script setup lang="ts">')[1].split('</script>')[0]
 const ast = ts.createSourceFile('Map.ts',script,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS)
-const names = ['groupKind','sortedServiceGroups','paneForMapService','syncMapServiceStack','onMapServicePointerMove']
+const names = ['groupKind','sortedServiceGroups','paneForMapService','syncMapServiceStack']
 const functions = ast.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text)).map(node => node.getText(ast)).join('\n')
 const group = (id,kind) => ({id,name:id,kind,source:{id,type:kind},layers:[{id,arcGisGeometryType:kind==='vector'?'esriGeometryPolygon':undefined}]})
 const groups = {value:[group('v1','vector'),group('v2','vector'),group('i1','imagery'),group('i2','imagery')]}
@@ -14,16 +14,17 @@ const panes = new Map(), paintOrder=[]
 const map = {getPane:name=>panes.get(name),createPane:name=>{const pane={style:{},parentElement:{appendChild:()=>paintOrder.push(name)}};panes.set(name,pane);return pane}}
 const list={parentElement:null,querySelectorAll:()=>groups.value.map((item,index)=>({dataset:{groupId:item.id},getBoundingClientRect:()=>({top:index*50,height:50})}))}
 const context = {map,mapServiceGroups:groups,mapServicePaneNames:new Map(),requestedLayerOrder:order,MAP_SERVICE_IMAGERY_PANE:'imagery',document:{getElementById:()=>({querySelector:()=>list})},layerPanelId:'test',dragGhost:{value:undefined}}
-const api = new Function('context',`const {${Object.keys(context)}}=context;let mapServicePaneSerial=0,dragPointerId=1,dragActive=true,dragGroupId='',dragRowX=0,dragRowY=0,dragStartX=0,dragStartY=0;${compile(functions)};return {${names},drag(id,y){dragGroupId=id;onMapServicePointerMove({pointerId:1,clientX:0,clientY:y,preventDefault(){}})}}`)(context)
+const api = new Function('context',`const {${Object.keys(context)}}=context;let mapServicePaneSerial=0;${compile(functions)};return {${names}}`)(context)
 assert.deepEqual(api.sortedServiceGroups([group('i','imagery'),group('v','vector')]).map(g=>g.id),['v','i'])
 const vectorPane=api.paneForMapService(groups.value[0].layers[0]), imagePane=api.paneForMapService(groups.value[2].layers[0])
 assert(Number(panes.get(vectorPane).style.zIndex)>Number(panes.get(imagePane).style.zIndex),'An image enabled later cannot cover a vector')
 api.syncMapServiceStack()
-const original=groups.value.map(g=>g.id)
-api.drag('i2',1);assert.deepEqual(groups.value.map(g=>g.id),original,'Imagery cannot be dragged above vectors')
-api.drag('v1',1000);assert.deepEqual(groups.value.map(g=>g.id),original,'Vectors cannot be dragged below imagery')
-api.drag('v2',1);assert.deepEqual(groups.value.map(g=>g.id),['v2','v1','i1','i2'],'Same-kind drag changes stack order')
-assert(order.indexOf('v2')>order.indexOf('v1'),'Top row paints last within its type band')
+const regionFunctions = ast.statements.filter(node => ts.isFunctionDeclaration(node) && ['regionEntries','toggleRegion'].includes(node.name?.text)).map(node=>node.getText(ast)).join('\n')
+const expandedRegions = {value: []}
+const toggleRegion = new Function('expandedRegions', `const regionKey=(type,code)=>JSON.stringify([type,code]);${compile(regionFunctions)};return toggleRegion`)(expandedRegions)
+toggleRegion('image',{code:'district',children:[]}); assert.equal(expandedRegions.value.length,1,'District without children expands')
+toggleRegion('image',{code:'district',children:[]}); assert.equal(expandedRegions.value.length,0,'District collapses')
+assert(!script.includes('长按可拖动排序') && !script.includes('onMapServicePointerDown'), 'Long press sorting and hint are removed')
 const changedService = {...groups.value.find(group => group.id === 'v1').layers[0], arcGisGeometryType: undefined}
 api.paneForMapService(changedService)
 assert.equal(panes.get(vectorPane).style.zIndex, '235', 'A service changed to imagery cannot retain its old vector pane priority')
@@ -80,4 +81,4 @@ let loading=true;zoom.isLoading=()=>loading
 zoom.retainPreviousLevel();assert.equal(zoom._levels[11].el.style.opacity,'1');assert.equal(zoom._levels[12].el.style.opacity,'0')
 zoom._pruneTiles();assert.equal(pruned,0,'Parent tiles survive until the new zoom level is ready')
 loading=false;zoom.commitReadyLevel();assert.equal(zoom._levels[11].el.style.opacity,'0');assert.equal(zoom._levels[12].el.style.opacity,'1');assert.equal(pruned,1)
-console.log('dashboard layers: type bands, cross-type drag blocking, same-type ordering and atomic zoom replacement passed')
+console.log('dashboard layers: district expansion, type bands and atomic zoom replacement passed')

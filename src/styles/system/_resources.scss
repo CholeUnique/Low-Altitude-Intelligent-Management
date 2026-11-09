@@ -87,7 +87,7 @@
 #app .fleet-overview :is(.health-device dt, .health-device dd, .device-name b, .device-inventory-list b, .performance-metrics b, .statistics-rows b, .alarm-list b) { color: var(--ui-text); }
 #app .fleet-overview :is(.device-name small, .device-name em, .device-inventory-list small, .health-device dt, .statistics-period, .statistics-period b, .alarm-list small, .alarm-list em) { color: var(--ui-muted); }
 #app .fleet-overview .health-device dt i { color: var(--ui-accent); background: var(--ui-selected); }
-#app .fleet-overview :is(.health-device dl > div, .device-name, .alarm-list > article, .statistics-table > header) { border-color: var(--ui-divider); }
+#app .fleet-overview :is(.health-device dl > div, .device-name, .alarm-list > article, .statistics-table, .statistics-table > header) { border-color: var(--ui-divider); }
 #app .fleet-overview :is(.device-name em, .device-inventory-list em, .alarm-list i.recovered) { color: #8be5c7; background: rgb(32 201 151 / 13%); }
 #app .fleet-overview .alarm-list i { color: #ffd18a; background: rgb(255 176 32 / 13%); }
 #app .fleet-overview .alarm-list i.severe:not(.recovered) { color: #ffb6b6; background: rgb(245 108 108 / 13%); }

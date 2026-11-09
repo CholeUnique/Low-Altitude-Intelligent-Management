@@ -43,6 +43,18 @@ function rememberAddedLayers(keys:string[]){for(const key of keys)if(detailLayer
 function updateUploads(items:UploadedTopicLayer[]){uploadedLayers.value=items;rememberAddedLayers(items.map(item=>`upload:${item.id}`))}
 const topicStore = useGeographicTopicsStore()
 const root = ref<HTMLElement>(), canvas = ref<HTMLElement>()
+const legendSpace = ref(22)
+let legendResizeObserver: ResizeObserver | undefined
+async function observeLegend() {
+  await nextTick()
+  legendResizeObserver?.disconnect()
+  const legend = root.value?.querySelector<HTMLElement>('.map-symbol-legend')
+  if (!legend) { legendSpace.value = 22; return }
+  const update = () => { legendSpace.value = legend.offsetHeight + 24 }
+  legendResizeObserver = new ResizeObserver(update)
+  legendResizeObserver.observe(legend)
+  update()
+}
 const layers = ref<TopicLayer[]>([])
 const legendCollapsed=ref(false)
 const analysisLegend=ref<SpatialResultLegend[]>([])
@@ -399,11 +411,13 @@ onMounted(() => {
   document.addEventListener('fullscreenchange', updateFullscreen)
   void loadData()
 })
-onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureHover=undefined; version++; document.removeEventListener('fullscreenchange', updateFullscreen); resizeObserver?.disconnect(); map?.remove(); map = undefined })
+watch(mapLegendGroups, () => void observeLegend(), { flush: 'post' })
+onMounted(() => void observeLegend())
+onBeforeUnmount(() => { legendResizeObserver?.disconnect(); clearFeatureSelection();featureHover?.destroy();featureHover=undefined; version++; document.removeEventListener('fullscreenchange', updateFullscreen); resizeObserver?.disconnect(); map?.remove(); map = undefined })
 </script>
 
 <template>
-  <section ref="root" class="geographic-topics" aria-label="专题地图">
+  <section ref="root" class="geographic-topics" :style="{ '--legend-space': `${legendSpace}px` }" aria-label="专题地图">
     <div ref="canvas" class="topic-map" :class="{'topic-map--drawing':drawingToolActive}"></div>
     <div class="topic-map-reference">
       <div class="topic-north" role="img" aria-label="指北针：上方为北">
@@ -499,6 +513,8 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
 .geographic-topics>.topic-tools{z-index:560}
 .config-body .config-service-group{margin:10px 0 0;border:1px solid #719dad29;border-radius:7px;overflow:hidden}.config-source-heading{display:flex;align-items:center;gap:8px;min-height:46px;padding:0 10px;background:#23485855}.config-source-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;padding:10px 0;border:0;background:transparent;color:#d9f1f7;font:inherit;text-align:left;cursor:pointer}.config-source-toggle b{font-size:12px;font-weight:500;line-height:1.7;overflow-wrap:anywhere}.config-source-switch{display:flex;align-items:center;gap:5px;flex:none;font-size:10px;cursor:pointer}.config-source-children{padding:0 10px 0 20px}.config-source-children .config-layer:last-child{border-bottom:0;margin-bottom:0}.legend-layer-name{display:grid;flex:1;min-width:0;gap:2px}.legend-layer-name b{color:#d6eaf1}.legend-layer-heading .legend-layer-name small{display:block;overflow:hidden;text-overflow:ellipsis;font-size:9px;color:#81a7b5;line-height:14px}
 .topic-legend{top:var(--left-panel-top);bottom:auto;width:var(--details-width);height:var(--details-height);max-height:none;box-sizing:border-box;border:1px solid #88bcd528;border-radius:10px;background:linear-gradient(145deg,#123846ed,#0a2938ed)}
+.geographic-topics{--details-top:50px}.topic-legend{top:var(--details-top);bottom:var(--legend-space,22px);height:auto}.topic-details-toggle{top:calc(var(--details-top) + 10px)}
+@media(max-width:1100px){.geographic-topics{--details-top:108px}}
 .legend-heading{min-height:50px;box-sizing:border-box;flex:0 0 50px;border-bottom:1px solid #7395a229;padding:0 15px;gap:9px;cursor:default}
 .legend-content{flex:1;min-height:0;padding:12px;overscroll-behavior:contain;scrollbar-width:none}.legend-content::-webkit-scrollbar{display:none}
 .legend-group{margin-top:8px;padding-top:0;border-top:0}.legend-layer-row{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:7px;min-height:42px;border:1px solid #719dad20;border-radius:6px;background:#153746;padding:0 8px}.legend-layer-row:hover{background:#1b4353}
