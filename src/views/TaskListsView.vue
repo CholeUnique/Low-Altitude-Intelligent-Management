@@ -307,22 +307,22 @@ onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRe
         <span>搜索任务</span>
         <span class="search-box"><i class="search-box__icon" aria-hidden="true"></i><input v-model="keyword" placeholder="任务名称、编号" /></span>
       </label>
-      <label>所属场景<select v-model="sceneFilter" :disabled="sceneLoading"><option value="">{{ sceneLoading ? '场景字典加载中…' : '全部场景' }}</option><option v-for="scene in sceneOptions" :key="scene.id" :value="scene.id">{{ scene.shortName }}</option></select></label>
-      <label>任务状态<select v-model="status"><option value="">全部状态</option><option :value="0">待执行</option><option :value="1">执行中</option><option :value="2">待核查</option><option :value="3">已失败</option><option :value="4">已取消</option><option :value="5">已完成</option></select></label>
+      <label>所属场景<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="sceneFilter" :disabled="sceneLoading"><ElOption value="" :label="String(sceneLoading ? '场景字典加载中…' : '全部场景')" /><ElOption v-for="scene in sceneOptions" :key="scene.id" :value="scene.id" :label="String(scene.shortName)" /></ElSelect></label>
+      <label>任务状态<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="status"><ElOption value="" label="全部状态" /><ElOption :value="0" label="待执行" /><ElOption :value="1" label="执行中" /><ElOption :value="2" label="待核查" /><ElOption :value="3" label="已失败" /><ElOption :value="4" label="已取消" /><ElOption :value="5" label="已完成" /></ElSelect></label>
       <label>所属部门
         <div class="department-filter">
-          <select v-model="parentDeptId" :disabled="departmentLoading">
-            <option value="">{{ departmentLoading ? '部门加载中…' : '全部一级部门' }}</option>
-            <option v-for="item in rootDepartments" :key="item.id" :value="item.id">{{ item.name }}</option>
-          </select>
-          <select v-model="childDeptId" :disabled="departmentLoading || !parentDeptId || !childDepartments.length">
-            <option value="">全部二级部门</option>
-            <option v-for="item in childDepartments" :key="item.id" :value="item.id">{{ item.name }}</option>
-          </select>
+          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="parentDeptId" :disabled="departmentLoading">
+            <ElOption value="" :label="String(departmentLoading ? '部门加载中…' : '全部一级部门')" />
+            <ElOption v-for="item in rootDepartments" :key="item.id" :value="item.id" :label="String(item.name)" />
+          </ElSelect>
+          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="childDeptId" :disabled="departmentLoading || !parentDeptId || !childDepartments.length">
+            <ElOption value="" label="全部二级部门" />
+            <ElOption v-for="item in childDepartments" :key="item.id" :value="item.id" :label="String(item.name)" />
+          </ElSelect>
         </div>
       </label>
-      <label>当前处理人<select v-model="handlerFilter" aria-label="当前处理人筛选" :disabled="taskLoading || handlerLoading"><option value="">{{ handlerLoading ? '人员加载中…' : '全部处理人' }}</option><option v-for="person in handlerOptions" :key="person.key" :value="person.key">{{ person.name }}</option></select></label>
-      <label>优先级<select v-model.number="priority"><option value="">全部优先级</option><option :value="2">高</option><option :value="1">中</option><option :value="0">低</option></select></label>
+      <label>当前处理人<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="handlerFilter" aria-label="当前处理人筛选" :disabled="taskLoading || handlerLoading"><ElOption value="" :label="String(handlerLoading ? '人员加载中…' : '全部处理人')" /><ElOption v-for="person in handlerOptions" :key="person.key" :value="person.key" :label="String(person.name)" /></ElSelect></label>
+      <label>优先级<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="priority"><ElOption value="" label="全部优先级" /><ElOption :value="2" label="高" /><ElOption :value="1" label="中" /><ElOption :value="0" label="低" /></ElSelect></label>
     </section>
     <p v-if="sceneError" class="scene-dictionary-error">场景字典加载失败：{{ sceneError }}。请检查登录状态与网络后刷新页面。</p>
     <p v-if="departmentError" class="scene-dictionary-error">部门列表加载失败：{{ departmentError }}。筛选将使用当前登录部门。</p>

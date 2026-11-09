@@ -447,11 +447,11 @@ onBeforeUnmount(() => {
         </header>
         <header class="collection-toolbar">
           <label class="search-control"><i>⌕</i><input v-model="keyword" placeholder="搜索任务或数据名称..." /></label>
-          <label class="select-control"><select v-model="mediaTypeFilter" aria-label="数据类型"><option value="">数据类型</option><option value="video">视频</option><option value="image">图片</option></select></label>
-          <label class="select-control"><select v-model="taskFilter"><option value="">任务名称</option><option v-for="[id, name] in taskOptions" :key="id" :value="id">{{ name }}</option></select></label>
-          <label class="select-control"><select v-model="timeFilter"><option value="">采集时间</option><option value="1">最近 1 天</option><option value="7">最近 7 天</option><option value="30">最近 30 天</option></select></label>
-          <label class="select-control"><select v-model="deviceFilter"><option value="">设备类型</option><option v-for="item in deviceOptions" :key="item">{{ item }}</option></select></label>
-          <label class="select-control status-select" title="等待后端提供状态码枚举"><select v-model="statusFilter" disabled><option value="">状态（待后端枚举）</option></select></label>
+          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="mediaTypeFilter" aria-label="数据类型"><ElOption value="" label="数据类型" /><ElOption value="video" label="视频" /><ElOption value="image" label="图片" /></ElSelect></label>
+          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="taskFilter"><ElOption value="" label="任务名称" /><ElOption v-for="[id, name] in taskOptions" :key="id" :value="id" :label="String(name)" /></ElSelect></label>
+          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="timeFilter"><ElOption value="" label="采集时间" /><ElOption value="1" label="最近 1 天" /><ElOption value="7" label="最近 7 天" /><ElOption value="30" label="最近 30 天" /></ElSelect></label>
+          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="deviceFilter"><ElOption value="" label="设备类型" /><ElOption v-for="item in deviceOptions" :key="item" :value="String(item)" :label="String(item)" /></ElSelect></label>
+          <label class="select-control status-select" title="等待后端提供状态码枚举"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="statusFilter" disabled><ElOption value="" label="状态（待后端枚举）" /></ElSelect></label>
         </header>
 
         <div v-if="loading || (mediaScanLoading && !pageMedia.length)" class="page-state">正在读取图片与视频数据…</div>
@@ -466,7 +466,7 @@ onBeforeUnmount(() => {
 
         <footer class="collection-pagination">
           <span>{{ knownTotal === undefined ? `已读取 ${filteredMedia.length} 条匹配数据` : `共 ${knownTotal} 条数据` }}{{ mediaScanLoading ? ' · 正在读取素材…' : '' }}</span>
-          <nav><select v-model="pageSize"><option :value="20">20 条/页</option><option :value="40">40 条/页</option><option :value="60">60 条/页</option></select><button :disabled="currentPage === 1 || mediaScanLoading" @click="setPage(currentPage - 1)">‹</button><button v-for="page in visiblePages" :key="page" :disabled="mediaScanLoading" :class="{ active:currentPage === page }" @click="setPage(page)">{{ page }}</button><button :disabled="currentPage === pageCount || mediaScanLoading" @click="setPage(currentPage + 1)">›</button><label>前往 <input :value="currentPage" :disabled="mediaScanLoading" inputmode="numeric" @change="setPage(Number(($event.target as HTMLInputElement).value))" /> 页</label></nav>
+          <nav><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="pageSize"><ElOption :value="20" label="20 条/页" /><ElOption :value="40" label="40 条/页" /><ElOption :value="60" label="60 条/页" /></ElSelect><button :disabled="currentPage === 1 || mediaScanLoading" @click="setPage(currentPage - 1)">‹</button><button v-for="page in visiblePages" :key="page" :disabled="mediaScanLoading" :class="{ active:currentPage === page }" @click="setPage(page)">{{ page }}</button><button :disabled="currentPage === pageCount || mediaScanLoading" @click="setPage(currentPage + 1)">›</button><label>前往 <input :value="currentPage" :disabled="mediaScanLoading" inputmode="numeric" @change="setPage(Number(($event.target as HTMLInputElement).value))" /> 页</label></nav>
         </footer>
       </section>
       <div v-else class="page-state">识别成果暂不可用</div>

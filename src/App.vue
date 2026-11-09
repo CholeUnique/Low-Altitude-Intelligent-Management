@@ -9,6 +9,8 @@ const route = useRoute()
 const user = useUserStore()
 watchEffect(() => {
   document.title = getPlatformBrand(route.meta.public ? undefined : user.organizationId).title
+  // 只决定视觉变量；路由、权限与业务状态仍由原有逻辑控制。
+  document.documentElement.dataset.uiTheme = route.meta.public || route.name === 'workspace' ? 'light' : 'dark'
 })
 </script>
 

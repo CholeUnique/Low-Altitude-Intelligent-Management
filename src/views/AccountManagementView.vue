@@ -858,7 +858,7 @@ onMounted(loadProfile)
                 <label><span>登录账号</span><input :value="userStore.currentUser?.username" disabled></label>
                 <label><span>真实姓名</span><input v-model.trim="profileForm.realName" placeholder="请输入真实姓名"></label>
                 <label><span>昵称</span><input v-model.trim="profileForm.nickname" placeholder="请输入昵称"></label>
-                <label><span>性别</span><select v-model.number="profileForm.gender"><option :value="0">未知</option><option :value="1">男</option><option :value="2">女</option></select></label>
+                <label><span>性别</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="profileForm.gender"><ElOption :value="0" label="未知" /><ElOption :value="1" label="男" /><ElOption :value="2" label="女" /></ElSelect></label>
                 <label><span>手机号</span><input v-model.trim="profileForm.phone" placeholder="请输入手机号"></label>
                 <label><span>电子邮箱</span><input v-model.trim="profileForm.email" type="email" placeholder="请输入电子邮箱"></label>
                 <label class="form-grid__wide"><span>头像地址</span><input v-model.trim="profileForm.avatar" placeholder="请输入头像图片地址"></label>
@@ -877,9 +877,9 @@ onMounted(loadProfile)
           <section class="panel table-panel">
             <form class="filter-bar" @submit.prevent="searchUsers">
               <input v-model.trim="userFilters.keyword" placeholder="搜索账号、姓名或手机号">
-              <select v-if="isAdmin" v-model="userFilters.role"><option value="">全部账号角色</option><option value="ADMIN">系统管理员</option><option value="USER">普通用户及部门管理员</option></select>
-              <select v-model="userFilters.status"><option value="">全部状态</option><option :value="1">启用</option><option :value="0">禁用</option></select>
-              <select v-if="isAdmin" v-model="userFilters.defaultDeptId"><option value="">全部部门</option><option v-for="dept in departments" :key="dept.id" :value="String(dept.id)">{{ dept.name }}</option></select>
+              <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-if="isAdmin" v-model="userFilters.role"><ElOption value="" label="全部账号角色" /><ElOption value="ADMIN" label="系统管理员" /><ElOption value="USER" label="普通用户及部门管理员" /></ElSelect>
+              <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="userFilters.status"><ElOption value="" label="全部状态" /><ElOption :value="1" label="启用" /><ElOption :value="0" label="禁用" /></ElSelect>
+              <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-if="isAdmin" v-model="userFilters.defaultDeptId"><ElOption value="" label="全部部门" /><ElOption v-for="dept in departments" :key="dept.id" :value="String(dept.id)" :label="String(dept.name)" /></ElSelect>
               <button class="button button--primary" type="submit">查询</button>
               <button class="button button--ghost" type="button" @click="Object.assign(userFilters, { keyword: '', role: '', status: '', defaultDeptId: '' }); searchUsers()">重置</button>
             </form>
@@ -913,7 +913,7 @@ onMounted(loadProfile)
           <section class="panel table-panel">
             <form class="filter-bar" @submit.prevent="loadDepartments()">
               <input v-model.trim="departmentFilters.keyword" placeholder="搜索部门名称或编码">
-              <select v-model="departmentFilters.status"><option value="">全部状态</option><option :value="1">启用</option><option :value="0">停用</option></select>
+              <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="departmentFilters.status"><ElOption value="" label="全部状态" /><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect>
               <button class="button button--primary" type="submit">查询</button>
               <button class="button button--ghost" type="button" @click="Object.assign(departmentFilters, { keyword: '', status: '' }); loadDepartments()">重置</button>
             </form>
@@ -955,9 +955,9 @@ onMounted(loadProfile)
           <label v-if="userEditorMode === 'add'"><span>初始密码 *</span><input v-model="userForm.password" type="password" required></label>
           <label><span>真实姓名</span><input v-model.trim="userForm.realName" :disabled="userEditorMode === 'view'"></label>
           <label><span>昵称</span><input v-model.trim="userForm.nickname" :disabled="userEditorMode === 'view'"></label>
-          <label><span>角色</span><select v-model="userForm.role" :disabled="userEditorMode === 'view' || isDepartmentAdmin"><option value="USER">普通用户</option><option v-if="isAdmin" value="DEPT_ADMIN">部门管理员</option></select></label>
-          <label><span>状态</span><select v-model.number="userForm.status" :disabled="userEditorMode === 'view'"><option :value="1">启用</option><option :value="0">禁用</option></select></label>
-          <label><span>性别</span><select v-model.number="userForm.gender" :disabled="userEditorMode === 'view'"><option :value="0">未知</option><option :value="1">男</option><option :value="2">女</option></select></label>
+          <label><span>角色</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="userForm.role" :disabled="userEditorMode === 'view' || isDepartmentAdmin"><ElOption value="USER" label="普通用户" /><ElOption v-if="isAdmin" value="DEPT_ADMIN" label="部门管理员" /></ElSelect></label>
+          <label><span>状态</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="userForm.status" :disabled="userEditorMode === 'view'"><ElOption :value="1" label="启用" /><ElOption :value="0" label="禁用" /></ElSelect></label>
+          <label><span>性别</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="userForm.gender" :disabled="userEditorMode === 'view'"><ElOption :value="0" label="未知" /><ElOption :value="1" label="男" /><ElOption :value="2" label="女" /></ElSelect></label>
           <label><span>手机号</span><input v-model.trim="userForm.phone" :disabled="userEditorMode === 'view'"></label>
           <label><span>电子邮箱</span><input v-model.trim="userForm.email" type="email" :disabled="userEditorMode === 'view'"></label>
           <label><span>单位</span><input v-model.trim="userForm.unit" :disabled="userEditorMode === 'view'"></label>
@@ -986,7 +986,7 @@ onMounted(loadProfile)
               <p v-if="!manageableFirstLevelDepartments.length" class="department-picker__empty">请先在“所属部门”中选择一级部门</p>
             </div>
           </section>
-          <label><span>默认部门</span><select v-model="userForm.defaultDeptId" :disabled="userEditorMode === 'view'"><option value="">未设置</option><option v-for="dept in (isAdmin ? departments : managedDepartments).filter((item) => userForm.deptIdList.includes(String(item.id)))" :key="dept.id" :value="String(dept.id)">{{ dept.name }}</option></select></label>
+          <label><span>默认部门</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="userForm.defaultDeptId" :disabled="userEditorMode === 'view'"><ElOption value="" label="未设置" /><ElOption v-for="dept in (isAdmin ? departments : managedDepartments).filter((item) => userForm.deptIdList.includes(String(item.id)))" :key="dept.id" :value="String(dept.id)" :label="String(dept.name)" /></ElSelect></label>
           <label><span>头像地址</span><input v-model.trim="userForm.avatar" :disabled="userEditorMode === 'view'"></label>
           <label class="form-grid__wide"><span>备注</span><textarea v-model.trim="userForm.remark" :disabled="userEditorMode === 'view'"></textarea></label>
         </form>
@@ -999,12 +999,12 @@ onMounted(loadProfile)
         <header><div><h2>{{ departmentEditorTitle }}</h2><p>维护部门基本信息</p></div><button type="button" @click="departmentEditorOpen = false">×</button></header>
         <form class="form-grid modal-form" @submit.prevent="submitDepartment">
           <label><span>部门名称 *</span><input v-model.trim="departmentForm.name" :disabled="departmentEditorMode === 'view'" required></label>
-          <label><span>上级部门{{ isDepartmentAdmin ? ' *' : '' }}</span><select v-model="departmentForm.parentId" :disabled="departmentEditorMode === 'view' || (isDepartmentAdmin && departmentEditorMode === 'edit')" :required="isDepartmentAdmin"><option value="">顶级部门</option><option v-for="dept in departmentParentOptions.filter((item) => String(item.id) !== departmentForm.id)" :key="dept.id" :value="String(dept.id)">{{ dept.name }}</option></select></label>
+          <label><span>上级部门{{ isDepartmentAdmin ? ' *' : '' }}</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="departmentForm.parentId" :disabled="departmentEditorMode === 'view' || (isDepartmentAdmin && departmentEditorMode === 'edit')" :required="isDepartmentAdmin"><ElOption value="" label="顶级部门" /><ElOption v-for="dept in departmentParentOptions.filter((item) => String(item.id) !== departmentForm.id)" :key="dept.id" :value="String(dept.id)" :label="String(dept.name)" /></ElSelect></label>
           <label><span>部门编码</span><input v-model.trim="departmentForm.code" :disabled="departmentEditorMode === 'view'"></label>
           <label><span>负责人</span><input v-model.trim="departmentForm.leader" :disabled="departmentEditorMode === 'view'"></label>
           <label><span>联系电话</span><input v-model.trim="departmentForm.phone" :disabled="departmentEditorMode === 'view'"></label>
           <label><span>排序</span><input v-model.number="departmentForm.sort" type="number" :disabled="departmentEditorMode === 'view'"></label>
-          <label><span>状态</span><select v-model.number="departmentForm.status" :disabled="departmentEditorMode === 'view'"><option :value="1">启用</option><option :value="0">停用</option></select></label>
+          <label><span>状态</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="departmentForm.status" :disabled="departmentEditorMode === 'view'"><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect></label>
           <label class="form-grid__wide"><span>备注</span><textarea v-model.trim="departmentForm.remark" :disabled="departmentEditorMode === 'view'"></textarea></label>
           <div class="form-actions form-grid__wide"><button class="button button--ghost" type="button" @click="departmentEditorOpen = false">{{ departmentEditorMode === 'view' ? '关闭' : '取消' }}</button><button v-if="departmentEditorMode !== 'view'" class="button button--primary" type="submit" :disabled="busy">保存</button></div>
         </form>

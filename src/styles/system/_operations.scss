@@ -1,0 +1,191 @@
+@use './badges';
+
+// Resource review / dispatch / calendar pages share the platform surfaces.
+#app :is(.flight-review, .general-review, .governance-page, .flight-plan-calendar, .route-flight-plan, .facility-dashboard) {
+  background: var(--ui-page-background); color: var(--ui-body); font-family: var(--ui-font);
+  --panel-bg: var(--ui-surface); --panel-border: var(--ui-border); --panel-shadow: none;
+  --muted: var(--ui-muted);
+}
+#app :is(.flight-review, .general-review, .governance-page, .flight-plan-calendar, .route-flight-plan) {
+  .panel, .summary-card, .metric-card, .calendar-panel, .daily-panel, .plan-list-panel,
+  .priority-section, .image-card-caption, .image-card__caption {
+    background: var(--ui-panel-background); border-color: var(--ui-border); border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); color: var(--ui-body);
+  }
+  h1 { font-size: 20px; color: var(--ui-text); line-height: 28px; }
+  h2, h3, .panel-title { color: var(--ui-text); font-size: 16px; line-height: 24px; }
+  .panel-title, .panel > header { border-color: var(--ui-divider); background: transparent; min-height: 44px; padding-inline: 16px; }
+  .panel-title small, .cell-sub, .muted, .source-task, .loading-note { color: var(--ui-muted); font-size: 12px; line-height: 18px; }
+  .filter-grid label, .filters label, .summary-card span { color: var(--ui-muted); font-size: 13px; }
+  .filter-grid :is(input, select), .filters :is(input, select), .toolbar :is(input, select) {
+    color: var(--ui-body); background: var(--ui-input); border: 1px solid var(--ui-border); border-radius: var(--ui-control-radius); min-height: 36px; font-size: 13px; color-scheme: dark;
+  }
+  :is(.filter-grid, .filters, .toolbar) select option { color: var(--ui-body); background: var(--ui-surface-raised); }
+  .filter-grid, .toolbar, .summary-grid, .stat-grid { gap: 12px; }
+  table { font-size: 13px; }
+  th { background: var(--ui-surface-raised); color: var(--ui-muted); font-size: 12px; }
+  td { color: var(--ui-body); border-color: var(--ui-divider); font-size: 13px; line-height: 20px; }
+  td b, .plan-cell > b, .spot-row b, .spot-item b { color: var(--ui-text); font-size: 13px; }
+  td small, .plan-cell small, .spot-row small, .spot-item small { color: var(--ui-muted); font-size: 12px; }
+  tbody tr:hover, .spot-row:hover, .spot-item:hover { background: var(--ui-hover); }
+  .spot-row.active, .spot-row.selected, .spot-item.selected { background: var(--ui-selected); border-color: #4f9bb5; }
+  .view-button, .text-button, .row-actions button { color: var(--ui-link); font-size: 13px; background: transparent; border-radius: 4px; }
+  .view-button:hover:not(:disabled), .row-actions button:hover:not(:disabled) { background: var(--ui-selected); color: var(--ui-text); }
+  .summary-icon { border: 0; box-shadow: none; background: var(--ui-hover); border-radius: 50%; color: var(--ui-accent); }
+  .summary-card strong, .summary-card b { color: var(--ui-text); font-size: 28px; line-height: 34px; }
+  .summary-card small { color: var(--ui-muted); font-size: 12px; }
+  .spot-detail dt, .detail dt { color: var(--ui-muted); font-size: 13px; }
+  .spot-detail dd, .detail dd { color: var(--ui-body); font-size: 13px; }
+  .spot-detail dl > div, .detail dl > div { border-color: var(--ui-divider); }
+}
+#app .flight-review, #app .general-review { padding: 16px; gap: 16px; }
+#app .flight-review .summary-upload-button { background: var(--ui-surface); color: var(--ui-accent); border: 1px solid var(--ui-border); border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); }
+#app .flight-review .summary-upload-button:hover { background: var(--ui-hover); border-color: #558ba9; }
+#app .flight-review :is(.outline-button, .folder-icon, .soft-tag) { color: var(--ui-link); background: var(--ui-selected); border-color: var(--ui-border); border-radius: var(--ui-control-radius); }
+#app .flight-review .outline-button:hover { background: var(--ui-hover); color: var(--ui-text); }
+#app .general-review .stat-grid > article { background: var(--ui-panel-background); border-color: var(--ui-border); }
+#app .general-review .stat-grid article strong { color: var(--ui-text); font-size: 28px; }
+#app .general-review .stat-grid article small { color: var(--ui-muted); font-size: 12px; }
+#app .general-review .stat-grid article span { color: var(--ui-muted); font-size: 13px; }
+
+// Review pages use the dark platform theme; embedded workbench forms stay light.
+#app .recognition-content :is(.governance-page, .general-review) {
+  .spot-item, .spot-row, .recognition-task-item { background: transparent; color: var(--ui-body); border-color: var(--ui-divider); }
+  :is(.spot-item, .spot-row, .recognition-task-item):hover { background: var(--ui-hover); }
+  .spot-item.active, .spot-row.active, .spot-row.checked { background: var(--ui-selected); }
+  .spot-item b, .spot-row b, .recognition-task-item b { color: var(--ui-text); }
+  .spot-item small, .spot-row small, .recognition-task-item small { color: var(--ui-muted); }
+  :is(.spot-item, .spot-row) em { color: #ffd18a; background: rgb(255 176 32 / 13%); }
+  :is(.spot-item, .spot-row) em.status-1 { color: #8ccaff; background: rgb(47 140 255 / 14%); }
+  :is(.spot-item, .spot-row) em.status-2 { color: #7ce2bf; background: rgb(32 201 151 / 13%); }
+  :is(.spot-item, .spot-row) em:is(.status-3, .status-4) { color: var(--ui-muted); background: var(--ui-input); }
+  .panel > header, .manual-spot-heading { color: var(--ui-text); background: transparent; border-color: var(--ui-divider); }
+  .panel > header span, .panel > header small, .analysis-title-hint { color: var(--ui-muted); }
+  .map-header-actions button, .periods button, .period-bar button,
+  .spot-action-button, .detail-action, .review-button, .image-card--add { color: var(--ui-link); background: var(--ui-input); border-color: var(--ui-border); }
+  .map-header-actions button:hover, .periods button:hover:not(:disabled), .period-bar button:hover:not(:disabled),
+  .spot-action-button:hover:not(:disabled), .detail-action:hover:not(:disabled), .review-button:hover:not(:disabled),
+  .image-card--add:hover:not(:disabled) { color: var(--ui-accent); background: var(--ui-hover); border-color: var(--ui-accent); }
+  .periods button.active, .period-bar button.active { color: var(--ui-accent); background: var(--ui-selected); border-color: var(--ui-accent); }
+  .periods button:disabled, .period-bar button:disabled { color: var(--ui-muted); background: var(--ui-input); border-color: var(--ui-border); }
+  .periods span, .period-bar > span, .image-card--add small { color: var(--ui-muted); }
+  .map-compare, .map-grid { background: var(--ui-divider); }
+  .map-empty, .spot-map--empty, .imagery-empty { color: var(--ui-muted); background: var(--ui-input); border-color: var(--ui-border); }
+  .empty-imagery { color: var(--ui-body); background: var(--ui-surface-raised); border-color: var(--ui-border); }
+  .detail > p, .spot-detail > p { color: var(--ui-body); background: var(--ui-input); }
+  .detail > p.review-feedback--error, .spot-detail > .detail-load-error,
+  .operation-message.error, .dialog-error, .submit-message--error, .spot-action-dialog__error {
+    color: #ffaaaa; background: rgb(245 108 108 / 12%);
+  }
+  .submit-message--success { color: #7ce2bf; background: rgb(32 201 151 / 13%); }
+  .spot-action-button--revoke, .detail-action--revoke { color: #ffaaaa; }
+  .detail :is(dt, dd), .spot-detail dl > div { border-color: var(--ui-divider); }
+  .manual-spot-form { scrollbar-color: #527c94 transparent; }
+  .manual-spot-form::-webkit-scrollbar-track { background: transparent; }
+  .manual-spot-form::-webkit-scrollbar-thumb { background: #527c94; border-color: transparent; }
+  .field > span, .reference-services legend, .reference-service-list label { color: var(--ui-body); }
+  .reference-services, .geometry-card { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+  .geometry-card b { color: var(--ui-text); }
+  .geometry-card small, .reference-services > small { color: var(--ui-muted); }
+  .field input, .field textarea, .task-name-field input, .upload-form :is(input, textarea) {
+    color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); color-scheme: dark;
+  }
+  .field .el-select__input { background: transparent; }
+  .spot-datetime__input { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+  :is(.review-dialog, .image-delete-dialog, .service-picker-dialog, .task-create-dialog, .spot-action-dialog, .upload-dialog) {
+    color: var(--ui-body); background: var(--ui-surface-raised); border-color: var(--ui-border);
+    > header, > footer { color: var(--ui-text); background: transparent; border-color: var(--ui-divider); }
+    h3, b, dt { color: var(--ui-text); }
+    p, small, dd { color: var(--ui-body); }
+    dl, .create-summary article, .selected-spot-box, .priority-section, .file-picker { background: var(--ui-input); border-color: var(--ui-border); }
+    button.cancel, .spot-action-dialog__cancel, .priority-options button { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+  }
+  .service-picker-body label { border-color: var(--ui-divider); }
+  .service-picker-body label:hover { background: var(--ui-hover); }
+  .service-picker-body label.added, .service-picker-tip { background: var(--ui-input); color: var(--ui-muted); }
+}
+#app .flight-plan-calendar {
+  padding: 16px;
+  .toolbar { color: var(--ui-body); background: var(--ui-panel-background); border-color: var(--ui-border); box-shadow: var(--ui-shadow); }
+  .toolbar-title { border-color: var(--ui-divider); }
+  .toolbar-title b, .month-switch b, .daily-panel > header b { color: var(--ui-text); }
+  .toolbar-title span, .daily-panel > header span, .daily-panel > header em { color: var(--ui-muted); }
+  .month-switch button, .mode-switch { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+  .month-switch button:hover, .mode-switch button:not(.active):hover { color: var(--ui-accent); background: var(--ui-hover); border-color: var(--ui-accent); }
+  .month-switch button.today { color: var(--ui-accent); background: var(--ui-selected); border-color: var(--ui-border); }
+  .mode-switch button { color: var(--ui-body); }
+  .mode-switch button.active { color: #fff; background: var(--ui-action); }
+  .filters label > .system-select { width: 148px; flex: 0 0 148px; }
+  .metric-grid article { background: var(--ui-panel-background); border-color: var(--ui-border); border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); }
+  .toolbar-title, .day-cell__heading, .daily-panel > header { color: var(--ui-text); }
+  .calendar-panel > header, .daily-panel > header, .weekday { background: var(--ui-surface-raised); color: var(--ui-muted); border-color: var(--ui-divider); }
+  .day-cell { background: var(--ui-panel-background); border-color: var(--ui-divider); }
+  .day-cell:hover { background: var(--ui-hover); }
+  .day-cell.selected { background: var(--ui-selected); }
+  .day-cell > i { font-size: 12px; }
+  .day-cell > i, .daily-list article > em, .plan-list-panel em { @include badges.tone(neutral); }
+  :is(.day-cell > i, .daily-list article > em, .plan-list-panel em).pending { @include badges.tone(warning); }
+  :is(.day-cell > i, .daily-list article > em, .plan-list-panel em).running { @include badges.tone(info); }
+  :is(.day-cell > i, .daily-list article > em, .plan-list-panel em).done { @include badges.tone(success); }
+  :is(.day-cell > i, .daily-list article > em, .plan-list-panel em).failed { @include badges.tone(danger); }
+  .daily-list article { background: var(--ui-input); border-color: var(--ui-border); }
+  .daily-list article > b { color: var(--ui-text); font-size: 14px; }
+  .daily-list article > span, .daily-list article > small, .daily-panel > footer { color: var(--ui-muted); font-size: 12px; }
+  .daily-panel > footer { background: var(--ui-surface); }
+}
+#app .global-live-cruise {
+  background: var(--ui-page-background); color: var(--ui-body); gap: 12px; padding: 16px;
+  &.is-fullscreen { padding: 0; }
+  .overview-panel { background: var(--ui-panel-background); border-color: var(--ui-border); border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); }
+  .panel-title { color: var(--ui-text); background: transparent; border-color: var(--ui-divider); }
+  .panel-title b { color: var(--ui-text); font-size: 16px; }
+  .panel-title span, .panel-tip, .overview-actions, .empty-state, .video-empty { color: var(--ui-muted); }
+  .panel-tip { border-color: var(--ui-divider); }
+  .device-row, .route-row { color: var(--ui-body); background: transparent; border-color: var(--ui-divider); }
+  .device-row:hover, .route-row:hover { background: var(--ui-hover); }
+  .device-row.active, .route-row.active { background: var(--ui-selected); }
+  .device-row b, .route-row b { color: var(--ui-text); font-size: 13px; }
+  .device-row small, .route-row small { color: var(--ui-muted); font-size: 12px; }
+  .device-row em, .route-row em { color: var(--ui-accent); background: var(--ui-selected); }
+  .selected-device { color: var(--ui-muted); background: var(--ui-input); }
+  .selected-device span { color: var(--ui-text); }
+  .flight-task-search { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); border-radius: var(--ui-control-radius); }
+  .flight-task-search::placeholder { color: var(--ui-muted); }
+  .flight-task-row.unavailable, .flight-task-row.checking { background: var(--ui-input); }
+  .flight-task-row.unavailable b, .flight-task-row.unavailable small { color: var(--ui-muted); }
+  .flight-task-row.unavailable em { color: #ffaaaa; background: rgb(245 108 108 / 12%); }
+  .flight-task-row .unavailable-reason { color: #e6a4ab !important; }
+  .overview-actions button { color: var(--ui-link); background: var(--ui-input); border-color: var(--ui-border); border-radius: var(--ui-control-radius); }
+  .overview-actions button:hover { color: var(--ui-accent); background: var(--ui-hover); }
+  .playback-state, .playback-state.error { color: var(--ui-text); background: var(--ui-panel-background); }
+  .playback-state i { color: var(--ui-accent); border-color: var(--ui-border); }
+  .playback-state span { color: var(--ui-muted); white-space: normal; }
+  .playback-state.error i { color: #ffaaaa; border-color: #a6656a; }
+  .overview-error { color: #ffaaaa; background: #482d3d; border-color: #a6656a; }
+}
+#app .route-flight-plan .route-data-selects { background: transparent; border-color: var(--ui-divider); }
+#app .route-flight-plan .route-data-selects label { color: var(--ui-muted); }
+#app .facility-dashboard {
+  padding: 20px; overflow: auto;
+  .dashboard-heading h1 { font-size: 24px; line-height: 32px; }
+  .dashboard-heading p, .eyebrow { font-size: 12px; color: var(--ui-muted); }
+  .panel, .kpi-card { background: var(--ui-panel-background); border: 1px solid var(--ui-border); box-shadow: var(--ui-shadow); border-radius: var(--ui-radius); }
+  .panel::before, .panel::after, .kpi-card::before, .kpi-card::after { display: none; }
+  .kpi-card:hover { transform: none; box-shadow: none; border-color: #558ba9; }
+  .panel > header h2 { font-size: 16px; color: var(--ui-text); }
+  .kpi-card strong { color: var(--ui-text); font-size: 28px; line-height: 34px; }
+  .kpi-card span, .legend-list, .recent-list, .bar-list { font-size: 13px; }
+}
+
+// Workbench fallback panels retain the light reading theme rather than the dark review theme.
+#app .workspace-body :is(.backend-task-panel, .dispatch-page, .review-page) { background: #fff; color: #40566c; font-size: 14px; line-height: 22px; }
+#app .workspace-body :is(.backend-task-panel, .dispatch-page, .review-page) :is(.card, .panel) { background: #fff; border-color: #dce5ee; border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); }
+#app .workspace-body :is(.backend-task-panel, .dispatch-page, .review-page) :is(h2, h3, .panel-title) { color: #21354c; font-size: 16px; }
+
+@media (max-width: 1350px) {
+  #app .general-review .review-layout { grid-template-columns: 260px minmax(0, 1fr); }
+  #app .general-review .right-column { grid-column: 1 / -1; }
+  #app .general-review .spot-detail { display: block; }
+  #app .general-review { overflow: auto; }
+  #app .governance-page { grid-template-columns: 260px minmax(0, 1fr); overflow: auto; }
+  #app .governance-page .right-column { grid-column: 1 / -1; }
+}

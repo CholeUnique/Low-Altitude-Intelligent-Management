@@ -91,8 +91,8 @@ watch(pageCount, () => setPage(currentPage.value))
       </header>
       <section class="toolbar">
         <label class="search-box"><i>⌕</i><input v-model="keyword" placeholder="搜索算法名称、关键词或描述..." /></label>
-        <label><span>算法类型</span><select v-model="category"><option v-for="item in categories" :key="item">{{ item }}</option></select></label>
-        <label><span>{{ family==='ai'?'场景标签':'应用场景' }}</span><select v-model="scene"><option v-for="item in scenes" :key="item">{{ item }}</option></select></label>
+        <label><span>算法类型</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="category"><ElOption v-for="item in categories" :key="item" :value="String(item)" :label="String(item)" /></ElSelect></label>
+        <label><span>{{ family==='ai'?'场景标签':'应用场景' }}</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="scene"><ElOption v-for="item in scenes" :key="item" :value="String(item)" :label="String(item)" /></ElSelect></label>
         <div class="view-switch">
           <button type="button" :class="{active:viewMode==='grid'}" title="卡片视图" aria-label="卡片视图" :aria-pressed="viewMode==='grid'" @click="viewMode='grid'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></svg></button>
           <button type="button" :class="{active:viewMode==='list'}" title="列表视图" aria-label="列表视图" :aria-pressed="viewMode==='list'" @click="viewMode='list'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="4" height="4" rx="1" /><path d="M10 6h11" /><rect x="3" y="10" width="4" height="4" rx="1" /><path d="M10 12h11" /><rect x="3" y="16" width="4" height="4" rx="1" /><path d="M10 18h11" /></svg></button>
@@ -135,7 +135,7 @@ watch(pageCount, () => setPage(currentPage.value))
         </article>
       </section>
       <div v-else class="empty-state">暂无符合当前筛选条件的算法</div>
-      <footer class="pagination"><div>共 <b>{{ filteredModels.length }}</b> 条算法模型　每页显示 <select v-model="pageSize"><option :value="6">6</option><option :value="12">12</option></select> 条</div><nav><button :disabled="currentPage===1" @click="setPage(currentPage-1)">‹</button><button v-for="page in pageNumbers" :key="page" :class="{active:currentPage===page}" @click="setPage(page)">{{ page }}</button><button :disabled="currentPage===pageCount" @click="setPage(currentPage+1)">›</button></nav></footer>
+      <footer class="pagination"><div>共 <b>{{ filteredModels.length }}</b> 条算法模型　每页显示 <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="pageSize"><ElOption :value="6" label="6" /><ElOption :value="12" label="12" /></ElSelect> 条</div><nav><button :disabled="currentPage===1" @click="setPage(currentPage-1)">‹</button><button v-for="page in pageNumbers" :key="page" :class="{active:currentPage===page}" @click="setPage(page)">{{ page }}</button><button :disabled="currentPage===pageCount" @click="setPage(currentPage+1)">›</button></nav></footer>
     </main>
 
     <transition name="notice"><div v-if="notice" class="mock-notice">{{ notice }}</div></transition>

@@ -1,0 +1,28 @@
+@use 'sass:map';
+@use 'sass:list';
+
+$tones: (
+  neutral: (#9fb7c9, rgb(159 183 201 / 10%), #52758a),
+  info: (#8ccaff, #2f8cff24, #4c8bb6),
+  warning: (#ffd18a, #ffb0201a, #947b46),
+  success: (#7ce2bf, #20c9971a, #428e7f),
+  danger: (#ffaaaa, #f56c6c1a, #a6656a),
+);
+
+@mixin tone($name) {
+  $values: map.get($tones, $name);
+  color: list.nth($values, 1);
+  background: list.nth($values, 2);
+  border-color: list.nth($values, 3);
+}
+
+@mixin attribute {
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 17px;
+  text-align: center;
+  @include tone(neutral);
+}

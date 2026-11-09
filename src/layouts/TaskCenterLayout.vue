@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { DataAnalysis, List, CircleCheck } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
@@ -13,9 +14,9 @@ const route = useRoute()
 const router = useRouter()
 const user = useUserStore()
 const entries = computed(() => [
-  { label: '任务总览', icon: '▦', name: 'task-overview', permission: 'task-overview' as const },
-  { label: '任务列表', icon: '☷', name: 'task-list', permission: 'task-list' as const },
-  { label: '我的待办', icon: '✓', name: 'task-todo', permission: 'task-todo' as const },
+  { label: '任务总览', icon: DataAnalysis, name: 'task-overview', permission: 'task-overview' as const },
+  { label: '任务列表', icon: List, name: 'task-list', permission: 'task-list' as const },
+  { label: '我的待办', icon: CircleCheck, name: 'task-todo', permission: 'task-todo' as const },
 ].filter((entry) => user.hasPermission(entry.permission)))
 const activeEntry = computed(() => entries.value.find((entry) => entry.name === route.name)?.name)
 </script>
@@ -32,7 +33,7 @@ const activeEntry = computed(() => entries.value.find((entry) => entry.name === 
             :class="{ active: activeEntry === entry.name }"
             @click="router.push({ name: entry.name })"
           >
-            <i>{{ entry.icon }}</i><span>{{ entry.label }}</span><b>›</b>
+            <i aria-hidden="true"><component :is="entry.icon" /></i><span>{{ entry.label }}</span><b>›</b>
           </button>
         </nav>
       </aside>

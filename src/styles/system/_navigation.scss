@@ -1,0 +1,97 @@
+#app .business-layout { background: var(--ui-page-background); }
+#app .business-layout-content { overflow: hidden; }
+#app .primary-header {
+  height: 68px; flex: 0 0 68px; padding-inline: 24px; gap: 16px;
+  grid-template-columns: minmax(280px, 1fr) auto minmax(240px, 1fr);
+  background: linear-gradient(115deg, rgb(7 41 65 / 94%), rgb(17 59 82 / 78%) 48%, rgb(7 41 65 / 92%)); border-bottom: 1px solid var(--ui-border); box-shadow: 0 4px 20px rgb(0 17 30 / 12%);
+  &::after { display: block; opacity: .55; }
+  .primary-brand { gap: 10px; }
+  .primary-brand h1 { color: #e6f1ff; font-size: clamp(18px, 1.2vw, 23px); line-height: 28px; letter-spacing: .3px; }
+  .primary-title small { color: #9fb7c9; font-size: 10px; letter-spacing: 1.2px; line-height: 14px; }
+  .primary-nav { gap: 8px; }
+  .primary-nav button { height: 40px; padding-inline: 16px; border-radius: 10px; color: #a9c2d3; font-size: 15px; letter-spacing: 0; transition: background-color var(--ui-motion), color var(--ui-motion), box-shadow var(--ui-motion); }
+  .primary-nav button:hover { color: #e6f1ff; background: var(--ui-hover); }
+  .primary-nav button.active { color: #e6f1ff; background: linear-gradient(180deg, rgb(45 167 214 / 10%), rgb(45 167 214 / 22%)); box-shadow: inset 0 1px 0 rgb(159 225 249 / 10%); text-shadow: none; }
+  .primary-nav button.active::after { display: block; height: 2px; opacity: .7; box-shadow: none; }
+  .primary-user { gap: 12px; font-size: 13px; }
+  .primary-user time { color: #9fb7c9; font-size: 12px; font-variant-numeric: tabular-nums; }
+}
+
+#app :is(.task-center-layout, .uav-page, .recognition-page) {
+  min-width: 0; height: 100%; min-height: 0; background: var(--ui-page-background); color: var(--ui-body);
+}
+#app :is(.task-center-sidebar, .recognition-page > main > aside, .uav-page > main > aside, .management-sidebar) {
+  background: linear-gradient(180deg, rgb(12 47 69 / 70%), rgb(7 34 54 / 40%)); color: #c4d6e6; padding: 20px 12px;
+  border-right: 1px solid var(--ui-divider); box-shadow: none; overflow-x: hidden;
+}
+#app :is(.task-center-sidebar, .management-sidebar) { width: 220px; flex-basis: 220px; }
+#app .uav-page > main { grid-template-columns: 220px minmax(0, 1fr); }
+#app .recognition-page > main { grid-template-columns: 220px minmax(0, 1fr); }
+#app .task-center-sidebar nav { gap: 8px; }
+#app .task-center-sidebar button::after { display: none; }
+#app :is(.task-center-sidebar button, .uav-page > main > aside > button,
+  .recognition-page aside .primary-nav-button, .recognition-page aside .topic-primary-button,
+  .management-sidebar > button) {
+  min-height: 50px; padding: 8px 10px; gap: 10px; color: #a9c2d3;
+  border: 1px solid transparent; border-radius: 11px; background: transparent;
+  font-size: 14px; font-weight: 500; line-height: 22px; box-shadow: none;
+  transition: color var(--ui-motion), background-color var(--ui-motion), border-color var(--ui-motion);
+  &:hover:not(:disabled) { color: #e6f1ff; background: var(--ui-hover); border-color: rgb(154 205 228 / 10%); }
+  &.active { color: #8ce8f5; background: var(--ui-selected); border-color: rgb(103 199 228 / 24%); box-shadow: inset 0 1px 0 rgb(207 240 255 / 5%); }
+}
+#app .task-center-sidebar button { grid-template-columns: 30px minmax(0, 1fr) 16px; }
+#app .recognition-page aside nav :is(.primary-nav-button, .topic-primary-button) { grid-template-columns: 30px minmax(0, 1fr) 16px; }
+#app .recognition-page aside nav :is(.primary-nav-button, .topic-primary-button)::after { display: none; }
+#app .recognition-page aside nav :is(.primary-nav-button, .topic-primary-button) b { font-size: 14px; font-weight: 500; line-height: 22px; }
+#app .recognition-page aside nav :is(.primary-nav-button, .topic-primary-button) > em { color: #9fb7c9; font-size: 18px; }
+#app .recognition-page aside .topic-root-menu > .task-button { min-height: 38px; color: #9fb7c9; background: transparent; border: 0; border-radius: var(--ui-control-radius); }
+#app .recognition-page aside .topic-root-menu > .task-button:hover { background: var(--ui-hover); color: #e6f1ff; }
+#app .recognition-page aside .topic-root-menu > .task-button.selected { background: var(--ui-selected); color: #22d3ee; }
+#app .recognition-page aside .recognition-task-submenu .task-button.selected { background: var(--ui-selected); color: #22d3ee; border-color: transparent; }
+#app :is(.task-center-sidebar button i, .uav-page aside button .nav-icon,
+  .recognition-page aside nav :is(.primary-nav-button, .topic-primary-button) > i) {
+  display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px;
+  border: 1px solid rgb(154 205 228 / 12%); border-radius: 9px; background: linear-gradient(140deg, rgb(106 194 225 / 12%), rgb(106 194 225 / 3%)); box-shadow: inset 0 1px 0 rgb(207 240 255 / 5%); color: inherit; font-size: 19px;
+  svg { width: 20px; height: 20px; }
+}
+#app :is(.task-center-sidebar button, .uav-page > main > aside > button,
+  .recognition-page aside .primary-nav-button, .recognition-page aside .topic-primary-button):is(:hover, .active) > :is(i, .nav-icon) {
+  color: #b7f0fb; border-color: rgb(130 215 238 / 26%); background: rgb(74 182 216 / 14%);
+  transition: background-color var(--ui-motion), border-color var(--ui-motion), color var(--ui-motion);
+}
+#app :is(.task-center-sidebar button span, .recognition-page aside .primary-nav-button span,
+  .recognition-page aside .topic-primary-button span) { font-size: 14px; font-weight: 500; line-height: 22px; }
+#app :is(.task-center-sidebar button b, .recognition-page aside .primary-nav-button > b,
+  .recognition-page aside .topic-primary-button > b) { color: #9fb7c9; font-size: 18px; line-height: 22px; }
+#app .uav-page aside .route-submenu { margin: 4px 0 6px 22px; padding-left: 10px; border-color: var(--ui-border); }
+#app .uav-page aside .route-submenu button { min-height: 38px; color: #9fb7c9; font-size: 13px; background: transparent; }
+#app .uav-page aside .route-submenu button:hover { background: var(--ui-hover); color: #e6f1ff; }
+#app .uav-page aside .route-submenu button.active { background: var(--ui-selected); color: #22d3ee; }
+#app .recognition-page aside :is(.recognition-data-submenu, .recognition-analysis-submenu, .facility-submenu) {
+  border-color: var(--ui-border);
+  .task-button { min-height: 38px; color: #9fb7c9; font-size: 13px; border-radius: var(--ui-control-radius); }
+  .task-button:hover:not(.unavailable) { color: #e6f1ff; background: var(--ui-hover); }
+  .task-button.active { color: #22d3ee; background: var(--ui-selected); }
+}
+
+#app .management-shell { background: var(--ui-page-background); color: #c4d6e6; }
+#app .management-context { height: 68px; padding-inline: 24px; background: linear-gradient(115deg, rgb(7 41 65 / 96%), rgb(21 61 83 / 78%)); border-bottom: 1px solid var(--ui-border); box-shadow: 0 4px 20px rgb(0 17 30 / 10%); }
+#app .management-context h1 { font-size: 20px; letter-spacing: .5px; }
+#app .management-body { height: calc(100% - 68px); grid-template-columns: 220px minmax(0, 1fr); }
+#app .management-context .account-summary { font-size: 13px; }
+#app :is(.workspace-context, .facility-header, .patrol-context) { background: linear-gradient(115deg, #072941, #123e57); border-color: rgb(154 205 228 / 18%); box-shadow: 0 4px 16px rgb(0 17 30 / 10%); }
+
+@media (max-width: 1400px) {
+  #app .primary-header { padding-inline: 16px; gap: 10px; grid-template-columns: minmax(250px, 1fr) auto auto; }
+  #app .primary-header .primary-nav { gap: 4px; }
+  #app .primary-header .primary-nav button { padding-inline: 12px; font-size: 14px; }
+}
+@media (max-width: 1100px) {
+  #app :is(.task-center-sidebar, .management-sidebar) { width: 190px; flex-basis: 190px; }
+  #app :is(.uav-page > main, .recognition-page > main, .management-body) { grid-template-columns: 190px minmax(0, 1fr); }
+  #app .primary-header { grid-template-columns: minmax(220px, 1fr) auto auto; }
+  #app .primary-header .primary-brand h1 { font-size: 18px; }
+  #app .primary-header .primary-title small { letter-spacing: .3px; }
+  #app .primary-header .primary-user { gap: 6px; }
+  #app .primary-header .primary-nav button { padding-inline: 9px; }
+}

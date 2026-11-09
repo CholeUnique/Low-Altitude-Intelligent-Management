@@ -562,16 +562,16 @@ async function selectPlan(id: string) {
           <div class="panel-title">航线规划工具</div>
           <div class="route-data-selects">
             <label>所属项目
-              <select v-model="selectedProjectId" :disabled="routeLoading || Boolean(task)" @change="loadScopedPatrolData">
-                <option value="">全部可见项目</option>
-                <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}</option>
-              </select>
+              <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="selectedProjectId" :disabled="routeLoading || Boolean(task)" @change="loadScopedPatrolData">
+                <ElOption value="" label="全部可见项目" />
+                <ElOption v-for="project in projects" :key="project.id" :value="project.id" :label="String(project.name)" />
+              </ElSelect>
             </label>
             <label>飞行计划
-              <select v-model="activePlanId" :disabled="routeLoading || planLoading || !plans.length" @change="selectPlan(activePlanId)">
-                <option value="">请选择飞行计划</option>
-                <option v-for="plan in plans" :key="plan.id" :value="plan.id">{{ plan.title }}</option>
-              </select>
+              <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="activePlanId" :disabled="routeLoading || planLoading || !plans.length" @change="selectPlan(activePlanId)">
+                <ElOption value="" label="请选择飞行计划" />
+                <ElOption v-for="plan in plans" :key="plan.id" :value="plan.id" :label="String(plan.title)" />
+              </ElSelect>
             </label>
           </div>
           <div class="tool-grid">
@@ -580,13 +580,13 @@ async function selectPlan(id: string) {
           </div>
           <div class="route-filter">
             <input v-model="routeKeyword" placeholder="筛选当前航线…" />
-            <select v-model="statusFilter">
-              <option value="">全部状态</option>
-              <option>草稿</option>
-              <option>已规划</option>
-              <option>已下发</option>
-              <option>已完成</option>
-            </select>
+            <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="statusFilter">
+              <ElOption value="" label="全部状态" />
+              <ElOption :value="'草稿'" label="草稿" />
+              <ElOption :value="'已规划'" label="已规划" />
+              <ElOption :value="'已下发'" label="已下发" />
+              <ElOption :value="'已完成'" label="已完成" />
+            </ElSelect>
           </div>
           <div class="route-list">
             <button

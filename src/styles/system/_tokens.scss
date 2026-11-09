@@ -1,0 +1,180 @@
+html:root {
+  --ui-brand: #072941;
+  --ui-font: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --ui-bg: var(--ui-brand);
+  --ui-page-background: radial-gradient(ellipse at 8% 0%, rgb(53 129 164 / 13%), transparent 48%), radial-gradient(ellipse at 100% 90%, rgb(38 113 145 / 9%), transparent 50%), var(--ui-brand);
+  --ui-surface: rgb(17 56 77 / 56%);
+  --ui-surface-raised: #15394f;
+  --ui-panel-background: linear-gradient(140deg, rgb(119 190 218 / 7%), transparent 58%), var(--ui-surface);
+  --ui-input: rgb(4 27 45 / 36%);
+  --ui-hover: rgb(103 192 225 / 10%);
+  --ui-selected: rgb(49 171 213 / 16%);
+  --ui-text: #e6f1ff;
+  --ui-body: #c4d6e6;
+  --ui-muted: #9fb7c9;
+  --ui-border: rgb(154 205 228 / 18%);
+  --ui-divider: rgb(154 205 228 / 11%);
+  // Keep the reference blue family while preserving contrast for small white labels.
+  --ui-action: #2674d4;
+  --ui-action-hover: #2577ce;
+  --ui-link: #7cc4ff;
+  --ui-accent: #22d3ee;
+  --ui-success: #20c997;
+  --ui-warning: #ffb020;
+  --ui-danger: #f56c6c;
+  --ui-radius: 14px;
+  --ui-control-radius: 9px;
+  --ui-gap: 16px;
+  --ui-panel-padding: 16px;
+  --ui-overlay: rgb(7 36 55 / 82%);
+  --ui-glass: linear-gradient(135deg, rgb(27 67 86 / 82%), rgb(7 34 52 / 70%));
+  --ui-modal-background: linear-gradient(135deg, rgb(23 61 82 / 96%), rgb(7 35 54 / 94%));
+  --ui-shadow: 0 12px 32px rgb(0 17 30 / 16%), inset 0 1px 0 rgb(207 240 255 / 6%);
+  --ui-shadow-hover: 0 16px 38px rgb(0 17 30 / 23%), inset 0 1px 0 rgb(207 240 255 / 10%);
+  --ui-motion: 180ms ease-out;
+  --ui-panel-motion: 220ms ease-out;
+  --ui-scroll-thumb: rgb(159 183 201 / 25%);
+  --ui-scroll-hover: rgb(159 183 201 / 55%);
+  font-family: var(--ui-font);
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--ui-bg);
+  color: var(--ui-body);
+  color-scheme: dark;
+  --el-font-family: var(--ui-font);
+  --el-font-size-base: 14px;
+  --el-color-primary: var(--ui-action);
+  --el-color-primary-light-3: #6eafff;
+  --el-color-primary-light-5: #3474a2;
+  --el-color-primary-light-7: #214f71;
+  --el-color-primary-light-8: #19415f;
+  --el-color-primary-light-9: #12364f;
+  --el-color-primary-dark-2: #2674d4;
+  --el-color-success: var(--ui-success);
+  --el-color-warning: var(--ui-warning);
+  --el-color-danger: var(--ui-danger);
+  --el-color-success-light-7: #285d57;
+  --el-color-success-light-8: #204e4b;
+  --el-color-success-light-9: #173e43;
+  --el-color-warning-light-7: #665635;
+  --el-color-warning-light-8: #51472f;
+  --el-color-warning-light-9: #3b3b30;
+  --el-color-danger-light-7: #704153;
+  --el-color-danger-light-8: #5a3548;
+  --el-color-danger-light-9: #432d3f;
+  --el-color-info: #9fb7c9;
+  --el-color-info-light-7: #3a5a71;
+  --el-color-info-light-8: #2f4b62;
+  --el-color-info-light-9: #233e55;
+  --el-text-color-primary: var(--ui-text);
+  --el-text-color-regular: var(--ui-body);
+  --el-text-color-secondary: var(--ui-muted);
+  --el-text-color-placeholder: #90aabb;
+  --el-text-color-disabled: #748d9d;
+  --el-bg-color: var(--ui-surface);
+  --el-bg-color-page: var(--ui-bg);
+  --el-bg-color-overlay: var(--ui-surface-raised);
+  --el-fill-color-blank: var(--ui-input);
+  --el-fill-color-light: var(--ui-hover);
+  --el-fill-color-lighter: #10354f;
+  --el-fill-color-extra-light: #0b304a;
+  --el-fill-color-dark: #1b4d69;
+  --el-fill-color: #17435e;
+  --el-border-color: var(--ui-border);
+  --el-border-color-light: rgb(154 205 228 / 16%);
+  --el-border-color-lighter: var(--ui-divider);
+  --el-border-color-extra-light: rgb(154 205 228 / 7%);
+  --el-border-radius-base: var(--ui-control-radius);
+  --el-component-size: 36px;
+  --el-disabled-bg-color: #113148;
+  --el-disabled-border-color: #294b62;
+  --el-mask-color: rgb(0 15 26 / 65%);
+}
+
+html[data-ui-theme='light'] {
+  --ui-bg: #f3f6fa;
+  --ui-page-background: radial-gradient(ellipse at 0% 0%, #e4f0f8, transparent 55%), #f3f6fa;
+  --ui-surface: #fff;
+  --ui-surface-raised: #fff;
+  --ui-panel-background: linear-gradient(140deg, rgb(255 255 255 / 97%), rgb(255 255 255 / 88%));
+  --ui-input: #fff;
+  --ui-hover: #edf5fc;
+  --ui-selected: #e6f3ff;
+  --ui-text: #21354c;
+  --ui-body: #40566c;
+  --ui-muted: #65788b;
+  --ui-border: #dce5ee;
+  --ui-divider: #e8eef4;
+  --ui-link: #176db3;
+  --ui-modal-background: #fff;
+  --ui-shadow: 0 6px 24px rgb(31 64 89 / 5%), inset 0 1px 0 #fff;
+  --ui-shadow-hover: 0 10px 30px rgb(31 64 89 / 9%);
+  --ui-scroll-thumb: #b4c3cf;
+  --ui-scroll-hover: #8da4b6;
+  --el-color-primary-light-3: #6eafff;
+  --el-color-primary-light-5: #a3cbff;
+  --el-color-primary-light-7: #c5dfff;
+  --el-color-primary-light-8: #d5e8ff;
+  --el-color-primary-light-9: #eaf3ff;
+  --el-color-success-light-9: #e9faf4;
+  --el-color-success-light-7: #bceedd;
+  --el-color-success-light-8: #d1f4e8;
+  --el-color-warning-light-9: #fff6e6;
+  --el-color-warning-light-7: #ffe0a5;
+  --el-color-warning-light-8: #ffebc6;
+  --el-color-danger-light-9: #fff0f0;
+  --el-color-danger-light-7: #fac7c7;
+  --el-color-danger-light-8: #fcdddd;
+  --el-color-info: #65788b;
+  --el-color-info-light-7: #d1d9e2;
+  --el-color-info-light-8: #e3e8ee;
+  --el-color-info-light-9: #f0f3f7;
+  --el-fill-color-lighter: #f5f8fb;
+  --el-fill-color-extra-light: #f8fafc;
+  --el-fill-color-dark: #e1e8ef;
+  --el-fill-color: #edf2f7;
+  --el-border-color: #c8d5e1;
+  --el-border-color-light: #dce5ee;
+  --el-border-color-lighter: #e8eef4;
+  --el-border-color-extra-light: #f0f4f8;
+  --el-text-color-placeholder: #728598;
+  --el-text-color-disabled: #8294a4;
+  --el-disabled-bg-color: #f0f4f7;
+  --el-disabled-border-color: #dce5ee;
+  color-scheme: light;
+}
+
+body { background: var(--ui-bg); color: var(--ui-body); font-family: var(--ui-font); }
+button, input, select, textarea { font-family: inherit; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+input, select, textarea { accent-color: var(--ui-action); }
+input::placeholder, textarea::placeholder { opacity: 1; }
+*, *::before, *::after { box-sizing: border-box; }
+* { scrollbar-width: thin; scrollbar-color: var(--ui-scroll-thumb) transparent; }
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { border-radius: 6px; background: var(--ui-scroll-thumb); }
+*::-webkit-scrollbar-thumb:hover { background: var(--ui-scroll-hover); }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+// Explicit scroll owners avoid width changes when content grows.
+#app :is(.task-table, .management-content, .basic-scroll, .config-body, .legend-content,
+  .facility-panel-scroll, .task-info__body, .table-wrap) {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+#app :is(.primary-header, .task-center-layout, .uav-page, .recognition-page, .results-page,
+  .management-shell, .workspace, .ng-page, .facility-workspace, .geographic-topics, .ledger,
+  .algorithm-page, .cockpit--glass) { font-family: var(--ui-font); }
+#app :is(.kpi-card strong, .metric-grid b, .stats strong, .summary-cards b,
+  .topic-statistics dd, .analysis-statistics dd, .facility-summary b) { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  #app *, #app *::before, #app *::after,
+  .el-overlay *, .el-popper * {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

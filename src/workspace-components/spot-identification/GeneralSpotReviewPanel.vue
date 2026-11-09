@@ -612,7 +612,7 @@ onBeforeUnmount(() => {
     <section class="review-layout">
       <aside class="spot-list panel">
         <header><b>问题图斑列表</b><span>{{ filtered.length }} / {{ visibleRecords.length }} 处</span></header>
-        <div class="filters"><input v-model="keyword" placeholder="搜索图斑编号、名称或类型" /><div><select v-model="sceneFilter" aria-label="场景筛选"><option value="">全部场景</option><option v-for="item in sceneOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select><select v-model="statusFilter"><option value="">全部状态</option><option v-for="item in statuses" :key="item.value" :value="item.value">{{ item.label }}</option></select></div></div>
+        <div class="filters"><input v-model="keyword" placeholder="搜索图斑编号、名称或类型" /><div><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="sceneFilter" aria-label="场景筛选"><ElOption value="" label="全部场景" /><ElOption v-for="item in sceneOptions" :key="item.value" :value="item.value" :label="String(item.label)" /></ElSelect><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="statusFilter"><ElOption value="" label="全部状态" /><ElOption v-for="item in statuses" :key="item.value" :value="item.value" :label="String(item.label)" /></ElSelect></div></div>
         <div class="spot-scroll">
           <button
             v-for="(item,index) in filtered"

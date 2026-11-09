@@ -1,0 +1,10 @@
+// Shared presentation layer. Page rules are scoped under their existing roots;
+// the app ID keeps late-loaded component styles from changing shared geometry.
+@use './system/tokens';
+@use './system/controls';
+@use './system/navigation';
+@use './system/tasks';
+@use './system/maps';
+@use './system/workspaces';
+@use './system/resources';
+@use './system/operations';

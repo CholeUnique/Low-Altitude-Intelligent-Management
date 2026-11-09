@@ -594,7 +594,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                   <span>{{ hoveredSceneTask?.name }}</span>
                   <strong v-if="hoveredSceneTask">{{ hoveredSceneTask.taskCount }} 项</strong>
                 </div>
-                <div class="scene-task-main"><div class="scene-task-ring" :aria-label="`各场景共 ${sceneTaskTotal} 项任务`" role="group">
+                <div class="scene-task-main"><div class="scene-task-ring" :aria-label="`各场景共 ${sceneTaskTotal} 项任务`" :style="{ '--ring-number-size': `${90 / (governanceCompletionRate === undefined ? 1 : String(governanceCompletionRate).length + 1)}cqw` }" role="group">
                   <svg viewBox="0 0 100 100" aria-hidden="true">
                     <circle class="scene-task-ring__track" cx="50" cy="50" r="42" pathLength="100" />
                     <circle

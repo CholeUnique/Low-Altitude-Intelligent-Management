@@ -1,0 +1,204 @@
+@use './badges';
+
+#app :is(.results-page, .algorithm-page, .ledger, .fleet-overview, .ticket-page,
+  .flight-plan-calendar, .engineering-facilities-dashboard) {
+  background: var(--ui-page-background); color: var(--ui-body); font-family: var(--ui-font);
+}
+#app .results-page { height: 100%; }
+#app .collection-page { padding: 20px; background: var(--ui-page-background); color: var(--ui-body); }
+#app .recognition-content { background: var(--ui-brand); color: var(--ui-body); }
+#app .collection-toolbar { gap: 12px; }
+#app :is(.collection-toolbar .search-control, .collection-toolbar .select-control,
+  .task-group, .media-card, .summary-card, .algorithm-card, .catalog-panel,
+  .ledger .card, .ledger .stats article, .fleet-overview .panel, .fleet-cards article,
+  .ticket-card, .summary-cards article) {
+  background: var(--ui-panel-background); border-color: var(--ui-border); border-radius: var(--ui-radius); box-shadow: var(--ui-shadow);
+}
+#app .collection-toolbar :is(.search-control, .select-control) { height: 36px; }
+#app .collection-toolbar :is(input, select) { font-size: 14px; color: var(--ui-body); background: transparent; }
+#app :is(.collection-heading h1, .collection-heading h2, .repository-heading h1, .ledger h1) { color: var(--ui-text); font-size: 20px; line-height: 28px; }
+#app :is(.collection-heading p, .repository-heading p, .ledger p) { color: var(--ui-muted); font-size: 12px; line-height: 18px; }
+#app .summary-card :is(strong, b), #app .ledger .stats strong { color: var(--ui-text); font-size: 28px; line-height: 34px; }
+#app .summary-card :is(span, small), #app .ledger .stats span { color: var(--ui-muted); font-size: 12px; }
+#app .summary-card :is(p, em) { color: var(--ui-muted); font-size: 12px; }
+#app .media-card__info { background: var(--ui-panel-background); border-color: var(--ui-divider); }
+#app .media-card__info :is(b, strong, h3) { color: var(--ui-text); font-size: 14px; line-height: 22px; }
+#app .media-card__info :is(span, small, p), #app .media-card__task { color: var(--ui-muted); font-size: 12px; line-height: 18px; }
+#app .report-gallery { background: var(--ui-panel-background); color: var(--ui-body); border-color: var(--ui-border); border-radius: var(--ui-control-radius); }
+#app .report-gallery h3 { color: var(--ui-text); font-size: 14px; line-height: 22px; }
+#app .report-gallery :is(h3 small, .gallery-item small) { color: var(--ui-muted); font-size: 12px; line-height: 18px; }
+#app .report-gallery :is(.gallery-item img, .gallery-state) { background: var(--ui-input); color: var(--ui-muted); border-radius: 6px; }
+#app .task-group__header { background: var(--ui-surface); color: var(--ui-body); font-size: 13px; }
+#app .task-group__header:hover, #app .media-card:hover { background: var(--ui-hover); border-color: #558ba9; }
+#app .collection-pagination { color: var(--ui-muted); font-size: 12px; }
+#app .collection-toolbar { background: var(--ui-panel-background); border-color: var(--ui-border); }
+#app .collection-toolbar .select-control { background: transparent; border: 0; box-shadow: none; overflow: visible; }
+#app .collection-toolbar .select-control:hover { background: transparent; border-color: transparent; }
+#app .collection-toolbar .status-select { opacity: 1; }
+#app .collection-media-grid, #app .task-group__body { background: transparent; border-color: var(--ui-divider); }
+#app .media-card-open { background: transparent; color: var(--ui-body); }
+#app .media-card__info { background: rgb(7 41 65 / 66%); }
+#app .collection-pagination :is(button, input) { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+#app .collection-pagination button.active { color: #fff; background: var(--ui-action); border-color: var(--ui-action); }
+#app .algorithm-page { grid-template-columns: 240px minmax(0, 1fr); }
+#app .catalog-panel { border-right: 1px solid var(--ui-border); border-radius: 0; }
+#app .family-tabs { height: 56px; padding-inline: 16px; border-color: var(--ui-divider); }
+#app .family-tabs button { color: var(--ui-muted); font-size: 14px; }
+#app .family-tabs button.active { color: var(--ui-accent); }
+#app .capability-group h3 { color: var(--ui-text); font-size: 16px; }
+#app .capability-group button { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); font-size: 13px; border-radius: var(--ui-control-radius); }
+#app .capability-group button:hover, #app .capability-group button.active { color: var(--ui-accent); background: var(--ui-selected); border-color: #3b829c; }
+#app .catalog-watermark { background: linear-gradient(180deg, transparent, var(--ui-brand) 45%); color: var(--ui-muted); }
+#app .repository-main { padding: 20px; }
+#app .algorithm-results.view-grid { grid-auto-rows: max-content; align-content: start; align-items: start; }
+#app .algorithm-results.view-grid .algorithm-card { grid-template-rows: 140px auto 44px; }
+#app .algorithm-results.view-grid .card-visual { height: 140px; min-height: 0; aspect-ratio: auto; }
+#app .algorithm-results.view-list .algorithm-card { grid-template-rows: minmax(160px, auto); }
+#app .algorithm-results.view-list .card-visual { height: 100%; min-height: 160px; aspect-ratio: auto; }
+#app .algorithm-card .card-content { background: var(--ui-surface); color: var(--ui-body); }
+#app .algorithm-card .card-content :is(h2, h3) { color: var(--ui-text); font-size: 16px; line-height: 24px; }
+#app .algorithm-card .card-content p { color: var(--ui-muted); font-size: 13px; line-height: 20px; }
+#app .algorithm-card .tags { flex-wrap: wrap; }
+#app .algorithm-card .tags span { background: var(--ui-input); border-color: var(--ui-border); color: var(--ui-muted); font-size: 12px; }
+#app .algorithm-card > footer { color: var(--ui-muted); border-color: var(--ui-divider); }
+#app .algorithm-card > footer button { color: var(--ui-link); }
+#app .algorithm-page .view-switch, #app .algorithm-page .view-switch button { background: var(--ui-input); color: var(--ui-body); border-color: var(--ui-border); }
+#app .algorithm-page .view-switch button.active { color: var(--ui-accent); background: var(--ui-selected); box-shadow: inset 0 0 0 1px var(--ui-accent); }
+#app .repository-main .toolbar { gap: 12px; }
+#app .repository-main .search-box { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); height: 36px; }
+#app .repository-main .search-box input { color: inherit; background: transparent; }
+
+#app .fleet-overview { gap: 16px; padding: 16px; }
+#app .fleet-cards { gap: 12px; }
+#app .fleet-cards article { padding: 14px 16px; min-height: 90px; }
+#app .fleet-cards span, #app .summary-cards span { color: var(--ui-muted); font-size: 13px; }
+#app .fleet-cards b, #app .summary-cards b { color: var(--ui-text); font-size: 28px; line-height: 34px; }
+#app .fleet-cards :is(em, small), #app .summary-cards :is(em, small) { color: var(--ui-muted); font-size: 12px; line-height: 18px; font-weight: 400; }
+#app .fleet-cards article .metric-icon { width: 40px; height: 40px; flex-basis: 40px; border: 0; border-radius: 50%; color: #62d9ec; background: var(--ui-hover); box-shadow: none; }
+#app .fleet-overview .panel > header { min-height: 48px; border-color: var(--ui-divider); background: var(--ui-surface); }
+#app .fleet-overview .panel > header > b { color: var(--ui-text); font-size: 16px; }
+#app .fleet-overview :is(.device-name, .performance-metrics b) { color: var(--ui-text); }
+#app .fleet-overview :is(.statistics-period, .performance-metrics span, .health-device span, .panel-empty) { color: var(--ui-muted); font-size: 12px; }
+#app .fleet-overview :is(.device-inventory-list button, .health-device, .statistics-rows article) { color: var(--ui-body); background: var(--ui-panel-background); border-color: var(--ui-divider); font-size: 13px; }
+#app .fleet-overview :is(.device-inventory-list button:hover, .device-inventory-list button.active) { background: var(--ui-hover); }
+#app .fleet-overview :is(.device-performance-layout, .inventory-column, .performance-column, .health-single, .performance-body) { background: transparent; border-color: var(--ui-divider); }
+#app .fleet-overview .health-device--active { background: var(--ui-panel-background); border-color: var(--ui-border); }
+#app .fleet-overview :is(.performance-metrics article, .subsection-title, .device-inventory-list button) { background: var(--ui-surface); border-color: var(--ui-divider); }
+#app .fleet-overview :is(.health-device dt, .health-device dd, .device-name b, .device-inventory-list b, .performance-metrics b, .statistics-rows b, .alarm-list b) { color: var(--ui-text); }
+#app .fleet-overview :is(.device-name small, .device-name em, .device-inventory-list small, .health-device dt, .statistics-period, .statistics-period b, .alarm-list small, .alarm-list em) { color: var(--ui-muted); }
+#app .fleet-overview .health-device dt i { color: var(--ui-accent); background: var(--ui-selected); }
+#app .fleet-overview :is(.health-device dl > div, .device-name, .alarm-list > article, .statistics-table > header) { border-color: var(--ui-divider); }
+#app .fleet-overview :is(.device-name em, .device-inventory-list em, .alarm-list i.recovered) { color: #8be5c7; background: rgb(32 201 151 / 13%); }
+#app .fleet-overview .alarm-list i { color: #ffd18a; background: rgb(255 176 32 / 13%); }
+#app .fleet-overview .alarm-list i.severe:not(.recovered) { color: #ffb6b6; background: rgb(245 108 108 / 13%); }
+#app .fleet-overview .map-legend { background: var(--ui-overlay); color: var(--ui-body); border-color: var(--ui-border); }
+#app .fleet-overview .alarm-list b { font-size: 13px; }
+#app .fleet-overview .alarm-list :is(small, em) { font-size: 12px; }
+#app .fleet-overview .map-header-actions button { color: var(--ui-link); background: var(--ui-selected); border-color: var(--ui-border); }
+#app .fleet-overview .statistics-table > header { color: var(--ui-muted); background: var(--ui-surface-raised); font-size: 12px; }
+#app .ticket-page { padding: 16px; gap: 16px; }
+#app .ticket-card > header { min-height: 48px; border-color: var(--ui-divider); }
+#app .ticket-card > header b { color: var(--ui-text); font-size: 16px; }
+#app .ticket-page .filter-grid { gap: 12px; padding: 16px; }
+#app .ticket-page .filter-grid label span { color: var(--ui-muted); font-size: 13px; }
+#app :is(.ticket-page .table-wrap, .ledger .table-wrap) table { font-size: 13px; }
+#app :is(.ticket-page .table-wrap, .ledger .table-wrap) th { color: var(--ui-muted); background: var(--ui-surface-raised); font-size: 12px; }
+#app :is(.ticket-page .table-wrap, .ledger .table-wrap) td { color: var(--ui-body); border-color: var(--ui-divider); font-size: 13px; }
+#app .ticket-page .table-wrap td > b { color: var(--ui-text); font-size: 13px; }
+#app .ticket-page .table-wrap td > small { color: var(--ui-muted); font-size: 12px; }
+#app :is(.ticket-page .table-wrap, .ledger .table-wrap) tbody tr:hover { background: var(--ui-hover); }
+#app .ticket-card > footer { min-height: 48px; color: var(--ui-muted); font-size: 12px; }
+#app .ticket-page {
+  .summary-cards article > i { color: var(--ui-accent); background: var(--ui-hover); border: 1px solid var(--ui-border); }
+  .table-wrap :is(.type-tag, .priority, .status) { @include badges.attribute; display: inline-block; vertical-align: middle; }
+  .table-wrap :is(th, td):nth-child(n+4):nth-child(-n+6) { text-align: center; }
+  .table-wrap .type-tag { @include badges.tone(info); }
+  .table-wrap .priority.p-0 { @include badges.tone(danger); }
+  .table-wrap :is(.priority.p-1, .status.s-0) { @include badges.tone(warning); }
+  .table-wrap .status.s-1 { @include badges.tone(info); }
+  .table-wrap .status.s-2 { @include badges.tone(success); }
+  .table-card > footer button { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+  .create-modal__body, .detail-modal__body { background: transparent; }
+  .create-modal__body > .form-grid, .detail-modal__body > dl { background: transparent; border-color: var(--ui-divider); }
+  .ticket-modal :is(.form-grid label > span, .form-grid legend) { color: var(--ui-body); }
+  .ticket-modal .form-grid :is(input:not([type='checkbox']), textarea) { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); color-scheme: dark; }
+  .ticket-modal .form-grid .el-select__input { background: transparent; }
+  .ticket-modal .form-grid input[readonly] { color: var(--ui-muted); background: var(--ui-input); }
+  .ticket-modal .form-grid fieldset { border-color: var(--ui-border); }
+  .ticket-modal input[type='checkbox'] { accent-color: var(--ui-accent); }
+  .ticket-modal .schedule-trigger { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); border-radius: var(--ui-control-radius); }
+  .scope-editor, .detail-scope { background: var(--ui-surface); border-color: var(--ui-border); box-shadow: none; }
+  .scope-editor > header, .detail-scope > header { background: transparent; border-color: var(--ui-divider); }
+  .scope-editor > header b, .detail-scope > header b, .detail-modal dd { color: var(--ui-text); }
+  .scope-editor > header span, .detail-scope > header span, .detail-modal dt { color: var(--ui-muted); }
+  .scope-editor > header em, .detail-scope > header em { color: var(--ui-accent); background: var(--ui-selected); }
+  .scope-empty { background: var(--ui-input); color: var(--ui-muted); }
+  .scope-empty b { color: var(--ui-body); }
+  .scope-empty i { color: var(--ui-accent); background: var(--ui-selected); border-color: var(--ui-border); }
+  .detail-modal dl > div { border-color: var(--ui-divider); }
+  .ticket-modal > footer button:not(.primary) { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+}
+#app .ledger { padding: 20px; }
+#app .ledger :is(th, td) { border-color: var(--ui-divider); }
+
+#app .management-content { padding: 20px; }
+#app .management-content :is(.panel, .profile-card, .form-panel) { background: var(--ui-panel-background); border-color: var(--ui-border); box-shadow: var(--ui-shadow); border-radius: var(--ui-radius); }
+#app .management-content :is(.page-heading h2, .panel h3) { color: var(--ui-text); }
+#app .management-content .page-heading h2 { font-size: 20px; line-height: 28px; }
+#app .management-content .page-heading p { color: var(--ui-muted); font-size: 12px; }
+#app .management-content .panel h3 { font-size: 16px; line-height: 24px; }
+#app .management-content .form-grid { gap: 16px; }
+#app .management-content .form-grid label > span { color: var(--ui-body); font-size: 13px; }
+#app .management-content :is(.profile-card dt, .profile-card dd, .panel-hint, .department-picker__heading p) { color: var(--ui-muted); font-size: 12px; }
+#app .management-content .form-grid :is(input, select) { min-height: 36px; }
+#app .management-content :is(th, td) { border-color: var(--ui-divider); }
+#app .management-content th { background: var(--ui-surface-raised); color: var(--ui-muted); font-size: 12px; }
+#app .management-content td { color: var(--ui-body); font-size: 13px; line-height: 22px; }
+#app .management-content tbody tr:hover { background: var(--ui-hover); }
+#app .management-content :is(.filter-bar, .profile-panel-heading, .profile-card dl div, .form-actions) { border-color: var(--ui-divider); }
+#app .management-content :is(.scene-panel, .user-card, .permission-card, .metadata-card, .service-card, .logs-panel) {
+  background: var(--ui-panel-background); border-color: var(--ui-border); border-radius: var(--ui-radius); box-shadow: var(--ui-shadow);
+}
+#app .management-content :is(.scene-heading, .permission-heading, .metadata-heading, .service-heading, .logs-heading) h2 { color: var(--ui-text); font-size: 20px; line-height: 28px; }
+#app .management-content :is(.scene-heading, .permission-heading, .metadata-heading, .service-heading, .logs-heading) p { color: var(--ui-muted); font-size: 12px; }
+#app .management-content :is(.scene-filters, .service-filter, .metadata-filter, .logs-filters) {
+  gap: 12px; padding: 16px; border-color: var(--ui-divider); background: var(--ui-surface);
+  label { font-size: 13px; color: var(--ui-muted); }
+  :is(input, select) { min-height: 36px; background: var(--ui-input); border-color: var(--ui-border); color: var(--ui-body); border-radius: var(--ui-control-radius); font-size: 13px; }
+}
+#app :is(.scene-modal, .service-modal, .metadata-modal, .logs-dialog) { color: var(--ui-body); background: var(--ui-modal-background); border-color: var(--ui-border); border-radius: 18px; max-width: calc(100vw - 40px); max-height: calc(100dvh - 48px); box-shadow: var(--ui-shadow); }
+#app :is(.scene-modal, .service-modal, .metadata-modal, .logs-dialog) :is(header, footer) { background: transparent; border-color: var(--ui-divider); padding: 16px 20px; }
+#app :is(.scene-modal, .service-modal, .metadata-modal, .logs-dialog) :is(h2, h3) { color: var(--ui-text); font-size: 18px; }
+#app :is(.scene-modal, .service-modal, .metadata-modal, .logs-dialog) :is(input:not([type='checkbox'], [type='radio']), select, textarea) { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); border-radius: var(--ui-control-radius); font-size: 14px; }
+#app :is(.scene-button, .service-button, .metadata-button) { min-height: 36px; font-size: 13px; border-radius: var(--ui-control-radius); box-shadow: none; }
+#app :is(.scene-button--primary, .service-button--primary, .metadata-button--primary) { color: #fff; background: var(--ui-action); border-color: var(--ui-action); }
+#app :is(.scene-button--primary, .service-button--primary, .metadata-button--primary):hover:not(:disabled) { background: var(--ui-action-hover); border-color: var(--ui-action-hover); }
+
+#app .login-visual { background: radial-gradient(ellipse at 75% 20%, #155370, transparent 65%), var(--ui-brand); }
+#app .login-brand b { font-size: 22px; letter-spacing: .5px; }
+#app .login-copy { margin-top: clamp(80px, 20vh, 220px); }
+#app .login-copy h1 { font-size: clamp(30px, 3.1vw, 48px); line-height: 1.45; }
+#app .login-copy p { font-size: 15px; line-height: 26px; color: #bdd3e2; }
+#app .login-panel { background: radial-gradient(ellipse at 100% 0%, rgb(204 229 244 / 55%), transparent 60%), #f5f8fb; }
+#app .login-box { width: min(440px, calc(100% - 48px)); }
+#app .login-box h2 { font-size: 24px; line-height: 32px; color: #21354c; }
+#app .login-box > p, #app .login-panel footer { color: #65788b; font-size: 12px; }
+#app .login-box .identity-label { color: #40566c; font-size: 13px; font-weight: 500; }
+#app .login-input { min-height: 44px; color: #21354c; background: #fff; border-color: #c8d5e1; font-size: 14px; }
+#app .login-input:focus { border-color: var(--ui-action); box-shadow: 0 0 0 3px #2f8cff18; }
+#app .login-button { height: 44px; border-radius: var(--ui-control-radius); font-size: 15px; background: var(--ui-action); border-color: var(--ui-action); box-shadow: none; }
+
+@media (max-width: 1150px) {
+  #app .algorithm-page { grid-template-columns: 200px minmax(0, 1fr); }
+  #app :is(.repository-main, .collection-page, .management-content) { padding: 16px; }
+  #app .collection-toolbar { grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(100px, 1fr)); }
+}
+@media (max-width: 760px) {
+  #app .login-page { height: 100dvh; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow: auto; }
+  #app .login-visual { padding: 20px 24px; }
+  #app .login-brand b { font-size: 18px; line-height: 26px; }
+  #app .login-visual :is(.login-copy, .radar) { display: none; }
+  #app .login-panel { padding: 32px 24px 56px; min-height: 520px; }
+  #app .login-box { width: min(440px, 100%); }
+  #app .login-panel footer { bottom: 16px; }
+}

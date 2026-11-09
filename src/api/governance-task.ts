@@ -253,6 +253,9 @@ export interface TaskGeometryFeatureCollection {
 
 interface BizTaskDto {
   id: string | number
+  facilityId?: string | number
+  /** 兼容任务详情在 task 内返回授权后的设施资料。 */
+  facility?: import('./facility').FacilityRecord
   taskNo?: string
   sceneCode?: string
   sceneName?: string
@@ -655,10 +658,11 @@ export async function finishGovernanceTask(id: string, deptId?: string): Promise
 
 export async function getGovernanceTaskDetail(taskId: string): Promise<GovernanceTaskDetail | undefined> {
   const detail = await apiClient.post<never, BizTaskDetailDto>('/v1/biz/task/detail', { id: taskId })
+  const task = toGovernanceTask(detail.task)
   return {
-    task: toGovernanceTask(detail.task),
-    facilityId: optionalValue(detail.facilityId),
-    facility: detail.facility,
+    task,
+    facilityId: optionalValue(detail.facilityId) || task.facilityId,
+    facility: detail.facility ?? detail.task.facility,
     refSummary: detail.refSummary,
     reportImages: (detail.reportImages || []).map(image => ({...image,imageId:String(image.imageId)})),
     abnormalCount: detail.abnormalCount,

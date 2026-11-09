@@ -392,7 +392,7 @@ watch(() => props.sceneCode, () => {
         </header>
         <form v-if="!isSceneScoped" class="metadata-filter type-filter" @submit.prevent="loadTypes(false)">
           <input v-model.trim="typeFilters.keyword" placeholder="搜索类型名称或编码">
-          <select v-model="typeFilters.status"><option value="">全部状态</option><option :value="1">启用</option><option :value="0">停用</option></select>
+          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="typeFilters.status"><ElOption value="" label="全部状态" /><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect>
           <button type="submit">查询</button>
         </form>
         <div class="type-list">
@@ -418,8 +418,8 @@ watch(() => props.sceneCode, () => {
         <div v-if="selectedType" class="metadata-overview"><div><span>全部条目</span><strong>{{ items.length }}</strong></div><div><span>启用条目</span><strong>{{ enabledItemCount }}</strong></div><div><span>层级节点</span><strong>{{ flatTreeNodes.length }}</strong></div><div><span>业务可选项</span><strong>{{ flatOptionNodes.length }}</strong></div></div>
         <form v-if="itemView === 'list'" class="metadata-filter item-filter" @submit.prevent="loadItems">
           <input v-model.trim="itemFilters.keyword" placeholder="搜索条目名称或编码">
-          <select v-if="!isSceneScoped" v-model="itemFilters.parentId"><option value="">全部层级</option><option value="0">仅一级条目</option><option v-for="item in items" :key="item.id" :value="item.id">{{ item.name }}</option></select>
-          <select v-model="itemFilters.status"><option value="">全部状态</option><option :value="1">启用</option><option :value="0">停用</option></select>
+          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-if="!isSceneScoped" v-model="itemFilters.parentId"><ElOption value="" label="全部层级" /><ElOption value="0" label="仅一级条目" /><ElOption v-for="item in items" :key="item.id" :value="item.id" :label="String(item.name)" /></ElSelect>
+          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="itemFilters.status"><ElOption value="" label="全部状态" /><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect>
           <button type="submit">查询</button>
           <button type="button" @click="Object.assign(itemFilters, { keyword: '', status: '', parentId: '' }); loadItems()">重置</button>
         </form>
@@ -455,7 +455,7 @@ watch(() => props.sceneCode, () => {
         <form @submit.prevent="submitType">
           <label><span>类型编码 *</span><input v-model.trim="typeForm.code" :disabled="typeEditorMode === 'view' || isSceneScoped" maxlength="50" required></label><label><span>类型名称 *</span><input v-model.trim="typeForm.name" :disabled="typeEditorMode === 'view'" maxlength="100" required></label>
           <label><span>最大层级</span><input v-model.number="typeForm.maxLevel" type="number" min="0" max="10" :disabled="typeEditorMode === 'view'"></label><label><span>排序</span><input v-model.number="typeForm.sort" type="number" :disabled="typeEditorMode === 'view'"></label>
-          <label><span>状态</span><select v-model.number="typeForm.status" :disabled="typeEditorMode === 'view'"><option :value="1">启用</option><option :value="0">停用</option></select></label><label class="wide"><span>描述</span><textarea v-model.trim="typeForm.description" :disabled="typeEditorMode === 'view'" maxlength="255"></textarea></label>
+          <label><span>状态</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="typeForm.status" :disabled="typeEditorMode === 'view'"><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect></label><label class="wide"><span>描述</span><textarea v-model.trim="typeForm.description" :disabled="typeEditorMode === 'view'" maxlength="255"></textarea></label>
           <footer><button type="button" @click="typeEditorOpen = false">{{ typeEditorMode === 'view' ? '关闭' : '取消' }}</button><button v-if="typeEditorMode !== 'view'" class="primary" type="submit" :disabled="busy">保存</button></footer>
         </form>
       </section>
@@ -467,7 +467,7 @@ watch(() => props.sceneCode, () => {
       <section class="metadata-modal"><header><div><h2>{{ isSceneScoped ? ({ add: '新增异常类型', edit: '编辑异常类型', view: '异常类型详情' }[itemEditorMode]) : itemEditorTitle }}</h2><p>{{ isSceneScoped ? props.sceneName || props.sceneCode : `${selectedType?.name} · 条目配置` }}</p></div><button @click="itemEditorOpen = false">×</button></header>
         <form @submit.prevent="submitItem">
           <label><span>{{ isSceneScoped ? '类型编码' : '条目编码' }} *</span><input v-model.trim="itemForm.code" :disabled="itemEditorMode === 'view' || (isSceneScoped && itemEditorMode === 'edit')" maxlength="50" required></label><label><span>{{ isSceneScoped ? '类型名称' : '条目名称' }} *</span><input v-model.trim="itemForm.name" :disabled="itemEditorMode === 'view'" maxlength="100" required></label>
-          <label v-if="!isSceneScoped"><span>父级条目</span><select v-model="itemForm.parentId" :disabled="itemEditorMode !== 'add'"><option value="">无（一级条目）</option><option v-for="item in parentOptions" :key="item.id" :value="item.id">{{ item.name }}（{{ item.level }}级）</option></select></label><label><span>排序</span><input v-model.number="itemForm.sort" type="number" :disabled="itemEditorMode === 'view'"></label>
+          <label v-if="!isSceneScoped"><span>父级条目</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="itemForm.parentId" :disabled="itemEditorMode !== 'add'"><ElOption value="" label="无（一级条目）" /><ElOption v-for="item in parentOptions" :key="item.id" :value="item.id" :label="String(item.name) + '（' + String(item.level) + '级）'" /></ElSelect></label><label><span>排序</span><input v-model.number="itemForm.sort" type="number" :disabled="itemEditorMode === 'view'"></label>
           <label class="wide"><span>备注</span><textarea v-model.trim="itemForm.remark" :disabled="itemEditorMode === 'view'" maxlength="255"></textarea></label>
           <footer><button type="button" @click="itemEditorOpen = false">{{ itemEditorMode === 'view' ? '关闭' : '取消' }}</button><button v-if="itemEditorMode !== 'view'" class="primary" type="submit" :disabled="busy">保存</button></footer>
         </form>

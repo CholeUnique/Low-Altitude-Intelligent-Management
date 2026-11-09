@@ -45,4 +45,11 @@ const facilityHistory=buildTaskHistory({...task,sceneCode:'HIGH_STANDARD_FARMLAN
 assert(facilityHistory.some(entry=>entry.title==='完成部门复核'&&entry.content.join('').includes('维修结果通过复核')))
 assert(facilityHistory.some(entry=>entry.content.join('').includes('更换接口')))
 assert(!JSON.stringify(facilityHistory).includes('复耕'))
+const mergedHistory=buildTaskHistory({...task,sceneCode:'HIGH_STANDARD_FARMLAND_FACILITY',sceneName:'高标准农田工程设施管理'},[],{timeline:[
+  {id:'check',nodeKey:'FIELD_CHECK',nodeName:'现场核查修复',status:'COMPLETED',submitTime:'2026-11-08T10:00:00',resultData:{result:'APPLY_DISCARD',discardReason:'设施损坏且无法修复'}},
+  {id:'review',nodeKey:'RECHECK_AUDIT',nodeName:'区县分局复核',status:'COMPLETED',submitTime:'2026-11-08T11:00:00',resultData:{result:'NOT_PASS',recheckOpinion:'补充维修依据'}},
+]},[])
+assert(mergedHistory.some(entry=>entry.content.join('').includes('申请废弃，待部门复核')))
+assert(mergedHistory.some(entry=>entry.content.join('').includes('申请废弃原因：设施损坏且无法修复')))
+assert(mergedHistory.some(entry=>entry.content.join('').includes('复核不通过，退回原核查人修复')))
 console.log('PASS: business-readable task history, opinions/recipients/plot outcomes, no raw JSON, chronology, skew/deduplication, loops and missing data')

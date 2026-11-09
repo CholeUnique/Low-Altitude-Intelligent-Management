@@ -668,8 +668,8 @@ onBeforeUnmount(() => {
         <div class="panel-title"><span>问题图斑列表</span><small>{{ filtered.length }} / {{ records.length }} 处</small></div>
         <div class="filters">
           <input v-model="keyword" placeholder="搜索图斑编号、名称或类型" />
-          <select v-model="sceneFilter"><option value="">全部场景类型</option><option v-for="[value, label] in sceneOptions" :key="value" :value="value">{{ label }}</option></select>
-          <select v-model="handleStatus"><option value="">全部处置状态</option><option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select>
+          <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="sceneFilter" aria-label="场景类型"><ElOption value="" label="全部场景类型" /><ElOption v-for="[value, label] in sceneOptions" :key="value" :value="value" :label="label" /></ElSelect>
+          <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="handleStatus" aria-label="处置状态"><ElOption value="" label="全部处置状态" /><ElOption v-for="item in statusOptions" :key="item.value" :value="item.value" :label="item.label" /></ElSelect>
         </div>
         <div class="spot-scroll">
           <button

@@ -668,16 +668,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleDetailKeydown)
 })
 
-function resetFilters() {
-  planKeyword.value = ''
-  routeTypeFilter.value = ''
-  taskTypeFilter.value = ''
-  deviceFilter.value = ''
-  regionFilter.value = ''
-  startDate.value = ''
-  endDate.value = ''
-  resultTypeFilter.value = ''
-}
 /** 重算为空时给出可执行的原因：边界未导入 → 未开启轨迹 → 轨迹无有效航点。 */
 async function undeterminedRegionReason(row: PlanRow) {
   try {
@@ -770,17 +760,16 @@ async function exportList() {
 <template>
   <div class="flight-review">
     <section class="filter-panel panel">
-      <header><div><h2>成果筛选</h2><span>按计划、航线、任务与文件类型检索真实飞行成果</span></div><button class="text-button" type="button" @click="resetFilters">重置条件</button></header>
       <div class="filter-grid">
         <label>飞行计划<input v-model="planKeyword" class="plan-keyword-input" placeholder="计划名称 / 编号" /></label>
-        <label>所属区划<select v-model="regionFilter"><option value="">全部区划</option><option v-for="item in regions" :key="item.code" :value="item.code">{{ item.label }}</option><option v-if="hasUnassignedRegion" :value="REGION_UNSET">未判定</option></select></label>
+        <label>所属区划<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="regionFilter"><ElOption value="" label="全部区划" /><ElOption v-for="item in regions" :key="item.code" :value="item.code" :label="String(item.label)" /><ElOption v-if="hasUnassignedRegion" :value="REGION_UNSET" label="未判定" /></ElSelect></label>
         <label>需求工单号<input placeholder="待关联接口接入" disabled title="后端暂未提供飞行计划与需求工单的关联关系" /></label>
-        <label>航线类型<select v-model="routeTypeFilter"><option value="">全部航线</option><option v-for="item in routeTypes" :key="item" :value="item">{{ routeTypeLabel(item) }}</option></select></label>
-        <label>任务类型<select v-model="taskTypeFilter"><option value="">全部类型</option><option v-for="item in taskTypes" :key="item" :value="item">{{ taskTypeLabel(item) }}</option></select></label>
-        <label>飞行设备<select v-model="deviceFilter"><option value="">全部设备</option><option v-for="item in devices" :key="item" :value="item">{{ item }}</option></select></label>
+        <label>航线类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="routeTypeFilter"><ElOption value="" label="全部航线" /><ElOption v-for="item in routeTypes" :key="item" :value="item" :label="String(routeTypeLabel(item))" /></ElSelect></label>
+        <label>任务类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="taskTypeFilter"><ElOption value="" label="全部类型" /><ElOption v-for="item in taskTypes" :key="item" :value="item" :label="String(taskTypeLabel(item))" /></ElSelect></label>
+        <label>飞行设备<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="deviceFilter"><ElOption value="" label="全部设备" /><ElOption v-for="item in devices" :key="item" :value="item" :label="String(item)" /></ElSelect></label>
         <label>完成日期 · 起<input v-model="startDate" type="date" /></label>
         <label>完成日期 · 止<input v-model="endDate" type="date" :min="startDate || undefined" /></label>
-        <label>成果类型<select v-model="resultTypeFilter"><option value="">全部文件</option><option value="image">图片</option><option value="video">视频</option><option value="other">其他文件</option></select></label>
+        <label>成果类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="resultTypeFilter"><ElOption value="" label="全部文件" /><ElOption value="image" label="图片" /><ElOption value="video" label="视频" /><ElOption value="other" label="其他文件" /></ElSelect></label>
       </div>
     </section>
 
@@ -824,7 +813,7 @@ async function exportList() {
             </div></td>
           </tr>
         </tbody></table></div>
-        <footer><span>共 {{ filteredRows.length }} 条计划 · {{ mediaLoading ? `已读取 ${completedMediaTaskIds.length}/${tasks.length} 个任务成果` : failedMediaTasks.length ? '部分素材读取失败' : '成果文件按需读取' }}</span><div><button type="button" :disabled="currentPage <= 1" @click="currentPage--">‹</button><b>{{ currentPage }} / {{ pageCount }}</b><button type="button" :disabled="currentPage >= pageCount" @click="currentPage++">›</button><select v-model.number="pageSize" aria-label="每页条数"><option :value="8">8 条/页</option><option :value="16">16 条/页</option><option :value="32">32 条/页</option></select></div></footer>
+        <footer><span>共 {{ filteredRows.length }} 条计划 · {{ mediaLoading ? `已读取 ${completedMediaTaskIds.length}/${tasks.length} 个任务成果` : failedMediaTasks.length ? '部分素材读取失败' : '成果文件按需读取' }}</span><div><button type="button" :disabled="currentPage <= 1" @click="currentPage--">‹</button><b>{{ currentPage }} / {{ pageCount }}</b><button type="button" :disabled="currentPage >= pageCount" @click="currentPage++">›</button><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="pageSize" aria-label="每页条数"><ElOption :value="8" label="8 条/页" /><ElOption :value="16" label="16 条/页" /><ElOption :value="32" label="32 条/页" /></ElSelect></div></footer>
       </template>
     </section>
 
