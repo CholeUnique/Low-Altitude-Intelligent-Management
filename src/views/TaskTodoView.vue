@@ -121,11 +121,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <TaskCenterLayout title="我的待办" :subtitle="`${user.organization.name} · 本人待办、已办及负责场景的历史任务`">
-    <template #actions>
-      <button class="refresh-button" :disabled="loading" @click="loadTasks">{{ loading ? '加载中…' : '刷新待办' }}</button>
-    </template>
-
+  <TaskCenterLayout title="我的待办" hide-heading>
     <div class="todo-layout">
       <main class="todo-main">
         <section class="todo-filters">

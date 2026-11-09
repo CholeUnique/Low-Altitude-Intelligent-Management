@@ -4,7 +4,12 @@ import { createRequire } from 'node:module'
 import ts from 'typescript'
 import { parse, compileTemplate } from '@vue/compiler-sfc'
 import { parse as parseTemplate } from '@vue/compiler-dom'
-import { createSSRApp } from 'vue'
+import { createSSRApp, h, provide, inject } from 'vue'
+// Element Plus builds its option cache on mount. Keep this template-binding test
+// deterministic in SSR; actual popup styling and selection are checked in the browser.
+const selectedValue = Symbol('selected service')
+const ElSelect = { props: ['modelValue'], setup(props, { attrs, slots }) { provide(selectedValue, props.modelValue); return () => h('select', attrs, slots.default?.()) } }
+const ElOption = { props: ['value', 'label', 'disabled'], setup(props) { const selected = inject(selectedValue); return () => h('option', { value: props.value, disabled: props.disabled, selected: props.value === selected }, props.label) } }
 import { renderToString } from 'vue/server-renderer'
 
 const component = readFileSync('src/components/MapServiceManagementPanel.vue', 'utf8')
@@ -16,8 +21,8 @@ assert.equal(functions.length, names.length)
 const options = ast.statements.filter(ts.isVariableStatement).flatMap(node => [...node.declarationList.declarations]).find(node => node.name.getText(ast) === 'serviceTypeOptions')
 const executable = ts.transpileModule(`const ${options.getText(ast)};\n${functions.map(node => node.getText(ast)).join('\n')}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const calls = [], errors = [], successes = []
-const state = { form: {}, editorMode: { value: 'edit' }, editorOpen: { value: true }, busy: { value: false }, departments: { value: [] }, dataTypeOptions: { value: [{ value: 'IMAGE', label: '影像' }] }, metadataError: { value: '' }, originalTopicCode: { value: '' } }
-const api = new Function('context', `const {form, editorMode, editorOpen, busy, departments, dataTypeOptions, metadataError, originalTopicCode, showError, showSuccess, addMapService, updateMapService, loadServices} = context;
+const state = { form: {}, editorMode: { value: 'edit' }, editorOpen: { value: true }, busy: { value: false }, departments: { value: [] }, dataTypeOptions: { value: [{ value: 'IMAGE', label: '影像' }] }, metadataError: { value: '' }, originalTopicCode: { value: '' }, originalRegionCode: { value: '' } }
+const api = new Function('context', `const {form, editorMode, editorOpen, busy, departments, dataTypeOptions, metadataError, originalTopicCode, originalRegionCode, showError, showSuccess, addMapService, updateMapService, loadServices} = context;
   const ref = value => ({ value });
   ${executable}; return {${names.join(',')}, serviceTypeOptions};`)(
   { ...state, showError: error => errors.push(error.message), showSuccess: message => successes.push(message),
@@ -30,7 +35,7 @@ assert.equal(api.toServiceTime(state.form.serviceTime), '2026-10-21T07:06:00.000
 state.form.type = 'WMS'
 await api.submitService()
 assert.equal(calls[0].mode, 'edit')
-assert.deepEqual(calls[0].payload, { id: 9, name: '测试图层', type: 'WMS', dataType: 'IMAGE', topicCode: undefined, serviceUrl: state.form.serviceUrl, sort: 3, serviceTime: '2026-10-21T07:06:00.000Z', remark: undefined, deptIds: ['2'] })
+assert.deepEqual(calls[0].payload, { id: 9, name: '测试图层', type: 'WMS', dataType: 'IMAGE', topicCode: undefined, regionCode: undefined, serviceUrl: state.form.serviceUrl, sort: 3, serviceTime: '2026-10-21T07:06:00.000Z', remark: undefined, deptIds: ['2'] })
 assert.equal(state.editorOpen.value, false)
 assert.equal(state.busy.value, false)
 
@@ -80,11 +85,12 @@ const ssrModule = { exports: {} }
 const js = ts.transpileModule(compiled.code, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 new Function('module', 'exports', 'require', js)(ssrModule, ssrModule.exports, createRequire(import.meta.url))
 async function render(mode, type = 'WMS') {
-  return renderToString(createSSRApp({ data: () => ({ editorMode: mode, form: { type }, serviceTypeOptions: api.serviceTypeOptions.value, serviceTypeLabel: api.serviceTypeLabel }), ssrRender: ssrModule.exports.ssrRender }))
+  return renderToString(createSSRApp({ data: () => ({ editorMode: mode, form: { type }, serviceTypeOptions: api.serviceTypeOptions.value, serviceTypeLabel: api.serviceTypeLabel }), ssrRender: ssrModule.exports.ssrRender }).component('ElSelect', ElSelect).component('ElOption', ElOption))
 }
 for (const mode of ['add', 'edit']) {
   const html = await render(mode)
   assert.match(html, /<select[^>]*required[^>]*aria-label="服务类型"/)
+  assert.match(html, /aria-label="服务类型"/)
   assert.match(html, /value="WMS" selected/)
   assert.doesNotMatch(html, /readonly|只读/)
 }

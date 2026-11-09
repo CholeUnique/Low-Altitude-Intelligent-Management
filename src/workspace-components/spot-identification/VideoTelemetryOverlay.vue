@@ -255,8 +255,8 @@ function chooseLocal(event: Event) {
   void loadSrt(file)
 }
 
-function chooseServer(event: Event) {
-  const id = (event.target as HTMLSelectElement).value
+function chooseServer(value: unknown) {
+  const id = String(value)
   const source = candidates.value.find(item => item.id === id)
   if (source) { manualSource.value = true; void loadSrt(source) }
 }
@@ -485,7 +485,7 @@ onBeforeUnmount(() => { endDrag(); endResize(); releaseVideoClock?.(); locationR
     <button v-if="error || manualSource" class="backend-srt-retry" type="button" :disabled="busy" @click="readVideoSrt">{{ manualSource ? '读取当前视频配套 SRT' : '重试读取配套 SRT' }}</button>
     <button v-if="!points.length" class="backend-srt-retry" type="button" :disabled="busy" @click="generateSrt">生成配套 SRT</button>
     <label v-if="!points.length && !busy" class="backend-srt-retry local-srt-picker" :title="sourceName">选择本地 SRT<input type="file" accept=".srt" aria-label="选择本地 SRT 文件" @change="chooseLocal" /></label>
-    <select v-if="candidates.length" class="server-srt" aria-label="选择任务中的 SRT" @change="chooseServer"><option value="">选择任务中的 SRT</option><option v-for="item in candidates" :key="item.id" :value="item.id">{{ item.fileName }}</option></select>
+    <ElSelect :empty-values="[null, undefined]" v-if="candidates.length" class="system-select server-srt" popper-class="system-select-options" aria-label="选择任务中的 SRT" @change="chooseServer"><ElOption value="" label="选择任务中的 SRT" /><ElOption v-for="item in candidates" :key="item.id" :value="item.id" :label="item.fileName" /></ElSelect>
     <p v-if="mapError && points.length" class="telemetry-warning">{{ mapError }}</p>
     <p v-if="manualSource" class="telemetry-warning">请确认 SRT 与当前视频匹配；本地文件仅在浏览器中读取。</p>
     </div>

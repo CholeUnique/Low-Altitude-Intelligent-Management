@@ -63,11 +63,11 @@ function selectDate(date: Date) {
   draft.value = next
   viewYear.value = date.getFullYear(); viewMonth.value = date.getMonth()
 }
-function setHour(event: Event) {
-  const next = new Date(draft.value); next.setHours(Number((event.target as HTMLSelectElement).value)); draft.value = next
+function setHour(value: unknown) {
+  const next = new Date(draft.value); next.setHours(Number(value)); draft.value = next
 }
-function setMinute(event: Event) {
-  const next = new Date(draft.value); next.setMinutes(Number((event.target as HTMLSelectElement).value)); draft.value = next
+function setMinute(value: unknown) {
+  const next = new Date(draft.value); next.setMinutes(Number(value)); draft.value = next
 }
 function locatePanel() {
   const rect = anchor.value?.getBoundingClientRect()
@@ -124,8 +124,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="spot-time">
-            <b>选择时间</b><small>小时</small><select :value="draft.getHours()" @change="setHour"><option v-for="hour in hours" :key="hour" :value="hour">{{ pad(hour) }}</option></select>
-            <small>分钟</small><select :value="draft.getMinutes()" @change="setMinute"><option v-for="minute in minutes" :key="minute" :value="minute">{{ pad(minute) }}</option></select>
+            <b>选择时间</b><small>小时</small><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" :model-value="draft.getHours()" @change="setHour"><ElOption v-for="hour in hours" :key="hour" :value="hour" :label="String(pad(hour))" /></ElSelect>
+            <small>分钟</small><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" :model-value="draft.getMinutes()" @change="setMinute"><ElOption v-for="minute in minutes" :key="minute" :value="minute" :label="String(pad(minute))" /></ElSelect>
             <strong>{{ pad(draft.getHours()) }} : {{ pad(draft.getMinutes()) }}</strong>
           </div>
         </div>

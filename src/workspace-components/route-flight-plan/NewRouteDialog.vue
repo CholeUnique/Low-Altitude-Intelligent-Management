@@ -95,16 +95,16 @@ function submit() {
 <template>
   <el-dialog v-model="visible" title="创建新航线" width="344px" class="new-route-dialog" destroy-on-close append-to-body>
     <label class="field-label">选择航线分组</label>
-    <select v-model="form.group" class="field-control">
-      <option value="测试">测试</option>
-      <option v-for="item in routeGroups" :key="item" :value="item">{{ item }}</option>
-    </select>
+    <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="form.group">
+      <ElOption value="测试" label="测试" />
+      <ElOption v-for="item in routeGroups" :key="item" :value="item" :label="String(item)" />
+    </ElSelect>
 
     <label class="field-label required">选择飞行器</label>
-    <select v-model="form.aircraft" class="field-control" :disabled="devicesLoading">
-      <option value="" disabled>{{ devicesLoading ? '正在读取飞行器…' : '请选择' }}</option>
-      <option v-for="item in aircraftChoices" :key="item.value" :value="item.value">{{ item.label }}</option>
-    </select>
+    <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="form.aircraft" :disabled="devicesLoading">
+      <ElOption value="" disabled :label="String(devicesLoading ? '正在读取飞行器…' : '请选择')" />
+      <ElOption v-for="item in aircraftChoices" :key="item.value" :value="item.value" :label="String(item.label)" />
+    </ElSelect>
     <p v-if="realMode && !devicesLoading && !aircraftChoices.length" class="field-hint">当前账号下未读取到可用飞行器。</p>
 
     <label class="field-label required">航线类型</label>

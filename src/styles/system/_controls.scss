@@ -1,0 +1,108 @@
+#app button:focus-visible, #app a:focus-visible, #app [tabindex='0']:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 3px;
+}
+
+// Element Plus overlays are teleported outside #app; variables follow the route theme.
+.el-button, .el-input, .el-select, .el-textarea, .el-dialog, .el-popper, .el-message {
+  font-family: var(--ui-font);
+}
+.el-button { border-radius: var(--ui-control-radius); box-shadow: none; transition: background-color var(--ui-motion), border-color var(--ui-motion), color var(--ui-motion); }
+.el-button:not(.is-text, .is-link, .el-button--small) { min-height: 36px; }
+.el-input__wrapper, .el-select__wrapper { min-height: 36px; border-radius: var(--ui-control-radius); }
+.el-input__inner, .el-select__selected-item, .el-textarea__inner { font-size: 14px; }
+// Use the same custom listbox as My Todo; native option popups cannot be themed consistently.
+:is(#app, html[data-ui-theme]) .el-select.system-select { width: 100%; min-width: 0; height: 36px; flex: 1 1 auto; font-size: 13px; }
+:is(#app, html[data-ui-theme]) .el-select.system-select .el-select__wrapper { min-width: 0; min-height: 36px; height: 36px; padding: 4px 11px; border-radius: var(--ui-control-radius); background: var(--ui-input); box-shadow: 0 0 0 1px var(--ui-border) inset; }
+:is(#app, html[data-ui-theme]) .el-select.system-select .el-select__selected-item { color: var(--ui-body); font-size: 13px; line-height: 22px; }
+:is(#app, html[data-ui-theme]) .el-select.system-select .el-select__placeholder.is-transparent { color: var(--ui-muted); }
+:is(#app, html[data-ui-theme]) .el-select.system-select .el-select__caret { color: var(--ui-muted); }
+:is(#app, html[data-ui-theme]) .el-select.system-select .el-select__input { min-height: 0; height: auto; padding: 0; border: 0; outline: none; box-shadow: none; background: transparent; }
+:is(#app, html[data-ui-theme]) .el-select.system-select .el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--ui-accent) inset; }
+:is(#app, html[data-ui-theme]) .el-select.system-select .el-select__wrapper.is-disabled { background: var(--el-disabled-bg-color); cursor: not-allowed; }
+:is(#app, html[data-ui-theme]) .el-select.system-select .is-disabled .el-select__selected-item { color: var(--el-text-color-disabled); }
+html[data-ui-theme] :is(.system-select-options, .todo-filter-options).el-popper { background: var(--ui-surface-raised); border-color: var(--ui-border); border-radius: 9px; box-shadow: var(--ui-shadow); }
+html[data-ui-theme] :is(.system-select-options, .todo-filter-options) .el-select-dropdown__item { height: 36px; line-height: 36px; padding-inline: 16px; color: var(--ui-body); background: transparent; font: 13px/36px var(--ui-font); }
+html[data-ui-theme] :is(.system-select-options, .todo-filter-options) .el-select-dropdown__item:is(.is-hovering, :hover) { background: var(--ui-hover); }
+html[data-ui-theme] :is(.system-select-options, .todo-filter-options) .el-select-dropdown__item.is-selected { background: var(--ui-selected); color: var(--ui-accent); font-weight: 600; }
+html[data-ui-theme] :is(.system-select-options, .todo-filter-options) .el-select-dropdown__item.is-disabled { color: var(--el-text-color-disabled); background: transparent; }
+html[data-ui-theme] :is(.system-select-options, .todo-filter-options) .el-popper__arrow::before { background: var(--ui-surface-raised); border-color: var(--ui-border); }
+#app :is(.collection-pagination, .flight-review footer, .general-review footer) .el-select.system-select { width: 110px; min-width: 110px; flex: 0 0 110px; }
+html[data-ui-theme='dark'] .spot-datetime-panel {
+  color: var(--ui-body); background: var(--ui-surface-raised); border-color: var(--ui-border);
+  .spot-calendar { border-color: var(--ui-divider); }
+  .spot-calendar header b, .spot-time > b { color: var(--ui-text); }
+  .spot-calendar header button, .spot-calendar__days button { color: var(--ui-body); }
+  .spot-calendar__days button:hover { background: var(--ui-hover); color: var(--ui-accent); }
+  .spot-calendar__days button.selected { background: var(--ui-action); color: #fff; }
+  .spot-calendar__days button.muted, .spot-calendar__week span, .spot-time small { color: var(--ui-muted); }
+  .spot-time, footer { background: var(--ui-input); border-color: var(--ui-divider); }
+  .spot-time strong { color: var(--ui-accent); background: var(--ui-selected); }
+  footer button { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+  footer button.primary { color: #fff; background: var(--ui-action); }
+}
+.el-table { --el-table-header-bg-color: var(--ui-surface-raised); --el-table-tr-bg-color: var(--ui-surface); --el-table-row-hover-bg-color: var(--ui-hover); --el-table-current-row-bg-color: var(--ui-selected); --el-table-border-color: var(--ui-divider); --el-table-header-text-color: var(--ui-body); --el-table-text-color: var(--ui-body); font-size: 13px; }
+.el-table .cell { line-height: 22px; }
+.el-table th.el-table__cell { height: 40px; font-weight: 600; }
+.el-tag { border-radius: 4px; font-size: 12px; }
+.el-dialog { max-width: calc(100vw - 40px); border: 1px solid var(--ui-border); border-radius: 18px; padding: 20px; background: var(--ui-modal-background); box-shadow: var(--ui-shadow); }
+.el-dialog__title { color: var(--ui-text); font-size: 18px; font-weight: 600; }
+.el-dialog__body { color: var(--ui-body); font-size: 14px; }
+.el-dialog__footer { padding-top: 16px; }
+.el-form-item__label { font-size: 13px; color: var(--ui-body); }
+.el-form-item.is-required .el-form-item__label::before { color: var(--ui-danger) !important; font-size: 16px; }
+.el-overlay-dialog { overscroll-behavior: contain; }
+.el-popper.is-dark { --el-bg-color-overlay: var(--ui-overlay); color: #e6f1ff; background: var(--ui-overlay); border-color: rgb(154 205 228 / 24%); font-size: 12px; line-height: 18px; backdrop-filter: blur(12px); }
+.el-popper.is-dark .el-popper__arrow::before { background: var(--ui-overlay); border-color: #3c6e88; }
+html[data-ui-theme] .el-popper.workflow-actor-tooltip { background: var(--ui-overlay); border-color: #3c6e88; font-family: var(--ui-font); }
+
+// These are form/dialog components, not map symbols or arbitrary buttons.
+#app :is(.management-content, .task-center-content, .ticket-page, .ledger, .collection-page,
+  .algorithm-page, .topic-config, .overlay-dialog, .topic-upload-dialog) {
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']), select, textarea {
+    color: var(--ui-body); background-color: var(--ui-input); border-color: var(--ui-border);
+    border-radius: var(--ui-control-radius); font-size: 14px; line-height: 22px;
+    transition: border-color var(--ui-motion), box-shadow var(--ui-motion);
+    &::placeholder { color: var(--ui-muted); }
+    &:hover:not(:disabled) { border-color: #558ba9; }
+    &:focus-visible { outline: 0; border-color: var(--ui-action); box-shadow: 0 0 0 2px rgb(47 140 255 / 18%); }
+    &:disabled { opacity: .6; cursor: not-allowed; }
+  }
+  select option { background: var(--ui-surface-raised); color: var(--ui-body); }
+}
+
+#app :is(.button, .refresh-button, .back-button, .task-action-toolbar button, .toolbar-actions button,
+  .ledger .actions button, .ticket-heading > button, .ng-actions button, .facility-submit) {
+  min-height: 36px; border-radius: var(--ui-control-radius); font-size: 13px; line-height: 20px;
+  box-shadow: none; text-shadow: none;
+  transition: background-color var(--ui-motion), border-color var(--ui-motion), color var(--ui-motion);
+}
+#app :is(.button--primary, .refresh-button, .toolbar-actions button.primary, .ticket-heading > button,
+  .task-action-primary, .enter-workspace, .facility-submit, .ng-actions .primary) {
+  background: var(--ui-action); border-color: var(--ui-action); color: #fff;
+  &:hover:not(:disabled) { background: var(--ui-action-hover); border-color: var(--ui-action-hover); }
+}
+#app :is(.button--ghost, .back-button, .task-action-edit, .ledger .actions .secondary) {
+  color: var(--ui-link); background: var(--ui-surface-raised); border-color: var(--ui-border);
+  &:hover:not(:disabled) { background: var(--ui-hover); border-color: #558ba9; }
+}
+#app :is(.task-action-danger, .delete-dialog .danger-button) {
+  background: #6b2a3a; border-color: #b65b6c; color: #ffd3d9;
+  &:hover:not(:disabled) { background: #85364a; }
+}
+
+#app :is(.modal-card, .ticket-modal, .action-confirm-dialog, .overlay-dialog, .detail-dialog,
+  .delete-dialog, .topic-upload-dialog) {
+  color: var(--ui-body); background: var(--ui-modal-background); border: 1px solid var(--ui-border);
+  border-radius: 18px; box-shadow: 0 16px 48px rgb(0 17 30 / 32%);
+  max-width: calc(100vw - 40px); max-height: calc(100dvh - 48px);
+  h2 { font-size: 18px; line-height: 26px; color: var(--ui-text); }
+  > header, > footer { background: transparent; border-color: var(--ui-divider); }
+  > header { flex: none; padding: 16px 20px; }
+  > footer { flex: none; gap: 8px; padding: 12px 20px; }
+  label, label > span { font-size: 13px; line-height: 20px; color: var(--ui-body); }
+}
+#app :is(.modal-card, .overlay-dialog, .detail-dialog) input:not([type='radio'], [type='checkbox'], [type='file']),
+#app :is(.modal-card, .overlay-dialog, .detail-dialog) select {
+  min-height: 36px; border-radius: var(--ui-control-radius); font-size: 14px;
+}

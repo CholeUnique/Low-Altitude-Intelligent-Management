@@ -396,10 +396,10 @@ watch(() => props.abnormalSceneId, () => void syncAbnormalSceneFromRoute())
 
     <section v-if="!abnormalScene" class="scene-panel">
       <form class="scene-filters" @submit.prevent="loadScenes">
-        <label class="department-filter"><span>管理部门</span><select v-model="selectedDeptId" :disabled="isDepartmentAdmin || loading || !departments.length" @change="changeDepartment"><option value="" disabled>{{ departments.length ? '请选择管理部门' : '暂无可选部门' }}</option><option v-for="item in sortedDepartments" :key="String(item.id)" :value="String(item.id)">{{ departmentOptionLabel(item) }}</option></select></label>
+        <label class="department-filter"><span>管理部门</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="selectedDeptId" :disabled="isDepartmentAdmin || loading || !departments.length" @change="changeDepartment"><ElOption value="" disabled :label="String(departments.length ? '请选择管理部门' : '暂无可选部门')" /><ElOption v-for="item in sortedDepartments" :key="String(item.id)" :value="String(item.id)" :label="String(departmentOptionLabel(item))" /></ElSelect></label>
         <label class="keyword-filter"><span>场景关键字</span><input v-model.trim="filters.keyword" placeholder="搜索场景名称或编码"></label>
-        <label><span>场景分类</span><select v-model="filters.category"><option value="">全部分类</option><option v-for="item in categoryOptions" :key="item[0]" :value="item[0]">{{ item[1] }}</option></select></label>
-        <label><span>运行状态</span><select v-model="filters.status"><option value="">全部状态</option><option :value="1">启用</option><option :value="0">停用</option></select></label>
+        <label><span>场景分类</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="filters.category"><ElOption value="" label="全部分类" /><ElOption v-for="item in categoryOptions" :key="item[0]" :value="item[0]" :label="String(item[1])" /></ElSelect></label>
+        <label><span>运行状态</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="filters.status"><ElOption value="" label="全部状态" /><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect></label>
         <div><button class="scene-button scene-button--primary" type="submit">查询</button><button class="scene-button scene-button--ghost" type="button" @click="resetFilters">重置</button></div>
       </form>
       <div class="scene-table-wrap">
@@ -434,7 +434,7 @@ watch(() => props.abnormalSceneId, () => void syncAbnormalSceneFromRoute())
             <div class="scene-form-grid">
               <label><span>场景名称 *</span><input v-model.trim="sceneForm.sceneName" maxlength="200" :disabled="editorMode === 'view'" required></label>
               <label><span>场景编码 *</span><input v-model.trim="sceneForm.sceneCode" maxlength="64" placeholder="例如 FOREST_LAW_ENFORCE" :disabled="editorMode !== 'add'" required></label>
-              <label><span>场景分类</span><select v-model="sceneForm.category" :disabled="editorMode === 'view'"><option value="">请选择场景分类</option><option v-for="item in categoryOptions" :key="item[0]" :value="item[0]">{{ item[1] }}</option></select></label>
+              <label><span>场景分类</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="sceneForm.category" :disabled="editorMode === 'view'"><ElOption value="" label="请选择场景分类" /><ElOption v-for="item in categoryOptions" :key="item[0]" :value="item[0]" :label="String(item[1])" /></ElSelect></label>
               <label><span>排序</span><input v-model.number="sceneForm.sort" type="number" :disabled="editorMode === 'view'"></label>
               <label class="wide"><span>场景说明</span><textarea v-model.trim="sceneForm.description" maxlength="1000" rows="3" :disabled="editorMode === 'view'" placeholder="请输入场景的业务用途和适用范围"></textarea></label>
             </div>
@@ -442,9 +442,9 @@ watch(() => props.abnormalSceneId, () => void syncAbnormalSceneFromRoute())
           <section class="scene-form-section">
             <h3><span>02</span>业务规则</h3>
             <div class="scene-form-grid">
-              <label><span>后续治理</span><select v-model.number="sceneForm.governanceEnabled" :disabled="editorMode === 'view'"><option :value="1">需要后续治理</option><option :value="0">无需后续治理</option></select></label>
-              <label><span>默认关联类型</span><select v-model="sceneForm.defaultRefType" :disabled="editorMode === 'view'"><option v-for="item in refTypeOptions" :key="item[0]" :value="item[0]">{{ item[1] }}</option></select></label>
-              <label v-if="editorMode === 'add'"><span>初始状态</span><select v-model.number="sceneForm.status"><option :value="1">启用</option><option :value="0">停用</option></select></label>
+              <label><span>后续治理</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="sceneForm.governanceEnabled" :disabled="editorMode === 'view'"><ElOption :value="1" label="需要后续治理" /><ElOption :value="0" label="无需后续治理" /></ElSelect></label>
+              <label><span>默认关联类型</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="sceneForm.defaultRefType" :disabled="editorMode === 'view'"><ElOption v-for="item in refTypeOptions" :key="item[0]" :value="item[0]" :label="String(item[1])" /></ElSelect></label>
+              <label v-if="editorMode === 'add'"><span>初始状态</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="sceneForm.status"><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect></label>
               <label v-else><span>当前状态</span><input :value="sceneForm.status === 1 ? '启用' : '停用'" disabled></label>
               <label v-if="editorMode !== 'add'"><span>归属部门</span><input :value="sceneForm.deptName || '-'" disabled></label>
             </div>
@@ -472,7 +472,7 @@ watch(() => props.abnormalSceneId, () => void syncAbnormalSceneFromRoute())
         <header><div><h2>配置初始派发负责人</h2><p>新任务进入该场景时的默认接收人</p></div><button type="button" @click="assigneeOpen = false">×</button></header>
         <div class="assignee-scene"><i>景</i><div><small>当前场景</small><strong>{{ assigneeScene?.sceneName }}</strong><span>{{ assigneeScene?.sceneCode }}</span></div></div>
         <form class="assignee-form" @submit.prevent="saveAssignee">
-          <label><span>初始派发负责人 *</span><select v-model="assigneeId" required><option value="" disabled>{{ users.length ? '请选择负责人' : '暂无可选用户' }}</option><option v-if="assigneeId && !users.some(item => String(item.id) === assigneeId)" :value="assigneeId">{{ assigneeFor(assigneeScene?.sceneCode || '')?.assigneeName || `用户 ${assigneeId}` }}（当前负责人）</option><option v-for="item in users" :key="String(item.id)" :value="String(item.id)">{{ userLabel(item) }}（{{ item.username }}）</option></select></label>
+          <label><span>初始派发负责人 *</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="assigneeId" required><ElOption value="" disabled :label="String(users.length ? '请选择负责人' : '暂无可选用户')" /><ElOption v-if="assigneeId && !users.some(item => String(item.id) === assigneeId)" :value="assigneeId" :label="String(assigneeFor(assigneeScene?.sceneCode || '')?.assigneeName || `用户 ${assigneeId}`) + '（当前负责人）'" /><ElOption v-for="item in users" :key="String(item.id)" :value="String(item.id)" :label="String(userLabel(item)) + '（' + String(item.username) + '）'" /></ElSelect></label>
           <p>负责人必须是当前场景归属部门的成员或系统管理员。</p>
           <div class="scene-form-actions"><button class="scene-button scene-button--ghost" type="button" @click="assigneeOpen = false">取消</button><button class="scene-button scene-button--primary" type="submit" :disabled="assigneeSaving || !assigneeId">{{ assigneeSaving ? '保存中…' : '保存负责人' }}</button></div>
         </form>

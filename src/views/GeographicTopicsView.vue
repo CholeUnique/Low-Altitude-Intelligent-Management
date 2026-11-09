@@ -456,7 +456,7 @@ onBeforeUnmount(() => { clearFeatureSelection();featureHover?.destroy();featureH
       <header><div><small>SCENE SETTINGS</small><h2>场景配置</h2></div><button aria-label="关闭场景配置" @click="configOpen=false"><Close /></button></header>
       <div class="config-body">
         <p v-if="topicStore.storageError" role="alert">{{ topicStore.storageError }}</p>
-        <section><h3>背景影像</h3><select aria-label="背景影像" :value="imageryLayers.find(item=>item.visible)?.key || ''" @change="selectImagery(($event.target as HTMLSelectElement).value)"><option value="">仅基础底图</option><option v-for="item in imageryLayers" :key="item.key" :value="item.key">{{ item.service.name }}</option></select></section>
+        <section><h3>背景影像</h3><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" aria-label="背景影像" :model-value="imageryLayers.find(item=>item.visible)?.key || ''" @change="selectImagery(String($event))"><ElOption value="" label="仅基础底图" /><ElOption v-for="item in imageryLayers" :key="item.key" :value="item.key" :label="String(item.service.name)" /></ElSelect></section>
         <section><h3>业务数据 <small>{{ configSourceGroups.length }} 个服务 · {{ vectorLayers.length }} 个图层</small></h3>
           <div class="selection-actions" role="group" aria-label="业务数据批量选择">
             <TopicSelectionCheckbox title="业务数据" :count="vectorLayers.length" :checked="businessAllSelected" :indeterminate="businessPartSelected" :disabled="pending || businessBatchPending || !vectorLayers.length" @change="selectBusinessLayers($event?'all':'none')" />

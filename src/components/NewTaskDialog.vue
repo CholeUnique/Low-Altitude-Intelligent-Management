@@ -412,15 +412,15 @@ function cancelTaskEdit() {
     <div class="new-task-grid">
       <section class="task-form">
         <label>任务名称 *</label><input v-model="form.name" placeholder="请输入任务名称" />
-        <div class="form-columns"><div><label>所属场景 *</label><select v-model="form.sceneId" :disabled="isEditing"><option v-for="scene in scenes" :key="scene.id" :value="scene.id">{{ scene.name }}</option></select></div><div><label>优先级</label><select v-model="form.priority"><option value="2">高</option><option value="1">中</option><option value="0">低</option></select></div></div>
+        <div class="form-columns"><div><label>所属场景 *</label><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="form.sceneId" :disabled="isEditing"><ElOption v-for="scene in scenes" :key="scene.id" :value="scene.id" :label="String(scene.name)" /></ElSelect></div><div><label>优先级</label><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="form.priority"><ElOption value="2" label="高" /><ElOption value="1" label="中" /><ElOption value="0" label="低" /></ElSelect></div></div>
         <p v-if="submitError" class="task-form-error">{{ submitError }}</p>
         <button v-if="assignmentFailed" type="button" :disabled="submitting" @click="retryReviewAssignment">{{ submitting ? '正在分派…' : '重试分派给 nyncKZ' }}</button>
         <template>
           <label>主责部门 *</label>
-          <select v-model="form.deptId" :disabled="departmentsLoading || !departmentOptions.length">
-            <option value="" disabled>{{ departmentsLoading ? '正在读取主责部门…' : departmentsError ? '主责部门读取失败' : '请选择主责部门' }}</option>
-            <option v-for="dept in departmentOptions" :key="dept.deptId" :value="dept.deptId">{{ dept.deptName }}</option>
-          </select>
+          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="form.deptId" :disabled="departmentsLoading || !departmentOptions.length">
+            <ElOption value="" disabled :label="String(departmentsLoading ? '正在读取主责部门…' : departmentsError ? '主责部门读取失败' : '请选择主责部门')" />
+            <ElOption v-for="dept in departmentOptions" :key="dept.deptId" :value="dept.deptId" :label="String(dept.deptName)" />
+          </ElSelect>
           <p v-if="departmentsError" class="task-form-error">{{ departmentsError }} <button type="button" class="department-retry" :disabled="departmentsLoading" @click="loadDepartments">重新读取</button></p>
           <p v-else-if="!departmentsLoading && !departmentOptions.length" class="task-form-error">当前登录账号没有可选择的主责部门，请确认部门数据和账号权限。</p>
         </template>
@@ -430,7 +430,7 @@ function cancelTaskEdit() {
         <label>成果要求</label><div class="requirement-list"><label v-for="item in ['照片','视频','直播','二维成果','三维成果','全景','事件','巡检报告']" :key="item"><input v-model="form.requirements" type="checkbox" :value="item" />{{ item }}</label></div>
         <label>联系人与联系电话</label><div class="form-columns"><input v-model="form.contact" maxlength="100" placeholder="联系人（可选）" /><input v-model="form.phone" maxlength="32" placeholder="联系电话（可选）" /></div>
         <template>
-          <div class="form-columns"><div><label>{{ autoAssignReview ? '科室初核负责人' : '负责人 ID' }}</label><input v-if="autoAssignReview" value="nyncKZ（创建后自动分派）" readonly /><input v-else v-model="form.assigneeId" inputmode="numeric" placeholder="可暂不填写" /></div><div><label>关联类型</label><select v-model="form.refType"><option value="NONE">不关联</option><option value="PLAN">飞行计划</option><option value="TASK">飞行任务</option></select></div></div>
+          <div class="form-columns"><div><label>{{ autoAssignReview ? '科室初核负责人' : '负责人 ID' }}</label><input v-if="autoAssignReview" value="nyncKZ（创建后自动分派）" readonly /><input v-else v-model="form.assigneeId" inputmode="numeric" placeholder="可暂不填写" /></div><div><label>关联类型</label><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="form.refType"><ElOption value="NONE" label="不关联" /><ElOption value="PLAN" label="飞行计划" /><ElOption value="TASK" label="飞行任务" /></ElSelect></div></div>
           <label v-if="form.refType !== 'NONE'">关联对象 ID *</label><input v-if="form.refType !== 'NONE'" v-model="form.refId" inputmode="numeric" placeholder="请输入飞行计划或飞行任务 ID" />
           <label>内部备注</label><textarea v-model="form.remark" maxlength="1000" placeholder="仅管理员可见，可暂不填写"></textarea>
           <template v-if="!isEditing">

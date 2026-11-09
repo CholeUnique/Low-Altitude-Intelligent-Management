@@ -21,7 +21,6 @@ const statisticsLoading = ref(true)
 const tasksLoading = ref(true)
 const statisticsError = ref('')
 const tasksError = ref('')
-const refreshedAt = ref('')
 const trendContainer = ref<HTMLElement>()
 const statusContainer = ref<HTMLElement>()
 let trendChart: EChartsType | undefined
@@ -151,21 +150,21 @@ function renderTrendChart() {
   trendChart.setOption({
     animationDuration: 450,
     grid: { top: 28, right: 24, bottom: 30, left: 42 },
-    tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#dbe4ec', textStyle: { color: '#34485e' } },
-    legend: { top: 0, right: 14, itemWidth: 18, itemHeight: 8, textStyle: { color: '#738396', fontSize: 11 }, data: ['任务数', '异常图斑'] },
+    tooltip: { trigger: 'axis', backgroundColor: '#072941', borderColor: '#38617b', textStyle: { color: '#e6f1ff', fontSize: 13 } },
+    legend: { top: 0, right: 14, itemWidth: 18, itemHeight: 8, textStyle: { color: '#a8c0d2', fontSize: 12 }, data: ['任务数', '异常图斑'] },
     xAxis: {
       type: 'category',
       boundaryGap: false,
       data: trendItems.value.map((item) => item.date.slice(5).replace('-', '/')),
       axisTick: { show: false },
-      axisLine: { lineStyle: { color: '#dfe6ed' } },
-      axisLabel: { color: '#8997a7' },
+      axisLine: { lineStyle: { color: '#38617b' } },
+      axisLabel: { color: '#a8c0d2', fontSize: 12 },
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
-      axisLabel: { color: '#8997a7' },
-      splitLine: { lineStyle: { color: '#edf1f5', type: 'dashed' } },
+      axisLabel: { color: '#a8c0d2', fontSize: 12 },
+      splitLine: { lineStyle: { color: '#28506a', type: 'dashed' } },
     },
     series: [
       {
@@ -176,7 +175,7 @@ function renderTrendChart() {
         symbolSize: 7,
         data: trendItems.value.map((item) => item.taskCount),
         lineStyle: { width: 3, color: '#2d8ed9' },
-        itemStyle: { color: '#2d8ed9', borderColor: '#fff', borderWidth: 2 },
+        itemStyle: { color: '#2d8ed9', borderColor: '#0b324d', borderWidth: 2 },
         areaStyle: { color: '#2d8ed918' },
       },
       {
@@ -200,8 +199,8 @@ function renderStatusChart() {
   }
   statusChart.setOption({
     animationDuration: 450,
-    tooltip: { trigger: 'item', formatter: '{b}<br/>{c} 个（{d}%）' },
-    legend: { orient: 'vertical', right: 8, top: 'middle', itemWidth: 10, itemHeight: 10, textStyle: { color: '#6e7f91', fontSize: 11 } },
+    tooltip: { trigger: 'item', formatter: '{b}<br/>{c} 个（{d}%）', backgroundColor: '#072941', borderColor: '#38617b', textStyle: { color: '#e6f1ff', fontSize: 13 } },
+    legend: { orient: 'vertical', right: 8, top: 'middle', itemWidth: 10, itemHeight: 10, textStyle: { color: '#a8c0d2', fontSize: 12 } },
     series: [{
       name: '任务状态',
       type: 'pie',
@@ -244,7 +243,6 @@ async function loadData() {
     tasksError.value = tasksResult.reason instanceof Error ? tasksResult.reason.message : '任务明细加载失败'
   }
   tasksLoading.value = false
-  refreshedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
   await nextTick()
   renderTrendChart()
   renderStatusChart()
@@ -279,16 +277,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <TaskCenterLayout class="task-overview-page" title="任务总览" :subtitle="`${user.organization.name} · 任务运行与办理效能概览`">
-    <template #actions>
-      <div class="overview-actions">
-        <span v-if="refreshedAt">更新于 {{ refreshedAt }}</span>
-        <button type="button" :disabled="statisticsLoading || tasksLoading" @click="loadData">
-          {{ statisticsLoading || tasksLoading ? '加载中…' : '刷新数据' }}
-        </button>
-      </div>
-    </template>
-
+  <TaskCenterLayout class="task-overview-page" title="任务总览" hide-heading>
     <div v-if="statisticsError || tasksError" class="error-banner" role="alert">
       <span>部分数据加载失败：{{ [statisticsError, tasksError].filter(Boolean).join('；') }}</span>
       <button type="button" @click="loadData">重新加载</button>

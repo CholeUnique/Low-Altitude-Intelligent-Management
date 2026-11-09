@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkbenchTaskNotice from '@/workspace-components/shared/WorkbenchTaskNotice.vue'
 import WorkflowActorBadge from '@/components/WorkflowActorBadge.vue'
 import { defaultWorkflow } from '@/utils/default-workflow'
 import DefaultWorkflowPanel from '@/workspace-components/shared/DefaultWorkflowPanel.vue'
@@ -9,7 +10,6 @@ import { getMyWorkflowTasks, type MyWorkflowTask } from '@/api/my-workflow-tasks
 import { pendingWorkbenchTasks } from '@/utils/task-todo-state'
 import { getTaskWorkflow, type TaskWorkflow } from '@/api/task-workflow'
 import { useUserStore } from '@/stores/user'
-import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import NonGrainNodePanel from './NonGrainNodePanel.vue'
 import TaskAcceptancePanel from '@/workspace-components/shared/TaskAcceptancePanel.vue'
 import NonGrainPreliminaryReviewPanel from './NonGrainPreliminaryReviewPanel.vue'
@@ -110,23 +110,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
       </nav>
 
       <div class="ng-header-right">
-        <div v-if="user.hasPermission('task-todo')" class="ng-notice-shell">
-          <button class="ng-notice" type="button" aria-label="我的待办通知" title="前往我的待办" @click="router.push('/tasks/todo')">
-            <DashboardSymbol name="notification" />
-            <b>{{ noticeTasks.length }}</b>
-          </button>
-          <div class="ng-notices">
-            <header><strong>其他待我处理的任务</strong><button type="button" @click="router.push('/tasks/todo')">查看全部</button></header>
-            <div class="ng-notice-list">
-              <button v-for="task in noticeTasks" :key="task.id" type="button" class="ng-notice-task" @click="openNoticeTask(task)">
-                <span><b :title="task.name">{{ task.name }}</b><small>{{ task.taskNo }} · 待我处理</small></span>
-                <time>{{ task.taskStatusDesc }}</time>
-              </button>
-              <p v-if="noticeError" class="ng-notice-empty">{{ noticeError }}</p>
-              <p v-else-if="!noticeTasks.length" class="ng-notice-empty">暂无其他待我处理的任务</p>
-            </div>
-          </div>
-        </div>
+        <WorkbenchTaskNotice v-if="user.hasPermission('task-todo')" :tasks="noticeTasks" :error="noticeError" @open-all="router.push('/tasks/todo')" @open-task="openNoticeTask" />
       </div>
     </section>
 
@@ -366,145 +350,6 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
   justify-content: flex-end;
   align-items: center;
   gap: 12px;
-}
-
-.ng-notice-shell {
-  position: relative;
-  width: 30px;
-  height: 30px;
-}
-
-.ng-notice {
-  position: relative;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  color: #9ec6d5;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
-.ng-notice :deep(svg) {
-  width: 25px;
-  height: 25px;
-  filter: drop-shadow(0 0 5px #1ce5f577);
-}
-
-.ng-notice>b {
-  position: absolute;
-  top: 0;
-  right: -2px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 3px;
-  color: #fff;
-  font-size: 10px;
-  line-height: 15px;
-  text-align: center;
-  background: #f04d62;
-  border-radius: 9px;
-  box-shadow: 0 0 7px #f04d62;
-}
-
-.ng-notices {
-  position: absolute;
-  z-index: 240;
-  top: 30px;
-  right: 0;
-  width: 262px;
-  max-width: calc(100vw - 32px);
-  max-height: min(440px, calc(100dvh - 90px));
-  box-sizing: border-box;
-  display: none;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 12px;
-  color: #4a6678;
-  background: #fff;
-  border: 1px solid #dbe6ed;
-  border-radius: 6px;
-  box-shadow: 0 10px 28px #2a4a5f2a;
-}
-
-.ng-notices::before { content: ''; position: absolute; top: -10px; left: 0; right: 0; height: 10px; }
-
-.ng-notice-shell:hover .ng-notices,
-.ng-notice-shell:focus-within .ng-notices {
-  display: flex;
-}
-
-.ng-notice-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-}
-
-.ng-notice-list::-webkit-scrollbar { display: none; }
-
-.ng-notices header {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #edf2f5;
-  line-height: 20px;
-}
-
-.ng-notices header > button {
-  padding: 0;
-  color: #2583c3;
-  background: transparent;
-  border: 0;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.ng-notices strong {
-  color: #1f4257;
-  font-size: 13px;
-}
-
-.ng-notice-task {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin: 9px 0 0;
-  padding-top: 8px;
-  color: #4a6678;
-  background: transparent;
-  border: 0;
-  border-top: 1px solid #edf2f5;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.ng-notice-task:hover { color: #167ab8; background: #f5faff; }
-.ng-notice-task span { min-width: 0; flex: 1; }
-.ng-notice-task b,.ng-notice-task small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ng-notice-task b { max-width: 165px; color: #2f5268; font-size: 12px; }
-.ng-notice-task small { max-width: 175px; margin-top: 3px; color: #899aa7; font-size: 10px; }
-.ng-notice-empty { margin: 12px 0 0; color: #8a9ba8; font-size: 11px; text-align: center; }
-
-.ng-notice-task time {
-  flex: 0 1 auto;
-  max-width: 44%;
-  overflow-wrap: anywhere;
-  text-align: right;
-}
-
-.ng-notices time {
-  color: #d48a21;
 }
 
 .ng-actor small,

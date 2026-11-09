@@ -116,8 +116,8 @@ function handleMonthWheel(event: WheelEvent) {
   moveMonth(event.deltaY > 0 ? 1 : -1)
 }
 
-function setTime(target: 'start' | 'end', part: 'hour' | 'minute', event: Event) {
-  const value = (event.target as HTMLSelectElement).value
+function setTime(target: 'start' | 'end', part: 'hour' | 'minute', selected: unknown) {
+  const value = String(selected)
   const current = target === 'start' ? startTime : endTime
   const [hour = '00', minute = '00'] = current.value.split(':')
   current.value = part === 'hour' ? `${value}:${minute}` : `${hour}:${value}`
@@ -182,7 +182,7 @@ function confirmSchedule() {
           <div v-for="target in ['start', 'end'] as const" :key="target" class="range-time-row">
             <span>{{ target === 'start' ? '开始时间' : '结束时间' }}</span>
             <div>
-              <select :value="timePart(target, 'hour')" :aria-label="`${target === 'start' ? '开始' : '结束'}小时`" @change="setTime(target, 'hour', $event)"><option v-for="hour in hours" :key="hour" :value="hour">{{ hour }}</option></select><b>:</b><select :value="timePart(target, 'minute')" :aria-label="`${target === 'start' ? '开始' : '结束'}分钟`" @change="setTime(target, 'minute', $event)"><option v-for="minute in minutes" :key="minute" :value="minute">{{ minute }}</option></select>
+              <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" :model-value="timePart(target, 'hour')" :aria-label="`${target === 'start' ? '开始' : '结束'}小时`" @change="setTime(target, 'hour', $event)"><ElOption v-for="hour in hours" :key="hour" :value="hour" :label="String(hour)" /></ElSelect><b>:</b><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" :model-value="timePart(target, 'minute')" :aria-label="`${target === 'start' ? '开始' : '结束'}分钟`" @change="setTime(target, 'minute', $event)"><ElOption v-for="minute in minutes" :key="minute" :value="minute" :label="String(minute)" /></ElSelect>
             </div>
             <em>{{ target === 'start' ? (dateStartText === '开始日期' ? '待选择日期' : dateStartText) : (dateEndText === '结束日期' ? '待选择日期' : dateEndText) }}</em>
           </div>

@@ -245,6 +245,7 @@ onMounted(() => void loadTaskContext())
               v-for="node in discoveryNodes"
               :key="node.key"
               :class="[nodeState(node.key), { 'acceptance-complete': node.key === 'task-acceptance' }]"
+              :data-processing="workflowInstance(node)?.status === 'PROCESSING'"
               :disabled="!nodeState(node.key).accessible"
               @click="selectNode(node)"
             >
@@ -261,6 +262,7 @@ onMounted(() => void loadTaskContext())
               v-for="node in governanceNodes"
               :key="node.key"
               :class="[nodeState(node.key), { 'acceptance-complete': node.key === 'task-acceptance' }]"
+              :data-processing="workflowInstance(node)?.status === 'PROCESSING'"
               :disabled="!nodeState(node.key).accessible"
               @click="selectNode(node)"
             >

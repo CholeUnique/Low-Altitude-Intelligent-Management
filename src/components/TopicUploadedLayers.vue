@@ -48,6 +48,7 @@ function select(keys:string[],selected:boolean){
   announce();persist()
 }
 function mode(item:UploadedTopicLayer,next:'filled'|'boundary'){item.mode=next;handles.get(item.id)?.setStyle(style(item));announce();persist()}
+function color(item:UploadedTopicLayer,next:string){item.color=next;handles.get(item.id)?.setStyle(style(item));announce();persist()}
 function locate(item:UploadedTopicLayer){const bounds=handles.get(item.id)?.getBounds();if(bounds?.isValid())props.map.fitBounds(bounds,{padding:[80,80],maxZoom:18})}
 function remove(item:UploadedTopicLayer){handles.get(item.id)?.remove();handles.delete(item.id);items.value=items.value.filter(value=>value.id!==item.id);removing.value='';delete expanded.value[item.id];announce();persist()}
 async function open(){opened.value=true;validation.value='';await nextTick();dialog.value?.showModal();emit('dialog',true)}
@@ -94,7 +95,7 @@ defineExpose({open,select})
     <header v-if="items.length&&!integrated"><b>上传图层 <small>{{ items.length }}</small></b></header>
     <p v-if="loading" role="status">正在读取本机图层…</p><p v-if="storageError" class="upload-error" role="alert">{{ storageError }}</p>
     <TopicLayerCard v-for="item in matches" :key="item.id" v-model:expanded="expanded[item.id]" :title="item.name" :subtitle="`${item.data.features.length} 个要素 · ${item.analyzable?'面图层':'点／线图层，仅供展示'}`" :checked="item.selected" class="uploaded-layer" :data-upload-id="item.id" :data-layer-key="`upload:${item.id}`" :style="integrated?{order:layerOrder?.[`upload:${item.id}`]??10000}:undefined" @select="select([item.id],$event)">
-      <TopicLayerDisplayMode :mode="item.mode" :name="`upload-mode-${item.id}`" :label="`${item.name}显示模式`" :color="item.color" @change="mode(item,$event)" />
+      <TopicLayerDisplayMode :mode="item.mode" :name="`upload-mode-${item.id}`" :label="`${item.name}显示模式`" :color="item.color" color-editable @change="mode(item,$event)" @color-change="color(item,$event)" />
       <div v-if="removing===item.id" class="upload-remove"><span>从当前浏览器移除此图层？</span><button type="button" @click="remove(item)">确认</button><button type="button" @click="removing=''">取消</button></div>
       <template #actions><button type="button" @click="locate(item)">定位</button><button type="button" @click="removing=removing===item.id?'':item.id">移除</button></template>
     </TopicLayerCard>
@@ -104,8 +105,8 @@ defineExpose({open,select})
       <form @submit.prevent="submit"><header><h2 id="topic-upload-title">上传 SHP 图层</h2><button type="button" aria-label="关闭上传图层" @click="close">×</button></header>
         <div class="topic-upload-body"><label>图层名称 <em>*</em><input v-model="name" aria-label="上传图层名称" maxlength="60" required :disabled="busy" /></label>
           <label>选择同名组件 <em>*</em><input type="file" multiple accept=".shp,.dbf,.shx,.prj,.cpg" aria-label="SHP 组件文件" :disabled="busy" @change="choose" /></label><p>必选 .shp、.dbf，建议同时选择 .prj、.shx、.cpg。总大小不超过 50MB，单层最多 5,000 个要素。</p><p class="file-names">{{ files.map(file=>file.name).join('、') }}</p>
-          <label>源坐标系<select v-model="crs" aria-label="SHP 源坐标系" :disabled="busy"><option v-for="option in UPLOAD_CRS" :key="option.code" :value="option.code">{{ option.name }}</option></select></label>
-          <label>属性文字编码<select v-model="encoding" aria-label="SHP 属性文字编码" :disabled="busy"><option value="auto">自动（优先读取 .cpg）</option><option value="utf-8">UTF-8</option><option value="gb18030">GB18030 / GBK</option></select></label>
+          <label>源坐标系<ElSelect :empty-values="[null, undefined]" :append-to="dialog" :popper-options="{ strategy: 'fixed' }" class="system-select" popper-class="system-select-options" v-model="crs" aria-label="SHP 源坐标系" :disabled="busy"><ElOption v-for="option in UPLOAD_CRS" :key="option.code" :value="option.code" :label="String(option.name)" /></ElSelect></label>
+          <label>属性文字编码<ElSelect :empty-values="[null, undefined]" :append-to="dialog" :popper-options="{ strategy: 'fixed' }" class="system-select" popper-class="system-select-options" v-model="encoding" aria-label="SHP 属性文字编码" :disabled="busy"><ElOption value="auto" label="自动（优先读取 .cpg）" /><ElOption value="utf-8" label="UTF-8" /><ElOption value="gb18030" label="GB18030 / GBK" /></ElSelect></label>
           <p>图层保存在当前浏览器，按账号、部门和专题隔离。面图层可以参与面积分析；坐标系不明确时请先核实，避免位置偏移。</p>
           <p v-if="validation" class="upload-error" role="alert">{{ validation }}</p><p v-if="busy" role="status">正在解析 SHP 并转换坐标…</p>
         </div><footer><button type="button" @click="close">{{ busy?'取消解析':'取消' }}</button><button type="submit" class="primary" :disabled="busy||loading">{{ busy?'解析中…':'添加到地图' }}</button></footer>
