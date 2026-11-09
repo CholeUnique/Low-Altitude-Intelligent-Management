@@ -8,8 +8,7 @@ import 'leaflet/dist/leaflet.css'
 
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
 import { getJiulongArcGisLayerBounds } from '@/utils/jiulong-arcgis-layers'
-import { getMapServiceRegionTree, listEnabledMapServices, listMapServicesForDepartments, updateMapService, type MapServiceItem, type MapServiceRegionGroup, type MapServiceRegionNode } from '@/api/map-service'
-import { getDepartmentList } from '@/api/account-management'
+import { getMapServiceRegionTree, listEnabledMapServices, type MapServiceItem, type MapServiceRegionGroup, type MapServiceRegionNode } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
 import type { DashboardMapLayer, DronePatrolRoute } from '@/types'
 import {
@@ -142,18 +141,6 @@ interface MapServiceGroup {
   kind?: 'vector' | 'imagery'
 }
 const requestedLayerOrder: string[] = []
-let dragOriginalStack: string[] = []
-const mapServiceOrderSaving = ref(false)
-const draggingGroupId = ref('')
-const dragGhost = ref<{ name: string; x: number; y: number; width: number; height: number }>()
-let dragPressTimer: number | undefined
-let dragPointerId: number | undefined
-let dragActive = false
-let dragGroupId = ''
-let dragStartX = 0, dragStartY = 0, dragRowX = 0, dragRowY = 0
-let dragOriginalOrder: string[] = []
-let previousUserSelect = ''
-let suppressGroupClick = false
 const pendingGroupIds = reactive(new Set<string>())
 function groupKind(group: MapServiceGroup) {
   return group.kind || (group.layers.some(item => item.arcGisGeometryType) || /矢量|农田|行政|VECTOR|FEATURE/i.test(`${group.name} ${group.source.type}`) ? 'vector' : 'imagery')
@@ -201,7 +188,6 @@ function selectRegion(type: string, node: MapServiceRegionNode) {
 }
 function toggleRegion(type: string, node: MapServiceRegionNode) {
   const key = regionKey(type, node.code)
-  if (!node.children?.length) return
   if (expandedRegions.value.includes(key)) {
     const descendants = new Set(regionEntries([node]).map(entry => regionKey(type, entry.node.code)))
     expandedRegions.value = expandedRegions.value.filter(item => !descendants.has(item))
@@ -418,173 +404,8 @@ function syncMapServiceStack() {
   })
 }
 
-function stopMapServiceDrag() {
-  if (dragPressTimer) window.clearTimeout(dragPressTimer)
-  dragPressTimer = undefined
-  window.removeEventListener('pointermove', onMapServicePointerMove)
-  window.removeEventListener('pointerup', onMapServicePointerUp)
-  window.removeEventListener('pointercancel', onMapServicePointerCancel)
-  window.removeEventListener('blur', onMapServicePointerCancel)
-  if (dragActive) document.body.style.userSelect = previousUserSelect
-  dragPointerId = undefined
-  dragGroupId = ''
-  dragActive = false
-  draggingGroupId.value = ''
-  dragGhost.value = undefined
-}
-
-function onMapServicePointerDown(event: PointerEvent, group: MapServiceGroup) {
-  if (event.button !== 0 || mapServiceOrderSaving.value || mapServicesLoading.value || (selectedRegion.value && selectedRegion.value !== 'all')) return
-  stopMapServiceDrag()
-  dragPointerId = event.pointerId
-  dragStartX = event.clientX
-  dragStartY = event.clientY
-  dragGroupId = group.id
-  const row = event.currentTarget as HTMLElement
-  const rect = row.getBoundingClientRect()
-  dragRowX = rect.left
-  dragRowY = rect.top
-  dragOriginalOrder = mapServiceGroups.value.map((item) => item.id)
-  dragOriginalStack = [...requestedLayerOrder]
-  window.addEventListener('pointermove', onMapServicePointerMove)
-  window.addEventListener('pointerup', onMapServicePointerUp)
-  window.addEventListener('pointercancel', onMapServicePointerCancel)
-  window.addEventListener('blur', onMapServicePointerCancel)
-  dragPressTimer = window.setTimeout(() => {
-    dragPressTimer = undefined
-    dragActive = true
-    draggingGroupId.value = group.id
-    previousUserSelect = document.body.style.userSelect
-    document.body.style.userSelect = 'none'
-    dragGhost.value = { name: group.name, x: rect.left, y: rect.top, width: rect.width, height: rect.height }
-  }, 240)
-}
-
-function onMapServicePointerMove(event: PointerEvent) {
-  if (event.pointerId !== dragPointerId) return
-  if (!dragActive) {
-    if (Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY) > 6) stopMapServiceDrag()
-    return
-  }
-  event.preventDefault()
-  if (dragGhost.value) {
-    dragGhost.value = { ...dragGhost.value, x: dragRowX + event.clientX - dragStartX, y: dragRowY + event.clientY - dragStartY }
-  }
-  const list = document.getElementById(layerPanelId)?.querySelector<HTMLElement>('.map-service-sort-list')
-  if (!list) return
-  const scroller = list.parentElement
-  if (scroller) {
-    const bounds = scroller.getBoundingClientRect()
-    if (event.clientY < bounds.top + 28) scroller.scrollTop -= 12
-    else if (event.clientY > bounds.bottom - 28) scroller.scrollTop += 12
-  }
-  const siblings = [...list.querySelectorAll<HTMLElement>('.map-service-group')]
-    .filter((element) => element.dataset.groupId !== dragGroupId)
-  const insertAt = siblings.findIndex((element) => event.clientY < element.getBoundingClientRect().top + element.getBoundingClientRect().height / 2)
-  const targetIndex = insertAt < 0 ? siblings.length : insertAt
-  const currentIndex = mapServiceGroups.value.findIndex((item) => item.id === dragGroupId)
-  if (currentIndex < 0 || currentIndex === targetIndex) return
-  const reordered = [...mapServiceGroups.value]
-  const [moved] = reordered.splice(currentIndex, 1)
-  if (!moved) return
-  const kind = groupKind(moved)
-  const otherKindBefore = siblings.slice(0, targetIndex).some(element => {
-    const group = mapServiceGroups.value.find(item => item.id === element.dataset.groupId)
-    return group && groupKind(group) !== kind
-  })
-  const vectors = reordered.filter(item => groupKind(item) === 'vector').length
-  // 跨分区拖动直接拒绝，既不改变画面顺序，也不向后端保存无效顺序。
-  if ((kind === 'imagery' && targetIndex < vectors) || (kind === 'vector' && otherKindBefore)) return
-  reordered.splice(targetIndex, 0, moved)
-  mapServiceGroups.value = reordered
-  requestedLayerOrder.splice(0, requestedLayerOrder.length, ...[...reordered].reverse().flatMap(group => group.layers.map(service => String(service.id))))
-  syncMapServiceStack()
-}
-
-async function persistMapServiceOrder(previousOrder: string[], requestVersion: number) {
-  const previousStack = [...dragOriginalStack]
-  mapServiceOrderSaving.value = true
-  try {
-    const departments = await getDepartmentList()
-    const departmentIds = departments.map((department) => String(department.id))
-    if (!departmentIds.length) throw new Error('无法获取部门列表，排序未保存')
-    const allServices = await listMapServicesForDepartments(departmentIds)
-    if (requestVersion !== mapServiceRequestVersion) return
-    const visibleOrder = mapServiceGroups.value.map((group) => group.id)
-    const visibleIds = new Set(visibleOrder)
-    if (visibleOrder.some((id) => !allServices.some((service) => String(service.id) === id))) {
-      throw new Error('部分地图服务未能从后台读到，排序未保存')
-    }
-    const orderedVisible = new Map(mapServiceGroups.value.map((group) => [group.id, group.source]))
-    let visibleIndex = 0
-    const reordered = allServices.map((service) => visibleIds.has(String(service.id))
-      ? orderedVisible.get(visibleOrder[visibleIndex++]!) || service
-      : service)
-    const changes = reordered.map((service, index) => ({ service, sort: index + 1, oldSort: Number(service.sort) || 0 }))
-      .filter(({ service, sort }) => Number(service.sort) !== sort)
-    const updateSort = (service: MapServiceItem, sort: number) => updateMapService({
-      id: service.id,
-      name: service.name,
-      serviceUrl: service.serviceUrl,
-      ...(service.type ? { type: service.type } : {}),
-      sort,
-      remark: service.remark,
-      deptIds: service.deptIds || [],
-    })
-    const results = await Promise.allSettled(changes.map(({ service, sort }) => updateSort(service, sort)))
-    if (results.some((result) => result.status === 'rejected')) {
-      await Promise.allSettled(changes.map(({ service, oldSort }) => updateSort(service, oldSort)))
-      throw new Error('后台排序保存失败，已尝试恢复原顺序')
-    }
-    if (requestVersion === mapServiceRequestVersion) {
-      mapServiceGroups.value.forEach((group) => {
-        group.source.sort = reordered.findIndex((service) => String(service.id) === group.id) + 1
-      })
-      showToolMessage('图层顺序已保存，所有用户将共用此排序')
-    }
-  } catch (reason) {
-    if (requestVersion === mapServiceRequestVersion) {
-      const byId = new Map(mapServiceGroups.value.map((group) => [group.id, group]))
-      mapServiceGroups.value = previousOrder.map((id) => byId.get(id)).filter((group): group is MapServiceGroup => Boolean(group))
-      requestedLayerOrder.splice(0, requestedLayerOrder.length, ...previousStack)
-      syncMapServiceStack()
-      showToolMessage(reason instanceof Error ? reason.message : '排序保存失败', 5000)
-    }
-  } finally {
-    mapServiceOrderSaving.value = false
-  }
-}
-
-function onMapServicePointerUp(event: PointerEvent) {
-  if (event.pointerId !== dragPointerId) return
-  const wasDragging = dragActive
-  const previousOrder = dragOriginalOrder
-  const requestVersion = mapServiceRequestVersion
-  stopMapServiceDrag()
-  if (!wasDragging) return
-  suppressGroupClick = true
-  window.setTimeout(() => { suppressGroupClick = false }, 100)
-  if (previousOrder.some((id, index) => id !== mapServiceGroups.value[index]?.id)) {
-    if (user.currentUser?.role === 'ADMIN') void persistMapServiceOrder(previousOrder, requestVersion)
-    else showToolMessage('图层顺序仅在当前页面生效；管理员可保存为所有用户共用的顺序')
-  }
-}
-
-function onMapServicePointerCancel() {
-  if (dragActive) {
-    const byId = new Map(mapServiceGroups.value.map((group) => [group.id, group]))
-    mapServiceGroups.value = dragOriginalOrder.map((id) => byId.get(id)).filter((group): group is MapServiceGroup => Boolean(group))
-    requestedLayerOrder.splice(0, requestedLayerOrder.length, ...dragOriginalStack)
-    syncMapServiceStack()
-  }
-}
-
 function onMapServiceGroupClick(group: MapServiceGroup) {
   if (pendingGroupIds.has(group.id)) return
-  if (suppressGroupClick) {
-    suppressGroupClick = false
-    return
-  }
   if (group.layers.length === 1 && categoryPanelFor(group.layers[0]!)) toggleCategoryFolder(group.layers[0]!)
   else if (group.layers.length === 1) void toggleMapServiceGroupVisibility(group)
   else void toggleMapServiceGroup(group)
@@ -1819,10 +1640,10 @@ onBeforeUnmount(() => {
       <aside :id="layerPanelId" class="layer-manager" :inert="layerPanelCollapsed" :aria-hidden="layerPanelCollapsed">
         <div v-if="!floatingControls" class="tool-title"><b><svg class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg>图层管理</b><span class="tool-title-state">{{ mapServiceGroups.length }} 项服务</span></div>
         <div v-if="floatingControls" :id="`${layerPanelId}-search`" class="layer-manager-search"></div>
-        <div class="layer-manager-list" :aria-busy="mapServiceOrderSaving">
-          <div class="region-filter"><label>行政区划</label><button type="button" class="region-picker-trigger" :title="regionPickerOpen ? '收起' : '展开'" :aria-expanded="regionPickerOpen" @click="regionPickerOpen = !regionPickerOpen">{{ selectedRegionLabel }} <span>{{ regionPickerOpen ? '⌃' : '⌄' }}</span></button><div v-if="regionPickerOpen" class="region-picker"><button type="button" class="region-option" :class="{ active: selectedRegion === 'all' }" @click="selectedRegion = 'all'; regionPickerOpen = false">全部图层</button><section v-for="regionGroup in regionSelectionOptions" :key="regionGroup.dataType"><strong>{{ regionGroup.dataTypeName || regionGroup.dataType }}</strong><template v-for="entry in regionGroup.entries" :key="regionKey(regionGroup.dataType, entry.node.code)"><button type="button" class="region-node region-node-select" :class="{ active: selectedRegion === regionKey(regionGroup.dataType, entry.node.code) }" :style="{ paddingLeft: `${12 + entry.depth * 10}px` }" :aria-expanded="entry.node.children?.length ? expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) : undefined" @click="selectRegion(regionGroup.dataType, entry.node)"><span>{{ entry.node.name }}（{{ regionServiceCount(regionGroup.dataType, entry.node.code) }}）</span><span v-if="entry.node.children?.length" class="region-node-toggle" :title="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '收起' : '展开'" aria-hidden="true">{{ expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '⌄' : '›' }}</span></button>          <div v-if="selectedRegion === regionKey(regionGroup.dataType, entry.node.code) || expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code))" class="map-service-sort-list region-service-list" :style="{ '--region-layer-indent': `${entry.depth * 10 + 10}px` }">
-            <div v-for="group in mapServiceGroups.filter(item => item.source.dataType === regionGroup.dataType && (item.source.regionCode || null) === entry.node.code)" :key="group.id" class="map-service-group" :class="{ 'is-dragging': draggingGroupId === group.id }" :data-group-id="group.id" :data-layer-kind="groupKind(group)">
-              <button :style="{ paddingLeft: `${12 + entry.depth * 10}px` }" :disabled="pendingGroupIds.has(group.id)" class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="`${group.name}(长按可拖动排序)`" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @pointerdown="onMapServicePointerDown($event, group)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
+        <div class="layer-manager-list" :aria-busy="mapServicesLoading">
+          <div class="region-filter"><label>行政区划</label><button type="button" class="region-picker-trigger" :title="regionPickerOpen ? '收起' : '展开'" :aria-expanded="regionPickerOpen" @click="regionPickerOpen = !regionPickerOpen">{{ selectedRegionLabel }} <span>{{ regionPickerOpen ? '⌃' : '⌄' }}</span></button><div v-if="regionPickerOpen" class="region-picker"><button type="button" class="region-option" :class="{ active: selectedRegion === 'all' }" @click="selectedRegion = 'all'; regionPickerOpen = false">全部图层</button><section v-for="regionGroup in regionSelectionOptions" :key="regionGroup.dataType"><strong>{{ regionGroup.dataTypeName || regionGroup.dataType }}</strong><template v-for="entry in regionGroup.entries" :key="regionKey(regionGroup.dataType, entry.node.code)"><button type="button" class="region-node region-node-select" :class="{ active: selectedRegion === regionKey(regionGroup.dataType, entry.node.code) }" :style="{ paddingLeft: `${12 + entry.depth * 10}px` }" :aria-expanded="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code))" @click="selectRegion(regionGroup.dataType, entry.node)"><span>{{ entry.node.name }}（{{ regionServiceCount(regionGroup.dataType, entry.node.code) }}）</span><span class="region-node-toggle" :title="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '收起' : '展开'" aria-hidden="true">{{ expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '⌄' : '›' }}</span></button>          <div v-if="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code))" class="map-service-sort-list region-service-list" :style="{ '--region-layer-indent': `${entry.depth * 10 + 10}px` }">
+            <div v-for="group in mapServiceGroups.filter(item => item.source.dataType === regionGroup.dataType && (item.source.regionCode || null) === entry.node.code)" :key="group.id" class="map-service-group" :data-group-id="group.id" :data-layer-kind="groupKind(group)">
+              <button :style="{ paddingLeft: `${12 + entry.depth * 10}px` }" :disabled="pendingGroupIds.has(group.id)" class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="group.name" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
                 <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em role="switch" tabindex="0" :aria-checked="isMapServiceGroupActive(group)" :aria-label="`切换${group.name}可视性`" :title="isMapServiceGroupActive(group) ? '关闭整个服务及其依赖边界' : '显示服务图层'" @pointerdown.stop @click.stop="toggleMapServiceGroupVisibility(group)" @keydown.enter.stop.prevent="toggleMapServiceGroupVisibility(group)">{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
               </button>
               <div v-if="group.layers.length === 1 && attributeFilters[String(group.layers[0]!.id)]" class="attribute-filter-chip">{{ attributeFilters[String(group.layers[0]!.id)] }}<button type="button" aria-label="清除属性筛选" @click="clearAttributeFilter(group.layers[0]!)">×</button></div>
@@ -1858,7 +1679,6 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div></template></section></div><small v-if="regionTreeError">{{ regionTreeError }}，可选择全部图层</small></div>
-          <div v-if="mapServiceOrderSaving" class="layer-order-save-status" role="status">正在保存共享排序…</div>
           <div v-if="selectedRegion === 'all' && jiulongAdminService" class="map-service-group administrative-boundary-group">
             <button class="layer-row map-service-row" @contextmenu="jiulongAdminService && onLayerContextMenu($event, jiulongAdminService)" :class="{ active: jiulongBoundaryVisible }" type="button" title="九龙镇行政区划边界" role="switch" :aria-checked="jiulongBoundaryVisible" @click="toggleJiulongBoundary">
               <i class="layer-kind" :style="jiulongAdminService ? { color: vectorRowColor(jiulongAdminService) } : undefined"><MapLocation /></i><span><b>九龙镇行政区划边界</b></span><em :title="jiulongBoundaryVisible ? '隐藏' : '显示'">{{ jiulongBoundaryVisible ? '●' : '○' }}</em>
@@ -1868,8 +1688,8 @@ onBeforeUnmount(() => {
           <div v-if="mapServicesError" class="layer-panel-message error">{{ mapServicesError }}</div>
           <div v-else-if="!mapServicesLoading && !mapServiceGroups.length" class="layer-panel-message">暂无可用的地图服务</div>
           <TransitionGroup v-else-if="selectedRegion === 'all'" tag="div" name="map-service-sort" class="map-service-sort-list">
-            <div v-for="(group, groupIndex) in visibleServiceGroups" :key="group.id" class="map-service-group" :class="{ 'is-dragging': draggingGroupId === group.id }" :data-group-id="group.id" :data-layer-kind="groupKind(group)"><div v-if="groupIndex === 0 || groupKind(visibleServiceGroups[groupIndex - 1]!) !== groupKind(group)" class="map-service-kind-label">{{ groupKind(group) === 'vector' ? '矢量图层' : '影像图层' }}</div>
-              <button :disabled="pendingGroupIds.has(group.id)" class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="`${group.name}(长按可拖动排序)`" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @pointerdown="onMapServicePointerDown($event, group)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
+            <div v-for="(group, groupIndex) in visibleServiceGroups" :key="group.id" class="map-service-group" :data-group-id="group.id" :data-layer-kind="groupKind(group)"><div v-if="groupIndex === 0 || groupKind(visibleServiceGroups[groupIndex - 1]!) !== groupKind(group)" class="map-service-kind-label">{{ groupKind(group) === 'vector' ? '矢量图层' : '影像图层' }}</div>
+              <button :disabled="pendingGroupIds.has(group.id)" class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="group.name" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
                 <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em role="switch" tabindex="0" :aria-checked="isMapServiceGroupActive(group)" :aria-label="`切换${group.name}可视性`" :title="isMapServiceGroupActive(group) ? '关闭整个服务及其依赖边界' : '显示服务图层'" @pointerdown.stop @click.stop="toggleMapServiceGroupVisibility(group)" @keydown.enter.stop.prevent="toggleMapServiceGroupVisibility(group)">{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
               </button>
               <div v-if="group.layers.length === 1 && attributeFilters[String(group.layers[0]!.id)]" class="attribute-filter-chip">{{ attributeFilters[String(group.layers[0]!.id)] }}<button type="button" aria-label="清除属性筛选" @click="clearAttributeFilter(group.layers[0]!)">×</button></div>

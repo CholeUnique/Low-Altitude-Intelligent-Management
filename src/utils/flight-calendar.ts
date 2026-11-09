@@ -31,10 +31,6 @@ function value(task: FlightTaskRecord, camelCase: string, snakeCase: string): un
   return task[camelCase] ?? task[snakeCase]
 }
 
-function hasDateTime(value: unknown): boolean {
-  return Boolean(executionDateTime(value))
-}
-
 function hasTaskError(task: FlightTaskRecord): boolean {
   const errorCode = text(value(task, 'errorCode', 'error_code'))
   return Boolean(errorCode) && errorCode !== '0' && errorCode !== '200'
@@ -44,8 +40,7 @@ function hasTaskError(task: FlightTaskRecord): boolean {
  * 页面内部状态：0 待执行、1 执行中、2 已完成、3 已取消、4 执行失败、
  * 5 已挂起、6 部分执行、7 执行终止。
  *
- * 大翼任务 status 使用 FlightTaskStatusEnum（1~7）。时间字段负责判断生命周期，
- * progressing=1 是当前在飞的最高优先级信号；errorCode 的 0/200 均表示无错误。
+ * 按大翼任务状态码展示每次执行；错误码仅补充说明，不替代任务状态。
  */
 function taskStatus(task: FlightTaskRecord): Pick<FlightCalendarItem, 'status' | 'statusText' | 'statusDetail'> {
   const rawStatus = value(task, 'status', 'status')
@@ -56,24 +51,9 @@ function taskStatus(task: FlightTaskRecord): Pick<FlightCalendarItem, 'status' |
     ? (errorDescription || `错误码 ${errorCode}`)
     : undefined
 
-  if (Number(value(task, 'progressing', 'progressing')) === 1) return { status: 1 }
-
-  // 非 0/200 的三方错误码代表异常；即使三方 status 尚未及时刷新，也不能显示成功。
-  if (statusDetail) return { status: 4, statusDetail }
-
-  // 大翼返回状态中的明确结果优先于时间字段的兜底判断。
-  if (code === 4) return { status: 2 }
-  if (code === 5) return { status: 6 }
-  if (code === 6) return { status: 4 }
-  if (code === 7) return { status: 7 }
-  if (code === 3) return { status: 5 }
-
-  const startTime = value(task, 'startTime', 'start_time')
-  const endTime = value(task, 'endTime', 'end_time')
-  if (hasDateTime(endTime)) return { status: 2 }
-  if (hasDateTime(startTime) || code === 2) return { status: 1 }
-  if (code === 1) return { status: 0 }
-  return { status: 0, statusText: Number.isFinite(code) ? `状态 ${code}` : '待执行' }
+  const statuses: Record<number, number> = { 1: 0, 2: 1, 3: 5, 4: 2, 5: 6, 6: 4, 7: 7 }
+  if (statuses[code] !== undefined) return { status: statuses[code], statusDetail }
+  return { status: undefined, statusText: Number.isFinite(code) ? `状态 ${code}` : '状态未返回', statusDetail }
 }
 
 /** 大翼飞行计划 status：1 待执行、2 执行中、3 已完成。 */
@@ -81,8 +61,8 @@ function planStatus(plan: FlightPlanItem): Pick<FlightCalendarItem, 'status' | '
   if (plan.status === 1) return { status: 0 }
   if (plan.status === 2) return { status: 1 }
   if (plan.status === 3) return { status: 2 }
-  if (plan.status === undefined || Number.isNaN(plan.status)) return { statusText: '状态未返回' }
-  return { statusText: `计划状态 ${plan.status}` }
+  if (plan.status === undefined || Number.isNaN(plan.status)) return { status: undefined, statusText: '状态未返回' }
+  return { status: undefined, statusText: `计划状态 ${plan.status}` }
 }
 
 /** 每条飞行任务对应一次日历排期；无任务的计划仍保留为计划排期。 */

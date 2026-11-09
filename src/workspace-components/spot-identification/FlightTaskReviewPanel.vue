@@ -74,7 +74,6 @@ watch(actionNotice, (value) => {
   if (value) noticeToastTimer = setTimeout(() => { actionNotice.value = '' }, 3000)
 })
 let pendingMedia = new Map<string, Promise<void>>()
-let pendingCounts = new Map<string, Promise<void>>()
 const error = ref('')
 const planKeyword = ref('')
 const routeTypeFilter = ref('')
@@ -473,25 +472,22 @@ async function forEachTask(taskList: FlightReviewTask[], version: number, read: 
   }))
 }
 
-async function loadVisibleCounts() {
-  const version = loadVersion
+async function loadAllCounts(taskList: FlightReviewTask[], version: number) {
   const deptId = user.activeDeptId
-  await forEachTask(pageRows.value.flatMap(row => row.tasks), version, async task => {
-    if (taskMediaTotals.value[task.id] !== undefined) return
-    const existing = pendingCounts.get(task.id)
-    if (existing) return existing
-    const pending = (async () => {
-      try {
-        // 仅取一条记录，数量直接用后端 total；不遍历素材分页。
-        const result = await getFlightReviewMedia(task.id, 1, 1, deptId)
-        if (version === loadVersion) taskMediaTotals.value = { ...taskMediaTotals.value, [task.id]: result.total }
-      } catch {
-        if (version === loadVersion && !failedCountTasks.value.includes(task.id)) failedCountTasks.value.push(task.id)
-      }
-    })()
-    pendingCounts.set(task.id, pending)
-    try { await pending } finally { if (pendingCounts.get(task.id) === pending) pendingCounts.delete(task.id) }
+  const totals: Record<string, number> = {}
+  const failures: string[] = []
+  await forEachTask(taskList, version, async task => {
+    try {
+      // 只查询一条素材，用接口 total 判断计划是否有成果。
+      const result = await getFlightReviewMedia(task.id, 1, 1, deptId)
+      totals[task.id] = result.total
+    } catch {
+      failures.push(task.id)
+    }
   })
+  if (version !== loadVersion) return
+  taskMediaTotals.value = totals
+  failedCountTasks.value = failures
 }
 
 async function loadDepartmentSummary(version: number) {
@@ -531,7 +527,6 @@ async function loadData() {
   actionNotice.value = ''
   openingPlanId.value = ''
   pendingMedia = new Map()
-  pendingCounts = new Map()
   mediaPreviewStatus.value = {}
   loading.value = true
   mediaLoading.value = false
@@ -552,8 +547,9 @@ async function loadData() {
     plans.value = planList.filter((plan) => plan.id)
     const planIds = new Set(plans.value.map((plan) => plan.id))
     tasks.value = taskList.filter((task) => task.id && planIds.has(task.planId))
+    await loadAllCounts(tasks.value, version)
+    if (version !== loadVersion) return
     loading.value = false
-    void loadVisibleCounts()
     void loadFilteredMedia()
   } catch (reason) {
     if (version !== loadVersion) return
@@ -629,6 +625,8 @@ const baseFilteredRows = computed(() => rows.value.filter((row) => {
   return true
 }))
 const filteredRows = computed(() => baseFilteredRows.value.filter(row => {
+  // 查询失败时无法判断类型，保留该计划并提示数量不完整。
+  if (resultTypeFilter.value && row.mediaFailed) return true
   if (resultTypeFilter.value === 'image' && !row.imageCount) return false
   if (resultTypeFilter.value === 'video' && !row.videoCount) return false
   if (resultTypeFilter.value === 'other' && !row.otherCount) return false
@@ -636,6 +634,7 @@ const filteredRows = computed(() => baseFilteredRows.value.filter(row => {
 }))
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / pageSize.value)))
 const pageRows = computed(() => filteredRows.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
+const resultsLoading = computed(() => loading.value || Boolean(resultTypeFilter.value && mediaLoading.value))
 watch(pageCount, count => { currentPage.value = Math.min(currentPage.value, count) })
 const detailRow = computed(() => rows.value.find((row) => row.plan.id === detailPlanId.value))
 /** 成果弹窗只列可预览的图片/视频；.DSC/.DAT 等后端附带文件不进列表。 */
@@ -647,9 +646,6 @@ const previewOrdinal = computed(() => previewMedia.value ? detailMedia.value.fin
 watch(() => previewMedia.value ? `${mediaKey(previewMedia.value)}|${previewMedia.value.localFileUrl}|${previewMedia.value.originalUrl}|${previewMedia.value.thumbnailUrl}` : '', () => { resetPreviewImageTransform(); void initializePreview() })
 watch(mediaFullscreen, resetPreviewImageTransform)
 watch([planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, regionFilter, startDate, endDate, resultTypeFilter, pageSize], () => { currentPage.value = 1 })
-watch(() => loading.value || resultTypeFilter.value ? '' : pageRows.value.map(row => row.plan.id).join(','), key => {
-  if (key) void loadVisibleCounts()
-})
 watch([resultTypeFilter, planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, regionFilter, startDate, endDate], () => { void loadFilteredMedia() })
 watch(() => user.activeDeptId, () => { void loadData() }, { immediate: true })
 onMounted(() => {
@@ -774,7 +770,7 @@ async function exportList() {
     </section>
 
     <section class="summary-grid">
-      <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><Calendar /></i><div><span>飞行计划</span><strong>{{ loading ? '—' : filteredRows.length }}</strong><small>当前筛选结果</small></div></article>
+      <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><Calendar /></i><div><span>飞行计划</span><strong>{{ resultsLoading ? '—' : filteredRows.length }}</strong><small>{{ failedCountTasks.length || (resultTypeFilter && failedMediaTasks.length) ? '部分成果读取失败，数量待确认' : '当前筛选结果' }}</small></div></article>
       <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><Picture /></i><div><span>图片文件</span><strong>{{ departmentMediaSummary.photoCount?.toLocaleString() ?? '—' }}</strong><small>{{ summaryFailed ? '部门素材统计读取失败' : '当前部门素材统计，不随列表筛选变化' }}</small></div></article>
       <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><VideoCamera /></i><div><span>视频文件</span><strong>{{ departmentMediaSummary.videoCount?.toLocaleString() ?? '—' }}</strong><small>{{ summaryFailed ? '部门素材统计读取失败' : '当前部门素材统计，不随列表筛选变化' }}</small></div></article>
       <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="2.75" y="2.75" width="18.5" height="18.5" rx="2" /><path d="M12 2.75v18.5M2.75 12h18.5" opacity=".55" /><path d="m4.5 9 3-3 3.2 2.2m3.2 9.4 2.2-2.1 3.2 1" opacity=".8" /><path d="m4.5 19.5 3.2-4.2 2.8-1.6 3.2-3.5 5.8-5.7" stroke-width="2" /></svg></i><div><span>正射成果</span><strong>--</strong><small>待后端提供成果关联</small></div></article>
@@ -785,11 +781,12 @@ async function exportList() {
     <p v-if="uploadMessage" class="upload-success" role="status">{{ uploadMessage }}</p>
 
     <section class="result-panel panel">
-      <header><div><h2>全部飞行结果</h2><span>已载入计划 · {{ filteredRows.length }} 条</span><span v-if="mediaLoading" class="loading-note">正在读取成果文件 · {{ completedMediaTaskIds.length }}/{{ tasks.length }} 个任务</span></div><button type="button" class="outline-button" :disabled="loading || exporting || !baseFilteredRows.length" @click="exportList">{{ exporting ? '正在生成…' : '导出清单' }}</button></header>
+      <header><div><h2>全部飞行结果</h2><span>{{ resultsLoading ? '正在核实成果…' : `已载入计划 · ${filteredRows.length} 条` }}</span><span v-if="mediaLoading" class="loading-note">正在读取成果文件 · {{ completedMediaTaskIds.length }}/{{ tasks.length }} 个任务</span></div><button type="button" class="outline-button" :disabled="resultsLoading || exporting || !baseFilteredRows.length" @click="exportList">{{ exporting ? '正在生成…' : '导出清单' }}</button></header>
       <div v-if="error" class="state error"><strong>成果读取失败</strong><span>{{ error }}</span><button type="button" @click="loadData">重新加载</button></div>
-      <div v-else-if="loading" class="state">正在读取飞行计划与任务…</div>
+      <div v-else-if="resultsLoading" class="state">正在核实飞行计划及成果，请稍候…</div>
       <div v-else-if="!filteredRows.length" class="state">{{ mediaLoading && resultTypeFilter ? '正在读取符合条件的成果…' : '当前条件下暂无飞行计划' }}</div>
       <template v-else>
+        <div v-if="failedCountTasks.length" class="warning">{{ failedCountTasks.length }} 个飞行任务的成果数量读取失败，相关计划暂时保留，总数待确认。请重新加载。</div>
         <div v-if="failedMediaTasks.length" class="warning">{{ failedMediaTasks.length }} 个飞行任务的素材未能读取；相关数量可能不完整，可重新加载。</div>
         <div class="table-scroll"><table><thead><tr><th>飞行计划 / 结果目录</th><th>所属区划</th><th>关联需求工单</th><th>航线类型</th><th>任务类型</th><th>执行设备</th><th>完成时间</th><th>时长</th><th>成果文件</th><th>操作</th></tr></thead><tbody>
           <tr v-for="row in pageRows" :key="row.plan.id">
@@ -813,7 +810,7 @@ async function exportList() {
             </div></td>
           </tr>
         </tbody></table></div>
-        <footer><span>共 {{ filteredRows.length }} 条计划 · {{ mediaLoading ? `已读取 ${completedMediaTaskIds.length}/${tasks.length} 个任务成果` : failedMediaTasks.length ? '部分素材读取失败' : '成果文件按需读取' }}</span><div><button type="button" :disabled="currentPage <= 1" @click="currentPage--">‹</button><b>{{ currentPage }} / {{ pageCount }}</b><button type="button" :disabled="currentPage >= pageCount" @click="currentPage++">›</button><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="pageSize" aria-label="每页条数"><ElOption :value="8" label="8 条/页" /><ElOption :value="16" label="16 条/页" /><ElOption :value="32" label="32 条/页" /></ElSelect></div></footer>
+        <footer><span>共 {{ filteredRows.length }} 条计划 · {{ failedCountTasks.length || failedMediaTasks.length ? '部分成果读取失败，数量待确认' : '成果文件按需读取' }}</span><div><button type="button" :disabled="currentPage <= 1" @click="currentPage--">‹</button><b>{{ currentPage }} / {{ pageCount }}</b><button type="button" :disabled="currentPage >= pageCount" @click="currentPage++">›</button><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="pageSize" aria-label="每页条数"><ElOption :value="8" label="8 条/页" /><ElOption :value="16" label="16 条/页" /><ElOption :value="32" label="32 条/页" /></ElSelect></div></footer>
       </template>
     </section>
 
@@ -949,8 +946,8 @@ async function exportList() {
 .detail-body aside button.unavailable { opacity: .7; }
 .detail-body aside button small em { color: #b77352; font-style: normal; }
 .detail-body main { align-items: stretch; justify-content: stretch; background: #132836; }
-.media-stage { position: relative; flex: 1; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding-right: 12px; box-sizing: border-box; background: #142936; }
-.media-stage :deep(.shared-video-player) { right: 12px; width: auto; }
+.media-stage { position: relative; flex: 1; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; box-sizing: border-box; background: #142936; }
+.media-stage :deep(.shared-video-player) { right: 0; width: auto; }
 .detail-dialog:not(.is-fullscreen) .media-stage :deep(.collaboration-toggle) { box-sizing: border-box; height: 32px; display: flex; align-items: center; }
 .detail-body main .media-stage img { display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; transform-origin: center; transition: transform .08s ease-out; will-change: transform; pointer-events: none; user-select: none; }
 .media-stage.can-expand { cursor: zoom-in; touch-action: none; user-select: none; }
@@ -969,7 +966,7 @@ async function exportList() {
 .preview-unavailable button.preview-download:disabled { opacity: .65; cursor: wait; }
 .preview-unavailable small { display: block; margin-top: 12px; color: #8499a4; font-size: 12px; }
 .preview-unavailable small.download-error { color: #b04747; }
-.fullscreen-toggle { position: absolute; z-index: 9; top: 12px; right: 20px; display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 1px solid #8eb9c9; border-radius: 4px; color: #dff4fc; background: #0b3449e8; box-shadow: 0 3px 10px #00152355; cursor: pointer; }
+.fullscreen-toggle { position: absolute; z-index: 9; top: 12px; right: 14px; display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 1px solid #8eb9c9; border-radius: 4px; color: #dff4fc; background: #0b3449e8; box-shadow: 0 3px 10px #00152355; cursor: pointer; }
 .fullscreen-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .fullscreen-toggle:hover { border-color: #4ed6e8; color: #fff; background: #187f9f; }
 .detail-media-item{position:relative;border-bottom:1px solid #e2ebef}.detail-media-item.is-selected{background:#e6f5f9}.detail-body aside .media-preview-choice{border-bottom:0}.detail-body aside .has-srt .media-preview-choice small{box-sizing:border-box;padding-right:60px}.detail-body aside .media-srt-button{position:absolute;right:6px;bottom:7px;width:auto;margin:0;padding:2px 5px;border:1px solid #b6dbe5;border-radius:4px;background:#edf9fc;color:#1685a3;font-size:12px;line-height:16px;white-space:nowrap}.detail-body aside .media-srt-button:hover{background:#d5f0f6}.row-actions{flex-wrap:wrap}
@@ -998,8 +995,6 @@ async function exportList() {
 .detail-heading__summary strong { overflow: hidden; color: #31566b; font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
 .detail-dialog .detail-heading__summary small { overflow: hidden; color: #8197a4; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .detail-dialog>header button { flex: none; }
-.detail-dialog:not(.is-fullscreen) .media-stage::after { position: absolute; z-index: 1; top: 0; right: 0; bottom: 0; width: 12px; background: #fff; content: ''; pointer-events: none; }
-.detail-dialog.is-fullscreen .media-stage { padding-right: 0; }
 .detail-dialog.is-fullscreen .media-stage :deep(.shared-video-player) { right: 0; width: 100%; }
 @media(max-width:800px) { .detail-backdrop:not(.is-fullscreen) { padding: 8px; } .detail-body { grid-template-columns: 180px minmax(0,1fr); } .detail-heading { gap: 12px; } .detail-heading h2 { font-size: 20px; } .detail-heading__summary { gap: 3px; padding-left: 12px; } .detail-heading__summary strong { font-size: 14px; } .detail-dialog .detail-heading__summary small { font-size: 12px; } .preview-unavailable { margin: 12px; padding: 18px; } .fullscreen-nav.previous { left: 8px; } .fullscreen-nav.next { right: 8px; } }
 </style>

@@ -56,14 +56,14 @@ const app = renderer.createApp(component)
 const vm = app.mount({})
 const flush = async()=>{ for(let i=0;i<8;i++){await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick()} }
 await flush()
-assert.equal(calls.length,16,'Initial load only counts tasks on the first page')
+assert.equal(calls.length,18,'Initial load checks all task counts before pagination')
 assert(calls.every(call=>call.pageNum===1 && call.pageSize===1),'Initial load must not read full media pages')
 assert.equal(vm.departmentMediaSummary.photoCount,6896,'Summary independent of loaded files')
 assert.equal(vm.pageRows[0].fileCount,201,'Row count comes from total, not one returned record')
 assert.equal(Object.keys(vm.mediaByTask).length,0)
 vm.currentPage=2
 await flush()
-assert.equal(calls.length,18,'Next page counts only its tasks')
+assert.equal(calls.length,18,'Changing pages does not trigger more count requests')
 vm.currentPage=1
 await flush()
 assert.equal(calls.length,18,'Cached counts are reused')
@@ -107,9 +107,8 @@ emptyTasks.clear(); failingCounts.clear()
 emptyTasks.add('t16'); emptyTasks.add('t17')
 user.activeDeptId='dept-d'
 await flush()
-vm.currentPage=2
-await flush()
-assert.equal(vm.currentPage,1,'Removing an empty last page returns to a valid page')
+assert.equal(vm.filteredRows.length,16,'Empty later pages are excluded before pagination is displayed')
+assert.equal(vm.currentPage,1)
 assert.equal(vm.pageRows.length,16)
 taskList.forEach(task=>emptyTasks.add(task.id))
 user.activeDeptId='dept-e'

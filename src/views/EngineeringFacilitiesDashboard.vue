@@ -18,12 +18,12 @@ const router = useRouter()
 function openCard(label: string) {
   if (label === '设施总数' || label === '正常') {
     void router.push({ name: 'recognition', params: { tab: 'topics' }, query: { topic: FACILITIES_TOPIC_ID, view: 'map' } })
-  } else if (label === '异常' || label === '核查中') {
+  } else if (label === '异常' || label === '核查中' || label === '废弃') {
     void router.push({ name: 'task-list', query: { sceneCode: 'farmland-facilities' } })
   }
 }
 function cardDestination(label: string) {
-  return label === '设施总数' || label === '正常' ? '工程设施地图' : label === '异常' || label === '核查中' ? '工程设施任务列表' : ''
+  return label === '设施总数' || label === '正常' ? '工程设施地图' : label === '异常' || label === '核查中' || label === '废弃' ? '工程设施任务列表' : ''
 }
 const statistics = ref<FacilityStatistics>()
 const regions = ref<FacilityRegionStat[]>([])

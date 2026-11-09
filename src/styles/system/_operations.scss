@@ -14,6 +14,8 @@
   h1 { font-size: 22px; color: var(--ui-text); line-height: 28px; }
   h2, h3, .panel-title { color: var(--ui-text); font-size: 18px; line-height: 24px; }
   .panel-title, .panel > header { border-color: var(--ui-divider); background: transparent; min-height: 44px; padding-inline: 16px; }
+  // 面板底部分页栏的分隔线：组件内硬编码了浅色 #e0eaef，深色主题下会变成刺眼白线，这里统一回到主题分隔色。
+  .result-panel > footer, .panel > footer { border-color: var(--ui-divider); }
   .panel-title small, .cell-sub, .muted, .source-task, .loading-note { color: var(--ui-muted); font-size: 12px; line-height: 18px; }
   .filter-grid label, .filters label, .summary-card span { color: var(--ui-muted); font-size: 13px; }
   .filter-grid :is(input, select), .filters :is(input, select), .toolbar :is(input, select) {
@@ -42,6 +44,44 @@
 #app .flight-review .summary-upload-button:hover { background: var(--ui-hover); border-color: #558ba9; }
 #app .flight-review :is(.outline-button, .folder-icon, .soft-tag) { color: var(--ui-link); background: var(--ui-selected); border-color: var(--ui-border); border-radius: var(--ui-control-radius); }
 #app .flight-review .outline-button:hover { background: var(--ui-hover); color: var(--ui-text); }
+
+// 飞行成果详情弹窗：头部信息 + 正文（文件列表 / 底部信息条）统一到深色主题。
+// 组件内仍保留浅色硬编码，深色弹窗下会出现白底分区和低对比文字，这里集中覆盖。
+#app .flight-review .detail-dialog {
+  .detail-heading__summary { border-left-color: var(--ui-divider); }
+  .detail-heading__summary strong { color: var(--ui-text); }
+  .detail-heading__summary small { color: var(--ui-muted); }
+  > header button { color: var(--ui-body); background: var(--ui-input); }
+  > header button:hover { color: var(--ui-text); background: var(--ui-hover); }
+
+  .detail-body aside { background: var(--ui-surface); border-right-color: var(--ui-divider); }
+  .detail-body aside button { color: var(--ui-body); border-bottom-color: var(--ui-divider); }
+  .detail-body aside button:hover { background: var(--ui-hover); }
+  .detail-body aside button.selected { background: var(--ui-selected); }
+  .detail-body aside button > span { color: var(--ui-accent); background: var(--ui-selected); }
+  .detail-body aside b { color: var(--ui-text); }
+  .detail-body aside small { color: var(--ui-muted); }
+  .detail-body aside button small em { color: var(--ui-warning); }
+  .detail-media-item { border-bottom-color: var(--ui-divider); }
+  .detail-media-item.is-selected { background: transparent; }
+  .detail-body aside .media-srt-button { border-color: var(--ui-border); color: var(--ui-link); background: var(--ui-input); }
+  .detail-body aside .media-srt-button:hover { background: var(--ui-hover); }
+
+  .detail-body main footer { color: var(--ui-body); background: var(--ui-surface); border-top-color: var(--ui-divider); }
+  .detail-body main footer small { color: var(--ui-muted); }
+  .detail-body main footer :is(a, .preview-download) { color: var(--ui-link); }
+  .detail-body main footer .download-error { color: var(--ui-danger); }
+  .preview-empty { color: var(--ui-muted); }
+
+  .preview-unavailable { color: var(--ui-body); background: var(--ui-surface-raised); border-color: var(--ui-border); box-shadow: 0 12px 32px rgb(0 0 0 / 40%); }
+  .preview-unavailable h3 { color: var(--ui-text); }
+  .preview-unavailable p, .preview-unavailable small { color: var(--ui-muted); }
+  .preview-unavailable__icon { color: var(--ui-warning); background: rgb(255 176 32 / 14%); }
+  .preview-unavailable :is(button, a):not(.preview-download) { color: var(--ui-link); background: var(--ui-input); border-color: var(--ui-border); }
+  .preview-unavailable :is(button, a):not(.preview-download):hover { background: var(--ui-hover); border-color: var(--ui-accent); }
+  .download-error { color: var(--ui-danger); }
+}
+
 #app .general-review .stat-grid > article { background: var(--ui-panel-background); border-color: var(--ui-border); }
 #app .general-review .stat-grid article strong { color: var(--ui-text); font-size: 28px; }
 #app .general-review .stat-grid article small { color: var(--ui-muted); font-size: 12px; }
@@ -121,6 +161,10 @@
   .day-cell { background: var(--ui-panel-background); border-color: var(--ui-divider); }
   .day-cell:hover { background: var(--ui-hover); }
   .day-cell.selected { background: var(--ui-selected); }
+  .day-cell.muted { background: #0b2638; }
+  .day-cell.muted:hover { background: #123348; }
+  .day-cell.muted .day-cell__heading { color: #718b9a; }
+  .day-cell.muted.selected { background: #163c50; }
   .day-cell > i { font-size: 12px; }
   .day-cell > i, .daily-list article > em, .plan-list-panel em { @include badges.tone(neutral); }
   :is(.day-cell > i, .daily-list article > em, .plan-list-panel em).pending { @include badges.tone(warning); }
@@ -131,6 +175,12 @@
   .daily-list article > b { color: var(--ui-text); font-size: 14px; }
   .daily-list article > span, .daily-list article > small, .daily-panel > footer { color: var(--ui-muted); font-size: 12px; }
   .daily-panel > footer { background: var(--ui-surface); }
+}
+html[data-ui-theme='light'] #app .flight-plan-calendar {
+  .day-cell.muted { background: #e7edf1; }
+  .day-cell.muted:hover { background: #dce6eb; }
+  .day-cell.muted .day-cell__heading { color: #83939d; }
+  .day-cell.muted.selected { background: #d2e7ed; }
 }
 #app .global-live-cruise {
   background: var(--ui-page-background); color: var(--ui-body); gap: 12px; padding: 16px;
@@ -146,7 +196,7 @@
   .device-row b, .route-row b { color: var(--ui-text); font-size: 14px; }
   .device-row small, .route-row small { color: var(--ui-muted); font-size: 12px; }
   .device-row em, .route-row em { color: var(--ui-accent); background: var(--ui-selected); }
-  .selected-device { color: var(--ui-muted); background: var(--ui-input); }
+  .selected-device { color: var(--ui-muted); background: var(--ui-input); border-color: var(--ui-border); }
   .selected-device span { color: var(--ui-text); }
   .flight-task-search { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); border-radius: var(--ui-control-radius); }
   .flight-task-search::placeholder { color: var(--ui-muted); }
