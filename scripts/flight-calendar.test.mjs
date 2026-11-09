@@ -40,4 +40,18 @@ const startedWithoutSchedule = toFlightCalendarItems([], [{ id: 'started', execu
 assert.equal(startedWithoutSchedule[0].date, '2026-10-15', '执行时间为空时应使用实际起飞时间')
 assert.equal(startedWithoutSchedule[0].statusText, '状态未返回')
 
+const statusRows = Array.from({ length: 7 }, (_, index) => ({ id: `status-${index + 1}`, status: index + 1, endTime: '2026-11-09T13:36:17' }))
+assert.deepEqual(toFlightCalendarItems([], statusRows).map(item => item.status), [0, 1, 5, 2, 6, 4, 7], '任务状态按最新枚举映射，结束时间不能改变明确状态')
+const partial = toFlightCalendarItems([], [{ id: 'partial', status: 5, errorCode: '321773' }])[0]
+assert.equal(partial.status, 6, '低电量返航不改变部分执行状态')
+const failure = toFlightCalendarItems([], [{ id: 'failure', status: 6, errorCode: '321773', errorCodeDesc: '低电量返航' }])[0]
+assert.equal(failure.status, 4)
+assert.equal(failure.statusDetail, '低电量返航')
+const rejected = toFlightCalendarItems([], [{ id: 'rejected', status: 7, errorCode: '321784', errorCodeDesc: '大风返航' }])[0]
+assert.equal(rejected.status, 7)
+assert.equal(rejected.statusDetail, '大风返航')
+assert.equal(toFlightCalendarItems([], [{ id: 'complete', status: 4, errorCode: '321773' }])[0].status, 2, '状态由后端 status 决定，错误码保留为说明')
+assert.equal(toFlightCalendarItems([], [{ id: 'unknown', status: 99 }])[0].statusText, '状态 99')
+assert.equal(toFlightCalendarItems([{ ...october13Plan, status: 99 }], [])[0].status, undefined)
+
 console.log('flight-calendar tests passed')

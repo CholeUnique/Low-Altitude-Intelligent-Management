@@ -8,9 +8,12 @@ import type { FlightCalendarItem, FlightTaskRecord } from '@/utils/flight-calend
 
 const user = useUserStore()
 const plans = ref<FlightCalendarItem[]>([])
+const taskRecords = ref(new Map<string, FlightTaskRecord>())
+const selectedItem = ref<FlightCalendarItem | null>(null)
 const loading = ref(false)
 const error = ref('')
 const warning = ref('')
+const taskDataAvailable = ref(false)
 let loadSequence = 0
 const keyword = ref('')
 const statusFilter = ref<number | ''>('')
@@ -23,8 +26,7 @@ const selectedDate = ref(dateKey(now))
 const statusMeta: Record<number, { label: string; tone: string }> = {
   0: { label: '待执行', tone: 'pending' },
   1: { label: '执行中', tone: 'running' },
-  2: { label: '已完成', tone: 'done' },
-  3: { label: '已取消', tone: 'cancelled' },
+  2: { label: '执行成功', tone: 'done' },
   4: { label: '执行失败', tone: 'failed' },
   5: { label: '已挂起', tone: 'suspended' },
   6: { label: '部分执行', tone: 'partial' },
@@ -56,7 +58,6 @@ const filteredPlans = computed(() => plans.value.filter((plan) => {
     && (!deviceFilter.value || plan.sn === deviceFilter.value)
 }))
 const monthPlans = computed(() => filteredPlans.value.filter((plan) => plan.date.startsWith(monthKey.value)))
-const scheduledDays = computed(() => new Set(monthPlans.value.map((plan) => plan.date)).size)
 const unscheduledCount = computed(() => filteredPlans.value.filter((plan) => !/^\d{4}-\d{2}-\d{2}$/.test(plan.date)).length)
 const selectedPlans = computed(() => filteredPlans.value.filter((plan) => plan.date === selectedDate.value)
   .sort((left, right) => left.start.localeCompare(right.start)))
@@ -85,12 +86,20 @@ const calendarDays = computed(() => {
     }
   })
 })
-const monthlyStats = computed(() => ({
-  total: monthPlans.value.length,
-  pending: monthPlans.value.filter((plan) => plan.status === 0).length,
-  running: monthPlans.value.filter((plan) => plan.status === 1).length,
-  done: monthPlans.value.filter((plan) => plan.status === 2).length,
-}))
+const monthlyTaskStats = computed(() => {
+  const tasks = monthPlans.value.filter((item) => item.taskId !== undefined)
+  const cards = [
+    { key: 'total', label: '本月任务', count: tasks.length },
+    ...[0, 1, 5, 2, 6, 4, 7].map((status) => ({
+      key: statusMeta[status]!.tone + status,
+      label: statusMeta[status]!.label,
+      count: tasks.filter((task) => task.status === status).length,
+    })),
+  ]
+  const unknownCount = tasks.filter((task) => task.status === undefined || !statusMeta[task.status]).length
+  if (unknownCount) cards.push({ key: 'unknown', label: '未知状态', count: unknownCount })
+  return cards
+})
 
 function moveMonth(offset: number) {
   cursor.value = new Date(cursor.value.getFullYear(), cursor.value.getMonth() + offset, 1)
@@ -103,6 +112,36 @@ function goToday() {
 function selectDay(key: string) {
   selectedDate.value = key
 }
+function showDetails(item: FlightCalendarItem) {
+  selectedDate.value = item.date || selectedDate.value
+  selectedItem.value = item
+}
+const selectedTask = computed(() => selectedItem.value?.taskId ? taskRecords.value.get(selectedItem.value.taskId) : undefined)
+function detailValue(value: unknown) {
+  return value === null || value === undefined || value === '' ? '暂无数据' : String(value).replace('T', ' ')
+}
+const detailRows = computed(() => {
+  const item = selectedItem.value
+  if (!item) return []
+  const task = selectedTask.value
+  const rows: [string, unknown][] = [
+    ['所属计划', item.planTitle || (item.taskId ? undefined : item.title)],
+    [item.taskId ? '任务 ID' : '计划 ID', item.taskId || item.planId],
+    ['执行状态', statusLabel(item.status, item.statusText)],
+    ['计划时间', item.scheduledAt || [item.date, item.start].filter(Boolean).join(' ')],
+    ['实际开始', task?.startTime],
+    ['实际结束', task?.endTime],
+    ['关联航线', item.area === '-' ? undefined : item.area],
+    ['设备编号', item.sn],
+    ['设备类型', item.deviceType],
+    ['飞行器编号', task?.droneSn],
+    ['飞行器型号', task?.droneType],
+    ['飞行距离', task?.flightDistance == null ? undefined : `${task.flightDistance} 米`],
+    ['已上传 / 预计文件', task?.uploadedFileCount == null && task?.expectedFileCount == null ? undefined : `${detailValue(task?.uploadedFileCount)} / ${detailValue(task?.expectedFileCount)}`],
+  ]
+  if (item.statusDetail) rows.push(['状态说明', item.statusDetail])
+  return rows.map(([label, value]) => ({ label, value: detailValue(value) }))
+})
 
 async function loadAllPlans(deptId?: string): Promise<FlightPlanItem[]> {
   const first = await getFlightPlans({ pageNum: 1, pageSize: 200, deptId })
@@ -147,6 +186,7 @@ async function loadAllTasks(deptId?: string): Promise<FlightTaskRecord[]> {
 async function loadPlans() {
   const sequence = ++loadSequence
   loading.value = true
+  taskDataAvailable.value = false
   error.value = ''
   warning.value = ''
   try {
@@ -160,7 +200,9 @@ async function loadPlans() {
     }
     const planList = planResult.status === 'fulfilled' ? planResult.value : []
     const taskList = taskResult.status === 'fulfilled' ? taskResult.value : []
+    taskRecords.value = new Map(taskList.filter((task) => task.id != null).map((task) => [String(task.id), task]))
     plans.value = toFlightCalendarItems(planList, taskList)
+    taskDataAvailable.value = taskResult.status === 'fulfilled'
     if (planResult.status === 'rejected') warning.value = '飞行计划读取失败，当前仅显示飞行任务。'
     else if (taskResult.status === 'rejected') warning.value = '飞行任务读取失败，当前仅显示计划排期。'
   } catch (reason) {
@@ -178,11 +220,10 @@ watch(() => user.activeDeptId, () => void loadPlans())
 
 <template>
   <div class="flight-plan-calendar">
-    <section class="metric-grid" aria-label="本月飞行排期概览">
-      <article class="metric-card metric-card--total"><span>本月排期</span><b>{{ monthlyStats.total }}<small>架次</small></b><em>覆盖 {{ scheduledDays }} 个日期</em></article>
-      <article class="metric-card metric-card--pending"><span>待执行</span><b>{{ monthlyStats.pending }}<small>架次</small></b><em>等待计划起飞</em></article>
-      <article class="metric-card metric-card--running"><span>执行中</span><b>{{ monthlyStats.running }}<small>架次</small></b><em>正在执行的任务</em></article>
-      <article class="metric-card metric-card--done"><span>已完成</span><b>{{ monthlyStats.done }}<small>架次</small></b><em>本月完成计划</em></article>
+    <section class="metric-grid task-status-metrics" aria-label="本月飞行任务状态统计" title="按任务执行时间统计，受当前筛选条件影响">
+      <article v-for="card in monthlyTaskStats" :key="card.key" class="metric-card" :class="`metric-card--${card.key.replace(/[0-9]+$/, '')}`">
+        <span>{{ card.label }}</span><b>{{ taskDataAvailable && !loading ? card.count : '—' }}<small>架次</small></b>
+      </article>
     </section>
 
     <section class="toolbar">
@@ -200,17 +241,18 @@ watch(() => user.activeDeptId, () => void loadPlans())
       <div class="calendar-panel">
         <div class="weekday"><b v-for="day in ['周一','周二','周三','周四','周五','周六','周日']" :key="day">{{ day }}</b></div>
         <div class="calendar-grid" :style="{ '--week-count': calendarDays.length / 7 }">
-          <button v-for="day in calendarDays" :key="day.key" class="day-cell" :class="{ muted: !day.currentMonth, selected: selectedDate === day.key, today: day.today }" @click="selectDay(day.key)">
-            <span class="day-cell__heading"><strong>{{ day.day }}</strong><small v-if="day.plans.length">{{ day.plans.length }} 架次</small></span>
-            <i v-for="plan in day.plans.slice(0,3)" :key="plan.id" :class="statusTone(plan.status)"><em>{{ planTime(plan) }}</em><span>{{ plan.title }}</span></i>
-            <small v-if="day.plans.length > 3" class="day-cell__more">还有 {{ day.plans.length - 3 }} 架次</small>
-          </button>
+          <div v-for="day in calendarDays" :key="day.key" class="day-cell" :class="{ muted: !day.currentMonth, selected: selectedDate === day.key, today: day.today }" @click="selectDay(day.key)">
+            <button type="button" class="day-cell__heading" :aria-label="`选择 ${day.key}`" @click.stop="selectDay(day.key)"><strong>{{ day.day }}</strong><small v-if="day.plans.length">{{ day.plans.length }} 架次</small></button>
+            <div class="day-cell__items" @wheel.stop>
+              <button v-for="plan in day.plans" :key="plan.id" type="button" class="day-cell__item" :class="statusTone(plan.status)" :title="plan.title" @click.stop="showDetails(plan)"><em>{{ planTime(plan) }}</em><span>{{ plan.title }}</span></button>
+            </div>
+          </div>
         </div>
       </div>
       <aside class="daily-panel">
         <header><div><span>当日飞行</span><b>{{ selectedDateLabel.date }} <small>{{ selectedDateLabel.weekday }}</small></b></div><em>{{ selectedPlans.length }} 架次</em></header>
         <div class="daily-list">
-          <article v-for="plan in selectedPlans" :key="plan.id">
+          <article v-for="plan in selectedPlans" :key="plan.id" role="button" tabindex="0" @click="showDetails(plan)" @keydown.enter.prevent="showDetails(plan)" @keydown.space.prevent="showDetails(plan)">
             <div class="daily-list__top"><time>{{ planTime(plan) }}</time><em :class="statusTone(plan.status)" :title="plan.statusDetail || ''">{{ statusLabel(plan.status, plan.statusText) }}</em></div>
             <b>{{ plan.title }}</b><span v-if="plan.planTitle && plan.planTitle !== plan.title">所属计划：{{ plan.planTitle }}</span><span>{{ plan.area }}</span><small>{{ plan.sn || '未返回设备 SN' }}<template v-if="plan.deviceType"> · {{ plan.deviceType }}</template></small>
           </article>
@@ -221,6 +263,12 @@ watch(() => user.activeDeptId, () => void loadPlans())
     </section>
 
     <section v-else class="plan-list-panel"><header><span>任务 / 计划名称</span><span>执行时间</span><span>航线</span><span>设备</span><span>状态</span></header><div><article v-for="plan in filteredPlans" :key="plan.id"><span><b>{{ plan.title }}</b><small v-if="plan.planTitle && plan.planTitle !== plan.title">所属计划：{{ plan.planTitle }}</small><small>{{ plan.taskId ? `任务 ID：${plan.taskId}` : `计划 ID：${plan.planId}` }}</small></span><span>{{ plan.date || '日期未返回' }} {{ planTime(plan) }}</span><span>{{ plan.area }}</span><span>{{ plan.sn || '-' }}<small>{{ plan.deviceType || '' }}</small></span><span><em :class="statusTone(plan.status)" :title="plan.statusDetail || ''">{{ statusLabel(plan.status, plan.statusText) }}</em></span></article><div v-if="!filteredPlans.length" class="empty">暂无符合条件的飞行排期</div></div></section>
+    <ElDialog :model-value="!!selectedItem" class="flight-detail-dialog" :title="selectedItem?.taskId ? '飞行架次详情' : '飞行计划详情'" width="min(560px, 92vw)" append-to-body destroy-on-close @update:model-value="(open: boolean) => { if (!open) selectedItem = null }">
+      <div v-if="selectedItem" class="flight-detail">
+        <h3>{{ selectedItem.title }}</h3>
+        <dl><div v-for="row in detailRows" :key="row.label"><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl>
+      </div>
+    </ElDialog>
   </div>
 </template>
 
@@ -230,6 +278,15 @@ watch(() => user.activeDeptId, () => void loadPlans())
 .filters select:hover,.filters select:focus{color:#fff;background-color:#315f91;border-color:#315f91}
 .filters select option{color:#3f6171;background:#fff}
 .data-warning{padding:8px 12px;color:#856a27;background:#fff7df;border:1px solid #efd791;border-radius:6px;font-size:12px}
+.day-cell{display:flex;flex-direction:column}
+.day-cell .day-cell__heading{width:100%;flex:none;padding:0;color:inherit;background:transparent;border:0;text-align:left;cursor:pointer}
+.day-cell__items{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#5d8fa5 transparent}
+.day-cell__item{display:flex;width:100%;min-width:0;align-items:center;gap:5px;margin:4px 0;padding:5px 6px;color:#367187;background:#e3f4f7;border:0;border-left:3px solid #22a7c3;border-radius:4px;font-size:11px;text-align:left;cursor:pointer;transition:transform .18s,filter .18s,box-shadow .18s}
+.day-cell__item em{flex:none;font-size:10px;font-style:normal;font-weight:700}.day-cell__item span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.day-cell__item.pending{color:#856a27;background:#fff5d9;border-color:#e6b747}.day-cell__item.running{color:#247389;background:#e2f5f9;border-color:#18a4c2}.day-cell__item.done{color:#2f775e;background:#e3f5ed;border-color:#2cad7e}.day-cell__item.failed,.day-cell__item.terminated{color:#8b6570;background:#f5e9ed;border-color:#b78191}.day-cell__item.suspended{color:#816f43;background:#f5f0e3;border-color:#aa9362}.day-cell__item.partial{color:#806124;background:#fff0cf;border-color:#d6a33d}
+.day-cell__item:hover,.day-cell__item:focus-visible{transform:translateY(-2px);filter:brightness(1.08);box-shadow:0 3px 8px #0004;outline:1px solid #62c9df}
+.daily-list article{cursor:pointer;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}.daily-list article:hover,.daily-list article:focus-visible{transform:translateY(-3px);border-color:#58c1d8;box-shadow:0 7px 16px #0004;outline:none}
+.flight-detail h3{margin:0 0 15px;font-size:16px;line-height:1.5;overflow-wrap:anywhere}.flight-detail dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px;margin:0}.flight-detail dl>div{min-width:0;padding:10px 0;border-bottom:1px solid var(--ui-border,#dce7ed)}.flight-detail dt{color:var(--ui-muted,#718895);font-size:12px}.flight-detail dd{margin:4px 0 0;color:var(--ui-text,#1a4158);overflow-wrap:anywhere;line-height:1.45}.flight-detail{max-height:65vh;overflow:auto}
 
 /* Flight schedule visual hierarchy */
 .flight-plan-calendar{gap:13px;padding:16px;background:#edf3f7}
@@ -241,6 +298,11 @@ watch(() => user.activeDeptId, () => void loadPlans())
 .metric-grid b{margin:7px 0 4px;color:#1a4158;font-size:34px;font-weight:750;line-height:1}
 .metric-grid b small{margin-left:7px;color:#678391;font-size:12px;font-weight:600}
 .metric-grid em{float:none;margin:0;color:#8197a2;font-size:12px;line-height:1.35}
+.task-status-metrics{grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px}
+.task-status-metrics article{min-width:0;min-height:70px;padding:10px 14px}
+.task-status-metrics article::before{top:10px;bottom:10px}
+.task-status-metrics b{margin:5px 0 0;font-size:24px}
+.metric-card--cancelled,.metric-card--unknown{--metric-accent:#879ba7}.metric-card--failed,.metric-card--terminated{--metric-accent:#e47579}.metric-card--suspended{--metric-accent:#aa9362}.metric-card--partial{--metric-accent:#d6a33d}
 
 .toolbar{min-height:76px;padding:11px 16px;border-color:#d9e5ec;border-radius:10px;box-shadow:0 3px 13px #183d510b}
 .toolbar-leading{display:flex;min-width:0;align-items:center;gap:18px}
@@ -324,4 +386,8 @@ watch(() => user.activeDeptId, () => void loadPlans())
 @media(max-width:1500px){.toolbar{flex-wrap:wrap}.toolbar-leading,.filters{width:100%}.filters{justify-content:flex-end}.calendar-layout{grid-template-columns:minmax(0,1fr) 315px}}
 @media(max-width:1280px){.filters>input{display:block}.day-cell{padding:7px 5px}.day-cell>i{gap:4px;padding:5px 4px;font-size:10px}.day-cell>i em{font-size:9px}}
 @media(max-width:980px){.calendar-layout{grid-template-columns:1fr;grid-template-rows:minmax(400px,1fr) 240px;overflow:auto}.daily-panel{display:flex}.daily-list{padding:8px}.daily-list .empty{min-height:130px}.filters{flex-wrap:wrap;justify-content:flex-start}.filters label{display:flex}}
+</style>
+
+<style lang="scss">
+.el-dialog.flight-detail-dialog { background: var(--ui-surface-raised, #15394f); }
 </style>

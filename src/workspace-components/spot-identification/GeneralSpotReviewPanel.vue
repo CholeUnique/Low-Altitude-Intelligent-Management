@@ -599,10 +599,10 @@ onBeforeUnmount(() => {
 <template>
   <div class="general-review">
     <section class="stat-grid">
-      <article><span>疑似图斑总数</span><b>{{ visibleRecords.length }}</b><small>不区分场景与来源任务</small></article>
-      <article><span>待核查</span><b>{{ statusCounts[0]?.count || 0 }}</b><small>等待派生核查任务</small></article>
-      <article><span>核查中</span><b>{{ statusCounts[1]?.count || 0 }}</b><small>已进入核查流程</small></article>
-      <article><span>已完成处置</span><b>{{ (statusCounts[2]?.count || 0) + (statusCounts[3]?.count || 0) }}</b><small>已处置及已销号</small></article>
+      <article><i aria-hidden="true">▦</i><div><span>疑似图斑总数</span><strong>{{ visibleRecords.length }}</strong><small>不区分场景与来源任务</small></div></article>
+      <article><i aria-hidden="true">◷</i><div><span>待核查</span><strong>{{ statusCounts[0]?.count || 0 }}</strong><small>等待派生核查任务</small></div></article>
+      <article><i aria-hidden="true">⌕</i><div><span>核查中</span><strong>{{ statusCounts[1]?.count || 0 }}</strong><small>已进入核查流程</small></div></article>
+      <article><i aria-hidden="true">✓</i><div><span>已完成处置</span><strong>{{ (statusCounts[2]?.count || 0) + (statusCounts[3]?.count || 0) }}</strong><small>已处置及已销号</small></div></article>
       <div class="heading-actions"><button :disabled="!selectedIds.length || creatingTasks" @click="openTaskCreateDialog">{{ `勾选图斑创建任务（${selectedIds.length}）` }}</button></div>
     </section>
 
@@ -846,7 +846,17 @@ onBeforeUnmount(() => {
   min-height: 72px;
   box-sizing: border-box;
   padding: 10px 14px;
+  display:flex;
+  align-items:center;
+  gap:13px;
 }
+.stat-grid article > i { width:39px;height:39px;flex:0 0 39px;display:grid;place-items:center;border-radius:8px;color:#159ab2;background:#e5f7fa;font-size:21px;font-style:normal;font-weight:700 }
+.stat-grid article:nth-child(2)>i { color:#c68219;background:#fff4d9 }
+.stat-grid article:nth-child(3)>i { color:#3477d7;background:#e8f1ff }
+.stat-grid article:nth-child(4)>i { color:#149a74;background:#e3f8f1 }
+.stat-grid article > div { min-width:0 }
+.stat-grid article strong { display:block;margin:2px 0;color:var(--ui-text, #183e56);font-size:25px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums }
+.stat-grid article small { overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
 
 .stat-grid b {
   margin: 4px 0 2px;
@@ -1008,7 +1018,6 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 5px 12px;
-  border-bottom: 1px solid #e2eaee;
 }
 
 .period-bar > div {

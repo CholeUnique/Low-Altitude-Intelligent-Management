@@ -102,6 +102,13 @@ html[data-ui-theme] .el-popper.workflow-actor-tooltip { background: var(--ui-ove
   > footer { flex: none; gap: 8px; padding: 12px 20px; }
   label, label > span { font-size: 13px; line-height: 20px; color: var(--ui-body); }
 }
+// 全屏预览要真正占满视口：上面通用弹窗的尺寸上限、圆角、描边不能作用在全屏态，
+// 否则弹窗只到 100vw-40px / 100dvh-48px，四周露出遮罩，素材无法铺满（此组选择器特异性高于上面的 :is()）。
+#app .detail-dialog.is-fullscreen {
+  width: 100vw; height: 100dvh;
+  max-width: none; max-height: none;
+  border: 0; border-radius: 0; box-shadow: none;
+}
 #app :is(.modal-card, .overlay-dialog, .detail-dialog) input:not([type='radio'], [type='checkbox'], [type='file']),
 #app :is(.modal-card, .overlay-dialog, .detail-dialog) select {
   min-height: 36px; border-radius: var(--ui-control-radius); font-size: 14px;
