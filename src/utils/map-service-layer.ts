@@ -97,6 +97,7 @@ export interface MapServiceLayerHandle {
   /** 改基准色后返回与分类顺序一致的深浅色；没有分类时返回空数组。 */
   setColor?: (color: string) => string[]
   setFillOpacity?: (opacity: number) => void
+  setCategoryFillOpacity?: (value:string,opacity:number) => void
   setAttributeFilter?: (field?: string, value?: string) => void
   definitionExpression?: () => string
   setRenderer?: (renderer: Record<string, unknown>) => void
@@ -112,10 +113,35 @@ export interface MapServiceLayerOptions {
   boundsOverride?: L.LatLngBounds
 }
 
+/** 区划名称以发布字段为准；村级优先村名，乡级优先乡镇名。 */
+function administrativeNameField(fields:{name?:string;alias?:string}[],layerName:string) {
+  const preferred = /村级/.test(layerName)
+    ? ['CUNMC','XZCMC','CJQYMC','VILLAGE_NAME','VILLAGENAME','CUN_NAME','CUNNAME','ZLDWMC']
+    : ['XZMC','TOWN_NAME','TOWNNAME','ZLDWMC']
+  for (const name of [...preferred,'XZQMC','XZQHMC','NAME']) {
+    const field=fields.find(field=>field.name?.toUpperCase()===name)
+    if(field?.name)return field.name
+  }
+  return fields.find(field=>/村(?:居)?名|乡镇名称|街道名称|行政区(?:划)?名称|坐落单位名称/.test(field.alias||field.name||''))?.name
+}
+
+function administrativeCodeField(fields:{name?:string;alias?:string}[],layerName:string) {
+  const preferred=/村级/.test(layerName)?['CUNDM','XZCDM','CJQYDM','ZLDWDM']:['XZDM','PAC','ZLDWDM']
+  for(const name of [...preferred,'XZQDM','XZQHDM','PAC']){
+    const field=fields.find(field=>field.name?.toUpperCase()===name)
+    if(field?.name)return field.name
+  }
+  return fields.find(field=>/行政区(?:划)?代码|村(?:级)?代码|乡镇代码|坐落单位代码/.test(field.alias||field.name||''))?.name
+}
+
 /** 行政边界使用真实服务几何，在地图上绘制双层描边，不依赖影像导出的样式。 */
 export async function createAdministrativeBoundaryLayer(service: MapServiceItem, color = '#9AEEFE'): Promise<MapServiceLayerHandle> {
   const url = serviceRoot(service.serviceUrl)
   const layerId = Number(service.arcGisLayerId)
+  const metadata = await getMapServiceLayerMetadata(service)
+  const objectIdField = metadata.fields?.find(field=>field.type==='esriFieldTypeOID')?.name
+  const nameField = administrativeNameField(metadata.fields||[],service.name||metadata.name||'')
+  const codeField = administrativeCodeField(metadata.fields||[],service.name||metadata.name||'')
   const response = await queryAllFeatures(servicePath(url, `${layerId}/query`), new URLSearchParams({
     where: '1=1', outFields: '*', returnGeometry: 'true', outSR: '4326',
   }))
@@ -123,6 +149,7 @@ export async function createAdministrativeBoundaryLayer(service: MapServiceItem,
   const bounds = L.latLngBounds([])
   const outlines: L.Polygon[] = []
   const fills: L.Polygon[] = []
+  const entries:{value:string;label:string;id:unknown;outline:L.Polygon;fill:L.Polygon}[]=[]
   for (const feature of response.features || []) {
     const rings = feature.geometry?.rings
     if (!rings?.length) continue
@@ -137,12 +164,50 @@ export async function createAdministrativeBoundaryLayer(service: MapServiceItem,
       weight: 4, opacity: 1, fillColor: color === '#9AEEFE' ? '#66B9DA' : color, fillOpacity: .1,
       lineCap: 'round', lineJoin: 'round', className: 'hailing-boundary-glow',
     }).addTo(group))
+    const id=objectIdField?feature.attributes?.[objectIdField]:undefined
+    if(objectIdField&&id!=null){
+      const name=nameField?String(feature.attributes?.[nameField]??'').trim():''
+      const code=codeField?String(feature.attributes?.[codeField]??'').trim():''
+      entries.push({value:code?`code:${code}`:name?`name:${name}`:`id:${id}`,label:name||`未命名区划（${id}）`,id,outline:outlines[outlines.length-1]!,fill:fills[fills.length-1]!})
+    }
   }
   if (!bounds.isValid()) throw new Error('行政边界图层没有有效几何数据')
+  let selected=new Set(entries.map(entry=>entry.value))
+  const canSelect=Boolean(objectIdField&&entries.length===fills.length)
+  const categories=[...new Map(entries.map(entry=>[entry.value,{value:entry.value,label:entry.label,color}])).values()]
+  const duplicateNames=new Set(categories.filter(category=>categories.some(other=>other.value!==category.value&&other.label===category.label)).map(category=>category.label))
+  categories.forEach(category=>{
+    if(duplicateNames.has(category.label))category.label+=`（${category.value.replace(/^[^:]+:/,'')}）`
+  })
   return {
     layer: group, bounds, color,
     setColor: next => { fills.forEach(path => path.setStyle({ color: next, fillColor: next })); return [] },
     setFillOpacity: opacity => { fills.forEach(path => path.setStyle({ fillOpacity: opacity })) },
+    setCategoryFillOpacity:(value,opacity)=>{entries.filter(entry=>entry.value===value).forEach(entry=>entry.fill.setStyle({fillOpacity:opacity}))},
+    ...(canSelect?{
+      categoryFilter:{
+        fieldName:objectIdField!,fieldLabel:'行政区名称',
+        values:categories,
+        setVisibleValues:(values:string[])=>{
+          selected=new Set(values)
+          entries.forEach(entry=>{
+            if(selected.has(entry.value)){if(!group.hasLayer(entry.outline))group.addLayer(entry.outline);if(!group.hasLayer(entry.fill))group.addLayer(entry.fill)}
+            else {group.removeLayer(entry.outline);group.removeLayer(entry.fill)}
+          })
+        },
+        locateValue:async(value:string)=>{
+          const selectedBounds=L.latLngBounds([])
+          entries.filter(entry=>entry.value===value).forEach(entry=>selectedBounds.extend(entry.fill.getBounds()))
+          return {bounds:selectedBounds.isValid()?selectedBounds:undefined,geometryType:'esriGeometryPolygon',geometries:[]}
+        },
+      },
+      definitionExpression:()=>{
+        if(!selected.size)return '1=0'
+        if(selected.size===categories.length)return '1=1'
+        const ids=entries.filter(entry=>selected.has(entry.value)).map(entry=>typeof entry.id==='number'?String(entry.id):`'${String(entry.id).replace(/'/g,"''")}'`)
+        return `${objectIdField} IN (${ids.join(',')})`
+      },
+    }:{}),
   }
 }
 
@@ -2745,7 +2810,10 @@ async function queryAllFeatures(url: string, parameters: URLSearchParams,options
 }
 
 function identifiedFeature(service: MapServiceItem, feature: NonNullable<ArcGisQueryResponse['features']>[number], metadata: ArcGisLayerMetadata, aliases?: Record<string, string>): IdentifiedMapFeature {
-  const rows = attributeRows(feature.attributes, aliases)
+  // Modern ArcGIS query responses may omit fieldAliases; the published layer
+  // metadata still carries the aliases (including village names and 一田一码).
+  const publishedAliases = Object.fromEntries((metadata.fields || []).flatMap(field => field.name && field.alias ? [[field.name, field.alias]] : []))
+  const rows = attributeRows(feature.attributes, { ...publishedAliases, ...aliases })
   const type = hoverField(metadata)
   const category = categoryField(metadata)
   const oid = metadata.fields?.find(field => field.type === 'esriFieldTypeOID')?.name || 'OBJECTID'

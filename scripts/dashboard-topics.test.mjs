@@ -56,8 +56,13 @@ assert.equal(store.latest, undefined, 'Malformed cached summaries are not displa
 
 const { farmlandDefaults } = load('src/utils/farmland-analysis.ts')
 const calls = []
-let services = [{ id: '8', name: '九龙镇高标农田数据' }, { id: '9', name: '九龙镇高标准农田数据' }]
-let layers = [{ layerId: 0, name: '高标准农田GBZ', analyzable: true, fields: [] }, { layerId: 1, name: '九龙镇永久基本农田1', analyzable: true, fields: [] }]
+let services = [{ id: '8', name: '九龙镇高标准农田数据' }, { id: '9', name: '海陵区高标准农田' }]
+let layers = [
+  { layerId: 0, name: '永久基本农田_海陵区', analyzable: true, fields: [] },
+  { layerId: 1, name: '乡级行政区划', analyzable: false, fields: [] },
+  { layerId: 2, name: '高标地块_海陵区', analyzable: true, fields: [] },
+  { layerId: 3, name: '村级行政区划', analyzable: false, fields: [] },
+]
 const { loadDefaultFarmlandComparison } = load('src/utils/default-farmland-comparison.ts', {
   '@/api/map-service': { listEnabledMapServices: async dept => { calls.push(['services', dept]); return services } },
   '@/api/spatial-analysis': {
@@ -68,8 +73,8 @@ const { loadDefaultFarmlandComparison } = load('src/utils/default-farmland-compa
 })
 assert.equal(await loadDefaultFarmlandComparison('d1', new AbortController().signal), summary)
 assert.deepEqual(calls.map(item => item[0]), ['services', 'layers', 'summary'], 'Defaults do not request GeoJSON, tiles or result pages')
-assert.equal(calls[1][1], '9', 'Do not conflate 高标农田 with the canonical 高标准农田 service')
-assert.deepEqual(calls[2][1], { deptId: 'd1', sourceA: { serviceId: '9', layerId: 0, filters: [] }, sourceB: { serviceId: '9', layerId: 1, filters: [] }, minAreaSqm: 4, includeOverlapSpots: true })
+assert.equal(calls[1][1], '9', '默认基准使用海陵区服务，不再沿用九龙镇服务')
+assert.deepEqual(calls[2][1], { deptId: 'd1', sourceA: { serviceId: '9', layerId: 2, filters: [] }, sourceB: { serviceId: '9', layerId: 0, filters: [] }, minAreaSqm: 4, includeOverlapSpots: true })
 layers = layers.slice(0, 1)
 await assert.rejects(loadDefaultFarmlandComparison('d1', new AbortController().signal), /两类基准图层/)
 services = [services[0]]

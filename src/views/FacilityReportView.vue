@@ -98,13 +98,13 @@ async function submit() {
 .report-page{height:100%;min-height:100%;overflow-y:auto;box-sizing:border-box;padding:20px 16px 32px;background:radial-gradient(circle at 20% 0,#12394d 0,transparent 46%),#081c2b;color:#d7edf3}
 .card{width:100%;max-width:520px;margin:0 auto;padding:22px 18px 24px;box-sizing:border-box;border:1px solid rgba(105,182,217,.22);border-radius:14px;background:linear-gradient(135deg,rgba(8,37,58,.85),rgba(5,24,41,.75));box-shadow:0 16px 40px #00101d66}
 header{display:grid;gap:6px;padding-bottom:16px;border-bottom:1px solid #1e4d62}
-header span{color:#7fb3c6;font-size:11px;letter-spacing:1px}
-header h1{margin:0;font-size:20px;color:#eaf8ff}
+header span{color:#7fb3c6;font-size:12px;letter-spacing:1px}
+header h1{margin:0;font-size:22px;color:#eaf8ff}
 header p{margin:0;color:#7fa2b1;font-size:12px}
 form{display:grid;gap:14px;padding-top:16px}
 label{display:grid;gap:7px;color:#a9ccd6;font-size:13px;position:relative}
 label b{color:#ff9e78}
-label small{position:absolute;right:2px;bottom:-14px;color:#6f93a2;font-size:11px}
+label small{position:absolute;right:2px;bottom:-14px;color:#6f93a2;font-size:12px}
 textarea,input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #35687a;border-radius:8px;background:#0a2634;color:#e6f7fb;font:inherit;font-size:15px}
 textarea{resize:vertical;min-height:118px;line-height:1.6}
 textarea:focus,input:focus{outline:2px solid #2ba6c4;outline-offset:1px}

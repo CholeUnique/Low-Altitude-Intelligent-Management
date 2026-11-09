@@ -22,7 +22,7 @@
 #app .layer-card-heading:hover { background: var(--ui-hover); }
 #app .layer-card-toggle { color: #e6f1ff; }
 #app .layer-card-toggle:hover { color: #a8eefa; }
-#app .layer-card-toggle b { font-size: 13px; line-height: 22px; font-weight: 500; }
+#app .layer-card-toggle b { font-size: 14px; line-height: 22px; font-weight: 500; }
 #app .layer-card-toggle small { font-size: 12px; line-height: 18px; color: #9fb7c9; }
 #app .layer-card-body { padding: 12px; }
 #app .layer-card-disclosure { border-left-color: #9fb7c9; transition: rotate 180ms ease-out; }
@@ -39,7 +39,7 @@
 #app .topic-farmland-stat { padding: 16px; }
 #app .topic-farmland-stat > header { font-size: 16px; line-height: 24px; padding-bottom: 12px; border-color: var(--ui-divider); }
 #app :is(.analysis-statistics, .topic-statistics) {
-  h3 { font-size: 14px; line-height: 22px; color: #e6f1ff; }
+  h3 { font-size: 16px; line-height: 22px; color: #e6f1ff; }
   p { font-size: 12px; line-height: 18px; color: #9fb7c9; }
   dl { gap: 16px 12px; }
   dt { font-size: 12px; line-height: 20px; color: #a8c0d2; }
@@ -69,11 +69,11 @@
 }
 #app .topic-config {
   header { padding: 16px; border-color: var(--ui-divider); }
-  h2 { color: #e6f1ff; font-size: 18px; }
+  h2 { color: #e6f1ff; font-size: 20px; }
   .config-body { padding: 16px; }
-  .config-body h3 { font-size: 14px; line-height: 22px; color: #e6f1ff; }
+  .config-body h3 { font-size: 16px; line-height: 22px; color: #e6f1ff; }
   .config-body h3 small, .config-layer small { font-size: 12px; color: #9fb7c9; }
-  .config-layer b, .config-source-toggle b { font-size: 13px; color: #c4d6e6; }
+  .config-layer b, .config-source-toggle b { font-size: 14px; color: #c4d6e6; }
   .config-source-heading { background: rgb(121 189 218 / 5%); }
   .config-service-group { border-color: var(--ui-divider); }
 }
@@ -129,13 +129,13 @@
   .overview-float-panel::after { display: block; opacity: .18; }
   .overview-float-panel:hover { border-color: rgb(154 205 228 / 36%); box-shadow: var(--ui-shadow-hover); }
   .overview-float-panel > header { padding-bottom: 10px; min-height: 30px; }
-  .overview-float-panel h2 { font-size: 16px; line-height: 24px; letter-spacing: 0; }
+  .overview-float-panel h2 { font-size: 18px; line-height: 24px; letter-spacing: 0; }
   .overview-header-link { font-size: 12px; }
   .flight-kpis b { font-size: 24px; line-height: 30px; }
   .flight-kpis :is(small, span), .summary-foot, .panel-context { font-size: 12px; }
   .resource-states > span { font-size: 13px; }
   .resource-states b { font-size: 20px; }
-  .scene-task-ring__center b { font-size: min(32px, var(--ring-number-size)); }
+  .scene-task-ring__center b { font-size: max(12px, min(32px, var(--ring-number-size))); }
   .scene-task-legend span { font-size: 12px; }
   .recognition-types > div:not(.float-empty) { font-size: 13px; }
 }
@@ -156,10 +156,10 @@
 .jiulong-feature-tooltip { font-family: var(--ui-font); font-size: 13px; line-height: 20px; }
 #app .facilities-overview {
   .drawer-header, .category-header { padding: 14px 16px; border-color: var(--ui-divider); }
-  .drawer-header h2, .category-header h2 { font-size: 16px; }
+  .drawer-header h2, .category-header h2 { font-size: 18px; }
   .drawer-header small, .category-header small, .facility-copy small { font-size: 12px; color: #9fb7c9; }
   .facility-item { border-color: var(--ui-divider); }
-  .facility-copy strong, .facility-copy b, .filter-row label { font-size: 13px; }
+  .facility-copy strong, .facility-copy b, .filter-row label { font-size: 14px; }
 }
 
 @media (max-width: 1400px) {
@@ -186,14 +186,14 @@
     .task-state-legend > div { min-height: 24px; padding-block: 2px; font-size: 12px; }
     .scene-task-legend { min-height: 26px; }
     .flight-metrics { padding-block: 8px; }
-    .scene-task-ring__center b { font-size: min(28px, var(--ring-number-size)); }
+    .scene-task-ring__center b { font-size: max(12px, min(28px, var(--ring-number-size))); }
   }
 }
 @media (max-height: 700px) {
   #app .cockpit--glass {
     --cockpit-ring-size: 80px;
     .overview-float-panel { padding: 8px 10px; gap: 6px; }
-    .overview-float-panel h2 { font-size: 15px; }
+    .overview-float-panel h2 { font-size: 17px; }
     .overview-float-panel > header { padding-bottom: 4px; }
     .overview-header-link { font-size: 12px; line-height: 20px; }
     .recognition-summary dl > div { min-height: 24px; padding-block: 2px; font-size: 12px; line-height: 20px; }
@@ -202,6 +202,6 @@
     .scene-task-main { min-height: 80px; }
     .task-state-legend > div { min-height: 20px; padding-block: 0; }
     .scene-task-legend { min-height: 24px; }
-    .scene-task-ring__center b { font-size: min(26px, var(--ring-number-size)); }
+    .scene-task-ring__center b { font-size: max(12px, min(26px, var(--ring-number-size))); }
   }
 }

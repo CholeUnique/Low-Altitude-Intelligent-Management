@@ -27,8 +27,8 @@ const progress = computed(() => Math.min(100, Math.max(0, props.rate ?? 0)))
 .ring-track-edge { stroke:#8bdcee12; stroke-width:.7; }
 .ring-progress { stroke-width:8; stroke-linecap:round; filter:drop-shadow(0 1px 3px #24dceb28); transition:stroke-dasharray .24s ease; }
 .ring-value { position:absolute; inset:17%; display:grid; grid-template-rows:18px minmax(0,1fr) 18px; gap:3px; align-items:center; justify-items:center; border-radius:50%; background:radial-gradient(ellipse at 45% 30%,#67e4ee0c,transparent 72%); text-align:center; }
-.ring-value b { color:#65e9ed; font-size:clamp(24px,1.7vw,34px); font-weight:600; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-.6px; white-space:nowrap; }
-.ring-value span { color:#a4bdd0; font-size:11px; line-height:18px; white-space:nowrap; }
+.ring-value b { color:#65e9ed; font-size:max(12px, clamp(24px,1.7vw,34px)); font-weight:600; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-.6px; white-space:nowrap; }
+.ring-value span { color:#a4bdd0; font-size:12px; line-height:18px; white-space:nowrap; }
 .ring-emblem { width:100%; height:18px; display:grid; place-items:center; }
 .ring-emblem :deep(svg) { display:block; width:24px; height:18px; }
 @media(prefers-reduced-motion:reduce) { .ring-progress { transition:none; } }

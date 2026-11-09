@@ -33,6 +33,8 @@ const service = {name:'普通数据',type:'ARCGIS_MAPSERVER',serviceUrl:'https:/
 assert.equal(topic.topicRole(service,['DLBM','DLMC']),'land')
 assert.equal(topic.topicRole(service,['DLBM','DLMC','YJJBNTTBBH']),'permanent')
 assert.equal(topic.topicRole(service,['GCMC','SFGBXMJS']),'facility')
+assert.equal(topic.topicRole({...service,name:'村级行政区划'},['OBJECTID','村名']),'boundary','海陵区村级边界不依赖固定 PAC/NAME 字段')
+assert.equal(topic.topicRole({...service,name:'乡级行政区划'},['OBJECTID','乡镇名']),'boundary','海陵区乡级边界按业务图层识别')
 assert.equal(topic.topicRole({...service,type:'WMS'},[]),'unconfigured','WMS 不是天然的影像底图')
 assert.equal(topic.topicIncludes('facility',topic.HOMESTEAD),false)
 assert.equal(topic.topicIncludes('facility',topic.NON_GRAIN),true)

@@ -61,7 +61,7 @@ const activeEntry = computed(() => entries.value.find((entry) => entry.name === 
   flex-direction: column;
   color: #25364d;
   background: #f2f5f9;
-  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-family: var(--ui-font);
 }
 .task-center-shell { flex: 1; min-height: 0; display: flex; }
 .task-center-sidebar {

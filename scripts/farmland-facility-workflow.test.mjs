@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { build } from 'esbuild'
 
 const bundle = await build({ entryPoints: ['src/utils/farmland-facility-workflow.ts'], bundle: true, platform: 'node', format: 'esm', write: false, tsconfig: 'tsconfig.app.json' })
-const { FACILITY_CHECK_RESULTS, FACILITY_RECHECK_RESULTS, facilityArchiveConclusion, facilityHandoff, facilityNodeKey, facilityRequiredFields, facilityWorkflow, facilitySubmission, isFacilityRepairFlow } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`)
+const { FACILITY_CHECK_RESULTS, FACILITY_RECHECK_RESULTS, canOperateFacilityWorkflowNode, facilityArchiveConclusion, facilityHandoff, facilityNodeKey, facilityRequiredFields, facilityWorkflow, facilitySubmission, isFacilityRepairFlow } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`)
 const node = (id, nodeKey, nodeName, status, assigneeId = '7') => ({ id, bizTaskId: '1', nodeKey, nodeName, nodeType: 'REVIEW', status, assigneeId })
 
 assert.equal(facilityNodeKey(node('1', 'DEPT_REVIEW', '部门审核', 'PROCESSING')), 'department-review')
@@ -24,6 +24,11 @@ assert.deepEqual(steps.map(step => step.name), ['任务受理', '部门审核', 
 assert.deepEqual(steps.map(step => step.status), ['completed', 'completed', 'active', 'pending', 'pending'])
 assert.deepEqual(steps.map(step => step.viewable), [true, true, true, false, false])
 assert.equal(steps[2].instance?.assigneeId, '7')
+assert.equal(canOperateFacilityWorkflowNode(flow.currentNode,flow,'7',0),true)
+assert.equal(canOperateFacilityWorkflowNode(flow.timeline[1],flow,'7',0),false,'已完成历史节点只能查看')
+assert.equal(canOperateFacilityWorkflowNode(flow.currentNode,{...flow,status:'FINISHED'},'7',0),false,'已结束流程即使保留旧当前节点也不可修改')
+assert.equal(canOperateFacilityWorkflowNode(flow.currentNode,flow,'7',5),false,'已完成任务禁止办理')
+assert.equal(canOperateFacilityWorkflowNode(flow.currentNode,flow,'other',0),false,'不能修改其他人的当前节点')
 assert.equal(facilityWorkflow()[0].viewable, false)
 const target={id:'7',deptId:'1',name:'测试办理人'}
 for(const [backend,form,expected] of [

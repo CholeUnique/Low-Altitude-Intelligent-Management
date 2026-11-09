@@ -16,16 +16,17 @@ let resizeObserver: ResizeObserver | undefined
 function render() {
   if (!chart) return
   chart.setOption({
+    textStyle: { fontFamily: getComputedStyle(container.value!).getPropertyValue('--ui-font').trim() },
     animationDuration: 500,
     grid: { top: 38, left: 38, right: 30, bottom: 34 },
     tooltip: { trigger: 'axis', backgroundColor: '#061d35ee', borderColor: '#147ca3', textStyle: { color: '#dff9ff', fontSize: 12 } },
-    legend: { top: 4, left: 'center', itemWidth: 13, itemHeight: 8, itemGap: 15, textStyle: { color: '#a9d5e5', fontSize: 12 }, data: ['任务数', '异常图斑'] },
+    legend: { top: 4, left: 'center', itemWidth: 13, itemHeight: 8, itemGap: 15, textStyle: { color: '#a9d5e5', fontSize: 14 }, data: ['任务数', '异常图斑'] },
     xAxis: {
       type: 'category',
       data: props.data.map((item) => item.date.slice(5).replace('-', '/')),
-      axisLabel: { color: '#83aabd', fontSize: 11 }, axisLine: { lineStyle: { color: '#16465f' } }, axisTick: { show: false },
+      axisLabel: { color: '#83aabd', fontSize: 12 }, axisLine: { lineStyle: { color: '#16465f' } }, axisTick: { show: false },
     },
-    yAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#638ba0', fontSize: 10 }, splitLine: { lineStyle: { color: '#123951', type: 'dashed' } } },
+    yAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#638ba0', fontSize: 12 }, splitLine: { lineStyle: { color: '#123951', type: 'dashed' } } },
     series: [
       { name: '任务数', type: 'bar', data: props.data.map((item) => item.taskCount), barWidth: 13, itemStyle: { color: '#169de8' } },
       // 后端返回的是按“日”离散汇总值；不可使用平滑插值，否则会生成并不存在的中间趋势。

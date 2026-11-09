@@ -77,7 +77,7 @@ const detailFields = computed(() => {
 .acceptance-plots button.selected{border-color:#1687ef;box-shadow:0 0 0 1px #1687ef}
 .acceptance-plots img,.plot-placeholder{width:100%;height:85px;object-fit:cover;border-radius:5px}
 .plot-placeholder{display:grid;place-items:center;background:#e7f2fa;color:#1687ef;font-size:22px}
-.acceptance-plots b{font-size:12px}.acceptance-plots small{font-size:10px;color:#8195a6}.acceptance-plots strong{font-size:15px;color:#147dda}
+.acceptance-plots b{font-size:14px}.acceptance-plots small{font-size:12px;color:#8195a6}.acceptance-plots strong{font-size:15px;color:#147dda}
 .acceptance-record-panel{padding:0!important;overflow:hidden}
 .empty-copy{margin:16px 0;color:#8195a6;font-size:12px;text-align:center}
 @media(max-width:1100px){.acceptance-summary{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:8px}}

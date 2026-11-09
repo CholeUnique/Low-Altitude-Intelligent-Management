@@ -10,7 +10,7 @@ const leaflet = { TileLayer: class {}, LayerGroup: class {}, Layer: class {}, Gr
 const fields = [
   { name:'OBJECTID', type:'esriFieldTypeOID' },
   ...Array.from({length:12}, (_,i) => ({name:`FIELD_${i}`,type:'esriFieldTypeString'})),
-  { name:'COUNT', type:'esriFieldTypeInteger' },
+  { name:'COUNT', alias:'一田一码', type:'esriFieldTypeInteger' },
   { name:'Shape_Length', type:'esriFieldTypeDouble' },
   { name:'DLMC', type:'esriFieldTypeString' },
   { name:'项目类', type:'esriFieldTypeString' },
@@ -46,7 +46,7 @@ globalThis.fetch = async (url, options) => {
   }))}
   return {ok:true,json:async()=>data}
 }
-const source = ts.transpileModule(readFileSync('src/utils/map-service-layer.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText
+const source = ts.transpileModule(readFileSync('src/utils/map-service-layer.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
 const module = {exports:{}}
 new Function('require','module','exports',source)(id=>{
   if(id==='leaflet')return {default:leaflet}
@@ -56,25 +56,41 @@ new Function('require','module','exports',source)(id=>{
 const api=module.exports
 const boundaryPaths = []
 leaflet.latLng = (lat, lng) => ({ lat, lng })
-leaflet.layerGroup = () => ({ paths: [] })
+leaflet.layerGroup = () => ({ paths: [],hasLayer(path){return this.paths.includes(path)},addLayer(path){this.paths.push(path);return this},removeLayer(path){this.paths=this.paths.filter(item=>item!==path);return this} })
 leaflet.polygon = (coordinates, style) => {
   const path = { coordinates, style, addTo(group) { group.paths.push(this); return this }, setStyle(next) { Object.assign(this.style, next) } }
   boundaryPaths.push(path)
   return path
 }
 const regularFetch = globalThis.fetch
-globalThis.fetch = async (_url, options) => ({ ok: true, json: async () => options.body.get('returnIdsOnly') === 'true'
-  ? { objectIds: [1] }
-  : { features: [{ geometry: { rings: [[[119.8,32.4],[119.9,32.4],[119.9,32.5],[119.8,32.4]]] } }] } })
+globalThis.fetch = async (_url, options) => options.method!=='POST'
+  ? {ok:true,text:async()=>JSON.stringify({fields:[{name:'OBJECTID',type:'esriFieldTypeOID'},{name:'ZLDWMC',alias:'坐落单位名称'},{name:'ZLDWDM',alias:'坐落单位代码'}]})}
+  : { ok: true, json: async () => options.body.get('returnIdsOnly') === 'true'
+  ? { objectIds: [1,2,3] }
+  : { features: [1,2,3].map(id=>({attributes:{OBJECTID:id,ZLDWMC:'孙金村',ZLDWDM:`32120${id===3?2:id}`}, geometry: { rings: [[[119.8,32.4],[119.9,32.4],[119.9,32.5],[119.8,32.4]]] } })) } }
 const boundary = await api.createAdministrativeBoundaryLayer({ serviceUrl: 'https://example.test/MapServer', arcGisLayerId: 2 })
 assert(boundary.bounds.isValid())
-assert.equal(boundaryPaths.length, 2, 'Administrative boundary uses a halo and a crisp foreground stroke')
+assert.equal(boundaryPaths.length, 6, 'Each administrative feature uses a halo and a crisp foreground stroke')
 assert.equal(boundaryPaths[1].style.color, '#9AEEFE')
 assert.equal(boundaryPaths[1].style.fillOpacity, .1)
 assert.deepEqual(boundaryPaths[1].coordinates[0][0], { lat: 32.4, lng: 119.8 }, 'ArcGIS WGS84 geometry keeps latitude/longitude order')
 boundary.setColor('#ff0000'); boundary.setFillOpacity(.15)
 assert.equal(boundaryPaths[1].style.fillColor, '#ff0000')
 assert.equal(boundaryPaths[1].style.fillOpacity, .15)
+assert.equal(boundary.categoryFilter.values.length,2,'同代码多块几何合为一个选项，同名但不同代码的区划独立选择')
+assert(boundary.categoryFilter.values[0].label.startsWith('孙金村'),'区划选项显示真实村名')
+boundary.categoryFilter.setVisibleValues([])
+assert.equal(boundary.layer.paths.length,0,'取消区划时同时移除底部光晕和前景边界')
+assert.equal(boundary.definitionExpression(),'1=0')
+boundary.categoryFilter.setVisibleValues(['code:321202'])
+assert.equal(boundary.layer.paths.length,4,'重新选中区划恢复其全部几何的两层边线')
+assert.equal(boundary.definitionExpression(),'OBJECTID IN (2,3)','属性查询同步使用选中区划全部原始要素 ID')
+assert(boundary.layer.paths.includes(boundaryPaths[3]),'只显示被选中区划')
+assert(!boundary.layer.paths.includes(boundaryPaths[1]),'另一个同名区划保持隐藏')
+boundary.categoryFilter.setVisibleValues(['code:321201','code:321202'])
+assert.equal(boundary.layer.paths.length,6,'恢复全选')
+boundary.setCategoryFillOpacity('code:321201',0)
+assert.equal(boundaryPaths[1].style.fillOpacity,0)
 globalThis.fetch = regularFetch
 const service={id:'test',name:'测试图层',serviceUrl:'https://example.test/MapServer',arcGisLayerId:0,arcGisGeometryType:'esriGeometryPoint'}
 const topicRecords = await api.queryMapServiceFeatures(service, ['DLMC'], "DLMC = '水浇地'")
@@ -100,6 +116,8 @@ clicked=true;numericFallback=false
 const identified=await api.identifyVectorFeatures(service,{west:119,south:32,east:120,north:33})
 assert.equal(identified.length,2,'Overlapping features remain selectable')
 assert.equal(identified[0].typeValue,'水浇地','Hover displays land type rather than engineering names')
+assert.equal(identified[0].rows.find(row=>row.name==='COUNT').label,'一田一码','无 fieldAliases 时使用发布元数据中的别名')
+assert.equal(identified[0].rows.find(row=>row.name==='FIELD_11').label,'最后一个文本字段','查询响应的别名优先于元数据')
 const gbz=await api.identifyVectorFeatures({...service,arcGisLayerId:1},{west:119,south:32,east:120,north:33})
 assert.equal(gbz[0].category.field,'项目类','GBZ without a land-use field exposes its genuine project classification')
 assert.equal(gbz[0].typeLabel,'项目类型')

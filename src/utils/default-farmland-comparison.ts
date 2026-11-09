@@ -6,8 +6,8 @@ import { farmlandDefaults } from './farmland-analysis'
 export async function loadDefaultFarmlandComparison(deptId: string, signal: AbortSignal) {
   const services = await listEnabledMapServices(deptId)
   signal.throwIfAborted()
-  const source = services.find(item => item.name.replace(/\s/g, '') === '九龙镇高标准农田数据')
-    || services.find(item => /九龙镇.*高标准农田/.test(item.name))
+  const source = services.find(item => item.name.replace(/\s/g, '') === '海陵区高标准农田')
+    || services.find(item => /海陵区.*高标准农田/.test(item.name.replace(/\s/g, '')))
   if (!source) throw new Error('当前部门没有可用的高标准农田基准服务。')
   const layers = await getSpatialLayers(String(source.id), deptId, { signal })
   signal.throwIfAborted()

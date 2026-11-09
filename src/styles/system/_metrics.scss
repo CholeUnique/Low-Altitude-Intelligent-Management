@@ -1,0 +1,37 @@
+// Numeric KPI boards share hierarchy; workflow metadata summaries keep their reading size.
+#app :is(.task-center-content, .recognition-content, .uav-content, .facility-dashboard, .ledger, .cockpit-page, .management-content) {
+  :is(.kpi-grid, .summary-grid, .summary-cards, .fleet-cards, .summary-strip, .metric-grid, .stat-grid, .scene-summary) > :is(article, button, .summary-card) {
+    font-family: var(--ui-font);
+    --stat-icon-rgb: 34 211 238;
+    &:nth-child(5n+2) { --stat-icon-rgb: 65 147 255; }
+    &:nth-child(5n+3) { --stat-icon-rgb: 32 201 151; }
+    &:nth-child(5n+4) { --stat-icon-rgb: 255 176 32; }
+    &:nth-child(5n+5) { --stat-icon-rgb: 174 130 255; }
+    &.is-blue { --stat-icon-rgb: 65 147 255; }
+    &.is-green { --stat-icon-rgb: 32 201 151; }
+    &.is-orange { --stat-icon-rgb: 255 176 32; }
+    &.is-purple { --stat-icon-rgb: 174 130 255; }
+    &.is-cyan { --stat-icon-rgb: 34 211 238; }
+    > i, > .summary-icon, > .metric-icon {
+      display: grid; place-items: center; flex: 0 0 44px;
+      width: 44px; height: 44px; box-sizing: border-box; border-radius: 50%;
+      color: rgb(var(--stat-icon-rgb));
+      background: rgb(var(--stat-icon-rgb) / 14%);
+      border: 1px solid rgb(var(--stat-icon-rgb) / 22%);
+      font-size: 22px; font-style: normal;
+      svg { width: 24px; height: 24px; }
+    }
+  }
+  :is(.kpi-grid .kpi-card strong, .summary-grid .summary-card strong,
+    .summary-cards > article b, .fleet-cards > article b,
+    .summary-strip .summary-card strong > b, .metric-grid > article b,
+    .stat-grid > article b, .stats > article strong, .scene-summary > article b) {
+    color: var(--ui-text); font-size: 34px; line-height: 40px;
+    font-family: var(--ui-font); font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  :is(.fleet-cards > article b small, .summary-cards > article b small,
+    .metric-grid > article b small, .summary-strip .summary-card strong > em) {
+    color: var(--ui-muted); font-size: 13px; line-height: 20px; font-weight: 400;
+  }
+  .summary-strip .summary-card strong { line-height: 40px; }
+}

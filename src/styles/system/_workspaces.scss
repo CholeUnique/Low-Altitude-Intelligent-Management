@@ -14,7 +14,7 @@
 #app :is(.ng-steps, .facility-steps) button:is(.active, .returned) > span { color: #fff2a2; }
 @media (max-width: 1100px) and (min-width: 801px) {
   #app :is(.ng-context, .facility-header) { grid-template-columns: minmax(200px, 1fr) minmax(0, 2.6fr) minmax(200px, 1fr); gap: 10px; }
-  #app :is(.ng-steps, .facility-steps) button > span { font-size: 11px; }
+  #app :is(.ng-steps, .facility-steps) button > span { font-size: 12px; }
 }
 @media (max-width: 800px) {
   #app :is(.ng-context, .facility-header) { height: auto; flex-basis: auto; min-height: 110px; grid-template-columns: minmax(0, 1fr) 36px; grid-template-rows: auto auto; padding-block: 10px; }
@@ -24,9 +24,9 @@
 #app .ng-page { --ng-bg: #fff; --ng-panel: #fff; --ng-line: #dce5ee; --ng-title: #21354c; --ng-text: #40566c; --ng-muted: #65788b; --ng-primary: #2f8cff; padding: 12px 16px; font-size: 14px; line-height: 22px; }
 #app .ng-grid { gap: 12px; }
 #app .ng-card { border-color: #dce5ee; padding: 14px; border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); }
-#app .ng-card h3 { margin-bottom: 10px; font-size: 16px; line-height: 24px; color: #21354c; }
+#app .ng-card h3 { margin-bottom: 10px; font-size: 18px; line-height: 24px; color: #21354c; }
 #app .ng-card h3 small, #app .ng-readonly { font-size: 12px; }
-#app .ng-card h4 { font-size: 14px; line-height: 22px; }
+#app .ng-card h4 { font-size: 16px; line-height: 22px; }
 #app .ng-list li { font-size: 13px; line-height: 20px; padding-block: 7px; }
 #app .ng-list li > span:first-child { color: #65788b; }
 #app .ng-list li b { color: #21354c; }
@@ -39,7 +39,7 @@
 #app .ng-page select:not(:disabled):hover { border-color: #6ea6d0; }
 #app :is(.ng-desc-list, .ng-ai-block ol, .ng-info-box p, .ng-plot small, .ng-plot em,
   .ng-record-bar span, .ng-record-bar b, .ng-summary-card small, .ng-card h3 small,
-  .ng-radio label small, .ng-tag, .ng-accept-kpi p, .ng-confidence) { font-size: 12px; line-height: 18px; }
+  .ng-radio label small, .ng-tag, .ng-accept-kpi p, .ng-confidence) { font-size: 14px; line-height: 18px; }
 #app .ng-summary-card b { font-size: 14px; line-height: 22px; }
 #app .ng-plot b { font-size: 14px; line-height: 22px; }
 #app .ng-card :is(.plot-scroll, .ng-plot-list) { overscroll-behavior: contain; }
@@ -53,7 +53,7 @@
 #app .facility-summary article, #app .facility-card { background: #fff; border: 1px solid rgb(199 215 228 / 72%); border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); }
 #app .facility-summary small { color: #65788b; font-size: 12px; }
 #app .facility-summary b { color: #21354c; font-size: 14px; line-height: 22px; }
-#app .facility-card h2 { color: #21354c; font-size: 16px; line-height: 24px; }
+#app .facility-card h2 { color: #21354c; font-size: 18px; line-height: 24px; }
 #app .facility-fields { gap: 16px; }
 #app .facility-fields label > span, #app .facility-deadline { font-size: 13px; line-height: 20px; color: #40566c; }
 #app .facility-fields :is(input, select, textarea), #app .facility-deadline input { min-height: 36px; padding: 7px 10px; font-size: 14px; line-height: 22px; color: #21354c; background: #fff; border: 1px solid #c8d5e1; border-radius: var(--ui-control-radius); }
@@ -66,7 +66,7 @@
 #app .facility-dossier dd { color: #21354c; }
 #app :is(.facility-brand b, .workspace-brand b) { font-size: 16px; line-height: 24px; }
 #app :is(.facility-brand small, .workspace-brand small, .module-nodes span, .facility-steps span) { font-size: 12px; line-height: 18px; }
-#app .workflow-actor-badge { width: 20px; height: 20px; font-size: 11px; line-height: 1; }
+#app .workflow-actor-badge { width: 20px; height: 20px; font-size: 12px; line-height: 1; }
 #app .workflow-actor-badge.actor-mine { background: #ee9420; border-color: #ffe1a7; color: #fff; }
 #app :is(.workbench-required-mark, .required-mark) { color: #e5484d; font-size: 16px; line-height: 1; font-weight: 600; }
 #app .facility-notice-list { max-height: min(360px, calc(100dvh - 100px)); scrollbar-width: none; overscroll-behavior: contain; color: #e6f1ff; background: var(--ui-overlay); border-color: #38617b; }

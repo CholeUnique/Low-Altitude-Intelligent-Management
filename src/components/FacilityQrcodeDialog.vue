@@ -77,7 +77,7 @@ onBeforeUnmount(() => { if (imageUrl.value) URL.revokeObjectURL(imageUrl.value) 
 .backdrop{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:24px;background:#00131bbd}
 .dialog{width:min(420px,94vw);max-height:calc(100vh - 48px);overflow:auto;border:1px solid #3f8297;border-radius:8px;background:#103445;color:#d9eff3;box-shadow:0 20px 58px #000a}
 .dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 22px;border-bottom:1px solid #315e6e}
-.dialog h2{margin:0;font-size:19px}
+.dialog h2{margin:0;font-size:21px}
 .dialog header p{margin:7px 0 0;color:#8db6c1;font-size:13px}
 .dialog header>button{border:0;background:transparent;color:#cfeaf0;font-size:26px;line-height:1;cursor:pointer}
 .body{padding:20px 22px 4px;display:grid;gap:14px;justify-items:center}
@@ -87,7 +87,7 @@ onBeforeUnmount(() => { if (imageUrl.value) URL.revokeObjectURL(imageUrl.value) 
 .qrcode{width:260px;height:260px;display:grid;place-items:center;padding:12px;box-sizing:border-box;border-radius:10px;background:#fff;box-shadow:0 10px 26px #00131f66}
 .qrcode img{width:100%;height:100%;object-fit:contain;display:block}
 .tip{margin:0;color:#8db6c1;font-size:12px;line-height:1.65;text-align:center}
-.url{margin:0;color:#6f93a2;font-size:11px;word-break:break-all;text-align:center}
+.url{margin:0;color:#6f93a2;font-size:12px;word-break:break-all;text-align:center}
 .dialog footer{display:flex;justify-content:flex-end;gap:10px;padding:16px 22px 20px}
 .dialog footer button{min-width:88px;padding:9px 16px;border:1px solid #3a7386;border-radius:4px;background:#123a4c;color:#d7eef4;font:inherit;font-size:13px;cursor:pointer}
 .dialog footer button.primary{border-color:#1f9dbc;background:linear-gradient(135deg,#12789c,#1aa4bd);color:#f2fdff}

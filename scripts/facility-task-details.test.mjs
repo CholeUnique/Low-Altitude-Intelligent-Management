@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { build } from 'esbuild'
 const bundle=await build({entryPoints:['src/utils/facility-task.ts'],bundle:true,platform:'node',format:'esm',write:false,tsconfig:'tsconfig.app.json'})
-const {isFacilityTask,facilityGeometry,facilityFacts,facilityTaskReference}=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`)
+const {isFacilityTask,facilityGeometry,facilityTaskGeometry,facilityFacts,facilityTaskReference}=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`)
 assert(isFacilityTask({sceneCode:'HIGH_STANDARD_FARMLAND_FACILITY',sceneName:'工程设施'}))
 assert(isFacilityTask({sceneCode:'other',sceneName:'高标准农田工程设施管理'}))
 assert(!isFacilityTask({sceneCode:'NON_GRAIN',sceneName:'非粮化动态监测'}))
@@ -22,4 +22,14 @@ assert.equal(facilityTaskReference({...report,refType:'FACILITY',refId:'23'}).id
 assert.equal(facilityTaskReference(report,'24').id,'24')
 assert.equal(facilityTaskReference({...report,description:'请检修 ID: 1419 的设施'}),undefined,'Do not guess links from arbitrary user descriptions')
 assert.equal(facilityTaskReference({...report,sceneCode:'NON_GRAIN',sceneName:'非粮化'}),undefined)
+for(const geometry of [
+  {type:'Point',coordinates:[119.9,32.4]},
+  {type:'LineString',coordinates:[[119.9,32.4],[119.91,32.41]]},
+  {type:'Polygon',coordinates:[[[119.9,32.4],[119.91,32.4],[119.91,32.41],[119.9,32.4]]]},
+]) {
+  const detail={task:{...report,facilityId:'1'},facility:{...facility,geometryJson:JSON.stringify(geometry)}}
+  assert.equal(facilityTaskGeometry(detail).features[0].geometry.type,geometry.type,'设施缩略图兼容点、线、面')
+  assert.equal(facilityTaskGeometry({...detail,facility:{...detail.facility,id:'2'}}).features.length,0,'不能把其他设施的位置显示成当前上报设施')
+}
+assert.equal(facilityTaskGeometry(undefined).features.length,0)
 console.log('facility task details: exact scene identity, facility geometry, repair dossier and construction location passed')

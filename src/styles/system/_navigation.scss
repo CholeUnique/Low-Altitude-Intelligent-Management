@@ -6,8 +6,8 @@
   background: linear-gradient(115deg, rgb(7 41 65 / 94%), rgb(17 59 82 / 78%) 48%, rgb(7 41 65 / 92%)); border-bottom: 1px solid var(--ui-border); box-shadow: 0 4px 20px rgb(0 17 30 / 12%);
   &::after { display: block; opacity: .55; }
   .primary-brand { gap: 10px; }
-  .primary-brand h1 { color: #e6f1ff; font-size: clamp(18px, 1.2vw, 23px); line-height: 28px; letter-spacing: .3px; }
-  .primary-title small { color: #9fb7c9; font-size: 10px; letter-spacing: 1.2px; line-height: 14px; }
+  .primary-brand h1 { color: #e6f1ff; font-size: max(14px, clamp(18px, 1.2vw, 23px)); line-height: 28px; letter-spacing: .3px; }
+  .primary-title small { color: #9fb7c9; font-size: 12px; letter-spacing: 1.2px; line-height: 16px; }
   .primary-nav { gap: 8px; }
   .primary-nav button { height: 40px; padding-inline: 16px; border-radius: 10px; color: #a9c2d3; font-size: 15px; letter-spacing: 0; transition: background-color var(--ui-motion), color var(--ui-motion), box-shadow var(--ui-motion); }
   .primary-nav button:hover { color: #e6f1ff; background: var(--ui-hover); }
@@ -76,7 +76,7 @@
 
 #app .management-shell { background: var(--ui-page-background); color: #c4d6e6; }
 #app .management-context { height: 68px; padding-inline: 24px; background: linear-gradient(115deg, rgb(7 41 65 / 96%), rgb(21 61 83 / 78%)); border-bottom: 1px solid var(--ui-border); box-shadow: 0 4px 20px rgb(0 17 30 / 10%); }
-#app .management-context h1 { font-size: 20px; letter-spacing: .5px; }
+#app .management-context h1 { font-size: 22px; letter-spacing: .5px; }
 #app .management-body { height: calc(100% - 68px); grid-template-columns: 220px minmax(0, 1fr); }
 #app .management-context .account-summary { font-size: 13px; }
 #app :is(.workspace-context, .facility-header, .patrol-context) { background: linear-gradient(115deg, #072941, #123e57); border-color: rgb(154 205 228 / 18%); box-shadow: 0 4px 16px rgb(0 17 30 / 10%); }
@@ -90,7 +90,7 @@
   #app :is(.task-center-sidebar, .management-sidebar) { width: 190px; flex-basis: 190px; }
   #app :is(.uav-page > main, .recognition-page > main, .management-body) { grid-template-columns: 190px minmax(0, 1fr); }
   #app .primary-header { grid-template-columns: minmax(220px, 1fr) auto auto; }
-  #app .primary-header .primary-brand h1 { font-size: 18px; }
+  #app .primary-header .primary-brand h1 { font-size: 20px; }
   #app .primary-header .primary-title small { letter-spacing: .3px; }
   #app .primary-header .primary-user { gap: 6px; }
   #app .primary-header .primary-nav button { padding-inline: 9px; }

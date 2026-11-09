@@ -105,6 +105,6 @@ onBeforeUnmount(() => {
 .fleet-device-marker.is-offline span { background:#7d8a91;color:#d9dfe2;border-color:#c5cdd1;box-shadow:0 2px 7px #17374655;filter:grayscale(1); }
 .fleet-device-marker.is-selected span { outline:3px solid #ffcf4e;outline-offset:3px; }
 .fleet-device-tooltip strong,.fleet-device-tooltip span { display:block;text-align:center; }
-.fleet-device-tooltip span { margin-top:3px;color:#5b7888;font-size:11px; }
+.fleet-device-tooltip span { margin-top:3px;color:#5b7888;font-size:12px; }
 @keyframes fleet-drone-glow { from { box-shadow:0 0 5px #38f6dc,0 0 11px #14d9c5,0 2px 8px #17374677; } to { box-shadow:0 0 10px #7ffff0,0 0 24px #14d9c5,0 2px 8px #17374677; } }
 </style>

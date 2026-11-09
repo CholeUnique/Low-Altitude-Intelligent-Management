@@ -27,7 +27,7 @@ const emit = defineEmits<{ openAll: []; openTask: [task: MyWorkflowTask] }>()
 .workbench-notice-shell{position:relative;justify-self:end;width:32px;height:32px}
 .workbench-notice{position:relative;width:32px;height:32px;padding:0;display:grid;place-items:center;background:transparent;border:0;cursor:pointer}
 .workbench-notice :deep(svg){width:25px;height:25px;filter:drop-shadow(0 0 4px #1ce5f540)}
-.workbench-notice>b{position:absolute;top:-1px;right:-3px;min-width:16px;height:16px;padding:0 3px;border-radius:9px;background:#f04d62;color:#fff;font:11px/16px var(--ui-font);text-align:center}
+.workbench-notice>b{position:absolute;top:-1px;right:-3px;min-width:16px;height:16px;padding:0 3px;border-radius:9px;background:#f04d62;color:#fff;font:12px/16px var(--ui-font);text-align:center}
 .workbench-notices{position:absolute;z-index:240;top:32px;right:0;display:none;flex-direction:column;width:310px;max-width:calc(100vw - 32px);max-height:min(440px,calc(100dvh - 90px));padding:14px;overflow:hidden;border:1px solid #dce5ee;border-radius:10px;background:#fff;color:#40566c;box-shadow:0 10px 28px #173e5926}
 .workbench-notice-shell:is(:hover,:focus-within) .workbench-notices{display:flex}
 .workbench-notices header{display:flex;flex:none;justify-content:space-between;align-items:center;gap:12px;padding-bottom:10px;border-bottom:1px solid #e8eef4}

@@ -8,14 +8,15 @@ const {farmlandDefaults,splitFarmlandOverlay,partitionUploadedRange}=load('src/u
 const make=(kind,area,id)=>({type:'Feature',geometry:{type:'Polygon',coordinates:[[[120,32],[120.001,32],[120.001,32.001],[120,32]]]},properties:{diffType:kind,areaSqm:area,seqNo:id,centerLng:120,centerLat:32}})
 const collection=features=>({type:'FeatureCollection',features})
 const group=(kind,area,id)=>({areaSqm:area,spotCount:area?1:0,featureCollection:collection(area?[make(kind,area,id)]:[])})
-const high={serviceId:'9',layerId:0,layerName:'高标准农田GBZ',serviceName:'九龙镇高标准农田数据'},permanent={...high,layerId:1,layerName:'九龙镇永久基本农田1'}
+const high={serviceId:'9',layerId:2,layerName:'高标地块_海陵区',serviceName:'海陵区高标准农田'},permanent={...high,layerId:0,layerName:'永久基本农田_海陵区'}
 const defaults=farmlandDefaults([
- {key:'8/0',sourceName:'九龙镇高标农田数据',role:'land',service:{name:'无关层'}},
- {key:'9/0',sourceName:high.serviceName,role:'project',service:{name:high.layerName}},
- {key:'9/1',sourceName:high.serviceName,role:'permanent',service:{name:permanent.layerName}},
- {key:'9/2',sourceName:high.serviceName,role:'boundary',service:{name:'九龙镇行政区'}},
+ {key:'8/0',sourceName:'海陵区高标农田',role:'land',service:{name:'无关层'}},
+ {key:'9/0',sourceName:high.serviceName,role:'permanent',service:{name:permanent.layerName}},
+ {key:'9/1',sourceName:high.serviceName,role:'boundary',service:{name:'乡级行政区划'}},
+ {key:'9/2',sourceName:high.serviceName,role:'parcel',service:{name:high.layerName}},
+ {key:'9/3',sourceName:high.serviceName,role:'boundary',service:{name:'村级行政区划'}},
 ])
-assert.deepEqual(defaults.keys,['9/0','9/1','9/2']);assert.equal(defaults.a.layerId,0);assert.equal(defaults.b.layerId,1)
+assert.deepEqual(defaults.keys,['9/0','9/1','9/2','9/3']);assert.equal(defaults.a.layerId,2);assert.equal(defaults.b.layerId,0);assert.equal(defaults.boundary.layerId,1)
 const features=[make('A_ONLY',100,1),make('B_ONLY',200,2),make('OVERLAP',300,3)]
 const summary={sourceA:high,sourceB:permanent,onlyAArea:100,onlyBArea:200,overlapArea:300,diffArea:300,spotCount:3,minAreaSqm:4}
 const split=splitFarmlandOverlay(collection(features),summary)

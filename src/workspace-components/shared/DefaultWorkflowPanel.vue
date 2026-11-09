@@ -157,47 +157,47 @@ async function submit() {
 .default-plot { box-sizing: border-box; display: grid; grid-template-columns: 14px 76px minmax(0, 1fr); align-items: center; gap: 10px; width: 100%; margin-bottom: 9px; padding: 10px; text-align: left; background: #f8fbff; border: 1px solid #e0ebf2; border-radius: 6px; color: #294a61; cursor: pointer; font: inherit; }
 .default-plot.selected { border-color: #1687ef; background: #eff7ff; }
 .plot-radio { color: #1687ef; font-size: 12px; }
-.thumbnail { height: 66px; min-width: 0; overflow: hidden; display: grid; place-items: center; background: #e7f0f6; border-radius: 5px; font-size: 11px; color: #8195a6; }
+.thumbnail { height: 66px; min-width: 0; overflow: hidden; display: grid; place-items: center; background: #e7f0f6; border-radius: 5px; font-size: 12px; color: #8195a6; }
 .thumbnail img { width: 100%; height: 100%; object-fit: cover; }
 .thumbnail :deep(.task-range-map) { height: 100%; min-height: 0; pointer-events: none; }
 .thumbnail :deep(.range-tools), .thumbnail :deep(.range-area) { display: none; }
 .plot-content { min-width: 0; display: grid; gap: 6px; }
 .plot-content b { overflow-wrap: anywhere; font-size: 12px; }
-.plot-content small { color: #8195a6; font-size: 10px; }
-.plot-content em { color: #8195a6; font-size: 10px; font-style: normal; }
+.plot-content small { color: #8195a6; font-size: 12px; }
+.plot-content em { color: #8195a6; font-size: 12px; font-style: normal; }
 .plot-content em.complete { color: #1687ef; }
 .default-history { padding: 0; }
 .default-operation { overflow-y: auto; scrollbar-width: thin; display: block; padding: 16px; }
 .default-operation > h3 { margin-bottom: 12px; }
 .default-operation > h3 .ng-tag { margin-left: auto; }
 .default-form-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 12px; border-radius: 5px; background: #edf7ff; }
-.default-form-summary span { min-width: 0; display: grid; gap: 6px; color: #7190a4; font-size: 11px; }
+.default-form-summary span { min-width: 0; display: grid; gap: 6px; color: #7190a4; font-size: 12px; }
 .default-form-summary b { color: #294a61; font-size: 12px; overflow-wrap: anywhere; }
 .default-operation fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .default-field { margin: 15px 0; gap: 8px; font-size: 12px; }
 .default-field textarea { min-height: 88px; resize: vertical; font: inherit; line-height: 1.7; }
 .default-field input { font: inherit; }
 .default-field :is(input, textarea):disabled { opacity: 1; color: #36556d; -webkit-text-fill-color: #36556d; }
-.field-counter { text-align: right; color: #8195a6; font-size: 10px; }
+.field-counter { text-align: right; color: #8195a6; font-size: 12px; }
 .default-operation .section-heading { padding-left: 7px; border-left: 3px solid #61aef9; margin-top: 15px; }
 .default-choices label { font-size: 12px; }
-.default-tip { margin: 8px 0; color: #8195a6; font-size: 11px; line-height: 1.7; }
+.default-tip { margin: 8px 0; color: #8195a6; font-size: 12px; line-height: 1.7; }
 .material-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .material-list article { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e0eaf1; border-radius: 5px; }
 .material-list article > span { color: #1687ef; font-size: 22px; }
 .material-list article > div { min-width: 0; display: grid; gap: 5px; }
-.material-list b { overflow-wrap: anywhere; font-size: 11px; font-weight: 500; }
-.material-list small { color: #8195a6; font-size: 10px; }
-.material-upload { position: relative; display: grid; justify-items: center; gap: 5px; margin-top: 8px; padding: 12px; border: 1px dashed #a6c9e2; border-radius: 5px; color: #4389b6; background: #f5fbff; cursor: pointer; font-size: 11px; }
+.material-list b { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; }
+.material-list small { color: #8195a6; font-size: 12px; }
+.material-upload { position: relative; display: grid; justify-items: center; gap: 5px; margin-top: 8px; padding: 12px; border: 1px dashed #a6c9e2; border-radius: 5px; color: #4389b6; background: #f5fbff; cursor: pointer; font-size: 12px; }
 .material-upload > span { font-size: 22px; }
-.material-upload small { color: #8195a6; font-size: 10px; }
+.material-upload small { color: #8195a6; font-size: 12px; }
 .material-upload input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .material-upload:focus-within { outline: 2px solid #1687ef; outline-offset: 2px; }
 .default-actions { display: flex; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e1eaf0; }
 .default-actions button { min-width: 112px; padding: 9px 18px; color: #fff; background: #1687ef; border: 0; border-radius: 4px; font-size: 12px; cursor: pointer; }
 .default-actions button:disabled { color: #8d9da9; background: #e9edf0; cursor: not-allowed; }
 .default-operation :deep(.assignee-picker) { font-size: 12px; padding: 10px; gap: 7px; }
-.default-operation :deep(.assignee-picker small) { font-size: 11px; }
+.default-operation :deep(.assignee-picker small) { font-size: 12px; }
 @media (max-height: 780px) { .default-page { gap: 10px; } .default-summary { flex-basis: 62px; } .default-sidebar { grid-template-rows: minmax(210px, 1.5fr) minmax(120px, 1fr); gap: 10px; } }
 @media (max-width: 1100px) { .default-columns, .default-page--archive .default-columns { grid-template-columns: 280px minmax(0, 1fr); gap: 12px; } .default-page--acceptance .default-columns { grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr); gap: 12px; } .default-form-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 800px) { .default-page { overflow: auto; } .default-summary { flex-basis: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 62px; } .default-columns, .default-page--acceptance .default-columns, .default-page--archive .default-columns { flex: none; grid-template-columns: minmax(0, 1fr); } .default-sidebar { grid-template-rows: 300px 240px; } .default-operation { overflow: visible; } }

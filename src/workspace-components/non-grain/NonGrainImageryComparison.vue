@@ -98,15 +98,15 @@ onBeforeUnmount(() => { stop(); window.removeEventListener('keydown', handleFull
 
 <style scoped>
 .imagery-comparison{gap:8px}.comparison-viewport{position:relative;flex:1;min-height:0;overflow:hidden;border:1px solid #b9d0dd;border-radius:6px;background:#e8eef3}.comparison-viewport.side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.comparison-map{min-width:0;min-height:0;height:100%}/* Isolate Leaflet panes so the historical map cannot cover the clipped current map. */
-.swipe .comparison-map{position:absolute;inset:38px 0 0;height:auto;z-index:0;isolation:isolate}.swipe .current{z-index:2}.swipe .current :deep(.leaflet-top.leaflet-left){left:auto;right:10px}.swipe-handle{position:absolute;z-index:600;top:0;bottom:0;width:3px;background:white;box-shadow:0 0 8px #092f48aa;cursor:ew-resize;touch-action:none;transform:translateX(-50%)}.swipe-handle i{position:absolute;top:50%;left:50%;width:32px;height:32px;display:grid;place-items:center;transform:translate(-50%,-50%);color:#fff;background:#1687ef;border:2px solid #fff;border-radius:50%;font-style:normal;box-shadow:0 3px 10px #06263b66}.swipe-handle:focus-visible i{outline:3px solid #fce505}footer{display:flex;justify-content:space-between;gap:10px;font-size:11px;color:#718696}footer span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.swipe .comparison-map{position:absolute;inset:38px 0 0;height:auto;z-index:0;isolation:isolate}.swipe .current{z-index:2}.swipe .current :deep(.leaflet-top.leaflet-left){left:auto;right:10px}.swipe-handle{position:absolute;z-index:600;top:0;bottom:0;width:3px;background:white;box-shadow:0 0 8px #092f48aa;cursor:ew-resize;touch-action:none;transform:translateX(-50%)}.swipe-handle i{position:absolute;top:50%;left:50%;width:32px;height:32px;display:grid;place-items:center;transform:translate(-50%,-50%);color:#fff;background:#1687ef;border:2px solid #fff;border-radius:50%;font-style:normal;box-shadow:0 3px 10px #06263b66}.swipe-handle:focus-visible i{outline:3px solid #fce505}footer{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#718696}footer span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 </style>
 
 <style scoped>
-.comparison-map{display:flex;flex-direction:column}.period-title{position:relative;z-index:3;flex:0 0 38px;display:flex;align-items:center;gap:8px;box-sizing:border-box;padding:0 9px;background:#f5faff;border-bottom:1px solid #dbe7ef;min-width:0;font-size:12px;color:#254863}.period-title b{white-space:nowrap}.period-title select{min-width:0;flex:1;max-width:100%;padding:3px;border:1px solid #d6e5ef;border-radius:4px;font-size:11px}.period-title small{color:#8195a6;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.comparison-canvas{position:relative;min-height:0;flex:1}.comparison-canvas :deep(.period-badge){display:none}.swipe .comparison-canvas{height:100%;flex:auto}.swipe .swipe-handle{top:38px}.swipe-periods{position:absolute;z-index:650;top:0;left:0;right:0;display:grid;grid-template-columns:1fr 1fr;height:38px}.swipe-periods .period-title{height:38px}.swipe .comparison-canvas :deep(.leaflet-top){top:10px}
+.comparison-map{display:flex;flex-direction:column}.period-title{position:relative;z-index:3;flex:0 0 38px;display:flex;align-items:center;gap:8px;box-sizing:border-box;padding:0 9px;background:#f5faff;border-bottom:1px solid #dbe7ef;min-width:0;font-size:14px;color:#254863}.period-title b{white-space:nowrap}.period-title select{min-width:0;flex:1;max-width:100%;padding:3px;border:1px solid #d6e5ef;border-radius:4px;font-size:12px}.period-title small{color:#8195a6;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.comparison-canvas{position:relative;min-height:0;flex:1}.comparison-canvas :deep(.period-badge){display:none}.swipe .comparison-canvas{height:100%;flex:auto}.swipe .swipe-handle{top:38px}.swipe-periods{position:absolute;z-index:650;top:0;left:0;right:0;display:grid;grid-template-columns:1fr 1fr;height:38px}.swipe-periods .period-title{height:38px}.swipe .comparison-canvas :deep(.leaflet-top){top:10px}
 </style>
 
 <style scoped>
-.map-source-note{margin:0;font-size:11px;color:#718696}.comparison-canvas :deep(.task-range-map){min-height:0}.swipe .current :deep(.range-tools){right:10px}
+.map-source-note{margin:0;font-size:12px;color:#718696}.comparison-canvas :deep(.task-range-map){min-height:0}.swipe .current :deep(.range-tools){right:10px}
 </style>
 
 <style scoped>
@@ -117,10 +117,10 @@ onBeforeUnmount(() => { stop(); window.removeEventListener('keydown', handleFull
 .comparison-placeholder{min-height:0;height:100%}
 .imagery-comparison.is-fullscreen{--ng-title:#fff;position:fixed;z-index:4000;inset:0;width:100%;height:100dvh;max-height:none;padding:0;gap:0;border:0;border-radius:0;background:#e8eef3;box-shadow:none}
 .is-fullscreen>.ng-card-head{flex:0 0 60px;min-height:60px;box-sizing:border-box;padding:0 16px;align-items:center;background:#07344f}
-.is-fullscreen>.ng-card-head h3{margin:0;font-size:18px;color:#fff}
+.is-fullscreen>.ng-card-head h3{margin:0;font-size:20px;color:#fff}
 .is-fullscreen .fullscreen-button{background:#126f91;border-color:#6ed8eb;color:#fff}
 .is-fullscreen>.comparison-viewport{margin:4px;border-radius:0;border:0}
 .is-fullscreen>footer{padding:7px 12px;background:#f5faff;flex-shrink:0}
 .is-fullscreen>.map-source-note{padding:4px 12px}
-@media(max-width:650px){.comparison-actions{gap:4px}.comparison-actions>small{display:none}.fullscreen-button{padding:5px 6px}.is-fullscreen>.ng-card-head{padding-inline:8px}.is-fullscreen>.ng-card-head h3{font-size:14px}}
+@media(max-width:650px){.comparison-actions{gap:4px}.comparison-actions>small{display:none}.fullscreen-button{padding:5px 6px}.is-fullscreen>.ng-card-head{padding-inline:8px}.is-fullscreen>.ng-card-head h3{font-size:16px}}
 </style>

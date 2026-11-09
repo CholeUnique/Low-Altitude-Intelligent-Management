@@ -61,7 +61,7 @@
   border-left: 0;
   border-radius: 0 6px 6px 0;
   box-shadow: 2px 2px 6px rgba(0, 0, 0, .18);
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
 }
 .layer-panel-handle:hover { background: #fff; }
@@ -94,7 +94,7 @@
   color: var(--map-gold);
   background: #08273c;
   border-bottom: 1px solid var(--map-border);
-  font-size: 17px;
+  font-size: 19px;
   letter-spacing: .3px;
 }
 
@@ -120,7 +120,7 @@
   background: rgba(52, 152, 219, .22);
   box-shadow: inset 3px 0 #a9d2ee;
 }
-.layer-manager .map-service-row b { color: inherit; font-size: 13px; font-weight: 600; line-height: 1.4; }
+.layer-manager .map-service-row b { color: inherit; font-size: 14px; font-weight: 600; line-height: 1.4; }
 .layer-manager .map-service-row em {
   width: 14px;
   height: 14px;
@@ -159,8 +159,8 @@
   background: rgba(8, 39, 60, .68);
   border-bottom: 1px solid rgba(255, 255, 255, .12);
 }
-.parcel-filter-heading b { color: var(--map-text); font-size: 13px; }
-.parcel-filter-heading small { color: var(--map-muted); font-size: 11px; }
+.parcel-filter-heading b { color: var(--map-text); font-size: 14px; }
+.parcel-filter-heading small { color: var(--map-muted); font-size: 12px; }
 .parcel-filter-row {
   min-height: 36px;
   padding: 6px 12px;
@@ -212,8 +212,8 @@
 .search-result-title { color: var(--map-gold); background: #08273c; border-color: var(--map-border); }
 .search-results button { color: var(--map-text); border-color: rgba(255, 255, 255, .12); }
 .search-results button:hover { background: #485d6e75; }
-.search-results b { color: var(--map-text); font-size: 13px; }
-.search-results small,.search-results p { color: var(--map-muted); font-size: 11px; }
+.search-results b { color: var(--map-text); font-size: 14px; }
+.search-results small,.search-results p { color: var(--map-muted); font-size: 12px; }
 
 .map-tools {
   --tool-size: 40px;
@@ -510,7 +510,7 @@
 @container (max-width: 650px) {
   .left-map-rail { --map-panel-menu-clearance: 160px; width: min(220px, 42cqw); max-width: none; }
   .parcel-type-panel { width: 100%; max-width: none; }
-  .tool-title { padding-inline: 10px; font-size: 15px; }
+  .tool-title { padding-inline: 10px; font-size: 17px; }
   .layer-manager .map-service-row { padding-inline: 10px; }
   .map-tools { --tool-size: 36px; gap: 3px; padding: 5px; }
   .map-tools > button,.map-mode-switch button,.measure-tool > button { gap: 0; padding: 0; }
@@ -523,16 +523,16 @@
 @container (max-width: 480px) {
   .left-map-rail { --map-panel-menu-clearance: 146px; left: 7px; top: 61px; width: min(130px, 36cqw); }
   .parcel-type-panel { width: 100%; max-height: 160px; }
-  .tool-title { min-height: 36px; flex-basis: 36px; font-size: 14px; }
+  .tool-title { min-height: 36px; flex-basis: 36px; font-size: 16px; }
   .layer-manager .map-service-row { min-height: 36px; padding-block: 6px; }
-  .layer-manager .map-service-row b { font-size: 11px; }
+  .layer-manager .map-service-row b { font-size: 14px; }
   .parcel-filter-row { min-height: 32px; }
   .map-tools { --tool-size: 30px; gap: 1px; padding: 4px; border-radius: 12px; }
   .map-mode-switch { gap: 1px; padding-right: 4px; }
   .map-tools > button,.map-mode-switch button,.measure-tool > button { gap: 0; padding: 0; border-radius: 8px; }
   .map-tools .map-tool-icon { width: 27px; height: 27px; flex-basis: 27px; }
   .map-tools .map-tool-icon svg { width: 18px; height: 18px; }
-  .map-tools span,.map-mode-switch span { display: block; font-size: 11px; }
+  .map-tools span,.map-mode-switch span { display: block; font-size: 12px; }
   .right-submenu { width: 100px; }
   .map-search { right: 8px; top: 8px; }
   .map-search.expanded { width: 42cqw; }

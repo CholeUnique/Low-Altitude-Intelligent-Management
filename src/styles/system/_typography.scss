@@ -1,0 +1,25 @@
+// Keep native controls, teleported overlays and map text on the same font stack.
+// Component sizes live beside their layout rules so responsive views retain hierarchy.
+html:root {
+  --el-font-size-small: 12px;
+  --el-font-size-extra-small: 12px;
+}
+
+html:root body, html:root body :where(*) {
+  font-family: var(--ui-font);
+}
+
+:where(small, sub, sup) { font-size: max(12px, .85em); }
+:where(h5, h6, th, [role='columnheader']) { font-size: 14px; }
+
+// Leaflet and Element Plus ship a few 10–11px labels independently of page styles.
+html:root body :is(.leaflet-control-attribution, .leaflet-control-scale-line,
+  .el-badge__content, .el-calendar-table .el-calendar-day,
+  .el-input--small, .el-select--small, .el-tag--small,
+  .el-date-table th, .el-date-table td, .el-time-panel__footer) {
+  font-size: 12px;
+}
+
+html:root body :is(.el-table__header th, .el-table__header th .cell) {
+  font-size: 14px;
+}

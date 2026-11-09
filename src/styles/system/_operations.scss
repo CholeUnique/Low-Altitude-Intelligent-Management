@@ -11,8 +11,8 @@
   .priority-section, .image-card-caption, .image-card__caption {
     background: var(--ui-panel-background); border-color: var(--ui-border); border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); color: var(--ui-body);
   }
-  h1 { font-size: 20px; color: var(--ui-text); line-height: 28px; }
-  h2, h3, .panel-title { color: var(--ui-text); font-size: 16px; line-height: 24px; }
+  h1 { font-size: 22px; color: var(--ui-text); line-height: 28px; }
+  h2, h3, .panel-title { color: var(--ui-text); font-size: 18px; line-height: 24px; }
   .panel-title, .panel > header { border-color: var(--ui-divider); background: transparent; min-height: 44px; padding-inline: 16px; }
   .panel-title small, .cell-sub, .muted, .source-task, .loading-note { color: var(--ui-muted); font-size: 12px; line-height: 18px; }
   .filter-grid label, .filters label, .summary-card span { color: var(--ui-muted); font-size: 13px; }
@@ -22,9 +22,9 @@
   :is(.filter-grid, .filters, .toolbar) select option { color: var(--ui-body); background: var(--ui-surface-raised); }
   .filter-grid, .toolbar, .summary-grid, .stat-grid { gap: 12px; }
   table { font-size: 13px; }
-  th { background: var(--ui-surface-raised); color: var(--ui-muted); font-size: 12px; }
+  th { background: var(--ui-surface-raised); color: var(--ui-muted); font-size: 14px; }
   td { color: var(--ui-body); border-color: var(--ui-divider); font-size: 13px; line-height: 20px; }
-  td b, .plan-cell > b, .spot-row b, .spot-item b { color: var(--ui-text); font-size: 13px; }
+  td b, .plan-cell > b, .spot-row b, .spot-item b { color: var(--ui-text); font-size: 14px; }
   td small, .plan-cell small, .spot-row small, .spot-item small { color: var(--ui-muted); font-size: 12px; }
   tbody tr:hover, .spot-row:hover, .spot-item:hover { background: var(--ui-hover); }
   .spot-row.active, .spot-row.selected, .spot-item.selected { background: var(--ui-selected); border-color: #4f9bb5; }
@@ -143,7 +143,7 @@
   .device-row, .route-row { color: var(--ui-body); background: transparent; border-color: var(--ui-divider); }
   .device-row:hover, .route-row:hover { background: var(--ui-hover); }
   .device-row.active, .route-row.active { background: var(--ui-selected); }
-  .device-row b, .route-row b { color: var(--ui-text); font-size: 13px; }
+  .device-row b, .route-row b { color: var(--ui-text); font-size: 14px; }
   .device-row small, .route-row small { color: var(--ui-muted); font-size: 12px; }
   .device-row em, .route-row em { color: var(--ui-accent); background: var(--ui-selected); }
   .selected-device { color: var(--ui-muted); background: var(--ui-input); }
@@ -171,7 +171,7 @@
   .panel, .kpi-card { background: var(--ui-panel-background); border: 1px solid var(--ui-border); box-shadow: var(--ui-shadow); border-radius: var(--ui-radius); }
   .panel::before, .panel::after, .kpi-card::before, .kpi-card::after { display: none; }
   .kpi-card:hover { transform: none; box-shadow: none; border-color: #558ba9; }
-  .panel > header h2 { font-size: 16px; color: var(--ui-text); }
+  .panel > header h2 { font-size: 18px; color: var(--ui-text); }
   .kpi-card strong { color: var(--ui-text); font-size: 28px; line-height: 34px; }
   .kpi-card span, .legend-list, .recent-list, .bar-list { font-size: 13px; }
 }
@@ -179,7 +179,7 @@
 // Workbench fallback panels retain the light reading theme rather than the dark review theme.
 #app .workspace-body :is(.backend-task-panel, .dispatch-page, .review-page) { background: #fff; color: #40566c; font-size: 14px; line-height: 22px; }
 #app .workspace-body :is(.backend-task-panel, .dispatch-page, .review-page) :is(.card, .panel) { background: #fff; border-color: #dce5ee; border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); }
-#app .workspace-body :is(.backend-task-panel, .dispatch-page, .review-page) :is(h2, h3, .panel-title) { color: #21354c; font-size: 16px; }
+#app .workspace-body :is(.backend-task-panel, .dispatch-page, .review-page) :is(h2, h3, .panel-title) { color: #21354c; font-size: 18px; }
 
 @media (max-width: 1350px) {
   #app .general-review .review-layout { grid-template-columns: 260px minmax(0, 1fr); }

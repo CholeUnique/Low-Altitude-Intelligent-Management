@@ -142,16 +142,16 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
 }
 header { flex: none; display: flex; align-items: center; justify-content: center; gap: calc(14px * var(--legend-density)); padding: calc(13px * var(--legend-density)) calc(18px * var(--legend-density)) calc(10px * var(--legend-density)); }
 header::before, header::after { content: ''; height: 1px; flex: 1; background: #e3eeec70; }
-h2 { margin: 0; font-size: calc(14px * var(--legend-density)); font-weight: 600; line-height: calc(20px * var(--legend-density)); letter-spacing: calc(6px * var(--legend-density)); padding-left: calc(6px * var(--legend-density)); }
+h2 { margin: 0; font-size: max(14px, calc(14px * var(--legend-density))); font-weight: 600; line-height: calc(20px * var(--legend-density)); letter-spacing: calc(6px * var(--legend-density)); padding-left: calc(6px * var(--legend-density)); }
 /* 面板按内容自然撑高，所有条目直接展示，不限制高度或创建滚动区域。 */
 .map-symbol-content { padding: 0 calc(16px * var(--legend-density)) calc(12px * var(--legend-density)); overflow: visible; }
 .map-legend-group + .map-legend-group { border-top: 1px solid #e3eeec45; margin-top: calc(10px * var(--legend-density)); padding-top: calc(10px * var(--legend-density)); }
-h3 { margin: 0 0 calc(7px * var(--legend-density)); font-size: calc(12px * var(--legend-density)); font-weight: 600; line-height: calc(18px * var(--legend-density)); overflow-wrap: anywhere; break-after: avoid-column; }
+h3 { margin: 0 0 calc(7px * var(--legend-density)); font-size: max(14px, calc(14px * var(--legend-density))); font-weight: 600; line-height: calc(18px * var(--legend-density)); overflow-wrap: anywhere; break-after: avoid-column; }
 .map-symbol-grid { list-style: none; padding: 0; margin: 0; }
 .map-symbol-row { display: grid; grid-template-columns: calc(40px * var(--legend-density)) minmax(0, 1fr); align-items: center; column-gap: calc(8px * var(--legend-density)); min-height: calc(28px * var(--legend-density)); break-inside: avoid-column; }
 .map-symbol-row + .map-symbol-row { margin-top: calc(4px * var(--legend-density)); }
 .map-symbol { display: block; width: calc(40px * var(--legend-density)); height: calc(26px * var(--legend-density)); overflow: visible; filter: drop-shadow(0 1px 1px #001017); }
-.map-symbol-label { font-size: calc(12px * var(--legend-density)); line-height: calc(18px * var(--legend-density)); overflow-wrap: anywhere; }
+.map-symbol-label { font-size: max(12px, calc(12px * var(--legend-density))); line-height: calc(18px * var(--legend-density)); overflow-wrap: anywhere; }
 .map-symbol-legend.is-compact { width: min(380px, calc(var(--details-width, 320px) * 1.2)); }
 .is-compact header { padding: calc(8px * var(--legend-density)) calc(12px * var(--legend-density)) calc(6px * var(--legend-density)); }
 .is-compact .map-symbol-columns { column-count: 2; column-gap: calc(5px * var(--legend-density)); column-rule: 1px solid #e3eeec30; }
