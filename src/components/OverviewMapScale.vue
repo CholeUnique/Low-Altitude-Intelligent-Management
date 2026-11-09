@@ -33,5 +33,5 @@ onBeforeUnmount(() => current?.off('moveend zoomend resize', update))
 </template>
 
 <style scoped>
-.overview-scale{position:absolute;z-index:500;right:14px;bottom:10px;height:18px;padding:0;color:#b9e7f4;background:transparent;font-size:11px;text-align:center;pointer-events:none}.overview-scale b{position:relative;z-index:1;display:block;font-size:11px;font-weight:600;line-height:12px}.overview-scale i{position:absolute;right:0;bottom:0;left:0;height:7px;border-right:2px solid #b9e7f4;border-bottom:2px solid #b9e7f4;border-left:2px solid #b9e7f4}
+.overview-scale{position:absolute;z-index:500;right:14px;bottom:10px;height:18px;padding:0;color:#b9e7f4;background:transparent;font-size:12px;text-align:center;pointer-events:none}.overview-scale b{position:relative;z-index:1;display:block;font-size:12px;font-weight:600;line-height:16px}.overview-scale i{position:absolute;right:0;bottom:0;left:0;height:7px;border-right:2px solid #b9e7f4;border-bottom:2px solid #b9e7f4;border-left:2px solid #b9e7f4}
 </style>

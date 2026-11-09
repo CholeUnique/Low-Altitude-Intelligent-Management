@@ -23,10 +23,11 @@ onMounted(() => {
   if (!container.value) return
   chart = init(container.value)
   chart.setOption({
+    textStyle: { fontFamily: getComputedStyle(container.value).getPropertyValue('--ui-font').trim() },
     animationDuration: 800,
     grid: { top: 38, left: 38, right: 32, bottom: 46 },
     tooltip: { trigger: 'axis', backgroundColor: '#061d35ee', borderColor: '#147ca3', textStyle: { color: '#dff9ff', fontSize: 12 } },
-    legend: { top: 4, left: 'center', itemWidth: 13, itemHeight: 8, itemGap: 13, textStyle: { color: '#a9d5e5', fontSize: 12 }, data: ['计划数', '完成数', '完成率'] },
+    legend: { top: 4, left: 'center', itemWidth: 13, itemHeight: 8, itemGap: 13, textStyle: { color: '#a9d5e5', fontSize: 14 }, data: ['计划数', '完成数', '完成率'] },
     xAxis: {
       type: 'category',
       data: props.data.map((item) => item.name.length > 6 ? `${item.name.slice(0, 5)}\n${item.name.slice(5, 9)}` : item.name),
@@ -35,8 +36,8 @@ onMounted(() => {
       axisTick: { show: false },
     },
     yAxis: [
-      { type: 'value', min: 0, max: 200, axisLabel: { color: '#638ba0', fontSize: 10 }, splitLine: { lineStyle: { color: '#123951', type: 'dashed' } } },
-      { type: 'value', min: 0, max: 100, axisLabel: { color: '#638ba0', fontSize: 10, formatter: '{value}%' }, splitLine: { show: false } },
+      { type: 'value', min: 0, max: 200, axisLabel: { color: '#638ba0', fontSize: 12 }, splitLine: { lineStyle: { color: '#123951', type: 'dashed' } } },
+      { type: 'value', min: 0, max: 100, axisLabel: { color: '#638ba0', fontSize: 12, formatter: '{value}%' }, splitLine: { show: false } },
     ],
     series: [
       { name: '计划数', type: 'bar', data: props.data.map((item) => item.planned), barWidth: 12, itemStyle: { color: '#169de8' } },

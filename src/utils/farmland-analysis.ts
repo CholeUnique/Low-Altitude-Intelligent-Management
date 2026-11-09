@@ -13,15 +13,25 @@ function partition(kind:FarmlandGroupKind,name:string,data:SpatialCollection,sou
   return {kind,name,color:colors[kind],areaSqm:area(data),sources,data:{...data,features:data.features.map(feature=>({...feature,properties:{...feature.properties,analysisMembership:name,analysisSourceLayerName:sources.join('、'),analysisGroup:kind}}))}}
 }
 
-/** Resolve the three real sublayers from the canonical service, never conflate 高标 with 高标准. */
+const normalizeLayerName = (name:string) => name.replace(/\s/g,'')
+
+/** Resolve the four default sublayers from the canonical 海陵区高标准农田 service. */
 export function farmlandDefaults<T extends {key:string;sourceName:string;role:string;service:{name:string}}>(layers:T[]) {
-  const canonical = layers.filter(item=>item.sourceName.replace(/\s/g,'')==='九龙镇高标准农田数据')
-  const candidates = canonical.length ? canonical : layers.filter(item=>/九龙镇.*高标准农田/.test(item.sourceName))
-  const a = candidates.find(item=>item.role!=='permanent'&&item.role!=='boundary'&&/高标准农田|高标田|GBZ/i.test(item.service.name))
-  const b = candidates.find(item=>item.role==='permanent'||/永久基本农田/.test(item.service.name))
-  const boundary = candidates.find(item=>item.role==='boundary'||/行政区/.test(item.service.name))
+  const canonical = layers.filter(item=>normalizeLayerName(item.sourceName)==='海陵区高标准农田')
+  const candidates = canonical.length ? canonical : layers.filter(item=>/海陵区.*高标准农田/.test(normalizeLayerName(item.sourceName)))
+  const named = (name:string) => candidates.find(item=>normalizeLayerName(item.service.name)===name)
+  const a = named('高标地块_海陵区')
+    || candidates.find(item=>item.role!=='permanent'&&item.role!=='boundary'&&/高标(?:准)?(?:农田)?地块|高标准农田|GBZ/i.test(item.service.name))
+  const b = named('永久基本农田_海陵区')
+    || candidates.find(item=>item.role==='permanent'||/永久基本农田/.test(item.service.name))
+  const township = named('乡级行政区划')
+  const village = named('村级行政区划')
+  const boundary = township || village || candidates.find(item=>item.role==='boundary'||/行政区/.test(item.service.name))
   const input = (item:T|undefined):SpatialInput|undefined => item && /^\d+$/.test(item.key.split('/')[1]||'') ? {serviceId:item.key.split('/')[0]!,layerId:Number(item.key.split('/')[1]),filters:[]} : undefined
-  return {a:input(a),b:input(b),keys:[a?.key,b?.key,boundary?.key].filter((key):key is string=>!!key)}
+  return {
+    a:input(a),b:input(b),boundary:input(boundary),
+    keys:[b?.key,township?.key,a?.key,village?.key].filter((key):key is string=>!!key),
+  }
 }
 
 /** Split only the actual backend output; an absent intersection is an error, never fabricated geometry. */

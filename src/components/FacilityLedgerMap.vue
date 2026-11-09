@@ -30,4 +30,4 @@ watch(() => props.deptId, () => { features?.clearLayers(); void load() })
 onBeforeUnmount(() => { version++; map?.remove() })
 </script>
 <template><section class="map-card"><div class="map-header"><strong>台账设施地图</strong><span>{{ loading ? '正在加载…' : error ? `加载失败：${error}` : `当前范围 ${count} 条设施` }}</span><button v-if="error" @click="load">重试</button></div><div ref="element" class="map" aria-label="台账设施地图"></div></section></template>
-<style scoped>.map-card{margin-bottom:18px;border:1px solid #285468;border-radius:6px;overflow:hidden;background:#102d40}.map-header{display:flex;gap:12px;align-items:center;padding:12px 14px;font-size:12px}.map-header span{color:#9abdc9}.map-header button{background:transparent;color:#70dbe6;border:0;cursor:pointer}.map{height:400px;background:#0b2331}</style>
+<style scoped>.map-card{margin-bottom:18px;border:1px solid #285468;border-radius:6px;overflow:hidden;background:#102d40}.map-header{display:flex;gap:12px;align-items:center;padding:12px 14px;font-size:14px}.map-header span{color:#9abdc9}.map-header button{background:transparent;color:#70dbe6;border:0;cursor:pointer}.map{height:400px;background:#0b2331}</style>

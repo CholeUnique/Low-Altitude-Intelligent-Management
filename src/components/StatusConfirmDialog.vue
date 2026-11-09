@@ -53,15 +53,15 @@ function cancel() {
 
 <style scoped>
 .status-dialog-mask { position: fixed; inset: 0; z-index: 3000; padding: 20px; display: grid; place-items: center; background: #00111cce; backdrop-filter: blur(4px); }
-.status-dialog { width: min(460px, 100%); overflow: hidden; color: #dceef5; background: #0b2638; border: 1px solid #28657d; border-radius: 10px; box-shadow: 0 25px 80px #000c, 0 0 0 1px #ffffff08 inset; font-family: "Microsoft YaHei", sans-serif; }
+.status-dialog { width: min(460px, 100%); overflow: hidden; color: #dceef5; background: #0b2638; border: 1px solid #28657d; border-radius: 10px; box-shadow: 0 25px 80px #000c, 0 0 0 1px #ffffff08 inset; font-family: var(--ui-font); }
 .status-dialog--disable { border-color: #855960; }
 .status-dialog__heading { padding: 22px 22px 18px; display: flex; align-items: center; gap: 13px; background: linear-gradient(115deg, #103b50, #0d2b3e); border-bottom: 1px solid #20566d; }
 .status-dialog--disable .status-dialog__heading { background: linear-gradient(115deg, #443039, #112c3e); border-bottom-color: #684751; }
 .status-dialog__icon { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; color: #eaffff; background: #157b96; border: 1px solid #43bdd9; border-radius: 50%; font-size: 22px; font-weight: 700; }
 .status-dialog--disable .status-dialog__icon { color: #ffe9e4; background: #884e52; border-color: #d27d80; }
 .status-dialog__heading > div { min-width: 0; flex: 1; }
-.status-dialog__heading small { display: block; margin-bottom: 5px; color: #88bac9; font-size: 11px; letter-spacing: 1px; }
-.status-dialog__heading h2 { margin: 0; color: #f3fbff; font-size: 18px; font-weight: 600; }
+.status-dialog__heading small { display: block; margin-bottom: 5px; color: #88bac9; font-size: 12px; letter-spacing: 1px; }
+.status-dialog__heading h2 { margin: 0; color: #f3fbff; font-size: 20px; font-weight: 600; }
 .status-dialog__close { width: 28px; height: 28px; align-self: start; color: #8cb5c3; background: transparent; border: 0; border-radius: 4px; font-size: 23px; line-height: 1; cursor: pointer; }
 .status-dialog__close:hover { color: #fff; background: #ffffff14; }
 .status-dialog__content { padding: 20px 22px 17px; }

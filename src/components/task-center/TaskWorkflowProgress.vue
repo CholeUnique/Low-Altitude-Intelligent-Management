@@ -68,13 +68,13 @@ const steps = computed(() => getTaskWorkflowSteps(props.task))
 .workflow-step:not(:first-child)::before { content: ""; position: absolute; top: 7px; right: calc(50% + 7px); width: calc(100% - 14px); height: 2px; background: #d9e0e7; }
 .workflow-step.done::before { background: #43b88b; }
 .workflow-step.active::before { background: linear-gradient(90deg, #43b88b, #328fd3); }
-.workflow-step i { position: relative; z-index: 1; width: 15px; height: 15px; display: grid; place-items: center; color: #fff; background: #fff; border: 2px solid #c4ced8; border-radius: 50%; font-size: 9px; font-style: normal; line-height: 1; }
+.workflow-step i { position: relative; z-index: 1; width: 15px; height: 15px; display: grid; place-items: center; color: #fff; background: #fff; border: 2px solid #c4ced8; border-radius: 50%; font-size: 12px; font-style: normal; line-height: 1; }
 .workflow-step.done i { background: #43b88b; border-color: #43b88b; }
 .workflow-step.active i { background: #328fd3; border-color: #328fd3; box-shadow: 0 0 0 3px #328fd31c; }
-.workflow-step small { width: calc(100% - 3px); margin-top: 4px; overflow: hidden; color: inherit; font-size: 10px; line-height: 1.2; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-step small { width: calc(100% - 3px); margin-top: 4px; overflow: hidden; color: inherit; font-size: 12px; line-height: 1.2; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-step.done small, .workflow-step.active small { color: #52677b; }
 .compact .workflow-step { grid-template-rows: 16px auto; }
 .compact .workflow-step i { width: 13px; height: 13px; }
 .compact .workflow-step:not(:first-child)::before { top: 6px; right: calc(50% + 6px); width: calc(100% - 12px); }
-.compact .workflow-step small { font-size: 9px; }
+.compact .workflow-step small { font-size: 12px; }
 </style>

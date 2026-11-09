@@ -196,25 +196,25 @@ onBeforeUnmount(() => {
 .task-meta { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 10px 16px; border-bottom: 1px solid #edf1f4; }
 .task-title { min-width: 0; display: flex; align-items: center; gap: 11px; }
 .task-title h2, .task-title p { margin: 0; }
-.task-title h2 { overflow: hidden; color: #30465c; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.work-state { margin-left: 6px; padding: 2px 6px; color: #277fbf; background: #eaf5fd; border-radius: 9px; font-size: 9px; font-style: normal; font-weight: 500; vertical-align: 2px; }
+.task-title h2 { overflow: hidden; color: #30465c; font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.work-state { margin-left: 6px; padding: 2px 6px; color: #277fbf; background: #eaf5fd; border-radius: 9px; font-size: 12px; font-style: normal; font-weight: 500; vertical-align: 2px; }
 .work-state.handled, .work-state.archived { color: #248263; background: #e7f7f0; }
-.task-title p { margin-top: 5px; color: #97a4b1; font-size: 10px; }
-.priority { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; color: #738396; background: #edf1f4; border-radius: 50%; font-size: 10px; }
+.task-title p { margin-top: 5px; color: #97a4b1; font-size: 12px; }
+.priority { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; color: #738396; background: #edf1f4; border-radius: 50%; font-size: 12px; }
 .priority-2 { color: #c95353; background: #fff0ef; }.priority-1 { color: #bd7a2b; background: #fff5e7; }
-.deadline { text-align: right; }.deadline span, .deadline strong { display: block; }.deadline span { color: #9aa6b2; font-size: 10px; }.deadline strong { margin-top: 3px; color: #5f7184; font-size: 12px; }.deadline.soon strong { color: #c95454; }.deadline.overdue strong { color: #c95454; }
+.deadline { text-align: right; }.deadline span, .deadline strong { display: block; }.deadline span { color: #9aa6b2; font-size: 12px; }.deadline strong { margin-top: 3px; color: #5f7184; font-size: 12px; }.deadline.soon strong { color: #c95454; }.deadline.overdue strong { color: #c95454; }
 .task-body { display: grid; grid-template-columns: minmax(270px, .9fr) minmax(370px, 1.45fr) 105px; align-items: center; gap: 18px; min-height: 74px; padding: 11px 16px; }
 .task-body dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
-.task-body dl div { min-width: 0; }.task-body dt { color: #a0abb6; font-size: 10px; }.task-body dd { margin: 5px 0 0; overflow: hidden; color: #596d80; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.task-body dl div { min-width: 0; }.task-body dt { color: #a0abb6; font-size: 12px; }.task-body dd { margin: 5px 0 0; overflow: hidden; color: #596d80; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-button { height: 32px; color: #fff; background: #2c8bcf; border: 1px solid #2180c3; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .workspace-button:hover { background: #227dbb; }
 .todo-empty { min-height: 220px; display: grid; align-content: center; justify-items: center; gap: 8px; padding: 30px; color: #8f9dab; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; text-align: center; }
 .todo-empty b { color: #5d7083; font-size: 14px; }.todo-empty p { margin: 0; font-size: 12px; }.todo-empty.error { color: #b45858; }.todo-empty button { padding: 6px 13px; color: #2d83c1; background: #fff; border: 1px solid #bcd8eb; border-radius: 4px; cursor: pointer; }
 .workload-panel { align-self: start; overflow: hidden; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; box-shadow: 0 2px 10px #24496909; }
-.workload-panel header { padding: 17px 18px; border-bottom: 1px solid #edf1f4; }.workload-panel h2, .workload-panel p { margin: 0; }.workload-panel h2 { color: #354b61; font-size: 15px; }.workload-panel header p { margin-top: 5px; color: #a1acb7; font-size: 10px; }
-.workload-total { padding: 20px 18px; text-align: center; background: #f8fbfd; }.workload-total strong, .workload-total span { display: block; }.workload-total strong { color: #2b89cc; font-size: 32px; }.workload-total span { margin-top: 3px; color: #8795a4; font-size: 11px; }
+.workload-panel header { padding: 17px 18px; border-bottom: 1px solid #edf1f4; }.workload-panel h2, .workload-panel p { margin: 0; }.workload-panel h2 { color: #354b61; font-size: 17px; }.workload-panel header p { margin-top: 5px; color: #a1acb7; font-size: 12px; }
+.workload-total { padding: 20px 18px; text-align: center; background: #f8fbfd; }.workload-total strong, .workload-total span { display: block; }.workload-total strong { color: #2b89cc; font-size: 32px; }.workload-total span { margin-top: 3px; color: #8795a4; font-size: 12px; }
 .workload-panel ul { margin: 0; padding: 10px 18px; list-style: none; }.workload-panel li { height: 35px; display: flex; align-items: center; justify-content: space-between; color: #687a8c; border-bottom: 1px dashed #e9eef2; font-size: 12px; }.workload-panel li:last-child { border-bottom: 0; }.workload-panel li span { display: flex; align-items: center; gap: 8px; }.workload-panel li i { width: 7px; height: 7px; border-radius: 50%; background: #318fd4; }.workload-panel li i.cyan { background: #28a5b3; }.workload-panel li i.purple { background: #7468d3; }.workload-panel li i.orange { background: #df8b32; }.workload-panel li i.red { background: #d45d5d; }.workload-panel li b { color: #43586d; }
-.workload-note { padding: 0 18px 16px; color: #a2adb8; font-size: 10px; line-height: 1.6; }
+.workload-note { padding: 0 18px 16px; color: #a2adb8; font-size: 12px; line-height: 1.6; }
 @media (max-width: 1280px) {
   .todo-layout { grid-template-columns: minmax(0, 1fr) 210px; }
   .task-body { grid-template-columns: 230px minmax(330px, 1fr) 100px; gap: 12px; }
@@ -225,7 +225,7 @@ onBeforeUnmount(() => {
 
 <style lang="scss">
 .todo-filter-options.el-popper { background: #fff; border-color: #d8e0e7; }
-.todo-filter-options .el-select-dropdown__item { background: #fff; color: #33495e; font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif; font-size: 12px; }
+.todo-filter-options .el-select-dropdown__item { background: #fff; color: #33495e; font-family: var(--ui-font); font-size: 12px; }
 .todo-filter-options .el-select-dropdown__item.is-selected { color: #33495e; font-weight: 600; }
 .todo-filter-options .el-select-dropdown__item.is-hovering,
 .todo-filter-options .el-select-dropdown__item:hover { background: #f1f2f4; }

@@ -25,6 +25,13 @@ export function facilityGeometry(facility?: FacilityRecord): TaskGeometryFeature
     return {type:'FeatureCollection',features:feature ? [feature] : []}
   } catch { return {type:'FeatureCollection',features:[]} }
 }
+/** Only use geometry from the facility explicitly associated with this task. */
+export function facilityTaskGeometry(detail?: GovernanceTaskDetail): TaskGeometryFeatureCollection {
+  const reference=facilityDetailReference(detail)
+  return reference && detail?.facility && String(detail.facility.id)===reference.id
+    ? facilityGeometry(detail.facility)
+    : {type:'FeatureCollection',features:[]}
+}
 export function facilityFacts(task: GovernanceTask | undefined, facility?: FacilityRecord, reference = facilityTaskReference(task)): Array<[string,unknown]> {
   return [
     ['设施名称',facility?.name || reference?.expectedName],['设施 ID',facility?.id || reference?.id],['设施编号',facility?.facilityNo],['设施类型',facility?.typeName || facility?.facilityType],

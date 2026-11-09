@@ -1,0 +1,42 @@
+// One numeric hierarchy for the six home-screen panels, including flip-number parents.
+#app .cockpit--glass {
+  --cockpit-number-size: 24px;
+  --cockpit-number-color: #65e9ed;
+  --cockpit-value-size: max(12px, var(--cockpit-number-size));
+
+  .overview-float-panel :is(.resource-states b, .metric-legend dd,
+    .recognition-summary dd, .recognition-types b, .flight-kpis b,
+    .flight-kpis .kpi-value, .flight-metrics b, .brief-metrics dd,
+    .scene-task-legend strong, .scene-task-hover-card strong, .category-tip strong) {
+    color: var(--cockpit-number-color);
+    font-family: var(--ui-font); font-size: max(12px, var(--cockpit-number-size));
+    font-weight: 700; line-height: 30px; font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+  }
+  .flight-kpis > div { grid-template-columns: 32px minmax(0, 1fr); column-gap: 8px; }
+  .flight-kpis > div > i { width: 32px; height: 32px; }
+  .flight-kpis b { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 4px; white-space: nowrap; }
+  .flight-kpis .kpi-value { min-width: 0; }
+  .flight-kpis > div > span, .flight-metrics > div > span,
+  .metric-legend dt, .recognition-summary dt, .brief-metrics dt { font-size: 13px; }
+  .overview-float-panel :is(.flight-kpis b small, .recognition-summary dd small,
+    .metric-legend dd small, .brief-metrics dd small) {
+    color: var(--cockpit-muted); font-size: 12px; line-height: 20px; font-weight: 400;
+  }
+  .recognition-summary dl > div { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: 4px; }
+  .recognition-summary dt { white-space: normal; }
+  .recognition-summary dd { white-space: nowrap; }
+  .overview-float-panel :is(.category-ring .center b, .scene-task-ring__center b) {
+    color: var(--cockpit-number-color); font-weight: 700;
+    font-family: var(--ui-font); line-height: 1.15;
+    font-size: max(12px, min(var(--cockpit-number-size), var(--ring-number-size)));
+  }
+  .category-ring .center { inset-inline: 10%; }
+  .category-ring .center:has(.emblem) b { font-size: max(12px, min(var(--cockpit-number-size), var(--ring-number-size))); }
+  .recognition-types > div:not(.float-empty) { min-height: 30px; align-items: center; }
+  .scene-task-legend :is(button, .scene-task-legend__static) { min-height: 30px; }
+  .overview-float-panel .auxiliary-number { color: var(--cockpit-number-color); font-size: inherit; font-weight: 700; }
+}
+@media (max-width: 1300px), (max-height: 700px) {
+  #app .cockpit--glass { --cockpit-number-size: 20px; }
+}

@@ -1,6 +1,6 @@
 import type { TaskWorkflow, WorkflowNode, WorkflowSubmitInput } from '@/api/task-workflow'
 import { FARMLAND_FACILITY_STEPS } from '../workspace/config/farmland-facilities'
-import { canViewWorkflowNode, workflowNodeState } from './task-workflow-state'
+import { canOperateWorkflowNode, canViewWorkflowNode, workflowNodeState } from './task-workflow-state'
 
 const aliases: Record<string, string> = {
   TASK_ACCEPTANCE: 'task-acceptance', FACILITY_ACCEPTANCE: 'task-acceptance',
@@ -16,6 +16,11 @@ const aliases: Record<string, string> = {
 }
 const namedAliases: Record<string, string> = { '区县分局审核': 'department-review', '现场核查修复': 'on-site-verification' }
 const normalizedKey = (node: WorkflowNode) => node.nodeKey.trim().replace(/-/g, '_').toUpperCase()
+
+/** Historical nodes and finished tasks are always read-only, even with a stale currentNode summary. */
+export function canOperateFacilityWorkflowNode(node: WorkflowNode | undefined, flow: TaskWorkflow | undefined, userId: string, taskStatus?: number) {
+  return flow?.status === 'RUNNING' && taskStatus !== 5 && node?.id === flow.currentNode?.id && canOperateWorkflowNode(node,userId)
+}
 
 export const FACILITY_CHECK_RESULTS = [
   { value: 'REPAIRED', label: '核查属实，已修复' },

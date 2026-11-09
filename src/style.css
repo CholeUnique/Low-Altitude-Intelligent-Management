@@ -15,7 +15,7 @@
   --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
-  font: 18px/145% var(--sans);
+  font: 18px/145% var(--ui-font);
   letter-spacing: 0.18px;
   color-scheme: light dark;
   color: var(--text);
@@ -56,7 +56,7 @@ body {
 
 h1,
 h2 {
-  font-family: var(--heading);
+  font-family: var(--ui-font);
   font-weight: 500;
   color: var(--text-h);
 }
@@ -76,7 +76,7 @@ h2 {
   letter-spacing: -0.24px;
   margin: 0 0 8px;
   @media (max-width: 1024px) {
-    font-size: 20px;
+    font-size: 22px;
   }
 }
 p {
@@ -85,7 +85,7 @@ p {
 
 code,
 .counter {
-  font-family: var(--mono);
+  font-family: var(--ui-font);
   display: inline-flex;
   border-radius: 4px;
   color: var(--text-h);

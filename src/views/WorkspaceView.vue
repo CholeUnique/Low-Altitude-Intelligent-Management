@@ -36,6 +36,7 @@ const taskLoading = ref(false)
 const taskError = ref('')
 const workspaceSceneId = computed(() => resolveWorkspaceSceneId(backendTask.value?.sceneCode || sceneId.value, backendTask.value?.sceneName))
 const isNonGrainWorkspace = computed(() => workspaceSceneId.value === 'non-grain-monitoring')
+const isFacilityWorkspace = computed(() => workspaceSceneId.value === 'farmland-facilities')
 // 不同场景使用各自任务数据，但统一复用林业执法监管的完整工作台流程与页面。
 const workspaceConfig = computed(() => {
   const config = getSharedWorkspaceConfig()
@@ -158,7 +159,9 @@ watch(
   [() => workspaceConfig.value?.sceneId, defaultNodeKey, () => route.query.node, () => task.value?.id],
   () => {
     // 非粮化工作台由其自身七节点路由守卫维护，不能复用共享工作台的节点改写逻辑。
-    if (isNonGrainWorkspace.value || useDefaultTemplate.value) return
+    // 非粮化与工程设施工作台都由内部流程维护节点路由；外层通用守卫不能
+    // 把其历史节点 query 改写成共享工作台节点，否则已完成页面无法回看。
+    if (isNonGrainWorkspace.value || isFacilityWorkspace.value || useDefaultTemplate.value) return
     if (!workspaceConfig.value) return
     const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
     const queryNode = workspaceConfig.value.nodes.find((item) => item.key === queryKey)
@@ -367,7 +370,7 @@ onMounted(() => void loadTaskContext())
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.workspace-brand small { margin-top: 3px; color: #78adbf; font-size: 11px; }
+.workspace-brand small { margin-top: 3px; color: #78adbf; font-size: 12px; }
 
 .flow-nav {
   display: flex;
@@ -387,7 +390,7 @@ onMounted(() => void loadTaskContext())
   background: #ffffff12;
   border: 1px solid #7fb4c855;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .module-nodes {
@@ -425,10 +428,10 @@ onMounted(() => void loadTaskContext())
   border-radius: 50%;
   background: #174e68;
   font-style: normal;
-  font-size: 11px;
+  font-size: 12px;
 }
 .module-nodes span {
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .module-nodes button.active { color: white; }
@@ -505,7 +508,7 @@ onMounted(() => void loadTaskContext())
 }
 @media (max-width: 1120px) {
   .workspace-context { grid-template-columns: 205px minmax(0, 1fr) 150px; padding-inline: 10px; }
-  .workspace-brand--moved { left: 105px; }.module-label { display: none; }.module-nodes button { min-width: 64px; }.module-nodes span { font-size: 10px; }.workspace-user { gap: 7px; font-size: 11px; }
+  .workspace-brand--moved { left: 105px; }.module-label { display: none; }.module-nodes button { min-width: 64px; }.module-nodes span { font-size: 12px; }.workspace-user { gap: 7px; font-size: 12px; }
 }
 @media (max-height: 700px) { .workspace-context { flex-basis: 62px; } }
 </style>

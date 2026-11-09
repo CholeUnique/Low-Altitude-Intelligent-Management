@@ -35,4 +35,21 @@ assert.equal(permanent[5].value,'49.36','永久基本农田图斑面积转换为
 assert.equal(topicFeatureRows([{name:'MJ',label:'面积（亩）',value:'1200'}],'parcel')[0].value,'1,200','明确已为亩的属性不能重复换算')
 assert.equal(topicFeatureRows([{name:'LZGM',value:'10000'}],'parcel')[0].value,'15','流转规模按属性表的平方米换算')
 assert.equal(rows[1].value,'1200','不修改源属性')
+const boundary = topicFeatureRows([
+  {name:'PAC',label:'行政区划代码',value:'321202102203'},
+  {name:'NAME',label:'村名',value:'界沟村'},
+  {name:'Shape_Area',label:'Shape_Area',value:'0.01'},
+],'boundary')
+assert.deepEqual(boundary.map(row=>[row.label,row.value]),[['行政区划代码','321202102203'],['村名','界沟村']],'行政区划展示代码和服务发布的村名别名')
+assert.equal(topicFeatureRows([{name:'CUSTOM_CODE',label:'图斑编号',value:'YT3212020001'}],'parcel')[0].value,'YT3212020001','一田一码按中文字段别名展示')
+assert.equal(topicFeatureRows([{name:'CUSTOM_CODE',label:'图斑编号',value:'YT3212020002'}],'permanent').at(-1).value,'YT3212020002','永久基本农田白名单也补充一田一码字段')
+assert.deepEqual(topicFeatureRows([
+  {name:'ZLDWMC',label:'坐落单位名称',value:'孙金村'},
+  {name:'ZLDWDM',label:'坐落单位代码',value:'3212020012040000000'},
+  {name:'DCMJ',label:'调查面积',value:'2618661.82'},
+  {name:'Shape_Area',label:'Shape_Area',value:'0.1'},
+],'boundary','村级行政区划').map(row=>[row.label,row.value]),[['村名','孙金村'],['坐落单位代码','3212020012040000000']],'村级数据实际用坐落单位名称存放村名；不展示内部面积字段')
+assert.equal(topicFeatureRows([{name:'db.village.XZQHMC',label:'行政区名称',value:'测试村'}],'boundary','村级行政区划')[0].value,'测试村','兼容发布服务中的限定字段名称')
+assert.equal(topicFeatureRows([{name:'CUSTOM_CODE',label:'一田一码',value:'0000001234567890123456'}],'parcel')[0].label,'图斑编号')
+assert.equal(topicFeatureRows([{name:'CUSTOM_CODE',label:'一田一码',value:'0000001234567890123456'}],'permanent')[0].value,'0000001234567890123456','长编号和前导零必须原样保留')
 console.log('topic fields: mu conversion, explicit units, PDF labels and source preservation passed')

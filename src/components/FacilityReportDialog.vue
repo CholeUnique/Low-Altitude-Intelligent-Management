@@ -86,7 +86,7 @@ async function submit() {
 .backdrop{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:24px;background:#00131bbd}
 .dialog{width:min(560px,96vw);max-height:calc(100vh - 48px);overflow:auto;border:1px solid #3f8297;border-radius:8px;background:#103445;color:#d9eff3;box-shadow:0 20px 58px #000a}
 .dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 22px;border-bottom:1px solid #315e6e}
-.dialog h2{margin:0;font-size:19px}
+.dialog h2{margin:0;font-size:21px}
 .dialog header p{margin:7px 0 0;color:#8db6c1;font-size:13px}
 .dialog header>button{border:0;background:transparent;color:#cfeaf0;font-size:26px;line-height:1;cursor:pointer}
 .fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:18px 22px 4px}
@@ -96,7 +96,7 @@ async function submit() {
 .fields input,.fields textarea{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #35687a;border-radius:4px;background:#0a2634;color:#e6f7fb;font:inherit;font-size:13px}
 .fields textarea{resize:vertical;min-height:96px;line-height:1.6}
 .fields input:focus,.fields textarea:focus{outline:2px solid #2ba6c4;outline-offset:1px}
-.counter{position:absolute;right:2px;bottom:-16px;color:#7597a5;font-size:11px}
+.counter{position:absolute;right:2px;bottom:-16px;color:#7597a5;font-size:12px}
 .error{margin:16px 22px 0;padding:8px 11px;border:1px solid #8a4d48;border-radius:4px;background:#482d31;color:#ffb6ad;font-size:12px}
 .hint{margin:22px 22px 0;color:#7fa2b1;font-size:12px;line-height:1.6}
 .dialog footer{display:flex;justify-content:flex-end;gap:10px;padding:16px 22px 20px}

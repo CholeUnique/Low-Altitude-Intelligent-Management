@@ -315,7 +315,7 @@ onBeforeUnmount(() => {
 }
 .map-tools > button.active, .map-tools > button:hover { color: #fff; background: #08618a; border-color: #2cc7e4; }
 .map-tools i { font-style: normal; font-size: 16px; }
-.map-tools span { font-size: 11px; }
+.map-tools span { font-size: 12px; }
 .submenu {
   position: absolute; right: 52px; top: 84px; width: 86px; padding: 4px;
   background: #031a31f5; border: 1px solid #1a6f95;

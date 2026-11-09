@@ -197,7 +197,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
   margin-top: 4px;
   overflow: hidden;
   color: #8eb1c3;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -246,7 +246,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
   background: rgb(217 217 217 / 22%);
   border: 1px solid #7199ac;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
   transition: transform .22s ease, box-shadow .22s ease;
 }
@@ -254,7 +254,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
 .ng-steps span {
   position: relative;
   z-index: 2;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -269,9 +269,9 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
   color: #063353;
   background: #6fe0c3;
   border-radius: 8px;
-  font-size: 9px;
+  font-size: 12px;
   font-style: normal;
-  line-height: 15px;
+  line-height: 16px;
   text-align: center;
   box-shadow: 0 0 7px #28d6b777;
 }
@@ -359,7 +359,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
 
 .ng-actor small {
   color: #7199ac;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .ng-actor b {

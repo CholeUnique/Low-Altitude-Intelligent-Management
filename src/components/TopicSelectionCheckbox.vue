@@ -12,5 +12,5 @@ function change(event: Event) {
   <label class="topic-selection-checkbox"><input type="checkbox" :checked="checked" :indeterminate="indeterminate" :disabled="disabled" :aria-label="`${title}${label}`" @change="change" />{{ label }}</label>
 </template>
 <style scoped>
-.topic-selection-checkbox{display:inline-flex;align-items:center;gap:4px;font-size:10px;line-height:18px;cursor:pointer;white-space:nowrap}.topic-selection-checkbox input{margin:0;width:12px;height:12px;flex:none;accent-color:#39c7d5}.topic-selection-checkbox:has(input:disabled){opacity:.4;cursor:default}
+.topic-selection-checkbox{display:inline-flex;align-items:center;gap:4px;font-size:12px;line-height:18px;cursor:pointer;white-space:nowrap}.topic-selection-checkbox input{margin:0;width:12px;height:12px;flex:none;accent-color:#39c7d5}.topic-selection-checkbox:has(input:disabled){opacity:.4;cursor:default}
 </style>

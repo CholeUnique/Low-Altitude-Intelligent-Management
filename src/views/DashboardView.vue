@@ -533,7 +533,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <DashboardCategoryRing :value="onlineUavCount ?? '—'" label="在线机组" :total="uavDeviceSummary?.totalCount" :items="fleetRingItems"><DashboardSymbol name="drone" /></DashboardCategoryRing>
                 <div class="resource-states"><span><i class="online"></i>在线 <b><DashboardFlipNumber :value="formatCount(uavDeviceSummary?.onlineCount)" /></b></span><span><i class="offline"></i>离线 <b><DashboardFlipNumber :value="formatCount(uavDeviceSummary?.offlineCount)" /></b></span><span><i class="starting"></i>机组总数 <b><DashboardFlipNumber :value="formatCount(uavDeviceSummary?.totalCount)" /></b></span></div>
               </div>
-              <p class="summary-foot">{{ livePreviewLoading ? '正在获取设备状态…' : '设备状态实时刷新' }}<span>已接入 {{ livePreviews.length }} 路直播画面</span></p>
+              <p class="summary-foot">{{ livePreviewLoading ? '正在获取设备状态…' : '设备状态实时刷新' }}<span>已接入 <b class="auxiliary-number">{{ livePreviews.length }}</b> 路直播画面</span></p>
             </section>
 
             <section class="overview-float-panel operation-panel">
@@ -557,7 +557,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                   <div><dt><i class="legend-blue"></i>照片</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.photoCount)" /></dd></div>
                   <div><dt><i class="legend-mint"></i>视频</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.videoCount)" /></dd></div>
                   <div><dt><i class="legend-violet"></i>其他</dt><dd><DashboardFlipNumber :value="formatCount(uavMediaSummary?.otherCount)" /></dd></div>
-                  <div><dt><i class="legend-muted"></i>素材容量</dt><dd><DashboardFlipNumber :value="formatFileSize(uavMediaSummary?.totalFileSize)" /></dd></div>
+                  <div><dt><i class="legend-muted"></i>素材容量</dt><dd><DashboardFlipNumber :value="formatFileSize(uavMediaSummary?.totalFileSize).split(' ')[0]" /><small>{{ formatFileSize(uavMediaSummary?.totalFileSize).split(' ').slice(1).join(' ') }}</small></dd></div>
                 </dl>
               </div>
             </section>
@@ -579,7 +579,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
             <section v-if="isAgricultureTopicDepartment(user)" class="overview-float-panel topic-data-panel">
               <header>
                 <h2>专题分析</h2>
-                <span class="topic-count">2 个专题</span>
+                <span class="topic-count"><b class="auxiliary-number">2</b> 个专题</span>
               </header>
               <DashboardTopicOverview />
             </section>

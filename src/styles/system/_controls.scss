@@ -96,7 +96,7 @@ html[data-ui-theme] .el-popper.workflow-actor-tooltip { background: var(--ui-ove
   color: var(--ui-body); background: var(--ui-modal-background); border: 1px solid var(--ui-border);
   border-radius: 18px; box-shadow: 0 16px 48px rgb(0 17 30 / 32%);
   max-width: calc(100vw - 40px); max-height: calc(100dvh - 48px);
-  h2 { font-size: 18px; line-height: 26px; color: var(--ui-text); }
+  h2 { font-size: 20px; line-height: 26px; color: var(--ui-text); }
   > header, > footer { background: transparent; border-color: var(--ui-divider); }
   > header { flex: none; padding: 16px 20px; }
   > footer { flex: none; gap: 8px; padding: 12px 20px; }

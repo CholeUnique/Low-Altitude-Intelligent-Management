@@ -3,10 +3,11 @@ import type { MapServiceItem } from '@/api/map-service'
 export const NON_GRAIN = 'CULTIVATED_LAND_USE_CONTROL'
 export const HOMESTEAD = 'RURAL_HOMESTEAD_SUPERVISE'
 export type TopicRole = 'land' | 'permanent' | 'boundary' | 'changes' | 'facility' | 'project' | 'parcel' | 'imagery' | 'unconfigured'
+
 /** 字段能力优先；不把同名服务、任意 WMS 或变化图斑一概当作某种业务成果。 */
 export function topicRole(service: MapServiceItem, fields: string[]): TopicRole {
   const has = (...names: string[]) => names.every(name => fields.includes(name))
-  if (has('PAC', 'NAME')) return 'boundary'
+  if (has('PAC', 'NAME') || /(?:乡|村)级行政区划/.test(service.name)) return 'boundary'
   if (has('DLBM', 'DLMC')) return has('YJJBNTTBBH') ? 'permanent' : 'land'
   if (has('变化类')) return 'changes'
   if (has('GCMC')) return 'facility'

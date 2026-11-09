@@ -426,7 +426,7 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
 .task-button span {
   margin-top: 3px;
   color: #678b9a;
-  font-size: 11px
+  font-size: 12px
 }
 
 .recognition-page aside .recognition-task-submenu p {

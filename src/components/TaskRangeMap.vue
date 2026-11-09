@@ -581,6 +581,6 @@ watch(() => props.view, applyExternalView, { deep: true })
 .range-area { position: absolute; z-index: 500; left: 10px; bottom: 10px; padding: 8px 11px; color: #85b1c2; background: #031b31e8; border: 1px solid #155c7d; font-size: 14px; }.range-area b { color: #8cecff; font-size: 16px; }
 .map-empty { position: absolute; z-index: 500; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 10px 14px; color: #8bb8c8; background: #031b31e8; border: 1px solid #155c7d; font-size: 14px; }.map-empty--notice { top: 14px; transform: translateX(-50%); color: #b8eaf7; border-color: #2784a8; }
 .map-error { position: absolute; z-index: 700; inset: 0; display: grid; place-items: center; color: #ff8c95; background: #04182eea; }
-:deep(.task-range-label) { color: #dffcff; background: #043657e8; border: 1px solid #36e5f4; border-radius: 2px; box-shadow: 0 0 10px #19cde666; font: 13px "Microsoft YaHei"; }
+:deep(.task-range-label) { color: #dffcff; background: #043657e8; border: 1px solid #36e5f4; border-radius: 2px; box-shadow: 0 0 10px #19cde666; font: 13px var(--ui-font); }
 :deep(.task-range-vertex) { width: 12px!important; height: 12px!important; box-sizing: border-box; background: #dffcff; border: 2px solid #087db3; border-radius: 50%; box-shadow: 0 0 0 2px #031b31, 0 0 8px #18d8ee; cursor: move!important; }
 </style>
