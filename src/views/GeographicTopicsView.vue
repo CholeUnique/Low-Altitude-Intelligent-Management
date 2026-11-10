@@ -16,10 +16,11 @@ import TopicMapToolbar from '@/components/TopicMapToolbar.vue'
 import TopicOverlayAnalysis from '@/components/TopicOverlayAnalysis.vue'
 import TopicUploadedLayers from '@/components/TopicUploadedLayers.vue'
 import type { UploadedTopicLayer } from '@/utils/topic-upload'
+import type { DrawingLayerInput } from '@/utils/map-drawing'
 import type { SpatialAnalysisOperation } from '@/utils/spatial-geometry-result'
 import { readPublishedSpatialGeometry } from '@/utils/spatial-geometry-input'
 import TopicMapLegend from '@/components/TopicMapLegend.vue'
-import type { SpatialResultLegend, SpatialInput } from '@/api/spatial-analysis'
+import type { SpatialResultLegend, SpatialInput, SpatialCollection } from '@/api/spatial-analysis'
 import OverviewMapScale from '@/components/OverviewMapScale.vue'
 import { identifyVectorFeatures, setMapHoverSelection, type IdentifiedMapFeature } from '@/utils/map-service-layer'
 import { HIGH_STANDARD_TOPIC_ID, FACILITIES_TOPIC_ID, useGeographicTopicsStore, type GeographicTopic } from '@/stores/geographic-topics'
@@ -30,6 +31,13 @@ import { categoryWhere, type TopicRole } from '@/utils/geographic-topic'
 import { readTopicLayerCatalog, topicStatSources, groupTopicLayers } from '@/utils/topic-layer-catalog'
 import { facilityCategoryFromName } from '@/utils/facility-category'
 import { createTopicFeatureHover, type TopicHoverTarget } from '@/utils/topic-feature-hover'
+import { runRegionClip,regionClipKey,RegionClipIntegrityError,type RegionClipResultLayer } from '@/utils/region-clip'
+import type { RegionClipRequest } from '@/api/region-clip'
+import { createRegionClipLayer } from '@/utils/region-clip-layer'
+import TopicRegionStatistics from '@/components/TopicRegionStatistics.vue'
+import TopicAnalysisProgress from '@/components/TopicAnalysisProgress.vue'
+import { calculateRegionStatistic,type RegionStatisticRow,type RegionGeometry } from '@/utils/region-statistics'
+import { matchesTopicText,matchesTopicProperties,topicSearchCategories,indexTopicProperties,matchingTopicPropertyRows,type TopicPropertySearchRow } from '@/utils/topic-layer-search'
 
 interface Category { value: string; name: string; count: number; checked: boolean; style?: C5Style; color?: string; mode?: TopicDisplayMode }
 interface TopicLayer { key: string; service: MapServiceItem; sourceName: string; role: TopicRole; fields: string[]; categoryField: string; categories: Category[]; visible: boolean; analysisHidden: boolean; pending: boolean; error: string; ready: boolean; mode: TopicDisplayMode; handle?: Raw<MapServiceLayerHandle> }
@@ -64,10 +72,30 @@ const uploadScope=computed(()=>`${user.currentUser?.id||user.currentUser?.userna
 let resumeCoverage=false
 async function openUpload(resume=false){resumeCoverage=resume;overlayOpen.value=false;configOpen.value=false;await nextTick();await uploadPanel.value?.open()}
 async function uploaded(){legendCollapsed.value=false;if(resumeCoverage){resumeCoverage=false;await nextTick();openOverlay('coverage')}}
+async function loadDrawing(input:DrawingLayerInput){
+  if(!uploadPanel.value)throw new Error('图层管理尚未就绪，请稍后再试')
+  await uploadPanel.value.addDrawings(input)
+  legendCollapsed.value=false;layerKeyword.value=''
+}
 const fullscreen = ref(false)
 const toolsMap = ref<Raw<L.Map>>(), drawingToolActive = ref(false)
 const businessBatchPending = ref(false)
+const regionClipSources=ref<string[]>([])
+const regionClipActive=computed(()=>isFarmland.value&&regionClipSources.value.length>0)
+const regionClipBusy=ref(false),regionClipError=ref(''),regionClipMessage=ref('')
+const regionClipProgress=ref<number>(),regionStatisticsProgress=ref<number>()
+const regionClipStates=shallowRef<Record<string,RegionClipResultLayer>>({})
+const regionStatistics=ref<RegionStatisticRow[]>([]),regionStatisticsBusy=ref(false),regionStatisticsMessage=ref(''),activeRegionStatId=ref('')
+const regionStatisticsGeometry=new Map<string,SpatialCollection>()
+const regionStatisticsCache=new Map<string,RegionStatisticRow[]>()
+let regionStatisticsController:AbortController|undefined
+const regionClipDisplays=new Map<string,ReturnType<typeof createRegionClipLayer>>()
+let regionClipController:AbortController|undefined,regionClipTimer:ReturnType<typeof setTimeout>|undefined,regionClipVersion=0,lastLocatedRegions=''
 const layerKeyword = ref('')
+const analysisSearchMatches=ref(0)
+const localSearchMatches=computed(()=>analysisSearchMatches.value>0||uploadedLayers.value.some(item=>matchesTopicText(layerKeyword.value,item.name)||item.data.features.some(feature=>matchesTopicProperties(layerKeyword.value,feature.properties))))
+const propertySearchRows=shallowRef<Record<string,TopicPropertySearchRow[]>>({}),propertySearchBusy=ref(false),propertySearchError=ref('')
+let propertySearchController:AbortController|undefined,propertySearchTimer:ReturnType<typeof setTimeout>|undefined
 const expandedLegendLayers = ref<Record<string,boolean>>({})
 const collapsedConfigSources = ref<Record<string,boolean>>({})
 const featureCandidates = ref<IdentifiedMapFeature[]>([]), selectedFeature = ref(0), identifyPending = ref(false), identifyError = ref('')
@@ -75,6 +103,7 @@ const featureRoles = computed(() => Object.fromEntries(layers.value.map(item => 
 let selectionGroup: L.LayerGroup | undefined, selectionVersion = 0
 let featureHover:ReturnType<typeof createTopicFeatureHover>|undefined
 function hoverTargets():TopicHoverTarget[]{
+  if(regionClipActive.value)return []
   const focus=featureCandidates.value[selectedFeature.value]
   return layers.value.filter(item=>item.visible&&!item.analysisHidden&&item.handle&&Number.isFinite(item.service.arcGisLayerId)&&item.role!=='imagery'&&item.role!=='boundary'&&expression(item)!=='1=0'&&(!focus||String(item.service.id)===focus.serviceId)).map(item=>{
     let where=expression(item)
@@ -88,12 +117,13 @@ const baselineInputs=computed(()=>farmlandDefaults(layers.value))
 const overlaySources = computed(() => groupTopicLayers(layers.value.filter(item => item.role !== 'imagery')).map(group => ({id:group.id,name:group.name})))
 const overlayVisibleKeys = computed(() => [...layers.value.filter(item => item.visible && !item.analysisHidden && (!item.categories.length || item.categories.some(category => category.checked))).map(item => item.key),...uploadedLayers.value.filter(item=>item.selected).map(item=>`upload:${item.id}`)])
 function openOverlay(operation:SpatialAnalysisOperation='difference') { overlayOperation.value=operation;configOpen.value=false; clearFeatureSelection(); overlayOpen.value=true }
-function loadAnalysisGeometry(input:SpatialInput,signal:AbortSignal){const item=layers.value.find(item=>item.key===`${input.serviceId}/${input.layerId}`);if(!item)throw new Error('所选发布图层不在当前部门的可用目录中');return readPublishedSpatialGeometry(item.service,input.filters,signal)}
+function loadAnalysisGeometry(input:SpatialInput,signal:AbortSignal,within?:SpatialCollection){const item=layers.value.find(item=>item.key===`${input.serviceId}/${input.layerId}`);if(!item)throw new Error('所选发布图层不在当前部门的可用目录中');return readPublishedSpatialGeometry(item.service,input.filters,signal,within)}
 function setOverlaySources(keys:string[],visible:boolean) {
   keys.forEach(key=>{const item=layers.value.find(layer=>layer.key===key);if(item)selectLegend(item,visible?'all':'none')})
   uploadPanel.value?.select(keys,visible)
 }
 function showOverlayResult() {
+  if(regionClipActive.value)clearRegionClip(false)
   clearFeatureSelection()
   // Result isolation affects map visibility only, never the configured layer catalogue.
   layers.value.filter(item=>item.visible&&item.role!=='imagery').forEach(item=>{
@@ -102,15 +132,53 @@ function showOverlayResult() {
   uploadPanel.value?.select(uploadedLayers.value.map(item=>item.id),false)
 }
 function matchesLayer(item: TopicLayer) {
-  const keyword = layerKeyword.value.trim().toLocaleLowerCase()
-  return !keyword || `${item.service.name} ${item.sourceName}`.toLocaleLowerCase().includes(keyword)
+  return matchesTopicText(layerKeyword.value,item.service.name,item.sourceName)||matchingCategories(item).length>0||!!propertyMatches.value[item.key]?.length
+}
+const propertyMatches=computed(()=>Object.fromEntries(Object.entries(propertySearchRows.value).map(([key,rows])=>[key,matchingTopicPropertyRows(layerKeyword.value,rows)])))
+function matchingCategories(item:TopicLayer){
+  const direct=topicSearchCategories(layerKeyword.value,[item.service.name,item.sourceName],item.categories)
+  const matched=new Set((propertyMatches.value[item.key]||[]).map(row=>row.category))
+  return item.categories.filter(category=>direct.includes(category)||matched.has(category.value))
 }
 const legendLayers = computed(() => availableLayers.value.filter(item => item.visible && item.role !== 'imagery' && matchesLayer(item)))
+let beforeSearchExpansion:Record<string,boolean>|undefined
+watch([layerKeyword,legendLayers],()=>{
+  if(layerKeyword.value.trim()){
+    beforeSearchExpansion??={...expandedLegendLayers.value}
+    legendLayers.value.forEach(item=>{expandedLegendLayers.value[item.key]=true})
+  }else if(beforeSearchExpansion){expandedLegendLayers.value=beforeSearchExpansion;beforeSearchExpansion=undefined}
+})
+function queuePropertySearch(){
+  clearTimeout(propertySearchTimer);propertySearchController?.abort();propertySearchBusy.value=false;propertySearchError.value=''
+  if(!layerKeyword.value.trim())return
+  const abort=new AbortController();propertySearchController=abort
+  const targets=layers.value.filter(item=>item.visible&&item.role!=='imagery'&&item.handle&&item.service.arcGisGeometryType&&!propertySearchRows.value[item.key])
+  if(!targets.length)return
+  propertySearchBusy.value=true
+  propertySearchTimer=setTimeout(async()=>{
+    const failed:string[]=[]
+    for(let offset=0;offset<targets.length;offset+=2){
+      if(abort.signal.aborted)return
+      await Promise.all(targets.slice(offset,offset+2).map(async item=>{
+        try{
+          const metadata=await getMapServiceLayerMetadata(item.service)
+          if(abort.signal.aborted)return
+          const fields=(metadata.fields||[]).map(field=>field.name).filter((name):name is string=>!!name)
+          const data=await queryMapServiceFeatures(item.service,fields,'1=1',false,{signal:abort.signal})
+          if(abort.signal.aborted)return
+          propertySearchRows.value={...propertySearchRows.value,[item.key]:indexTopicProperties(data.features,item.categoryField,item.role==='boundary'?item.handle?.categoryFilter?.values:undefined,data.objectIdField)}
+        }catch{if(!abort.signal.aborted)failed.push(item.service.name)}
+      }))
+    }
+    if(!abort.signal.aborted){propertySearchBusy.value=false;propertySearchError.value=failed.length?`部分图层的完整属性未能读取（${failed.join('、')}），已有分类仍可搜索。`:''}
+  },300)
+}
+watch(()=>JSON.stringify([layerKeyword.value,layers.value.filter(item=>item.visible).map(item=>[item.key,!!item.handle])]),queuePropertySearch)
 const imageryLayers = computed(() => availableLayers.value.filter(item => item.role === 'imagery'))
 const vectorLayers = computed(() => availableLayers.value.filter(item => item.role !== 'imagery' && matchesLayer(item)))
 const configSourceGroups = computed(() => groupTopicLayers(vectorLayers.value))
 const mapLegendGroups=computed(()=>[
-  ...layers.value.filter(item=>item.visible&&!item.analysisHidden&&item.role!=='imagery'&&item.handle).map(item=>{
+  ...layers.value.filter(item=>item.visible&&!item.analysisHidden&&item.role!=='imagery'&&item.handle&&(!regionClipActive.value||(regionClipStates.value[item.key]?.status==='SUCCEEDED'&&regionClipStates.value[item.key]!.resultFeatureCount>0))).map(item=>{
     const symbols=item.role!=='boundary'&&item.categories.length?item.categories.filter(category=>category.checked).map(category=>({
       label:category.name,color:category.style?`rgb(${category.style.rgb.join(',')})`:category.color||item.handle!.color||'#56bccc',
       pattern:category.style?c5Pattern(category.style):undefined,standard:!!category.style,mode:category.mode??item.mode,geometry:item.service.arcGisGeometryType||'esriGeometryPolygon',
@@ -143,12 +211,19 @@ const featureCache = new Map<string, Awaited<ReturnType<typeof queryMapServiceFe
 const inFlight = new Map<string, Promise<void>>()
 function current(item: TopicLayer, request: number) { return request === version && layers.value.some(layer => layer.key === item.key) }
 function expression(item: TopicLayer) {
-  if(item.role==='boundary'&&item.handle?.definitionExpression)return item.handle.definitionExpression()
+  if(item.role==='boundary'&&item.handle?.categoryFilter){
+    const selected=item.categories.filter(category=>category.checked)
+    if(!selected.length)return '1=0'
+    if(selected.length===item.categories.length)return '1=1'
+    const ids=administrativeIds(item)
+    return ids.length?`${item.categoryField} IN (${ids.map(id=>typeof id==='number'?String(id):`'${String(id).replace(/'/g,"''")}'`).join(',')})`:'1=0'
+  }
   const categories = item.categories
   return item.categoryField ? categoryWhere(item.categoryField, categories.filter(c => c.checked).map(c => c.value), categories.map(c => c.value)) : '1=1'
 }
 function applyFilter(item: TopicLayer) {
   featureHover?.clear()
+  regionClipDisplays.get(item.key)?.update(clipStyle(item))
   if (featureCandidates.value.length || identifyPending.value) clearFeatureSelection()
   if(item.role==='boundary')item.handle?.categoryFilter?.setVisibleValues(item.categories.filter(category=>category.checked).map(category=>category.value))
   else item.handle?.setQueryFilter?.(expression(item))
@@ -158,11 +233,7 @@ function legendPartSelected(item: TopicLayer) { return !item.analysisHidden && !
 function applyLegendSelection(item: TopicLayer) {
   if(item.categories.length)item.analysisHidden=!item.categories.some(category=>category.checked)
   applyFilter(item)
-  if(item.analysisHidden)item.handle?.layer.remove()
-  else if(item.visible&&map){
-    if(item.handle){if(!map.hasLayer(item.handle.layer))item.handle.layer.addTo(map)}
-    else void setVisible(item,true)
-  }
+  syncPublishedLayer(item)
 }
 function selectLegend(item: TopicLayer, mode: 'all' | 'none') {
   if(!item.categories.length)item.analysisHidden=mode!=='all'
@@ -191,10 +262,179 @@ async function selectSource(group:{layers:TopicLayer[]},visible:boolean) {
   try { await Promise.all(group.layers.map(item => setVisible(item,visible,true))) }
   finally { businessBatchPending.value = false }
 }
+function administrativeIds(item:TopicLayer) {
+  const selected=new Set(item.categories.filter(category=>category.checked).map(category=>category.value))
+  return [...new Set(item.handle?.categoryFilter?.values.filter(value=>selected.has(value.value)).flatMap(value=>value.objectIds||[])||[])]
+}
+function clipStyle(item:TopicLayer){return {mode:item.mode,color:item.handle?.color||'#56bccc',categoryField:item.categoryField,categories:item.categories,boundary:item.role==='boundary'}}
+function syncPublishedLayer(item:TopicLayer){
+  if(!map)return
+  const show=item.visible&&!item.analysisHidden
+  if(regionClipActive.value&&item.role!=='imagery'){
+    item.handle?.layer.remove()
+    const clipped=regionClipDisplays.get(item.key)
+    if(show&&clipped){if(!map.hasLayer(clipped.layer))clipped.layer.addTo(map)}else clipped?.layer.remove()
+  }else if(show&&item.handle){if(!map.hasLayer(item.handle.layer))item.handle.layer.addTo(map)}else item.handle?.layer.remove()
+}
+const regionClipRequest=computed<RegionClipRequest|undefined>(()=>{
+  if(!regionClipActive.value)return
+  const baselines=new Set([baselineInputs.value.a,baselineInputs.value.b].filter(Boolean).map(input=>`${input!.serviceId}/${input!.layerId}`))
+  return {
+    deptId:user.activeDeptId||'',combineMode:'UNION',
+    regions:layers.value.filter(item=>regionClipSources.value.includes(item.key)).map(item=>({serviceId:item.key.split('/')[0]!,layerId:Number(item.service.arcGisLayerId),objectIds:administrativeIds(item)})).filter(item=>item.objectIds.length),
+    // 基准面始终完整裁切供统计；地图分类只控制显示，不改变区域总量。
+    targets:layers.value.filter(item=>(item.visible||baselines.has(item.key)||regionClipSources.value.includes(item.key))&&item.role!=='imagery'&&Number.isInteger(item.service.arcGisLayerId)&&item.service.arcGisGeometryType).map(item=>({serviceId:item.key.split('/')[0]!,layerId:item.service.arcGisLayerId!,where:baselines.has(item.key)?'1=1':expression(item)})),
+  }
+})
+const regionClipSelectionCount=computed(()=>regionClipSources.value.reduce((sum,key)=>sum+(layers.value.find(item=>item.key===key)?.categories.filter(category=>category.checked).length||0),0))
+function setRegionClipSource(item:TopicLayer,enabled:boolean){
+  regionClipSources.value=enabled?[...new Set([...regionClipSources.value,item.key])]:regionClipSources.value.filter(key=>key!==item.key)
+}
+function clearRegionClip(restore=true){
+  regionStatisticsController?.abort();regionStatistics.value=[];regionStatisticsBusy.value=false;regionStatisticsGeometry.clear();activeRegionStatId.value=''
+
+  regionClipVersion++;clearTimeout(regionClipTimer);regionClipController?.abort();regionClipController=undefined
+  regionClipDisplays.forEach(display=>display.destroy());regionClipDisplays.clear()
+  regionClipSources.value=[];regionClipStates.value={};regionClipBusy.value=false;regionClipError.value='';regionClipMessage.value='';lastLocatedRegions=''
+  if(restore)layers.value.forEach(syncPublishedLayer)
+}
+function locateClipRange(){
+  const bounds=L.latLngBounds([])
+  regionClipDisplays.forEach(display=>{if(display.bounds.isValid())bounds.extend(display.bounds)})
+  if(bounds.isValid()&&map){const wide=map.getSize().x>1000;map.fitBounds(bounds,{paddingTopLeft:wide?[350,90]:[35,80],paddingBottomRight:wide?[330,60]:[35,60],maxZoom:17});return true}
+  return false
+}
+function locatePublishedLayer(item:TopicLayer){
+  const bounds=regionClipActive.value?regionClipDisplays.get(item.key)?.bounds:item.handle?.bounds
+  if(bounds?.isValid())map?.fitBounds(bounds,{padding:[80,80],maxZoom:17})
+}
+function clipLayerMessage(item:TopicLayer){
+  const state=regionClipStates.value[item.key]
+  if(!state)return regionClipBusy.value?'正在裁切…':regionClipError.value?'未显示未裁切数据':''
+  return state.status==='SUCCEEDED'?`裁切后 ${state.resultFeatureCount.toLocaleString()} 个要素`:state.error||'该图层裁切失败，已隐藏'
+}
+function queueRegionClip(){
+  regionStatisticsController?.abort();regionStatistics.value=[];regionStatisticsBusy.value=false;regionStatisticsGeometry.clear();activeRegionStatId.value=''
+
+  const request=++regionClipVersion
+  clearTimeout(regionClipTimer);regionClipController?.abort();regionClipController=undefined
+  regionClipDisplays.forEach(display=>display.destroy());regionClipDisplays.clear();regionClipStates.value={}
+  regionClipError.value='';regionClipMessage.value='';regionClipProgress.value=undefined;regionClipBusy.value=regionClipActive.value
+  clearFeatureSelection();layers.value.forEach(syncPublishedLayer)
+  const input=regionClipRequest.value
+  if(!input){regionClipBusy.value=false;return}
+  regionClipTimer=setTimeout(()=>void executeRegionClip(input,request),450)
+}
+async function executeRegionClip(input:RegionClipRequest,request:number){
+  const abort=new AbortController();regionClipController=abort
+  try{
+    if(!input.deptId)throw new Error('未获取到当前部门，请重新进入专题')
+    if(!input.regions.length)throw new Error('请至少勾选一个用于裁切的行政区，或清除区划裁切')
+    if(input.regions.length>20||input.regions.reduce((sum,region)=>sum+region.objectIds.length,0)>200)throw new Error('一次最多支持 20 个区划图层、200 个区划要素，请减少勾选范围')
+    if(input.targets.length>20)throw new Error('一次最多裁切 20 个业务图层，请减少开启的图层')
+    if(!input.targets.length){regionClipMessage.value='当前没有可裁切的已发布业务图层';return}
+    const unsupported=layers.value.filter(item=>item.visible&&item.role!=='imagery'&&!input.targets.some(target=>regionClipKey(target)===item.key))
+    const states:Record<string,RegionClipResultLayer>={}
+    const install=async(state:RegionClipResultLayer)=>{
+      abort.signal.throwIfAborted()
+      if(request!==regionClipVersion)return
+      const key=regionClipKey(state),item=layers.value.find(item=>item.key===key)
+      states[key]=state
+      if(state.status!=='SUCCEEDED'||!state.data||!item){regionClipStates.value={...states};return}
+      try{
+        const metadata=await getMapServiceLayerMetadata(item.service)
+        if(request!==regionClipVersion||abort.signal.aborted||!map)return
+        const pane=`topic-clip-${key.replace(/[^a-zA-Z0-9-]/g,'-')}`
+        if(!map.getPane(pane))map.createPane(pane)
+        map.getPane(pane)!.style.zIndex=item.role==='boundary'?'350':/point/i.test(item.service.arcGisGeometryType||'')?'345':/polyline/i.test(item.service.arcGisGeometryType||'')?'340':'335'
+        const display=createRegionClipLayer(map,state.data,item.service,metadata,pane,clipStyle(item),feature=>{
+          if(drawingToolActive.value||configOpen.value||overlayOpen.value||uploadDialogOpen.value)return false
+          clearFeatureSelection();featureCandidates.value=[feature];selectFeature(0);return true
+        })
+        display.setMemberships(item.handle?.categoryFilter?.values||[]);display.update(clipStyle(item))
+        regionClipDisplays.set(key,display);syncPublishedLayer(item)
+      }catch(error){regionClipDisplays.get(key)?.destroy();regionClipDisplays.delete(key);states[key]={...state,status:'FAILED',error:error instanceof Error?error.message:'裁切图层绘制失败'}}
+      regionClipStates.value={...states}
+    }
+    const result=await runRegionClip(input,{signal:abort.signal,progress:status=>{
+      if(request===regionClipVersion){regionClipProgress.value=typeof status.progress==='number'?status.progress:undefined;regionClipMessage.value=`后端已完成 ${status.layers.filter(layer=>['SUCCEEDED','FAILED'].includes(layer.status)).length} / ${input.targets.length} 层，正在读取并显示结果…`}
+    },notice:message=>{if(request===regionClipVersion)regionClipMessage.value=message},layer:install})
+    if(request!==regionClipVersion||abort.signal.aborted||!map)return
+    regionClipStates.value=states
+    const selectedRegions=JSON.stringify(input.regions)
+    if(selectedRegions!==lastLocatedRegions&&locateClipRange())lastLocatedRegions=selectedRegions
+    const failures=Object.values(states).filter(state=>state.status!=='SUCCEEDED')
+    regionClipMessage.value=`裁切完成：${Object.values(states).filter(state=>state.status==='SUCCEEDED').length} 个图层${result.cached?'（复用后端结果）':''}`
+    void updateRegionStatistics(input,states,request)
+    if(failures.length||unsupported.length)regionClipError.value=[...failures.map(layer=>`${layer.layerName||regionClipKey(layer)}：${layer.error||'裁切失败'}`),...unsupported.map(layer=>`${layer.service.name}：当前服务不支持行政区裁切`)].join('；')
+  }catch(error){if(request===regionClipVersion&&!abort.signal.aborted){
+    if(error instanceof RegionClipIntegrityError){regionClipDisplays.forEach(display=>display.destroy());regionClipDisplays.clear();regionClipStates.value={}}
+    regionClipError.value=error instanceof Error?error.message:'行政区裁切失败';regionClipMessage.value=error instanceof RegionClipIntegrityError?'裁切范围不完整，已隐藏全部裁切图层':'裁切未完成，原业务图层已隐藏';regionStatistics.value=[{id:'error',name:'区域统计',status:'FAILED',error:regionClipError.value}]
+  }}
+  finally{if(request===regionClipVersion){regionClipBusy.value=false;regionClipController=undefined}}
+}
+function regionPolygonData(data:GeoJSON.FeatureCollection|undefined):SpatialCollection{
+  if(!data||data.features.some(feature=>!feature.geometry||!['Polygon','MultiPolygon'].includes(feature.geometry.type)))throw new Error('区域统计缺少有效的后端面几何，请重试裁切')
+  return data as SpatialCollection
+}
+async function updateRegionStatistics(input:RegionClipRequest,states:Record<string,RegionClipResultLayer>,request:number){
+  const abort=new AbortController();regionStatisticsController?.abort();regionStatisticsController=abort
+  const current=()=>request===regionClipVersion&&!abort.signal.aborted
+  const selected:RegionGeometry[]=[]
+  regionStatisticsBusy.value=true;regionStatisticsProgress.value=undefined
+  try{
+    const {a,b}=baselineInputs.value
+    if(!a||!b)throw new Error('缺少高标田或永农基准图层，无法计算区域统计')
+    const highState=states[`${a.serviceId}/${a.layerId}`],permanentState=states[`${b.serviceId}/${b.layerId}`]
+    if(highState?.status!=='SUCCEEDED'||permanentState?.status!=='SUCCEEDED')throw new Error('高标田或永农裁切未成功，不能用原范围代替区域统计')
+    const high=regionPolygonData(highState.data),permanent=regionPolygonData(permanentState.data)
+    for(const source of input.regions){
+      const key=regionClipKey(source),item=layers.value.find(item=>item.key===key),data=regionPolygonData(states[key]?.data)
+      if(!item)throw new Error('行政区来源不在当前专题目录')
+      const requested=new Set(source.objectIds.map(String))
+      for(const category of item.categories){
+        const ids=new Set((item.handle?.categoryFilter?.values.find(value=>value.value===category.value)?.objectIds||[]).filter(id=>requested.has(String(id))).map(String))
+        if(!ids.size)continue
+        const collection:SpatialCollection={type:'FeatureCollection',features:data.features.filter(feature=>ids.has(String(feature.properties?.sourceObjectId)))}
+        if(!collection.features.length)throw new Error(`${category.name}未返回有效区划边界，无法统计`)
+        selected.push({id:`${key}:${category.value}`,name:category.name,data:collection})
+      }
+    }
+    if(!selected.length)throw new Error('未找到所选区划的统计范围')
+    const total:RegionGeometry={id:'total',name:'所选区域内（合计）',data:{type:'FeatureCollection',features:selected.flatMap(region=>region.data.features)}}
+    const regions=selected.length>1?[total,...selected]:selected
+    regions.forEach(region=>regionStatisticsGeometry.set(region.id,region.data))
+    const fingerprint=JSON.stringify([input.deptId,input.regions,a,b])
+    const cached=regionStatisticsCache.get(fingerprint)
+    if(cached){regionStatistics.value=cached.map(row=>({...row}));return}
+    regionStatistics.value=regions.map(region=>({id:region.id,name:region.name,status:'RUNNING'}))
+    for(let index=0;index<regions.length;index++){
+      if(!current())return
+      const region=regions[index]!
+      regionStatisticsMessage.value=`正在计算 ${region.name}（${index+1}/${regions.length}）`
+      try{
+        const value=await calculateRegionStatistic(region.data,high,permanent,abort.signal,undefined,user.activeDeptId,percent=>{if(current())regionStatisticsProgress.value=(index*100+percent)/regions.length})
+        if(!current())return
+        regionStatistics.value=regionStatistics.value.map(row=>row.id===region.id?{...row,status:'SUCCEEDED',value}:row)
+      }catch(error){if(!current())return;regionStatistics.value=regionStatistics.value.map(row=>row.id===region.id?{...row,status:'FAILED',error:error instanceof Error?error.message:'区域统计失败'}:row)}
+      regionStatisticsProgress.value=(index+1)*100/regions.length
+    }
+    if(regionStatistics.value.every(row=>row.status==='SUCCEEDED'))regionStatisticsCache.set(fingerprint,regionStatistics.value.map(row=>({...row})))
+  }catch(error){if(current())regionStatistics.value=[{id:'error',name:'区域统计',status:'FAILED',error:error instanceof Error?error.message:'区域统计失败'}]}
+  finally{if(current()){regionStatisticsBusy.value=false;regionStatisticsController=undefined}}
+}
+function highlightStatisticRegion(id:string){
+  const data=regionStatisticsGeometry.get(id)
+  if(!data||!map||!selectionGroup)return
+  clearFeatureSelection();activeRegionStatId.value=id
+  const layer=L.geoJSON(data,{pane:'topic-selection',interactive:false,style:{color:'#ffe14a',weight:4,fillColor:'#ffe14a',fillOpacity:.12}}).addTo(selectionGroup)
+  if(layer.getBounds().isValid()){const wide=map.getSize().x>1000;map.fitBounds(layer.getBounds(),{paddingTopLeft:wide?[350,90]:[35,80],paddingBottomRight:wide?[330,65]:[35,60],maxZoom:17})}
+}
+watch(()=>JSON.stringify(regionClipRequest.value),queueRegionClip,{flush:'post'})
 function clearFeatureSelection() {
   featureHover?.clear()
   selectionVersion++; identifyPending.value = false; identifyError.value = ''
-  featureCandidates.value = []; selectedFeature.value = 0; selectionGroup?.clearLayers()
+  featureCandidates.value = []; selectedFeature.value = 0; selectionGroup?.clearLayers();activeRegionStatId.value=''
   if (map) setMapHoverSelection(map)
 }
 function selectFeature(index: number) {
@@ -212,7 +452,14 @@ function selectFeature(index: number) {
   setMapHoverSelection(map,layers.value.find(item => String(item.service.id) === feature.serviceId)?.service,feature)
 }
 async function identifyFeature(event: L.LeafletMouseEvent) {
-  if (!map || drawingToolActive.value) return
+  if (!map || drawingToolActive.value || configOpen.value || overlayOpen.value || uploadDialogOpen.value) return
+  if(regionClipActive.value){
+    clearFeatureSelection()
+    // 边界模式的面内部没有原生 SVG 点击，使用当前已显示的裁切几何命中，不能查询未裁切服务。
+    featureCandidates.value=layers.value.filter(item=>item.visible&&!item.analysisHidden).slice().reverse().flatMap(item=>regionClipDisplays.get(item.key)?.identify(event.latlng)||[])
+    if(featureCandidates.value.length)selectFeature(0)
+    return
+  }
   clearFeatureSelection(); configOpen.value = false
   const request = selectionVersion
   const point = map.latLngToContainerPoint(event.latlng)
@@ -240,6 +487,7 @@ function setDrawingTool(active:boolean) {
   if (active) { clearFeatureSelection(); configOpen.value=false }
 }
 function applyDisplayMode(item: TopicLayer) {
+  regionClipDisplays.get(item.key)?.update(clipStyle(item))
   if (item.role === 'boundary') {
     item.handle?.setFillOpacity?.(item.mode === 'filled' ? 1 : 0)
     item.categories.forEach(category=>item.handle?.setCategoryFillOpacity?.(category.value,(category.mode??item.mode)==='filled'?1:0))
@@ -324,7 +572,7 @@ async function prepare(item: TopicLayer) {
     restoreCategoryModes(item)
     applyDisplayMode(item)
     applyFilter(item)
-    if (item.visible && !item.analysisHidden) handle.layer.addTo(map)
+    syncPublishedLayer(item)
     if (item.role === 'boundary' && handle.bounds?.isValid()) map.fitBounds(handle.bounds, { padding:[45,45], maxZoom:14 })
   } catch (reason) { if (current(item, request)) { item.error = reason instanceof Error ? reason.message : '数据读取失败'; item.visible = false } }
   finally { if (current(item, request)) item.pending = false }
@@ -338,8 +586,8 @@ async function setVisible(item: TopicLayer, visible: boolean, remember = false) 
     let job = inFlight.get(item.key)
     if (!job) { job = prepare(item); inFlight.set(item.key, job); void job.finally(() => { if (inFlight.get(item.key) === job) inFlight.delete(item.key) }) }
     await job
-    if (layers.value.some(layer => layer === item) && item.visible && !item.analysisHidden && item.handle && map) { applyFilter(item); if (!map.hasLayer(item.handle.layer)) item.handle.layer.addTo(map) }
-  } else item.handle?.layer.remove()
+    if (layers.value.some(layer => layer === item)) { applyFilter(item);syncPublishedLayer(item) }
+  } else {item.handle?.layer.remove();regionClipDisplays.get(item.key)?.layer.remove()}
 }
 async function selectImagery(key: string) { await Promise.all(imageryLayers.value.map(item => setVisible(item, item.key === key,true))) }
 let initialSceneScope=''
@@ -363,10 +611,12 @@ async function applyScene() {
 }
 async function loadData() {
   if (!map) return
+  clearRegionClip(false)
   clearFeatureSelection()
   expandedLegendLayers.value = {}
   collapsedConfigSources.value = {}
   const request = ++version
+  clearTimeout(propertySearchTimer);propertySearchController?.abort();propertySearchRows.value={};propertySearchBusy.value=false;propertySearchError.value='';regionStatisticsCache.clear()
   layers.value.forEach(item => item.handle?.layer.remove()); layers.value = []; featureCache.clear(); inFlight.clear()
   pending.value = true; error.value = ''
   try {
@@ -397,7 +647,7 @@ async function toggleFullscreen() {
   catch { error.value = '浏览器未允许全屏，请使用浏览器全屏查看。' }
 }
 function updateFullscreen() { fullscreen.value = document.fullscreenElement === root.value; map?.invalidateSize({pan:false}) }
-watch(uploadScope,()=>{analysisStatistics.value=[];analysisLegend.value=[];detailLayerOrder.value={};nextAddedLayerOrder=10000})
+watch(uploadScope,()=>{clearRegionClip();analysisStatistics.value=[];analysisLegend.value=[];detailLayerOrder.value={};nextAddedLayerOrder=10000})
 watch(() => user.activeDeptId, () => { void loadData() })
 watch(configOpen, open => { if (open) clearFeatureSelection() })
 watch(uploadDialogOpen,open=>{if(open)featureHover?.clear()})
@@ -426,7 +676,7 @@ onMounted(() => {
 })
 watch(mapLegendGroups, () => void observeLegend(), { flush: 'post' })
 onMounted(() => void observeLegend())
-onBeforeUnmount(() => { legendResizeObserver?.disconnect(); clearFeatureSelection();featureHover?.destroy();featureHover=undefined; version++; document.removeEventListener('fullscreenchange', updateFullscreen); resizeObserver?.disconnect(); map?.remove(); map = undefined })
+onBeforeUnmount(() => { regionStatisticsController?.abort();clearTimeout(propertySearchTimer);propertySearchController?.abort();clearRegionClip(false);legendResizeObserver?.disconnect(); clearFeatureSelection();featureHover?.destroy();featureHover=undefined; version++; document.removeEventListener('fullscreenchange', updateFullscreen); resizeObserver?.disconnect(); map?.remove(); map = undefined })
 </script>
 
 <template>
@@ -439,7 +689,7 @@ onBeforeUnmount(() => { legendResizeObserver?.disconnect(); clearFeatureSelectio
       <OverviewMapScale :map="toolsMap" />
     </div>
     <div class="topic-title"><span>专题分析 / {{ topic.name }}</span></div>
-    <TopicMapToolbar v-if="toolsMap" :map="toolsMap" :suspended="configOpen || overlayOpen || uploadDialogOpen" :coverage-enabled="topic.id===HIGH_STANDARD_TOPIC_ID" :analysis-label="isFarmland?'高标田与永农对比分析':undefined" @drawing="setDrawingTool" @overlay="openOverlay('difference')" @coverage="openOverlay('coverage')">
+    <TopicMapToolbar v-if="toolsMap" :key="uploadScope" :map="toolsMap" :load-drawing="loadDrawing" :suspended="configOpen || overlayOpen || uploadDialogOpen" :coverage-enabled="topic.id===HIGH_STANDARD_TOPIC_ID" :analysis-label="isFarmland?'高标田与永农对比分析':undefined" @drawing="setDrawingTool" @overlay="openOverlay('difference')" @coverage="openOverlay('coverage')">
       <button v-if="topic.id===HIGH_STANDARD_TOPIC_ID" type="button" aria-label="上传 SHP 图层" title="上传 SHP 图层" @click="openUpload()"><Upload /></button>
       <button :aria-label="fullscreen ? '退出全屏' : '全屏展示'" :title="fullscreen ? '退出全屏' : '全屏展示'" @click="toggleFullscreen"><FullScreen /></button>
       <button :class="{active:configOpen}" :aria-expanded="configOpen" title="场景配置" @click="configOpen = !configOpen"><Setting /><span>场景配置</span></button>
@@ -448,21 +698,30 @@ onBeforeUnmount(() => { legendResizeObserver?.disconnect(); clearFeatureSelectio
     <div v-else-if="pending" class="topic-status" role="status">正在准备专题数据…</div>
     <div v-else-if="topicStore.storageError" class="topic-status" role="alert">{{ topicStore.storageError }}</div>
     <div v-if="identifyPending || identifyError" class="topic-identify-status" :role="identifyError ? 'alert' : 'status'">{{ identifyError || '正在查询要素…' }}</div>
-    <div v-if="!configOpen && (analysisStatistics.length || farmlandStatSources.length || featureCandidates.length)" class="topic-inspector-rail" :class="{'has-details':featureCandidates.length}">
-      <aside v-if="analysisStatistics.length || farmlandStatSources.length" class="topic-farmland-stat" :aria-label="analysisStatistics.length?'分析结果':'高标准农田统计'"><header>{{ analysisStatistics.length?'分析结果':'高标准农田数据' }}</header><TopicAnalysisStatistics v-if="analysisStatistics.length" :items="analysisStatistics" /><!-- 高标田专题显示部门定制统计，保留后端的实际统计范围标题；图层服务切换不改变统计范围。 --><TopicStatisticsSummary v-else area-in-mu :sources="isFarmland ? undefined : farmlandStatSources" /></aside>
+    <div v-if="!configOpen && (regionClipActive || analysisStatistics.length || farmlandStatSources.length || featureCandidates.length)" class="topic-inspector-rail" :class="{'has-details':featureCandidates.length}">
+      <aside v-if="regionClipActive || analysisStatistics.length || farmlandStatSources.length" class="topic-farmland-stat" :aria-label="regionClipActive?'区域统计':analysisStatistics.length?'分析结果':'高标准农田统计'"><header>{{ regionClipActive?'区域统计':analysisStatistics.length?'分析结果':'高标准农田数据' }}</header><template v-if="regionClipActive"><TopicRegionStatistics v-if="regionStatistics.length" :rows="regionStatistics" :active-id="activeRegionStatId" @select="highlightStatisticRegion" /><p v-else role="status">正在准备所选区域的统计数据…</p></template><TopicAnalysisStatistics v-else-if="analysisStatistics.length" :items="analysisStatistics" /><!-- 高标田专题显示部门定制统计，保留后端的实际统计范围标题；图层服务切换不改变统计范围。 --><TopicStatisticsSummary v-else area-in-mu :sources="isFarmland ? undefined : farmlandStatSources" /></aside>
       <TopicFeatureDetails v-if="featureCandidates.length" embedded :features="featureCandidates" :selected="selectedFeature" :roles="featureRoles" @select="selectFeature" @close="clearFeatureSelection" />
     </div>
     <button class="topic-details-toggle" :class="{collapsed:legendCollapsed}" :aria-label="legendCollapsed?'展开图层详情':'收起图层详情'" :aria-expanded="!legendCollapsed" @click="legendCollapsed=!legendCollapsed">{{ legendCollapsed?'›':'‹' }}</button>
     <aside class="topic-legend" :class="{'is-collapsed':legendCollapsed}" :aria-hidden="legendCollapsed" :inert="legendCollapsed">
       <header class="legend-heading"><Collection /><b>图层详情</b></header>
-      <label class="layer-search"><Search aria-hidden="true" /><input v-model="layerKeyword" type="search" aria-label="搜索图层名称" placeholder="搜索图层名称" /></label>
-      <div class="legend-content"><div class="legend-layer-list">
-        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :farmland="isFarmland" :defaults="baselineInputs" :keyword="layerKeyword" :layer-order="detailLayerOrder" @layerkeys="rememberAddedLayers" @statistics="analysisStatistics=$event" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
-        <TopicUploadedLayers v-if="toolsMap&&topic.id===HIGH_STANDARD_TOPIC_ID" ref="uploadPanel" :map="toolsMap" :scope="uploadScope" :keyword="layerKeyword" integrated :layer-order="detailLayerOrder" @change="updateUploads" @dialog="uploadDialogOpen=$event" @imported="uploaded" />
-        <p v-if="!legendLayers.length && !pending">{{ layerKeyword.trim() ? '没有匹配的已开启图层，可在场景配置中查找并开启。' : '暂无已开启的分类图层，可在场景配置中选择。' }}</p>
+      <label class="layer-search"><Search aria-hidden="true" /><input v-model="layerKeyword" type="search" aria-label="搜索图层名称或属性" placeholder="搜索图层名称或属性（如村名）" /></label>
+      <section v-if="regionClipActive" class="region-clip-summary" aria-label="行政区裁切状态" :aria-busy="regionClipBusy">
+        <div><b>区划裁切 · {{ regionClipSelectionCount }} 个区域</b><button type="button" @click="locateClipRange">定位范围</button><button type="button" @click="clearRegionClip()">清除裁切</button></div>
+        <p role="status">{{ regionClipMessage || '正在准备裁切…' }}</p>
+        <p>地图按行政边界裁切；右侧展示所选区域的统计。</p>
+        <details v-if="regionClipError"><summary role="alert">{{ regionClipBusy?'正在更新裁切':'部分或全部图层未显示' }}</summary><p>{{ regionClipError }}</p></details>
+        <button v-if="regionClipError&&!regionClipBusy" type="button" @click="queueRegionClip">重试裁切</button>
+      </section>
+      <div class="legend-content"><div class="legend-layer-list"><p v-if="propertySearchBusy" role="status">正在搜索图层属性…</p><p v-if="propertySearchError" role="alert">{{ propertySearchError }}<button type="button" @click="queuePropertySearch">重试</button></p>
+        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :farmland="isFarmland" :defaults="baselineInputs" :keyword="layerKeyword" :layer-order="detailLayerOrder" @matches="analysisSearchMatches=$event" @layerkeys="rememberAddedLayers" @statistics="analysisStatistics=$event" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
+        <TopicUploadedLayers v-if="toolsMap" ref="uploadPanel" :map="toolsMap" :scope="uploadScope" :keyword="layerKeyword" integrated :layer-order="detailLayerOrder" @change="updateUploads" @dialog="uploadDialogOpen=$event" @imported="uploaded" />
+        <p v-if="!legendLayers.length && !pending && !propertySearchBusy && !localSearchMatches">{{ layerKeyword.trim() ? '没有匹配的已开启图层或属性，可修改关键词或在场景配置中开启图层。' : '暂无已开启的分类图层，可在场景配置中选择。' }}</p>
         <TopicLayerCard v-for="item in legendLayers" :key="item.key" v-model:expanded="expandedLegendLayers[item.key]" :title="item.service.name" :subtitle="item.service.name!==item.sourceName?item.sourceName:undefined" :category-count="item.categories.length" :checked="legendAllSelected(item)" :indeterminate="legendPartSelected(item)" class="published-layer" :data-layer-key="`published:${item.key}`" :style="{order:layers.findIndex(layer=>layer.key===item.key)}" @select="selectLegend(item,$event?'all':'none')">
+          <label v-if="isFarmland&&item.role==='boundary'&&item.handle?.categoryFilter" class="region-clip-switch"><input type="checkbox" :checked="regionClipSources.includes(item.key)" :aria-label="`${item.service.name}用于区划裁切`" @change="setRegionClipSource(item,($event.target as HTMLInputElement).checked)" />用于区划裁切</label>
+          <p v-if="regionClipActive&&clipLayerMessage(item)" class="region-clip-layer-state" :class="{'is-error':regionClipStates[item.key]?.status==='FAILED'}">{{ clipLayerMessage(item) }}</p>
           <TopicLayerDisplayMode v-if="item.service.arcGisGeometryType || item.role==='boundary'" :mode="layerUsesMode(item,'filled')?'filled':layerUsesMode(item,'boundary')?'boundary':'mixed'" :name="`legend-mode-${item.key}`" :label="`${item.service.name}图例显示模式`" :class="{'has-categories':item.categories.length>0}" @change="setLayerMode(item,$event)" />
-          <div v-for="category in item.categories" :key="category.value" class="category-entry">
+          <div v-for="category in matchingCategories(item)" :key="category.value" class="category-entry">
           <label class="topic-category">
             <input :checked="category.checked" :aria-label="`${item.service.name} ${category.name}`" type="checkbox" @change="setCategoryVisible(item,category,($event.target as HTMLInputElement).checked)" />
             <img v-if="category.style" :src="c5Pattern(category.style)" alt="" /><i v-else class="source-symbol" :style="{background:category.color}"></i>
@@ -474,11 +733,12 @@ onBeforeUnmount(() => { legendResizeObserver?.disconnect(); clearFeatureSelectio
             <label><input type="radio" :name="`category-mode-${item.key}-${category.value}`" :checked="(category.mode ?? item.mode) === 'boundary'" @change="setCategoryMode(item,category,'boundary')" />边界</label>
           </fieldset>
           </div>
-          <template v-if="item.handle?.bounds?.isValid()" #actions><button type="button" @click="toolsMap?.fitBounds(item.handle!.bounds!,{padding:[80,80],maxZoom:17})">定位</button></template>
+          <template v-if="item.handle?.bounds?.isValid()" #actions><button type="button" @click="locatePublishedLayer(item)">定位</button></template>
         </TopicLayerCard>
       </div></div>
     </aside>
     <TopicMapLegend :groups="mapLegendGroups" />
+    <TopicAnalysisProgress v-if="regionClipBusy || regionStatisticsBusy" :title="regionClipBusy?'行政区裁切运行中':'区域统计计算中'" :message="regionClipBusy?(regionClipMessage||'正在提交后端裁切任务…'):regionStatisticsMessage" :progress="regionClipBusy?regionClipProgress:regionStatisticsProgress" />
     <Transition name="topic-drawer"><aside v-if="configOpen" class="topic-config" aria-label="场景配置">
       <header><div><small>SCENE SETTINGS</small><h2>场景配置</h2></div><button aria-label="关闭场景配置" @click="configOpen=false"><Close /></button></header>
       <div class="config-body">
@@ -514,6 +774,7 @@ onBeforeUnmount(() => { legendResizeObserver?.disconnect(); clearFeatureSelectio
 </template>
 
 <style scoped>
+.region-clip-summary{flex:none;margin:10px 12px 0;padding:10px;border:1px solid #6bc6df40;border-radius:6px;background:#173e5180;font-size:12px;max-height:150px;overflow:auto}.region-clip-summary>div{display:flex;align-items:center;justify-content:space-between;gap:8px}.region-clip-summary b{font-size:14px;font-weight:500}.region-clip-summary button{padding:2px 0;border:0;background:none;color:#7de1e9;font-size:12px;cursor:pointer}.geographic-topics .region-clip-summary p{margin:6px 0 0;font-size:12px}.region-clip-summary details{margin-top:6px;color:#ffba98}.region-clip-summary details p{color:#ffba98;overflow-wrap:anywhere}.region-clip-switch{display:flex;align-items:center;gap:8px;padding-bottom:10px;color:#86e1e7;font-size:12px;cursor:pointer}.geographic-topics .region-clip-layer-state{margin:0 0 8px;color:#8bd9cf;font-size:12px}.geographic-topics .region-clip-layer-state.is-error{color:#ffba98}
 .geographic-topics{--details-width:320px;--left-panel-top:110px;--left-panel-bottom:22px;--details-height:clamp(200px,calc((100% - var(--left-panel-top) - var(--left-panel-bottom)) * .68),560px)}.topic-details-toggle{position:absolute;z-index:515;left:calc(20px + var(--details-width));top:calc(var(--left-panel-top) + 10px);display:flex;align-items:center;justify-content:center;width:24px;height:44px;padding:0;border:1px solid #78b8ce40;border-left:0;border-radius:0 7px 7px 0;background:#103745ee;color:#c8edf7;font-size:26px;line-height:1;cursor:pointer;transition:left .24s ease}.topic-details-toggle.collapsed{left:0}.topic-legend{transition:translate .24s ease,opacity .24s ease}.topic-legend.is-collapsed{translate:calc(-100% - 24px) 0;opacity:0;pointer-events:none}@media(max-width:1100px){.geographic-topics{--details-width:300px;--left-panel-top:160px}}@media(prefers-reduced-motion:reduce){.topic-details-toggle,.topic-legend{transition:none}}
 
 .legend-layer-heading{display:flex;align-items:center;gap:8px;width:100%;padding:0 0 12px;border:0;background:transparent;text-align:left;cursor:pointer}.legend-layer-heading b{flex:1;min-width:0;font-size:14px;line-height:1.6;font-weight:500;overflow-wrap:anywhere}.legend-layer-heading small,.legend-layer-heading span{font-size:12px;color:#83b5c4;white-space:nowrap}.legend-layer-heading:hover{color:#84e7f2}.topic-identify-status{position:absolute;z-index:526;right:20px;top:82px;max-width:350px;padding:10px 14px;border-radius:8px;background:#092b3bed;color:#b3d8e3;font-size:12px}.topic-identify-status:has(+.topic-feature-details){top:auto;bottom:10px}

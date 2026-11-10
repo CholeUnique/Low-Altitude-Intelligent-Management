@@ -1,6 +1,7 @@
 import type { SpatialCollection, SpatialCompareGroup, SpatialGeometryCompare, SpatialOverlaySummary, SpatialSource } from '@/api/spatial-analysis'
 import { assertTopicGeometry } from './topic-upload'
 import { annotateSpatialDifference } from './spatial-overlay-result'
+import { PUBLISHED_ANALYSIS_MAX_FEATURES } from './spatial-geometry-input'
 
 export type SpatialAnalysisOperation='difference'|'coverage'
 export type SpatialAnalysisSummary=Pick<SpatialOverlaySummary,'sourceA'|'sourceB'|'areaA'|'areaB'|'overlapArea'|'onlyAArea'|'onlyBArea'|'diffArea'|'minAreaSqm'|'crsUsed'|'featureCountA'|'featureCountB'|'spotCount'>
@@ -11,7 +12,7 @@ export function validateCompareGroup(group:SpatialCompareGroup,kind:'OVERLAP'|'A
   if(!group||!Number.isFinite(group.areaSqm)||group.areaSqm<0||!Number.isInteger(group.spotCount)||group.spotCount<0)throw new Error('后端分组统计无效')
   const data=group.featureCollection
   if(data?.type!=='FeatureCollection'||!Array.isArray(data.features)||data.features.length!==group.spotCount)throw new Error('后端返回的分组图斑数量不完整')
-  if(data.features.length)assertTopicGeometry(data)
+  if(data.features.length)assertTopicGeometry(data,PUBLISHED_ANALYSIS_MAX_FEATURES)
   let area=0
   for(const feature of data.features){
     const properties=feature.properties

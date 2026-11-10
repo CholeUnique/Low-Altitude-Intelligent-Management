@@ -1,5 +1,6 @@
 export type DrawingKind = 'point' | 'line' | 'polygon'
 export type DrawingFeature = GeoJSON.Feature<GeoJSON.Point | GeoJSON.LineString | GeoJSON.Polygon, { ID: number; TYPE: string }>
+export interface DrawingLayerInput {features:DrawingFeature[];name:string;color:string}
 export const DRAWING_WGS84 = 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]'
 
 export function createDrawingFeature(kind: DrawingKind, input: [number, number][], id: number): DrawingFeature {

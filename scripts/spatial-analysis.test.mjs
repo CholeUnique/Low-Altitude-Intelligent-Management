@@ -6,8 +6,9 @@ const calls=[]
 let handle
 const client={ApiBusinessError,apiClient:{post:async(path,body,options)=>{calls.push({path,body,options});return handle(path,body,options)}}}
 function load(file,dependencies){const module={exports:{}};new Function('module','exports','require',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(module,module.exports,id=>{assert(id in dependencies,`Unexpected dependency: ${id}`);return dependencies[id]});return module.exports}
-const api=load('src/api/spatial-analysis.ts',{'./client':client})
-const {loadSpatialOverlayResult,spatialFilters,spatialDifferenceFeatures,annotateSpatialDifference,spatialDifferenceLabel,SPATIAL_DIFFERENCE_COLORS}=load('src/utils/spatial-overlay-result.ts',{'@/api/client':client,'@/api/spatial-analysis':api})
+const task=load('src/utils/spatial-compare-task.ts',{})
+const api=load('src/api/spatial-analysis.ts',{'./client':client,'@/utils/spatial-compare-task':task})
+const {loadSpatialOverlayResult,loadSpatialOverlayFeatures,spatialFilters,spatialDifferenceFeatures,annotateSpatialDifference,spatialDifferenceLabel,SPATIAL_DIFFERENCE_COLORS}=load('src/utils/spatial-overlay-result.ts',{'@/api/client':client,'@/api/spatial-analysis':api})
 const signal=new AbortController().signal
 const fields=[{name:'DLMC',alias:'地类名称',type:'text'}]
 handle=async()=>[{layerId:2,name:'后端原名',analyzable:true,geometryType:'POLYGON',fields}]
@@ -20,6 +21,12 @@ const summary=await api.analyzeSpatialOverlay(input,{signal})
 assert.equal(summary.resultId,'9223372036854775805');assert.equal(summary.areaA,122.456,'Never recompute or round backend statistics in the API')
 assert.deepEqual(calls.at(-1).body,input);assert.equal(calls.at(-1).options.timeout,180000)
 assert(!('geometry' in calls.at(-1).body),'Send layer references, never browser-loaded source geometry')
+const asyncCalls=[],percentages=[]
+handle=async(path,body)=>{asyncCalls.push(path);assert.equal(body.deptId,'1');return path.endsWith('/status')?{resultId:summary.resultId,status:'SUCCEEDED',progress:100,areaA:122.456,diffArea:5.67}:{resultId:summary.resultId,status:'RUNNING',progress:10,areaA:0,diffArea:0}}
+const asyncSummary=await api.analyzeSpatialOverlay(input,{signal,pollMs:0,progress:value=>percentages.push(value)})
+assert.equal(asyncSummary.areaA,122.456);assert.deepEqual(percentages,[10,100])
+assert.deepEqual(asyncCalls,['/v1/spatial/overlay','/v1/spatial/overlay/status'],'Submit once, do not treat RUNNING placeholders as a finished result or fetch geometry early')
+assert.equal(calls.at(-1).options.timeout,30000)
 await api.getSpatialOverlayDetail(summary.resultId,'1',{signal});assert.equal(calls.at(-1).path,'/v1/spatial/overlay/detail')
 assert.equal(calls.at(-1).body.resultId,summary.resultId)
 assert.deepEqual(spatialFilters([{field:'DLMC',op:'IN',values:'水田\n旱地\n水田'}],fields),[{field:'DLMC',op:'IN',values:['水田','旱地']}])
@@ -37,6 +44,9 @@ handle=async()=>({areaA:20,areaB:10,both:{},aOnly:{},bOnly:{}})
 await api.compareSpatialGeometries({geometryA:data,geometryB:data,minAreaSqm:4},{signal})
 assert.equal(calls.at(-1).path,'/v1/spatial/spot/compare');assert.equal(calls.at(-1).options.timeout,180000);assert.equal(calls.at(-1).options.signal,signal)
 assert.equal(calls.at(-1).body.geometryA,data,'Uploaded analysis sends complete geometry to the existing backend')
+handle=async(path,body)=>{assert.equal(body.deptId,'1');return path.endsWith('/status')?{resultId:'9007199254740993',status:'SUCCEEDED',areaA:20,areaB:10,both:{},aOnly:{},bOnly:{}}:{resultId:'9007199254740993',status:'RUNNING',progress:10}}
+assert.equal((await api.compareSpatialGeometries({geometryA:data,geometryB:data,minAreaSqm:4},{signal,deptId:'1',pollMs:0})).areaA,20)
+assert.equal(calls.at(-1).body.resultId,'9007199254740993')
 const original=JSON.stringify(data);
 assert.equal(spatialDifferenceFeatures(data),data,'Use the classified backend result unchanged');
 assert.equal(spatialDifferenceFeatures(data).features[0].geometry,geometry,'Preserve multipart geometry and holes');
@@ -64,6 +74,15 @@ assert.equal(calls.at(-1).path,'/v1/spatial/overlay/geojson');
 assert.equal(calls.at(-1).body.merge,false,'Explicitly preserve source-side classification in one result layer');
 assert.equal(calls.at(-1).body.resultId,summary.resultId);
 assert.equal(calls.at(-1).options.signal,signal);
+const pages=[],downloadProgress=[]
+handle=async(path,body)=>{assert.equal(path,'/v1/spatial/overlay/spot/page');pages.push(body.pageNum);const offset=(body.pageNum-1)*200;return {total:5201,records:Array.from({length:Math.min(200,5201-offset)},(_,index)=>({seqNo:offset+index+1,diffType:index%2?'OVERLAP':'A_ONLY',geometry,areaSqm:1,centerLng:119.2,centerLat:32.2}))}}
+const paged=await loadSpatialOverlayFeatures({...summary,spotCount:5201},'1',{signal,progress:loaded=>downloadProgress.push(loaded)})
+assert.equal(paged.features.length,5201);assert.equal(paged.features[5200].properties.seqNo,5201);assert.equal(paged.features[1].properties.diffType,'OVERLAP');assert.equal(paged.features[0].geometry,geometry)
+assert.equal(pages.length,27);assert.equal(downloadProgress.at(-1),5201)
+handle=async(path)=>{if(path.endsWith('/geojson'))throw new ApiBusinessError('10707','lower configured export limit');return {total:1,records:[{seqNo:1,diffType:'B_ONLY',geometry,areaSqm:1}]}}
+assert.equal((await loadSpatialOverlayFeatures({...summary,spotCount:1},'1')).features[0].properties.diffType,'B_ONLY')
+handle=async()=>({total:5201,records:[]})
+await assert.rejects(loadSpatialOverlayFeatures({...summary,spotCount:5201},'1'),/分页数量不完整/)
 for(const code of ['-1','10707','403','10709']){
  const attempted=[];
  handle=async(path)=>{attempted.push(path);throw new ApiBusinessError(code,code==='-1'?'unknown error':'接口错误')};

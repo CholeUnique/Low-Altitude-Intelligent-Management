@@ -55,11 +55,13 @@ export function splitFarmlandOverlay(data:SpatialCollection,summary:SpatialOverl
 
 /** Three backend clips partition U by both datasets. No browser topology calculation or whole-feature classification. */
 export async function partitionUploadedRange(upload:SpatialCollection,high:SpatialCollection,permanent:SpatialCollection,minAreaSqm:number,sources:{high:SpatialSource;permanent:SpatialSource;uploadName:string},compare:(input:{geometryA:SpatialCollection;geometryB:SpatialCollection;minAreaSqm:number})=>Promise<SpatialGeometryCompare>,check:()=>void=()=>{}) {
-  const first = await compare({...geometryRequestInputs(upload,high),minAreaSqm});check()
+  const first = await compare({...geometryRequestInputs(upload,high.features.length?high:upload),minAreaSqm});check()
+  if(!high.features.length){first.aOnly={...first.both,featureCollection:{...first.both.featureCollection,features:first.both.featureCollection.features.map(feature=>({...feature,properties:{...feature.properties,diffType:'A_ONLY'}}))}};first.both={areaSqm:0,spotCount:0,featureCollection:empty()}}
   const inHigh = validateCompareGroup(first.both,'OVERLAP'),outsideHigh = validateCompareGroup(first.aOnly,'A_ONLY')
   const split = async (data:SpatialCollection) => {
     if(!data.features.length)return {inside:empty(),outside:empty()}
-    const result = await compare({...geometryRequestInputs(data,permanent),minAreaSqm});check()
+    const result = await compare({...geometryRequestInputs(data,permanent.features.length?permanent:data),minAreaSqm});check()
+    if(!permanent.features.length)return {inside:empty(),outside:validateCompareGroup(result.both,'OVERLAP')}
     return {inside:validateCompareGroup(result.both,'OVERLAP'),outside:validateCompareGroup(result.aOnly,'A_ONLY')}
   }
   const [inside,outside] = await Promise.all([split(inHigh),split(outsideHigh)]);check()

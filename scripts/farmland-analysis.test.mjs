@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import ts from 'typescript'
 function load(file,deps={}){const module={exports:{}};new Function('module','exports','require',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(module,module.exports,id=>{assert(id in deps,`Unexpected import ${id}`);return deps[id]});return module.exports}
-const validate=load('src/utils/spatial-geometry-result.ts',{'./topic-upload':{assertTopicGeometry(data){assert(data.features.every(f=>f.geometry.type==='Polygon'))}},'./spatial-overlay-result':{}})
+const validate=load('src/utils/spatial-geometry-result.ts',{'./topic-upload':{assertTopicGeometry(data){assert(data.features.every(f=>f.geometry.type==='Polygon'))}},'./spatial-overlay-result':{},'./spatial-geometry-input':{PUBLISHED_ANALYSIS_MAX_FEATURES:20000}})
 const requests={geometryRequestInputs:(geometryA,geometryB)=>({geometryA,geometryB})}
 const {farmlandDefaults,splitFarmlandOverlay,partitionUploadedRange}=load('src/utils/farmland-analysis.ts',{'./spatial-geometry-result':validate,'./spatial-geometry-input':requests})
 const make=(kind,area,id)=>({type:'Feature',geometry:{type:'Polygon',coordinates:[[[120,32],[120.001,32],[120.001,32.001],[120,32]]]},properties:{diffType:kind,areaSqm:area,seqNo:id,centerLng:120,centerLat:32}})
@@ -49,6 +49,13 @@ const emptyBranch=await partitionUploadedRange(upload,highData,permData,4,{high,
 })
 assert.equal(emptyCalls,2,'Skip only the mathematically empty branch')
 assert.deepEqual(emptyBranch.partitions.map(g=>g.areaSqm),[0,25,0,25,0,75])
+let outsideCalls=0
+const outsideAll=await partitionUploadedRange(upload,collection([]),collection([]),0,{high,permanent,uploadName:'规划'},async input=>{
+  outsideCalls++;assert.equal(input.geometryA,input.geometryB,'无候选图层时仍用后端自交计算范围面积')
+  return {areaA:100,areaB:100,crsUsed:'fixture',both:group('OVERLAP',100,1),aOnly:group('A_ONLY',0,0),bOnly:group('B_ONLY',0,0)}
+})
+assert.equal(outsideCalls,2)
+assert.deepEqual(outsideAll.partitions.map(group=>group.areaSqm),[0,0,0,0,0,100],'没有任何候选地块时完整范围属于都不满足')
 await assert.rejects(partitionUploadedRange(upload,highData,permData,4,{high,permanent,uploadName:'规划'},async()=>{throw Error('backend failure')}),/backend failure/)
 let checks=0
 await assert.rejects(partitionUploadedRange(upload,highData,permData,4,{high,permanent,uploadName:'规划'},async()=>responses[0],()=>{if(++checks)throw Error('cancelled')}),/cancelled/)

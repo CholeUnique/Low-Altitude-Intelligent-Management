@@ -1,4 +1,5 @@
 import { apiClient, ApiBusinessError } from './client'
+import { waitForSpatialComparison,waitForSpatialCalculation,type SpatialTaskOptions } from '@/utils/spatial-compare-task'
 
 export interface SpatialField { name:string; alias?:string; type:'text'|'number'|'date'|'oid' }
 export interface SpatialLayer { layerId:number; name:string; geometryType:string; analyzable:boolean; fields:SpatialField[] }
@@ -26,11 +27,11 @@ interface RequestOptions { signal?:AbortSignal }
 /** Keep diagnostic context without exposing request headers or authentication tokens. */
 export class SpatialRequestError extends ApiBusinessError {
   constructor(public readonly endpoint:string,public readonly resultId:string|undefined,code:string,detail:string) {
-    super(code,`${endpoint.endsWith('/overlay')||endpoint.endsWith('/spot/compare')?'后端分析':endpoint.endsWith('/geojson')?'读取结果 GeoJSON':endpoint.endsWith('/spot/page')?'读取结果分页':endpoint.endsWith('/detail')?'读取分析统计':'读取可分析图层'}失败（POST /api${endpoint}${resultId?`，结果 ${resultId}`:''}，错误码 ${code}）：${/^unknown error$/i.test(detail.trim())?'后端未提供具体原因（unknown error），请检查服务端异常日志':detail}`)
+    super(code,`${endpoint.includes('/region-clip')?'行政区裁切':endpoint.endsWith('/status')?'查询计算进度':endpoint.endsWith('/overlay')||endpoint.endsWith('/spot/compare')?'后端分析':endpoint.endsWith('/geojson')?'读取结果 GeoJSON':endpoint.endsWith('/spot/page')?'读取结果分页':endpoint.endsWith('/detail')?'读取分析统计':'读取可分析图层'}失败（POST /api${endpoint}${resultId?`，结果 ${resultId}`:''}，错误码 ${code}）：${/^unknown error$/i.test(detail.trim())?'后端未提供具体原因（unknown error），请检查服务端异常日志':detail}`)
     this.name='SpatialRequestError'
   }
 }
-async function spatialPost<T>(endpoint:string,body:object,options:RequestOptions&{timeout?:number}={}):Promise<T> {
+export async function spatialPost<T>(endpoint:string,body:object,options:RequestOptions&{timeout?:number}={}):Promise<T> {
   try{
     // apiClient's response interceptor unwraps data; Axios still types the transport response.
     const data:unknown=await apiClient.post(endpoint,body,options)
@@ -51,9 +52,12 @@ async function spatialPost<T>(endpoint:string,body:object,options:RequestOptions
 export function getSpatialLayers(serviceId:string,deptId?:string,options:RequestOptions={}) {
   return spatialPost<SpatialLayer[]>('/v1/spatial/layer/list',{serviceId,deptId},options)
 }
-export async function analyzeSpatialOverlay(input:SpatialOverlayRequest,options:RequestOptions={}) {
-  // This API is synchronous. Wait for the server instead of starting a browser worker or fake polling.
-  const result=await spatialPost<SpatialOverlaySummary>('/v1/spatial/overlay',input,{...options,timeout:180_000})
+export async function analyzeSpatialOverlay(input:SpatialOverlayRequest,options:SpatialTaskOptions={}) {
+  const accepted=await spatialPost<unknown>('/v1/spatial/overlay',input,{signal:options.signal,timeout:180_000})
+  const result=await waitForSpatialCalculation(accepted,(resultId,signal)=>spatialPost('/v1/spatial/overlay/status',{resultId,deptId:input.deptId},{signal,timeout:30_000}),value=>{
+    const summary=value as SpatialOverlaySummary|undefined
+    return summary&&Number.isFinite(summary.areaA)&&Number.isFinite(summary.diffArea)?summary:undefined
+  },'叠加分析',options)
   return {...result,resultId:String(result.resultId)}
 }
 export function getSpatialOverlayDetail(resultId:string,deptId?:string,options:RequestOptions={}) {
@@ -66,6 +70,7 @@ export function getSpatialOverlayGeoJson(resultId:string,deptId?:string,options:
 export function getSpatialOverlaySpots(resultId:string,pageNum:number,deptId?:string,options:RequestOptions={}) {
   return spatialPost<SpatialSpotPage>('/v1/spatial/overlay/spot/page',{resultId,deptId,pageNum,pageSize:200},options)
 }
-export function compareSpatialGeometries(input:{geometryA:SpatialCollection;geometryB:SpatialCollection;minAreaSqm:number},options:RequestOptions={}) {
-  return spatialPost<SpatialGeometryCompare>('/v1/spatial/spot/compare',input,{...options,timeout:180_000})
+export async function compareSpatialGeometries(input:{geometryA:SpatialCollection;geometryB:SpatialCollection;minAreaSqm:number},options:RequestOptions&{deptId?:string;progress?:(percent:number)=>void;pollMs?:number;timeoutMs?:number}={}) {
+  const accepted=await spatialPost<unknown>('/v1/spatial/spot/compare',{...input,deptId:options.deptId},{signal:options.signal,timeout:180_000})
+  return waitForSpatialComparison(accepted,(resultId,signal)=>spatialPost('/v1/spatial/spot/compare/status',{resultId,deptId:options.deptId},{signal,timeout:30_000}),options)
 }

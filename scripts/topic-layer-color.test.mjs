@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import * as vue from 'vue'
 import { parse, compileScript } from '@vue/compiler-sfc'
+const searchModule={exports:{}}
+new Function('module','exports',ts.transpileModule(readFileSync('src/utils/topic-layer-search.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(searchModule,searchModule.exports)
+const search=searchModule.exports
 
 function component(file, dependencies) {
   const { descriptor } = parse(readFileSync(file, 'utf8'))
@@ -49,7 +52,9 @@ const leaflet = { geoJSON, canvas: () => ({ remove() {} }) }
 globalThis.document = { createElement: () => ({ appendChild() {}, append() {} }) }
 const common = {
   vue: vueDeps, leaflet,
-  './TopicLayerCard.vue': { default: {} }, './TopicLayerDisplayMode.vue': { default: {} },
+  './TopicLayerCard.vue': { default: {} }, './TopicLayerDisplayMode.vue': { default: {} }, './TopicLayerColorPicker.vue': { default: {} },
+  './TopicAnalysisProgress.vue': { default: {} },
+  '@/utils/topic-layer-search': search,
   '@/utils/local-id': { createLocalId: () => 'color-fixture' },
   '@/utils/feature-hover-caption': { featureHoverCaption() {} },
   '@/utils/topic-feature-hover': { bindTopicFeatureHover: (shape, _map, _caption, reset) => resets.set(shape, reset) },
@@ -60,7 +65,10 @@ const data = { type: 'FeatureCollection', features: [feature] }
 const palette = ['#53d4df', '#f5ba5c']
 const saved = [], uploadEvents = [], analysisEvents = []
 try {
-  const picker = setup(component('src/components/TopicLayerDisplayMode.vue', { vue: vueDeps, '@/utils/topic-upload': { UPLOAD_COLORS: palette } }), {}, saved)
+  const colorInput=setup(component('src/components/TopicLayerColorPicker.vue',{vue:vueDeps}),{},saved)
+  colorInput.change({target:{value:'#fedcba'}});colorInput.change({target:{value:'transparent'}})
+  assert.deepEqual(saved.splice(0),[['change','#fedcba']])
+  const picker = setup(component('src/components/TopicLayerDisplayMode.vue', { vue: vueDeps, './TopicLayerColorPicker.vue': { default: {} } }), {}, saved)
   picker.changeColor('#123456'); picker.changeColor(null); picker.changeColor('transparent')
   assert.deepEqual(saved.splice(0), [['colorChange', '#123456']], 'Only usable solid colors are applied')
 
@@ -88,6 +96,7 @@ try {
   uploads.select([item.id], false); uploads.color(item, '#654321'); uploads.select([item.id], true)
   assert.equal(uploadLayer.shapes[0].style.fillColor, '#654321', 'Hidden layers use the new color when re-enabled')
 
+  const analysisProps=vue.reactive({ map, open: false, context: 'fixture', farmland: true, uploads: [], operation: 'difference', keyword: '' })
   const analysis = setup(component('src/components/TopicOverlayAnalysis.vue', {
     ...common,
     '@/api/spatial-analysis': {},
@@ -96,7 +105,7 @@ try {
     '@/utils/spatial-geometry-input': {}, '@/utils/farmland-analysis': {},
     '@/stores/user': { useUserStore: () => ({}) },
     '@/stores/farmland-comparison': { useFarmlandComparisonStore: () => ({}) },
-  }), vue.reactive({ map, open: false, context: 'fixture', farmland: true, uploads: [], operation: 'difference', keyword: '' }), analysisEvents)
+  }), analysisProps, analysisEvents)
   analysis.display(data, { sourceA: { layerName: '高标田' }, sourceB: { layerName: '永农' } }, [], 'difference', false, [{ kind: 'A_ONLY', name: '分析差异', color: palette[0], data, areaSqm: 1 }])
   const result = analysis.results.value[0], group = result.groups[0]
   analysis.groupColor(group, '#112233'); await flush()
@@ -111,5 +120,13 @@ try {
   Object.assign(restored.style, { color: '#highlight', fillColor: '#highlight' }); resets.get(restored)()
   assert.equal(restored.style.fillColor, '#aabbcc', 'Hover reset retains the chosen fill color')
   assert.equal(restored.style.fillOpacity, 0)
+  analysisProps.farmland=false
+  analysis.display({type:'FeatureCollection',features:[{...feature,properties:{analysisCoverage:'INSIDE'}}]}, { sourceA: { layerName: '上传范围' }, sourceB: { layerName: '目标图层' } }, [], 'coverage', false)
+  const generic=analysis.results.value[0]
+  analysis.changeResultColor(generic,'INSIDE','#123abc');await flush()
+  assert.equal(generic.layer.shapes[0].style.fillColor,'#123abc','其他专题的分析结果也可改色')
+  assert.equal(analysisEvents.filter(([name])=>name==='legend').at(-1)[1][0].symbols[0].color,'#123abc')
+  generic.layer.resetStyle(generic.layer.shapes[0])
+  assert.equal(generic.layer.shapes[0].style.color,'#123abc','其他专题结果悬浮复位保留改色')
   console.log('Topic colors: map stroke/fill, legend, upload persistence, boundary mode, hidden layers and hover restoration passed')
 } finally { cleanups.forEach(cleanup => cleanup()); scopes.forEach(scope => scope.stop()); delete globalThis.document }

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, markRaw, type Raw } from 'vue'
 import L from 'leaflet'
-import { analyzeSpatialOverlay, compareSpatialGeometries, getSpatialLayers, getSpatialOverlayDetail, getSpatialOverlayGeoJson, type SpatialCollection, type SpatialDifferenceType, type SpatialLayer, type SpatialInput, type SpatialResultLegend, type SpatialSource } from '@/api/spatial-analysis'
-import { annotateSpatialDifference, loadSpatialOverlayResult, spatialFilters, spatialDifferenceLabel, SPATIAL_DIFFERENCE_COLORS } from '@/utils/spatial-overlay-result'
+import { analyzeSpatialOverlay, compareSpatialGeometries, getSpatialLayers, getSpatialOverlayDetail, type SpatialCollection, type SpatialDifferenceType, type SpatialLayer, type SpatialInput, type SpatialResultLegend, type SpatialSource } from '@/api/spatial-analysis'
+import { annotateSpatialDifference, loadSpatialOverlayFeatures, spatialDifferenceFeatures, spatialFilters, spatialDifferenceLabel, SPATIAL_DIFFERENCE_COLORS } from '@/utils/spatial-overlay-result'
 import { geometryAnalysisResult, COVERAGE_COLORS, type SpatialAnalysisOperation, type SpatialAnalysisSummary } from '@/utils/spatial-geometry-result'
 import { filterUploadedGeometry, geometryRequestInputs } from '@/utils/spatial-geometry-input'
 import type { UploadedTopicLayer } from '@/utils/topic-upload'
@@ -13,20 +13,24 @@ import { squareMetresToMu, muToSquareMetres, formatSquareMetresAsMu } from '@/ut
 import { splitFarmlandOverlay, partitionUploadedRange, type FarmlandPartition, type AnalysisStatistic, type AnalysisStatistics } from '@/utils/farmland-analysis'
 import TopicLayerCard from './TopicLayerCard.vue'
 import TopicLayerDisplayMode from './TopicLayerDisplayMode.vue'
+import TopicLayerColorPicker from './TopicLayerColorPicker.vue'
+import TopicAnalysisProgress from './TopicAnalysisProgress.vue'
+import { matchesTopicText,matchesTopicProperties } from '@/utils/topic-layer-search'
 import { useUserStore } from '@/stores/user'
 import { useFarmlandComparisonStore } from '@/stores/farmland-comparison'
 interface FilterRow { id:number; field:string; op:'EQ'|'IN'; values:string }
 interface Selection { label:'A'|'B'; serviceId:string; layerId:string; layers:SpatialLayer[]; filters:FilterRow[]; loading:boolean; error:string; revision:number }
 interface ResultGroup extends FarmlandPartition { id:string; layer:Raw<L.GeoJSON>; visible:boolean; mode:'filled'|'boundary' }
-interface Result { id:string; name:string; operation:SpatialAnalysisOperation;remote:boolean;groups?:ResultGroup[];statistics?:AnalysisStatistic[];uploadName?:string;summary:SpatialAnalysisSummary; data:Raw<SpatialCollection>; difference:Raw<SpatialCollection>; layer:Raw<L.GeoJSON>; visible:boolean; restore:string[]; details:boolean; refreshing:boolean; error:string }
-const props=withDefaults(defineProps<{map:L.Map; open:boolean; context:string; sources:{id:string;name:string}[]; visibleKeys:string[];uploads?:UploadedTopicLayer[];farmland?:boolean;defaults?:{a?:SpatialInput;b?:SpatialInput};keyword?:string;layerOrder?:Record<string,number>;operation?:SpatialAnalysisOperation;loadGeometry?:(input:SpatialInput,signal:AbortSignal)=>Promise<SpatialCollection>}>(),{uploads:()=>[],operation:'difference'})
-const emit=defineEmits<{close:[];upload:[];hide:[keys:string[]];restore:[keys:string[]];legend:[items:SpatialResultLegend[]];layerkeys:[keys:string[]];statistics:[items:AnalysisStatistics[]]}>()
+interface Result { id:string; name:string; operation:SpatialAnalysisOperation;remote:boolean;colors:Record<string,string>;groups?:ResultGroup[];statistics?:AnalysisStatistic[];uploadName?:string;summary:SpatialAnalysisSummary; data:Raw<SpatialCollection>; difference:Raw<SpatialCollection>; layer:Raw<L.GeoJSON>; visible:boolean; restore:string[]; details:boolean; refreshing:boolean; error:string }
+const props=withDefaults(defineProps<{map:L.Map; open:boolean; context:string; sources:{id:string;name:string}[]; visibleKeys:string[];uploads?:UploadedTopicLayer[];farmland?:boolean;defaults?:{a?:SpatialInput;b?:SpatialInput};keyword?:string;layerOrder?:Record<string,number>;operation?:SpatialAnalysisOperation;loadGeometry?:(input:SpatialInput,signal:AbortSignal,within?:SpatialCollection)=>Promise<SpatialCollection>}>(),{uploads:()=>[],operation:'difference'})
+const emit=defineEmits<{close:[];upload:[];hide:[keys:string[]];restore:[keys:string[]];legend:[items:SpatialResultLegend[]];layerkeys:[keys:string[]];statistics:[items:AnalysisStatistics[]];matches:[count:number]}>()
 const user=useUserStore(),comparisonStore=useFarmlandComparisonStore(),dialog=ref<HTMLDialogElement>()
 const selection=(label:'A'|'B'):Selection=>({label,serviceId:'',layerId:'',layers:[],filters:[],loading:false,error:'',revision:0})
 const a=reactive(selection('A')),b=reactive(selection('B')),selections=[a,b]
 const rangeId=ref('')
 const minAreaMu=ref<number|string>(squareMetresToMu(4))
 const busy=ref(false),stage=ref(''),validation=ref(''),notice=ref(''),failed=ref(false),results=ref<Result[]>([])
+const analysisProgress=ref<number>()
 const canFinish=computed(()=>!busy.value&&selections.every(side=>!side.loading&&selected(side)?.analyzable)&&(!props.farmland||!coverage.value||props.uploads.some(item=>item.id===rangeId.value&&item.analyzable)))
 const coverage=computed(()=>props.operation==='coverage'),title=computed(()=>coverage.value?'范围覆盖分析':props.farmland?'高标田与永农对比分析':'对称差分 / 交集取反')
 const availableUploads=computed(()=>props.uploads.filter(item=>item.analyzable))
@@ -36,14 +40,16 @@ const colors=SPATIAL_DIFFERENCE_COLORS
 function resultTypes(result:Result){return (result.operation==='coverage'?['INSIDE','OUTSIDE']:['A_ONLY','B_ONLY']).filter(type=>result.difference.features.some(feature=>resultType(result,feature)===type))}
 function resultType(result:Pick<Result,'operation'>,feature:GeoJSON.Feature){return String(result.operation==='coverage'?feature.properties?.analysisCoverage:feature.properties?.diffType)}
 function typeColor(type:string){return {...colors,...COVERAGE_COLORS}[type as keyof typeof colors|keyof typeof COVERAGE_COLORS]}
+function resultColor(result:Result,type:string){return result.colors[type]||typeColor(type)}
+function changeResultColor(result:Result,type:string,color:string){result.colors[type]=color;result.layer.setStyle(feature=>{const value=resultColor(result,resultType(result,feature!));return {color:value,fillColor:value}})}
 function typeLabel(type:string,summary:SpatialAnalysisSummary){return type==='INSIDE'?`位于${summary.sourceB.layerName}范围内`:type==='OUTSIDE'?`位于${summary.sourceB.layerName}范围外`:spatialDifferenceLabel(type as SpatialDifferenceType,summary)}
 function publishResults(){
-  if(!props.farmland){emit('legend',results.value.filter(result=>result.visible).map(result=>({id:result.id,name:result.name,symbols:resultTypes(result).map(type=>({label:typeLabel(type,result.summary),color:typeColor(type)}))})));return}
+  if(!props.farmland){emit('legend',results.value.filter(result=>result.visible).map(result=>({id:result.id,name:result.name,symbols:resultTypes(result).map(type=>({label:typeLabel(type,result.summary),color:resultColor(result,type)}))})));return}
   emit('layerkeys',results.value.map(result=>`analysis:${result.id}`))
   emit('legend',results.value.filter(result=>result.groups?.some(group=>group.visible&&group.data.features.length)).map(result=>({id:result.id,name:result.name,symbols:result.groups!.filter(group=>group.visible&&group.data.features.length).map(group=>({label:group.name,color:group.color,mode:group.mode}))})))
   emit('statistics',results.value.filter(result=>result.groups?.some(group=>group.visible)).map(result=>({id:result.id,title:result.name,sources:[result.summary.sourceA.layerName,result.summary.sourceB.layerName],metrics:[...(result.statistics||[]),...(result.operation==='difference'?[{label:'差异面积',areaSqm:result.summary.diffArea},{label:'差异率',ratio:result.summary.diffRate}]:[])]})))
 }
-watch(()=>results.value.map(result=>[result.id,result.visible,result.summary,...(result.groups?.flatMap(group=>[group.id,group.visible,group.mode,group.color])||[])]),publishResults,{immediate:true})
+watch(()=>results.value.map(result=>[result.id,result.visible,result.summary,JSON.stringify(result.colors),...(result.groups?.flatMap(group=>[group.id,group.visible,group.mode,group.color])||[])]),publishResults,{immediate:true})
 
 function selected(side:Selection){return side.layers.find(layer=>String(layer.layerId)===side.layerId)}
 function uploaded(side:Selection){return props.uploads.find(item=>`upload:${item.id}`===side.serviceId)}
@@ -77,7 +83,7 @@ async function initialize(){
       if(!preferred){side.error=`未找到${side.label==='A'?'高标准农田':'永久基本农田'}基准图层，请核对场景配置和部门服务`;continue}
       side.serviceId=preferred.serviceId;await loadLayers(side)
       if(context!==props.context)return
-      if(side.layers.some(layer=>layer.layerId===preferred.layerId&&layer.analyzable))side.layerId=String(preferred.layerId)
+      if(side.layers.some(layer=>String(layer.layerId)===String(preferred.layerId)&&layer.analyzable)){side.layerId=String(preferred.layerId);side.error=''}
       else side.error='后端基准图层不可用于面积分析'
     }
     return
@@ -131,13 +137,14 @@ async function refreshDetail(result:Result){
   finally{result.refreshing=false;detailControllers.delete(abort)}
 }
 function display(data:SpatialCollection,summary:SpatialAnalysisSummary,restore:string[],operation:SpatialAnalysisOperation='difference',remote=true,partitions?:FarmlandPartition[],uploadName?:string){
+  const chosenColors=reactive<Record<string,string>>({})
   const difference=partitions?{type:'FeatureCollection' as const,features:partitions.filter(group=>!group.aggregate).flatMap(group=>group.data.features)}:operation==='coverage'?data:annotateSpatialDifference(data,summary)
   if(!difference.features.length&&!partitions)throw new Error('后端未返回可显示的分析图斑')
   const id=props.farmland?createLocalId():summary.resultId||createLocalId()
   if(!props.map.getPane('topic-analysis'))props.map.createPane('topic-analysis').style.zIndex='370'
   const name=props.farmland?`${operation==='coverage'?'范围覆盖分析':'高标田与永农对比分析'} ${++analysisSequence}${uploadName?` · ${uploadName}`:''}`:operation==='coverage'?`${summary.sourceA.layerName} · ${summary.sourceB.layerName}覆盖分析`:`${summary.sourceA.layerName} ↔ ${summary.sourceB.layerName}`
   function makeLayer(collection:SpatialCollection,color?:(feature:GeoJSON.Feature)=>string,mode:()=>string=()=> 'filled'){
-    const style=(feature?:GeoJSON.Feature)=>{const currentColor=color?color(feature!):typeColor(resultType({operation},feature!));return {color:currentColor,fillColor:currentColor,weight:mode()==='boundary'?3:2,fillOpacity:mode()==='boundary'?0:.65}}
+    const style=(feature?:GeoJSON.Feature)=>{const currentColor=color?color(feature!):chosenColors[resultType({operation},feature!)]||typeColor(resultType({operation},feature!));return {color:currentColor,fillColor:currentColor,weight:mode()==='boundary'?3:2,fillOpacity:mode()==='boundary'?0:.65}}
     const native=L.geoJSON(collection,{pane:'topic-analysis',bubblingMouseEvents:false,style,onEachFeature(feature,shape){
       const properties=feature.properties||{},type=String(properties.analysisMembership||typeLabel(resultType({operation},feature),summary))
       bindTopicFeatureHover(shape,props.map,()=>featureHoverCaption(properties,[],type),()=>native.resetStyle(shape as L.Path))
@@ -160,7 +167,7 @@ function display(data:SpatialCollection,summary:SpatialAnalysisSummary,restore:s
   }else layer=makeLayer(difference)
   try{if(difference.features.length)layer.addTo(props.map)}catch(error){layer.remove();throw error}
   if(!props.farmland)results.value.forEach(result=>{result.layer.remove();result.visible=false})
-  const result:Result={id,name,operation,remote,summary,groups,statistics:partitions?.map(group=>({label:group.name,areaSqm:group.areaSqm})),uploadName,data:markRaw(data),difference:markRaw(difference),layer:markRaw(layer),visible:difference.features.length>0,restore,details:true,refreshing:false,error:''}
+  const result:Result={id,name,operation,remote,summary,colors:chosenColors,groups,statistics:partitions?.map(group=>({label:group.name,areaSqm:group.areaSqm})),uploadName,data:markRaw(data),difference:markRaw(difference),layer:markRaw(layer),visible:difference.features.length>0,restore,details:true,refreshing:false,error:''}
   if(groups) { try { syncResultLayers(result) } catch(error) { layer.remove(); throw error } }
   if(props.farmland)results.value.push(result)
   else {results.value=results.value.filter(item=>item.id!==id);results.value.unshift(result)}
@@ -192,9 +199,11 @@ function toggleGroup(result:Result,group:ResultGroup,visible:boolean){
 }
 function groupMode(group:ResultGroup,mode:'filled'|'boundary'){group.mode=mode;group.layer.setStyle({color:group.color,fillColor:group.color,weight:mode==='boundary'?3:2,fillOpacity:mode==='boundary'?0:.65})}
 function groupColor(group:ResultGroup,color:string){group.color=color;groupMode(group,group.mode)}
-function groupMatches(group:ResultGroup){return !props.keyword?.trim()||group.name.toLocaleLowerCase().includes(props.keyword.trim().toLocaleLowerCase())}
-function resultMatches(result:Result){return !props.keyword?.trim()||result.name.toLocaleLowerCase().includes(props.keyword.trim().toLocaleLowerCase())||result.groups?.some(groupMatches)}
-function categoryMatches(result:Result,group:ResultGroup){return !props.keyword?.trim()||result.name.toLocaleLowerCase().includes(props.keyword.trim().toLocaleLowerCase())||groupMatches(group)}
+function groupMatches(group:ResultGroup){return matchesTopicText(props.keyword||'',group.name,group.kind)||group.data.features.some(feature=>matchesTopicProperties(props.keyword||'',feature.properties))}
+function resultMatches(result:Result){return matchesTopicText(props.keyword||'',result.name)||result.groups?.some(groupMatches)||result.difference.features.some(feature=>matchesTopicProperties(props.keyword||'',feature.properties))}
+function categoryMatches(result:Result,group:ResultGroup){return matchesTopicText(props.keyword||'',result.name)||groupMatches(group)}
+watch(()=>props.keyword,()=>{if(props.keyword?.trim())results.value.filter(resultMatches).forEach(result=>{result.details=true})})
+watch(()=>results.value.filter(resultMatches).length,count=>emit('matches',count),{immediate:true})
 function selectableGroups(result:Result){return result.groups?.filter(group=>group.data.features.length)||[]}
 function resultAllSelected(result:Result){const groups=selectableGroups(result);return groups.length>0&&groups.every(group=>group.visible)}
 function resultPartSelected(result:Result){return !resultAllSelected(result)&&selectableGroups(result).some(group=>group.visible)}
@@ -218,9 +227,9 @@ async function finish(){
     if(String(minAreaMu.value).trim()===''||!Number.isFinite(area)||area<0||area>10000)throw new Error('最小图斑面积须在 0–15 亩之间')
   }catch(error){validation.value=errorText(error);return}
   const operation=props.operation,keys=[sourceKey(a),sourceKey(b)],restore=keys.filter(key=>props.visibleKeys.includes(key)),deptId=user.activeDeptId
-  const snapshot=(side:Selection):SpatialSource=>({serviceId:side.serviceId,serviceName:uploaded(side)?'本机上传':props.sources.find(source=>source.id===side.serviceId)?.name||side.serviceId,layerId:selected(side)!.layerId,layerName:selected(side)!.name,filters:spatialFilters(side.filters,selected(side)!.fields)})
+  const snapshot=(side:Selection):SpatialSource=>({serviceId:side.serviceId,serviceName:uploaded(side)?uploaded(side)!.origin==='drawing'?'地图绘制':'本机上传':props.sources.find(source=>source.id===side.serviceId)?.name||side.serviceId,layerId:selected(side)!.layerId,layerName:selected(side)!.name,filters:spatialFilters(side.filters,selected(side)!.fields)})
   const sources={sourceA:snapshot(a),sourceB:snapshot(b)},locals=[uploaded(a),uploaded(b)],comparisonScope=comparisonStore.scope
-  const request=++job,abort=new AbortController();controller=abort;busy.value=true;stage.value='正在读取完整输入图层…';notice.value='';emit('close')
+  const request=++job,abort=new AbortController();controller=abort;busy.value=true;analysisProgress.value=undefined;stage.value='正在读取完整输入图层…';notice.value='';emit('close')
   try{
     let summary:SpatialAnalysisSummary,data:SpatialCollection
     const remote=operation==='difference'&&!locals.some(Boolean)
@@ -228,12 +237,14 @@ async function finish(){
       const range=availableUploads.value.find(item=>item.id===rangeId.value)
       if(!range)throw new Error('请选择上传的面图层作为规划范围')
       if(!props.loadGeometry)throw new Error('未配置基准图层几何读取')
-      stage.value='正在读取高标田、永农完整几何…'
-      const resolve=(side:Selection,input:SpatialInput)=>uploaded(side)?Promise.resolve(filterUploadedGeometry(uploaded(side)!.data,input.filters)):props.loadGeometry!(input,abort.signal)
+      stage.value='正在查询上传范围附近的高标田、永农候选地块…'
+      const resolve=(side:Selection,input:SpatialInput)=>uploaded(side)?Promise.resolve(filterUploadedGeometry(uploaded(side)!.data,input.filters)):props.loadGeometry!(input,abort.signal,filterUploadedGeometry(range.data,[]))
       const [high,permanent]=await Promise.all([resolve(a,sourceA),resolve(b,sourceB)])
       const check=()=>{abort.signal.throwIfAborted();if(request!==job)throw new Error('分析上下文已变化')}
       check();stage.value='后端正在将上传范围裁切为四类区域…'
-      const result=await partitionUploadedRange(filterUploadedGeometry(range.data,[]),high,permanent,area,{high:sources.sourceA,permanent:sources.sourceB,uploadName:range.name},input=>compareSpatialGeometries(input,{signal:abort.signal}),check)
+      let part=0;const partProgress=[0,0,0]
+      const result=await partitionUploadedRange(filterUploadedGeometry(range.data,[]),high,permanent,area,{high:sources.sourceA,permanent:sources.sourceB,uploadName:range.name},input=>{const slot=part++;return compareSpatialGeometries(input,{signal:abort.signal,deptId,progress:percent=>{if(request===job){partProgress[slot]=percent;analysisProgress.value=partProgress[0]!*.5+partProgress[1]!*.25+partProgress[2]!*.25;stage.value='后端正在计算上传范围的交集与差集…'}}})},check)
+      analysisProgress.value=100
       check()
       summary={...sources,areaA:result.areaSqm,areaB:0,overlapArea:0,onlyAArea:0,onlyBArea:0,diffArea:0,minAreaSqm:area,crsUsed:result.crsUsed,featureCountA:range.data.features.length,featureCountB:0,spotCount:result.partitions.filter(group=>!group.aggregate).reduce((sum,group)=>sum+group.data.features.length,0)}
       data={type:'FeatureCollection',features:result.partitions.filter(group=>!group.aggregate).flatMap(group=>group.data.features)}
@@ -241,10 +252,12 @@ async function finish(){
     }
     if(remote){
       stage.value=props.farmland?'后端正在执行高标田与永农对比分析…':'后端正在执行对称差分分析…'
-      const response=await analyzeSpatialOverlay({deptId,sourceA,sourceB,minAreaSqm:area,includeOverlapSpots:!!props.farmland},{signal:abort.signal})
+      const response=await analyzeSpatialOverlay({deptId,sourceA,sourceB,minAreaSqm:area,includeOverlapSpots:!!props.farmland},{signal:abort.signal,progress:percent=>{if(request===job)analysisProgress.value=percent}})
       if(request!==job)return
       summary=response;stage.value=props.farmland?'正在读取高标田、永农及交集三类图斑…':'正在读取后端差分图层及来源分类…'
-      data=props.farmland?await getSpatialOverlayGeoJson(response.resultId,deptId,{signal:abort.signal}):await loadSpatialOverlayResult(response.resultId,deptId,{signal:abort.signal})
+      analysisProgress.value=undefined
+      data=await loadSpatialOverlayFeatures(response,deptId,{signal:abort.signal,progress:(loaded,total)=>{if(request===job){analysisProgress.value=total?loaded/total*100:100;stage.value=`正在读取结果图层（${loaded.toLocaleString()} / ${total.toLocaleString()} 个图斑）…`}}})
+      if(!props.farmland)spatialDifferenceFeatures(data)
     }else{
       const resolve=async(input:SpatialInput,index:number):Promise<SpatialCollection>=>{
         const local=locals[index]
@@ -255,7 +268,7 @@ async function finish(){
       const [geometryA,geometryB]=await Promise.all([resolve(sourceA,0),resolve(sourceB,1)])
       if(request!==job)return
       stage.value='后端正在计算交集与差集…'
-      const response=await compareSpatialGeometries({...geometryRequestInputs(geometryA,geometryB),minAreaSqm:area},{signal:abort.signal})
+      const response=await compareSpatialGeometries({...geometryRequestInputs(geometryA,geometryB),minAreaSqm:area},{signal:abort.signal,deptId,progress:percent=>{if(request===job)analysisProgress.value=percent}})
       if(request!==job)return
       const result=geometryAnalysisResult(response,operation,sources,{a:geometryA.features.length,b:geometryB.features.length})
       summary=result.summary;data=result.data
@@ -290,10 +303,10 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
   </div>
   <section v-else-if="results.length" class="overlay-results" aria-label="对称差分分析结果">
     <h3>后端分析结果 <small>{{ results.length }}</small></h3>
-    <div v-for="result in results" :key="result.id" class="overlay-result-row">
+    <div v-for="result in results" v-show="resultMatches(result)" :key="result.id" class="overlay-result-row">
       <label><input v-model="result.visible" type="checkbox" :disabled="!result.difference.features.length" @change="toggle(result)" /><span :title="result.name">{{ result.operation==='coverage'?'范围覆盖结果':'不重叠区域' }}</span><small>独立图层</small></label>
       <dl class="analysis-sources"><div><dt>A 图层</dt><dd><b>{{ result.summary.sourceA.layerName }}</b><small>{{ result.summary.sourceA.serviceName }}</small></dd></div><div><dt>B 图层</dt><dd><b>{{ result.summary.sourceB.layerName }}</b><small>{{ result.summary.sourceB.serviceName }}</small></dd></div></dl>
-      <div class="result-actions"><button type="button" @click="result.details=!result.details">{{ result.details?'收起统计':'面积统计' }}</button><button type="button" :disabled="!result.difference.features.length" @click="download(result)">导出结果图层</button><button type="button" :disabled="!result.restore.length" @click="emit('restore',result.restore)">恢复输入</button><button type="button" @click="remove(result)">移除</button></div>
+      <div v-if="result.difference.features.length" class="result-types"><span v-for="type in resultTypes(result)" :key="type"><TopicLayerColorPicker :color="resultColor(result,type)" :label="typeLabel(type,result.summary)" @change="changeResultColor(result,type,$event)" />{{ typeLabel(type,result.summary) }}</span></div><div class="result-actions"><button type="button" @click="result.details=!result.details">{{ result.details?'收起统计':'面积统计' }}</button><button type="button" :disabled="!result.difference.features.length" @click="download(result)">导出结果图层</button><button type="button" :disabled="!result.restore.length" @click="emit('restore',result.restore)">恢复输入</button><button type="button" @click="remove(result)">移除</button></div>
       <div v-if="result.details" class="result-summary">
         <dl>
           <div v-for="[key,label] in result.operation==='coverage'?coverageMetrics:metrics" :key="key"><dt>{{ label }}</dt><dd><span class="metric-value">{{ formatSquareMetresAsMu(result.summary[key]) }}</span><small>亩</small></dd></div>
@@ -303,7 +316,7 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
         <template v-if="result.operation==='coverage'">
           <p>A / B 要素数：{{ number(result.summary.featureCountA) }} / {{ number(result.summary.featureCountB) }}<br />输出图斑数：{{ number(result.summary.spotCount) }} · 最小面积 {{ formatSquareMetresAsMu(result.summary.minAreaSqm) }} 亩<br />投影：{{ result.summary.crsUsed }}<template v-if="result.summary.costMs!=null"><br />耗时：{{ number(result.summary.costMs) }} 毫秒 · {{ result.summary.createTime }}</template></p>
           <p>A 为上传范围，B 为目标图层。结果包含 A∩B（范围内）与 A−B（范围外），不包含 B 单独存在的区域。</p>
-          <div v-if="result.difference.features.length" class="result-types"><span v-for="type in resultTypes(result)" :key="type"><i :style="{background:typeColor(type)}"></i>{{ typeLabel(type,result.summary) }}</span></div>
+
         </template>
         <button v-if="result.remote" type="button" :disabled="result.refreshing" @click="refreshDetail(result)">{{ result.refreshing?'读取中…':'刷新后端统计' }}</button><p v-if="result.error" class="overlay-error" role="alert">{{ result.error }}</p>
       </div>
@@ -335,7 +348,7 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
       <footer><span>{{ farmland?'完成后追加分类结果，右侧显示统计':coverage?'完成后显示上传范围内、外的结果':'完成后仅显示两图层不同的区域' }}</span><button type="button" @click="emit('close')">取消</button><button class="primary" type="submit" :disabled="!canFinish">Finish · 开始分析</button></footer>
     </form>
   </dialog>
-    <div v-if="busy" class="overlay-running" role="status" aria-live="polite"><div class="analysis-earth" aria-hidden="true"><div class="earth-land"></div><i></i><i></i></div><div><b>后端空间分析运行中</b><span>{{ stage }}</span></div><button type="button" title="仅停止前端等待，不取消后端计算" @click="stopWaiting()">停止等待</button></div>
+    <TopicAnalysisProgress v-if="busy" title="后端空间分析运行中" :message="stage" :progress="analysisProgress" can-stop @stop="stopWaiting()" />
     <div v-if="notice" class="overlay-toast" :class="{'is-error':failed}" :role="failed?'alert':'status'"><span>{{ failed?'!':'✓' }}</span><p>{{ notice }}</p><button type="button" aria-label="关闭分析提示" @click="notice=''">×</button></div>
   </Teleport>
 </template>
