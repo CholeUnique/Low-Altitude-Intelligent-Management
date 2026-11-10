@@ -174,6 +174,9 @@ async function loadTasks() {
       pageNum,
       pageSize,
       keyword: keyword.value || undefined,
+      // 当前处理人交给后端按工作流节点筛选，减少需要逐条读取流程的任务量；
+      // 仅有姓名没有 ID 的选项（name: 前缀）无法转成 ID，仍由前端本地兜底过滤。
+      currentHandlerId: handlerFilter.value.startsWith('id:') ? handlerFilter.value.slice(3) : undefined,
       // 流程已启动时业务 taskStatus 可能仍为 0，状态筛选须在合并流程后执行。
       priority: selectedPriority,
       deptId: selectedDeptId.value,
@@ -283,8 +286,23 @@ watch(parentDeptId, () => {
   if (!childDepartments.value.some((item) => item.id === childDeptId.value)) childDeptId.value = ''
 })
 watch([currentPage, requestPageSize], () => applyTaskRecords(projectedTasks.value, latestRequest))
-watch(handlerFilter, () => { currentPage.value = 1; applyTaskRecords(projectedTasks.value, latestRequest) })
-watch(selectedDeptId, deptId => { handlerFilter.value = ''; projectedTasks.value = []; handlerReadErrors.value={}; void loadHandlers(deptId) }, {immediate:true})
+// 处理人筛选改由后端按工作流节点筛选，切换时需要重新拉取；pureName 选项无法转 ID，仅本地过滤。
+let handlerFilterSilent = false
+watch(handlerFilter, () => {
+  currentPage.value = 1
+  if (handlerFilterSilent) {
+    handlerFilterSilent = false
+    applyTaskRecords(projectedTasks.value, latestRequest)
+    return
+  }
+  void loadTasks()
+})
+watch(selectedDeptId, deptId => {
+  if (handlerFilter.value) { handlerFilterSilent = true; handlerFilter.value = '' }
+  projectedTasks.value = []
+  handlerReadErrors.value = {}
+  void loadHandlers(deptId)
+}, {immediate:true})
 watch(selectedScene, () => {
   if (sceneFilter.value) void loadTasks()
 })
@@ -475,7 +493,6 @@ onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRe
 .task-table-row{flex:1;min-height:48px;max-height:62px}
 .task-list-page .task-table-row>span{padding:2px 8px}
 .task-table-row{box-sizing:border-box}
-.task-list-page .task-table-row{grid-template-columns:1.2fr .85fr .75fr .8fr .85fr 65px minmax(250px,2.5fr) 65px}
 .task-table-row>span{overflow:hidden}
 .task-owner small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .status-tag{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -487,11 +504,13 @@ onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRe
 </style>
 
 <style scoped>
-/* Nine compact columns share a fixed row height, with wrapping inside each cell. */
+/* 注意：任务表格的列宽与表头布局以 src/styles/system/_tasks.scss 为准。
+   那里的选择器带 #app 前缀（ID 级特异性），会压过本文件的 `.task-list-page ...` 规则，
+   所以不要在这里改 grid-template-columns，改了也不会生效。 */
 .task-list-page .task-filters{grid-template-columns:minmax(130px,1.1fr) minmax(100px,.9fr) minmax(90px,.8fr) minmax(170px,1.4fr) minmax(100px,.9fr) minmax(76px,.65fr)}
 .task-list-page .task-filters select{min-width:0;width:100%}
 .task-list-page .task-table{overflow-x:hidden;overflow-y:auto;scrollbar-width:thin}
-.task-list-page .task-table-row{min-width:0;width:100%;grid-template-columns:minmax(0,.72fr) minmax(0,.95fr) 86px 76px minmax(0,.72fr) 104px 86px minmax(180px,1.6fr) 44px;flex:0 0 68px;height:68px;min-height:68px;max-height:68px}
+/* 九列：名称/场景/单位按内容弹性，状态/处理人/时间/范围/操作给足最小宽，进度拿走剩余空间。 */
 .task-list-page .task-table-head{flex:0 0 36px;height:36px;min-height:36px;max-height:36px}
 .task-list-page .task-table-row>span{padding:4px 5px;font-size:12px;line-height:16px;white-space:normal;overflow-wrap:anywhere}
 .task-list-page .task-name b,.task-list-page .task-owner b{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;white-space:normal;font-size:14px;line-height:18px}
@@ -500,7 +519,7 @@ onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRe
 .task-list-page .status-tag,.task-list-page .scene-tag{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;max-width:100%;overflow:hidden;white-space:normal;overflow-wrap:anywhere;text-overflow:clip;font-size:12px;line-height:16px;padding:3px 4px}
 .task-list-page .task-actions button{padding:4px 5px;font-size:12px;white-space:nowrap}
 .task-list-page .task-created{font-size:12px;line-height:16px}
-.task-list-page .task-table-head>span:nth-child(7){font-size:14px;white-space:nowrap}
+.task-list-page .task-table-head>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .task-list-page .task-table-row>span:nth-child(4){white-space:normal}
-@media(max-width:1100px){.task-list-page .task-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.task-list-page .task-filters .search-box{grid-column:auto}.task-list-page .task-table-row{grid-template-columns:minmax(0,.66fr) minmax(0,.85fr) 72px 62px minmax(0,.66fr) 70px 72px minmax(125px,1.3fr) 40px}}
+@media(max-width:1100px){.task-list-page .task-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.task-list-page .task-filters .search-box{grid-column:auto}}
 </style>
