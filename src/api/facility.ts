@@ -121,4 +121,25 @@ export interface FacilityQrcodeQuery { deptId: string; id: string | number; url?
 /** 设施二维码（PNG 二进制；失败时后端仍返回 JSON 错误体）。 */
 export const getFacilityQrcode = (query: FacilityQrcodeQuery) =>
   apiClient.post<never, Blob>('/v1/biz/facility/qrcode', { url: resolveFacilityReportUrl(), size: 360, ...query }, { responseType: 'blob' })
+
+export interface ContentQrcodeInput { content: string; size?: number }
+/**
+ * 通用内容二维码（PNG 二进制）。内容由前端给定，服务端只做编码、不拼接；
+ * 用于上报签名码之外的自定义码（如地图导航码）。失败时后端仍返回 JSON 错误体。
+ */
+export async function getContentQrcode(input: ContentQrcodeInput): Promise<Blob> {
+  const blob = await apiClient.post<never, Blob>('/v1/biz/facility/qrcode/content', { size: 300, ...input }, { responseType: 'blob' })
+  if (!(blob instanceof Blob) || !blob.type.startsWith('image/')) {
+    if (blob instanceof Blob) {
+      try {
+        const error = JSON.parse(await blob.text())
+        throw new Error(error.msg || '二维码生成失败')
+      } catch (error) {
+        if (error instanceof Error && !(error instanceof SyntaxError)) throw error
+      }
+    }
+    throw new Error('二维码生成失败')
+  }
+  return blob
+}
 export const getFacilityGeoJson = (query: { deptId: string; minLng?: number; minLat?: number; maxLng?: number; maxLat?: number; bizStatus?: string }) => apiClient.post<never, GeoJSON.FeatureCollection>('/v1/biz/facility/geojson', query)

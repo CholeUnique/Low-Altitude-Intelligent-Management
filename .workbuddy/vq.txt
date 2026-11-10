@@ -1,0 +1,8 @@
+FILE facility-AixDB36K.js size=1835
+  /v1/biz/facility/qrcode/content         true
+  responseType                            true
+  app-switch                              false
+  正在生成二维码                                 false
+  baidumap://map/direction                false
+
+JS total bytes: 3069198

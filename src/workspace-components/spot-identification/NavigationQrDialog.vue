@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import QRCode from 'qrcode'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { getContentQrcode } from '@/api/facility'
 
 const props = defineProps<{ target: { longitude: number; latitude: number; address: string } }>()
 const emit = defineEmits<{ close: [] }>()
@@ -11,28 +11,22 @@ const apps = [
   { key: 'baidu', label: '百度地图' },
 ] as const
 type AppKey = (typeof apps)[number]['key']
+type QrKey = AppKey | 'baiduApp'
 
 const activeApp = ref<AppKey>('amap')
-const amapQr = ref('')
-const tencentQr = ref('')
-const baiduQr = ref('')
-const baiduAppQr = ref('')
 // 百度第二个码在「网页版」和「App scheme 版」之间切换。
 const baiduAppMode = ref(false)
 const error = ref('')
+const loadingKey = ref<QrKey | ''>('')
+const sources = ref<Partial<Record<QrKey, string>>>({})
+const objectUrls: string[] = []
 const teleportTarget = document.fullscreenElement || document.body
 
-const currentQr = computed(() => {
-  if (activeApp.value === 'tencent') return tencentQr.value
-  if (activeApp.value === 'baidu') return baiduAppMode.value ? baiduAppQr.value : baiduQr.value
-  return amapQr.value
-})
 const currentLabel = computed(() => apps.find((item) => item.key === activeApp.value)?.label || '')
-
-function selectApp(key: AppKey) {
-  activeApp.value = key
-  if (key !== 'baidu') baiduAppMode.value = false
-}
+const activeQrKey = computed<QrKey>(() =>
+  activeApp.value === 'baidu' ? (baiduAppMode.value ? 'baiduApp' : 'baidu') : activeApp.value)
+const currentSrc = computed(() => sources.value[activeQrKey.value] || '')
+const currentLoading = computed(() => loadingKey.value === activeQrKey.value)
 
 // 高德路径规划使用 GCJ-02；素材坐标按 WGS84 处理。
 function toGcj(longitude: number, latitude: number): [number, number] {
@@ -55,9 +49,11 @@ function toBd09(longitude: number, latitude: number): [number, number] {
   return [z*Math.cos(theta) + .0065, z*Math.sin(theta) + .006]
 }
 
-onMounted(async () => {
+/** 四种码对应的跳转内容；百度 App 码用 scheme，其余用 https。 */
+const links = computed<Record<QrKey, string>>(() => {
   const { longitude, latitude, address } = props.target
   const [lng, lat] = toGcj(longitude, latitude)
+  const [bdLng, bdLat] = toBd09(lng, lat)
 
   const amap = new URL('https://uri.amap.com/navigation')
   amap.searchParams.set('to', `${lng},${lat},${address.replace(/,/g, '，')}`)
@@ -73,9 +69,6 @@ onMounted(async () => {
   tencent.searchParams.set('referer', 'tzscene')
 
   // 百度的网页路线 URI（api.map.baidu.com/direction）已下线，只能用「标注」URI。
-  // 微信/相机走这个 https 版；百度地图 App 扫 https 会被自家域名接管并回落到首页，故另备 scheme 版。
-  const [bdLng, bdLat] = toBd09(lng, lat)
-
   const baidu = new URL('https://api.map.baidu.com/marker')
   baidu.searchParams.set('location', `${bdLat},${bdLng}`)
   baidu.searchParams.set('title', address)
@@ -90,19 +83,33 @@ onMounted(async () => {
     + `?destination=latlng:${bdLat},${bdLng}|name:${encodeURIComponent(address)}`
     + '&mode=driving&coord_type=bd09ll&src=webapp.tzscene.nav'
 
-  try {
-    const [a, t, b, c] = await Promise.all([
-      QRCode.toDataURL(amap.href, { width: 300, margin: 2 }),
-      QRCode.toDataURL(tencent.href, { width: 300, margin: 2 }),
-      QRCode.toDataURL(baidu.href, { width: 300, margin: 2 }),
-      QRCode.toDataURL(baiduApp, { width: 300, margin: 2 }),
-    ])
-    amapQr.value = a
-    tencentQr.value = t
-    baiduQr.value = b
-    baiduAppQr.value = c
-  } catch { error.value = '二维码生成失败，请重新打开弹窗' }
+  return { amap: amap.href, tencent: tencent.href, baidu: baidu.href, baiduApp }
 })
+
+/** 按需向后端取码，取过的复用 objectURL，避免每次切换都请求。 */
+async function loadQr(key: QrKey) {
+  if (sources.value[key]) return
+  loadingKey.value = key
+  error.value = ''
+  try {
+    const blob = await getContentQrcode({ content: links.value[key], size: 300 })
+    const url = URL.createObjectURL(blob)
+    objectUrls.push(url)
+    sources.value = { ...sources.value, [key]: url }
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '二维码生成失败'
+  } finally {
+    if (loadingKey.value === key) loadingKey.value = ''
+  }
+}
+
+function selectApp(key: AppKey) {
+  activeApp.value = key
+  if (key !== 'baidu') baiduAppMode.value = false
+}
+
+watch(activeQrKey, (key) => { void loadQr(key) }, { immediate: true })
+onBeforeUnmount(() => { objectUrls.forEach((url) => URL.revokeObjectURL(url)) })
 </script>
 
 <template>
@@ -121,9 +128,9 @@ onMounted(async () => {
         <p v-if="error" role="alert">{{ error }}</p>
 
         <div class="qr-stage">
-          <img v-if="currentQr" :src="currentQr" :alt="`${currentLabel}导航二维码`" />
-          <div v-else class="qr-placeholder" role="status">无法生成二维码</div>
-          <button v-if="activeApp === 'baidu' && baiduQr && baiduAppQr" type="button" class="qr-switch"
+          <img v-if="currentSrc" :src="currentSrc" :alt="`${currentLabel}导航二维码`" />
+          <div v-else class="qr-placeholder" role="status">{{ currentLoading ? '正在生成二维码…' : '二维码暂不可用' }}</div>
+          <button v-if="activeApp === 'baidu'" type="button" class="qr-switch"
             @click="baiduAppMode = !baiduAppMode">{{ baiduAppMode ? '用微信/相机扫' : '用百度地图App扫' }}</button>
         </div>
 
@@ -146,7 +153,7 @@ p{overflow-wrap:anywhere;line-height:1.5;color:#b8d8e5}
 .app-switch button.active{color:#eafcff;background:#10516a;border-color:#32b8dc;font-weight:600}
 .qr-stage{display:grid;gap:10px;justify-items:center;margin:18px 0 10px}
 .qr-stage img{width:min(268px,62vw);height:min(268px,62vw);background:#fff;border-radius:6px}
-.qr-placeholder{width:min(268px,62vw);height:min(268px,62vw);display:grid;place-items:center;box-sizing:border-box;padding:12px;background:#183b4d;border:1px solid #37677d;border-radius:6px;color:#b8d8e5}
+.qr-placeholder{width:min(268px,62vw);height:min(268px,62vw);display:grid;place-items:center;box-sizing:border-box;padding:12px;background:#183b4d;border:1px solid #37677d;border-radius:6px;color:#b8d8e5;text-align:center}
 .qr-switch{min-height:26px;padding:0 11px;border:1px solid #4a8ca5;border-radius:13px;color:#8fe3f7;background:#123c53;font-size:12px;line-height:1;cursor:pointer;transition:background .18s,border-color .18s,color .18s}
 .qr-switch:hover{color:#eafcff;background:#1b5876;border-color:#6fd3ea}
 .origin-note{margin:0;font-size:12px;line-height:1.6}

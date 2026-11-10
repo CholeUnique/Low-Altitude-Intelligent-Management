@@ -1,0 +1,6 @@
+FILE telemetry-panel-Db3mAin4.js
+  app-switch              true
+  正在生成二维码                 true
+  二维码暂不可用                 true
+  getContentQrcode        false
+  qrcode/content          false
