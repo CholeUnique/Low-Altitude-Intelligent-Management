@@ -35,8 +35,10 @@
 #app .topic-category em, #app .topic-category small { font-size: 12px; color: #a8c0d2; }
 #app .analysis-group-switch > span { font-size: 13px; line-height: 22px; }
 #app .analysis-group-switch > small { font-size: 12px; color: #9fb7c9; }
-#app .topic-inspector-rail { width: 300px; }
-#app .topic-farmland-stat { padding: 16px; }
+#app .topic-inspector-rail { width: max-content; min-width: min(320px, calc(100% - 40px)); max-width: min(560px, calc(100% - 40px)); align-items: flex-end; }
+#app .topic-farmland-stat, #app .topic-farmland-stat :is(.region-statistics,.analysis-statistics,.topic-statistics) { scrollbar-width: none; -ms-overflow-style: none; }
+#app .topic-farmland-stat::-webkit-scrollbar, #app .topic-farmland-stat :is(.region-statistics,.analysis-statistics,.topic-statistics)::-webkit-scrollbar { display: none; }
+#app .topic-farmland-stat { width: max-content; min-width: min(320px, 100%); max-width: 100%; padding: 16px; }
 #app .topic-farmland-stat > header { font-size: 16px; line-height: 24px; padding-bottom: 12px; border-color: var(--ui-divider); }
 #app :is(.analysis-statistics, .topic-statistics) {
   h3 { font-size: 16px; line-height: 22px; color: #e6f1ff; }
@@ -170,7 +172,7 @@
 @media (max-width: 1100px) {
   #app .geographic-topics { --details-width: 290px; --left-panel-top: 164px; }
   #app .topic-title { top: 78px; }
-  #app .topic-inspector-rail { width: 270px; }
+  #app .topic-inspector-rail { min-width: min(300px, calc(100% - 40px)); }
   #app .topic-tools { right: 16px; max-width: calc(100% - 32px); }
   #app .topic-tools .tool-actions { flex-wrap: wrap; justify-content: flex-end; }
 }

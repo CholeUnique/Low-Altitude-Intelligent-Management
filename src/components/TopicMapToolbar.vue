@@ -4,13 +4,17 @@ import L from 'leaflet'
 import { EditPen, Location, Connection, ArrowDown, Edit } from '@element-plus/icons-vue'
 import { formatSquareMetresAsMu } from '@/utils/topic-area'
 import { geodesicArea, formatDistance } from '@/utils/map-measurement'
-import { createDrawingFeature, exportDrawingShapefiles, type DrawingFeature, type DrawingKind } from '@/utils/map-drawing'
-const props = defineProps<{map:L.Map; suspended?:boolean;coverageEnabled?:boolean;analysisLabel?:string}>()
+import { createDrawingFeature, exportDrawingShapefiles, type DrawingFeature, type DrawingKind, type DrawingLayerInput } from '@/utils/map-drawing'
+import TopicLayerColorPicker from './TopicLayerColorPicker.vue'
+const props = defineProps<{map:L.Map; suspended?:boolean;coverageEnabled?:boolean;analysisLabel?:string;loadDrawing?:(input:DrawingLayerInput)=>Promise<void>}>()
 const emit = defineEmits<{drawing:[active:boolean];overlay:[];coverage:[]}>()
 type Tool = 'distance'|'area'|'marker'|'draw-point'|'draw-line'|'draw-polygon'
 const menu = ref<'measure'|'annotation'|'draw'|'analysis'>(), tool = ref<Tool>(), message = ref('')
 const measurements = L.layerGroup(), annotations = L.layerGroup(), drawings = L.layerGroup(), drawingPreview = L.layerGroup()
 const drawnFeatures = ref<DrawingFeature[]>([]), drawingName = ref('绘制图层'), exporting = ref(false)
+const loadingDrawing=ref(false),drawingLoaded=ref(false)
+const drawingFeedbackClosed=ref(false)
+const drawingColor=ref('#ffd16b')
 let drawingSequence = 0
 const isDrawingTool = (value: Tool | undefined) => Boolean(value?.startsWith('draw-'))
 let points: L.LatLng[] = [], doubleClickEnabled = false, boundMap: L.Map | undefined
@@ -25,6 +29,8 @@ function toggleMenu(next: typeof menu.value) {
   menu.value = menu.value === next ? undefined : next
 }
 function start(next: Tool) {
+  if(loadingDrawing.value)return
+  if(isDrawingTool(next)&&drawingLoaded.value){drawings.clearLayers();drawnFeatures.value=[];drawingSequence=0;drawingLoaded.value=false}
   stopDrawing(); tool.value = next; menu.value = undefined; points = []
   if (next !== 'marker' && !isDrawingTool(next)) measurements.clearLayers()
   doubleClickEnabled = props.map.doubleClickZoom.enabled(); props.map.doubleClickZoom.disable()
@@ -67,7 +73,7 @@ function finish(event?:L.LeafletMouseEvent) {
   if (!tool.value) return
   event?.originalEvent?.preventDefault()
   if(isDrawingTool(tool.value)){
-    if(tool.value==='draw-point'){stopDrawing();message.value='点绘制已结束，可导出图层';return}
+    if(tool.value==='draw-point'){stopDrawing();message.value='点绘制已结束，可导出或加载图层';return}
     try{commitDrawing(tool.value==='draw-line'?'line':'polygon',points);points=[];drawingPreview.clearLayers();message.value=`已完成 ${drawnFeatures.value.length} 个要素，可继续绘制；Esc 退出`}catch(error){message.value=error instanceof Error?error.message:'绘制失败'}
     return
   }
@@ -77,12 +83,27 @@ function finish(event?:L.LeafletMouseEvent) {
 }
 function commitDrawing(kind:DrawingKind,vertices:L.LatLng[]) {
   const feature = createDrawingFeature(kind,vertices.map(point=>[point.lng,point.lat]),drawingSequence+1)
-  const style={pane:'topic-tools',color:'#ffd16b',weight:3,fillColor:'#ffd16b',fillOpacity:.28,interactive:false}
+  const style={pane:'topic-tools',color:drawingColor.value,weight:3,fillColor:drawingColor.value,fillOpacity:.28,interactive:false}
   L.geoJSON(feature,{...style,style:()=>style,pointToLayer:(_feature,point)=>L.circleMarker(point,{...style,radius:6,fillOpacity:1})}).addTo(drawings)
-  drawingSequence++;drawnFeatures.value.push(feature)
+  drawingSequence++;drawnFeatures.value.push(feature);drawingFeedbackClosed.value=false
 }
+function changeDrawingColor(color:string){drawingColor.value=color;drawings.eachLayer(layer=>(layer as L.GeoJSON).setStyle({color,fillColor:color}))}
 function undoVertex(){if(isDrawingTool(tool.value)&&points.length){points.pop();redraw();message.value=`剩余 ${points.length} 个顶点；右键完成当前要素`}}
-function clearDrawings(){if(isDrawingTool(tool.value))stopDrawing();drawings.clearLayers();drawnFeatures.value=[];drawingSequence=0;drawingPreview.clearLayers();message.value='绘制图层已清除';menu.value=undefined}
+function clearDrawings(){if(loadingDrawing.value)return;if(isDrawingTool(tool.value))stopDrawing();drawings.clearLayers();drawnFeatures.value=[];drawingSequence=0;drawingLoaded.value=false;drawingPreview.clearLayers();message.value='绘制草稿已清除';menu.value=undefined}
+function unfinishedDrawing(){return isDrawingTool(tool.value)&&points.length>0}
+async function loadDrawings(){
+  if(loadingDrawing.value||drawingLoaded.value||!drawnFeatures.value.length)return
+  if(unfinishedDrawing()){message.value='请先完成当前要素，再加载图层';return}
+  if(!props.loadDrawing){message.value='当前专题尚未配置绘制图层加载';return}
+  loadingDrawing.value=true
+  try{
+    stopDrawing()
+    await props.loadDrawing({features:drawnFeatures.value,name:drawingName.value,color:drawingColor.value})
+    drawings.clearLayers();drawingLoaded.value=true;menu.value=undefined
+    message.value='绘制图层已加载，可在图层详情中管理，也可继续导出'
+  }catch(error){message.value=error instanceof Error?error.message:'绘制图层加载失败'}
+  finally{loadingDrawing.value=false}
+}
 async function exportDrawings(){
   if(exporting.value)return
   if(isDrawingTool(tool.value)&&points.length){message.value='请先完成当前要素，再导出图层';return}
@@ -123,7 +144,7 @@ onBeforeUnmount(()=>{unbind();window.removeEventListener('keydown',key)})
       </div>
       <div class="tool-dropdown">
         <button :class="{active:menu==='draw'||isDrawingTool(tool)}" :aria-expanded="menu==='draw'" @click="toggleMenu('draw')"><Edit /><span>绘制</span><ArrowDown class="down" /></button>
-        <div v-if="menu==='draw'" class="tool-menu drawing-menu" aria-label="绘制选项"><button @click="start('draw-point')">点状绘制</button><button @click="start('draw-line')">线状绘制</button><button @click="start('draw-polygon')">面状绘制</button><button v-if="isDrawingTool(tool)" @click="stopDrawing();menu=undefined">结束绘制</button><button :disabled="!drawnFeatures.length" @click="clearDrawings">清除绘制</button><hr /><small>已完成 {{ drawnFeatures.length }} 个要素</small><label>图层名称<input v-model="drawingName" maxlength="60" aria-label="绘制图层名称" /></label><button :disabled="!drawnFeatures.length || exporting" @click="exportDrawings">{{ exporting?'正在导出…':'导出图层（ZIP）' }}</button></div>
+        <div v-if="menu==='draw'" class="tool-menu drawing-menu" aria-label="绘制选项"><button @click="start('draw-point')">点状绘制</button><button @click="start('draw-line')">线状绘制</button><button @click="start('draw-polygon')">面状绘制</button><button v-if="isDrawingTool(tool)" @click="stopDrawing();menu=undefined">结束绘制</button><button :disabled="!drawnFeatures.length || loadingDrawing" @click="clearDrawings">清除绘制</button><hr /><small>已完成 {{ drawnFeatures.length }} 个要素</small><label>图层名称<input v-model="drawingName" maxlength="60" aria-label="绘制图层名称" :disabled="loadingDrawing" /></label><div class="drawing-color"><span>图层颜色</span><TopicLayerColorPicker :color="drawingColor" :label="drawingName" @change="changeDrawingColor" /></div><button :disabled="!drawnFeatures.length || exporting || unfinishedDrawing()" @click="exportDrawings">{{ exporting?'正在导出…':'导出图层（ZIP）' }}</button><button v-if="loadDrawing" :disabled="!drawnFeatures.length || drawingLoaded || loadingDrawing || unfinishedDrawing()" @click="loadDrawings">{{ drawingLoaded?'已加载到地图':loadingDrawing?'正在加载…':'加载到地图' }}</button></div>
       </div>
       <div class="tool-dropdown">
         <button :class="{active:menu==='analysis'}" :aria-expanded="menu==='analysis'" @click="toggleMenu('analysis')"><Connection /><span>空间分析</span><ArrowDown class="down" /></button>
@@ -131,14 +152,15 @@ onBeforeUnmount(()=>{unbind();window.removeEventListener('keydown',key)})
       </div>
       <span class="tool-divider"></span><slot />
     </div>
-    <div v-if="message" class="tool-feedback" role="status"><span>{{ message }}<template v-if="isDrawingTool(tool) && tool!=='draw-point'"><button class="finish-drawing" @click="finish()">完成当前要素</button><button class="finish-drawing" @click="undoVertex">撤销顶点</button></template></span><button aria-label="关闭工具提示" @click="message=''">×</button></div>
+    <div v-if="message || (drawnFeatures.length && !drawingFeedbackClosed)" class="tool-feedback" role="status"><div class="tool-feedback-content"><span>{{ message || `已完成 ${drawnFeatures.length} 个绘制要素` }}<template v-if="isDrawingTool(tool) && tool!=='draw-point'"><button class="finish-drawing" @click="finish()">完成当前要素</button><button class="finish-drawing" @click="undoVertex">撤销顶点</button></template></span><div v-if="drawnFeatures.length" class="drawing-result-actions" role="group" aria-label="绘制成果操作"><button :disabled="exporting || unfinishedDrawing()" @click="exportDrawings">{{ exporting?'正在导出…':'导出' }}</button><button v-if="loadDrawing" :disabled="drawingLoaded || loadingDrawing || unfinishedDrawing()" @click="loadDrawings">{{ drawingLoaded?'已加载':loadingDrawing?'正在加载…':'加载到地图' }}</button></div></div><button aria-label="关闭工具提示" @click="message='';drawingFeedbackClosed=true">×</button></div>
   </nav>
 </template>
 <style scoped>
+.tool-feedback-content{flex:1;min-width:0}.drawing-result-actions{display:flex;gap:8px;margin-top:10px}.drawing-result-actions button{padding:5px 9px;border:1px solid #78bdca55;border-radius:5px;color:#80e5ef;font:inherit;font-size:12px;white-space:nowrap}.drawing-result-actions button:last-child{background:#277b8d38}.drawing-result-actions button:disabled{opacity:.5;cursor:default}
 :global(.topic-measure-index){padding:2px 5px;border:1px solid #6bbcd455;border-radius:4px;background:#0d3042ed;color:#c9eff8;box-shadow:0 3px 8px #00182640;font:12px/16px var(--ui-font)}:global(.topic-measure-index.leaflet-tooltip-top:before){border-top-color:#0d3042ed}
 .topic-tools{position:absolute;z-index:550;right:20px;top:20px;padding:6px;border:1px solid #83cae027;border-radius:10px;background:linear-gradient(130deg,#133c4bef,#082736f2);box-shadow:0 8px 28px #001b2a40;backdrop-filter:blur(18px);color:#def1f5}.tool-actions{display:flex;align-items:center;gap:4px}.tool-actions :deep(button){height:34px;display:flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:6px;padding:0 9px;color:inherit;background:transparent;font:inherit;font-size:12px;white-space:nowrap;cursor:pointer}.tool-actions :deep(button:hover),.tool-actions :deep(button.active){background:#398f9c38;color:#a1f0f5}.tool-actions :deep(svg){width:16px;height:16px;flex:none}.tool-actions .down{width:10px;height:10px;color:#83acb9}.tool-divider{width:1px;height:20px;background:#83c8d82b;margin:0 4px}.tool-dropdown{position:relative}.tool-menu{position:absolute;top:calc(100% + 12px);left:0;min-width:130px;padding:5px;border:1px solid #79bed530;border-radius:8px;background:#0b2b3af5;box-shadow:0 10px 24px #00172566;backdrop-filter:blur(18px)}.tool-menu button{width:100%;justify-content:flex-start}.tool-menu--empty{padding:14px;color:#8fbbc8;font-size:12px}.tool-feedback{position:absolute;right:calc(100% + 12px);top:0;width:230px;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border:1px solid #6bbdce35;border-radius:8px;background:#0b2b3af0;font-size:12px;line-height:1.6;box-shadow:0 6px 18px #00162444}.tool-feedback span{flex:1}.tool-feedback button{border:0;background:transparent;color:#b2d5e0;cursor:pointer}@media(max-width:1100px){.tool-actions :deep(button){font-size:12px;padding:0 6px;gap:4px}.tool-feedback{right:0;top:calc(100% + 140px)}}
 </style>
 
 <style scoped>
-.drawing-menu{min-width:172px}.drawing-menu small{display:block;padding:5px 9px;color:#97b9c7;font-size:12px}.drawing-menu hr{border:0;border-top:1px solid #77aab633;margin:5px}.drawing-menu label{display:grid;gap:5px;padding:5px 9px;font-size:12px;color:#a9cad4}.drawing-menu input{box-sizing:border-box;width:100%;min-width:0;padding:6px 7px;border:1px solid #537f9455;border-radius:4px;background:#061f2c;color:#e3f5f8;font:inherit}.tool-menu button:disabled{opacity:.4;cursor:default}.tool-feedback .finish-drawing{display:inline-block;margin:6px 8px 0 0;padding:3px 5px;color:#80e5ef;border:1px solid #78bdca55;border-radius:4px;font-size:12px}
+.drawing-color{display:flex;align-items:center;justify-content:space-between;padding:7px 9px;font-size:12px;color:#a9cad4}.drawing-menu{min-width:172px}.drawing-menu small{display:block;padding:5px 9px;color:#97b9c7;font-size:12px}.drawing-menu hr{border:0;border-top:1px solid #77aab633;margin:5px}.drawing-menu>label{display:grid;gap:5px;padding:5px 9px;font-size:12px;color:#a9cad4}.drawing-menu>label input{box-sizing:border-box;width:100%;min-width:0;padding:6px 7px;border:1px solid #537f9455;border-radius:4px;background:#061f2c;color:#e3f5f8;font:inherit}.tool-menu button:disabled{opacity:.4;cursor:default}.tool-feedback .finish-drawing{display:inline-block;margin:6px 8px 0 0;padding:3px 5px;color:#80e5ef;border:1px solid #78bdca55;border-radius:4px;font-size:12px}
 </style>

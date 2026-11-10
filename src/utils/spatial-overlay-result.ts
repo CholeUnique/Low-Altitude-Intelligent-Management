@@ -1,4 +1,4 @@
-import { getSpatialOverlayGeoJson, type SpatialCollection, type SpatialDifferenceType, type SpatialField, type SpatialFilter, type SpatialGeometry, type SpatialOverlaySummary } from '@/api/spatial-analysis'
+import { getSpatialOverlayGeoJson,getSpatialOverlaySpots, type SpatialCollection, type SpatialDifferenceType, type SpatialField, type SpatialFilter, type SpatialGeometry, type SpatialOverlaySummary } from '@/api/spatial-analysis'
 
 export const SPATIAL_DIFFERENCE_COLORS:Record<SpatialDifferenceType,string>={A_ONLY:'#ffb81c',B_ONLY:'#9b5cff'}
 export function spatialDifferenceLabel(type:SpatialDifferenceType,summary:Pick<SpatialOverlaySummary,'sourceA'|'sourceB'>) {
@@ -54,4 +54,27 @@ export async function loadSpatialOverlayResult(resultId:string,deptId?:string,op
   const data=await getSpatialOverlayGeoJson(resultId,deptId,{signal:options.signal})
   try{return spatialDifferenceFeatures(data)}
   catch(error){throw new Error(`读取差分来源图层失败（POST /api/v1/spatial/overlay/geojson，merge=false，结果 ${resultId}）：${error instanceof Error?error.message:'后端结果格式无效'}`)}
+}
+/** 分页接口与 GeoJSON 接口读取同一结果；仅导出超限时切换，不回退到另一种计算或合并几何。 */
+export async function loadSpatialOverlayFeatures(summary:SpatialOverlaySummary,deptId?:string,options:{signal?:AbortSignal;progress?:(loaded:number,total:number)=>void}={}):Promise<SpatialCollection>{
+  const {resultId,spotCount}=summary
+  if(!Number.isInteger(spotCount)||spotCount<0)throw new Error('后端未返回有效的结果图斑总数')
+  if(spotCount<=5000){
+    try{const data=collection(await getSpatialOverlayGeoJson(resultId,deptId,{signal:options.signal}));if(data.features.length!==spotCount)throw new Error(`结果 ${resultId} 图斑返回不完整`);options.progress?.(spotCount,spotCount);return data}
+    catch(error){if(String((error as {code?:string})?.code)!=='10707')throw error}
+  }
+  const data:SpatialCollection={type:'FeatureCollection',features:[]},seen=new Set<number>()
+  for(let page=1;page<=Math.max(1,Math.ceil(spotCount/200));page++){
+    options.signal?.throwIfAborted()
+    const chunk=await getSpatialOverlaySpots(resultId,page,deptId,{signal:options.signal})
+    if(chunk.total!==spotCount||!Array.isArray(chunk.records)||chunk.records.length!==Math.min(200,spotCount-data.features.length))throw new Error(`结果 ${resultId} 分页数量不完整，请检查后端返回`)
+    for(const spot of chunk.records){
+      if(!Number.isInteger(spot.seqNo)||seen.has(spot.seqNo))throw new Error(`结果 ${resultId} 分页图斑编号重复或无效`)
+      seen.add(spot.seqNo)
+      const {geometry,...properties}=spot
+      data.features.push({type:'Feature',geometry,properties})
+    }
+    options.progress?.(data.features.length,spotCount)
+  }
+  return collection(data)
 }

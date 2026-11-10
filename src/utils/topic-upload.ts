@@ -20,7 +20,7 @@ proj4.defs('EPSG:4490','+proj=longlat +ellps=GRS80 +no_defs')
 
 export interface ShpPayload {shp:ArrayBuffer;dbf:ArrayBuffer;prj?:string;cpg?:string;crs:string;encoding:string}
 export interface ParsedTopicUpload {data:GeoJSON.FeatureCollection;sourceCrs:string;encoding:string;skippedCount:number;analyzable:boolean;fields:SpatialField[]}
-export interface UploadedTopicLayer extends ParsedTopicUpload {id:string;name:string;fileName:string;color:string;mode:'filled'|'boundary';selected:boolean;createdAt:string}
+export interface UploadedTopicLayer extends ParsedTopicUpload {id:string;name:string;fileName:string;color:string;mode:'filled'|'boundary';selected:boolean;createdAt:string;origin?:'upload'|'drawing'}
 
 export function validateUploadName(name:string) {
   const value=name.trim()
@@ -56,9 +56,9 @@ function automaticEncoding(dbf:ArrayBuffer,structure:ReturnType<typeof dbfStruct
     return 'utf-8'
   }catch{return 'gb18030'}
 }
-export function assertTopicGeometry(data:GeoJSON.FeatureCollection) {
+export function assertTopicGeometry(data:GeoJSON.FeatureCollection,maxFeatures=SHP_MAX_FEATURES) {
   if(data?.type!=='FeatureCollection'||!Array.isArray(data.features)||!data.features.length)throw new Error('图层没有有效要素')
-  if(data.features.length>SHP_MAX_FEATURES)throw new Error(`图层超过 ${SHP_MAX_FEATURES} 个要素，请分批处理`)
+  if(data.features.length>maxFeatures)throw new Error(`图层超过 ${maxFeatures} 个要素，请分批处理`)
   let vertices=0
   const position=(point:unknown)=>{
     if(!Array.isArray(point)||point.length<2||!point.slice(0,2).every(value=>typeof value==='number'&&Number.isFinite(value))||Math.abs(point[0])>180||Math.abs(point[1])>90)throw new Error('转换后坐标不在有效经纬度范围内，请检查源坐标系')

@@ -10,7 +10,7 @@ function load(file,deps={}){const module={exports:{}};new Function('module','exp
 const upload=load('src/utils/topic-upload.ts',{shpjs:shp,proj4})
 const overlay=load('src/utils/spatial-overlay-result.ts',{'@/api/client':{},'@/api/spatial-analysis':{}})
 const input=load('src/utils/spatial-geometry-input.ts',{'@terraformer/arcgis':{arcgisToGeoJSON},'./map-service-layer':{},'./topic-upload':upload})
-const result=load('src/utils/spatial-geometry-result.ts',{'./topic-upload':upload,'./spatial-overlay-result':overlay})
+const result=load('src/utils/spatial-geometry-result.ts',{'./topic-upload':upload,'./spatial-overlay-result':overlay,'./spatial-geometry-input':input})
 const ring=[[500000,3600000],[500000,3600100],[500200,3600100],[500200,3600000],[500000,3600000]]
 const fixture=await new Promise((resolve,reject)=>write([{NAME:'planning',ID:'321202100207000146'}],'POLYGON',[[ring]],(error,files)=>error?reject(error):resolve(files)))
 const payload={shp:fixture.shp.buffer,dbf:fixture.dbf.buffer,crs:'EPSG:4549',encoding:'auto'}
@@ -52,6 +52,10 @@ assert.throws(()=>input.spatialAttributeWhere([{field:'MISSING',op:'EQ',values:[
 assert.equal(input.filterUploadedGeometry(chinese.data,[{field:'NAME',op:'EQ',values:['水田']}]).features.length,1)
 assert.throws(()=>input.filterUploadedGeometry(chinese.data,[{field:'NAME',op:'EQ',values:['旱地']}]),/没有可分析/)
 const sent=input.geometryRequestInputs(parsed.data,chinese.data)
+const publishedMany={type:'FeatureCollection',features:Array(5001).fill(parsed.data.features[0])}
+assert.equal(input.geometryRequestInputs(publishedMany,chinese.data).geometryA.features.length,5001,'已发布图层不复用 SHP 上传 5000 上限')
+assert.deepEqual(input.spatialGeometryExtent({type:'FeatureCollection',features:[featureGeometry(119,32),featureGeometry(120,33)]}),{west:119,south:32,east:120.1,north:33.1})
+function featureGeometry(x,y){return {type:'Feature',geometry:{type:'Polygon',coordinates:[[[x,y],[x+.1,y],[x+.1,y+.1],[x,y]]]},properties:{}}}
 assert.deepEqual(sent.geometryA.features[0].properties,{});assert.equal(sent.geometryA.features[0].geometry,parsed.data.features[0].geometry)
 assert.equal(parsed.data.features[0].properties.NAME,'planning','Preparation never destroys source attributes')
 const geom={type:'Polygon',coordinates:[[[120,32],[120.001,32],[120.001,32.001],[120,32]]]}

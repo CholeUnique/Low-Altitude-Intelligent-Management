@@ -7,15 +7,18 @@ import { createLocalId } from '@/utils/local-id'
 import { featureHoverCaption } from '@/utils/feature-hover-caption'
 import { bindTopicFeatureHover } from '@/utils/topic-feature-hover'
 import { topicAreaAttribute } from '@/utils/topic-area'
-import { readShpPayload, UPLOAD_COLORS, UPLOAD_CRS, validateUploadName, type ParsedTopicUpload, type UploadedTopicLayer } from '@/utils/topic-upload'
+import { readShpPayload, UPLOAD_COLORS, UPLOAD_CRS, validateUploadName, assertTopicGeometry, uploadIsPolygon, type ParsedTopicUpload, type UploadedTopicLayer } from '@/utils/topic-upload'
+import type { DrawingLayerInput } from '@/utils/map-drawing'
 import { readTopicUploads, writeTopicUploads } from '@/utils/topic-upload-storage'
+import { matchesTopicText,matchesTopicProperties } from '@/utils/topic-layer-search'
 
 const props=defineProps<{map:L.Map;scope:string;keyword:string;integrated?:boolean;layerOrder?:Record<string,number>}>()
 const emit=defineEmits<{change:[layers:UploadedTopicLayer[]];dialog:[open:boolean];imported:[]}>()
 const items=ref<UploadedTopicLayer[]>([]),dialog=ref<HTMLDialogElement>(),opened=ref(false),busy=ref(false),loading=ref(false),storageError=ref(''),validation=ref('')
 const name=ref(''),files=ref<File[]>([]),crs=ref('prj'),encoding=ref('auto'),removing=ref('')
 const expanded=ref<Record<string,boolean>>({})
-const matches=computed(()=>items.value.filter(item=>!props.keyword.trim()||item.name.toLocaleLowerCase().includes(props.keyword.trim().toLocaleLowerCase())))
+const matches=computed(()=>items.value.filter(item=>matchesTopicText(props.keyword,item.name)||item.data.features.some(feature=>matchesTopicProperties(props.keyword,feature.properties))))
+watch([()=>props.keyword,matches],()=>{if(props.keyword.trim())matches.value.forEach(item=>{expanded.value[item.id]=true})})
 const handles=new Map<string,L.GeoJSON>()
 let request=0,loadVersion=0,worker:Worker|undefined,parseTimer:ReturnType<typeof setTimeout>|undefined,storageQueue=Promise.resolve()
 const pane='topic-uploaded-vectors'
@@ -51,6 +54,30 @@ function mode(item:UploadedTopicLayer,next:'filled'|'boundary'){item.mode=next;h
 function color(item:UploadedTopicLayer,next:string){item.color=next;handles.get(item.id)?.setStyle(style(item));announce();persist()}
 function locate(item:UploadedTopicLayer){const bounds=handles.get(item.id)?.getBounds();if(bounds?.isValid())props.map.fitBounds(bounds,{padding:[80,80],maxZoom:18})}
 function remove(item:UploadedTopicLayer){handles.get(item.id)?.remove();handles.delete(item.id);items.value=items.value.filter(value=>value.id!==item.id);removing.value='';delete expanded.value[item.id];announce();persist()}
+async function addDrawings(input:DrawingLayerInput){
+  if(loading.value||busy.value)throw new Error('本机图层正在读取或导入，请稍后再试')
+  const title=validateUploadName(input.name)
+  if(!/^#[\da-f]{6}$/i.test(input.color))throw new Error('绘制图层颜色无效')
+  // 快照后加入本机图层，后续清除或继续绘制都不能改动已加载几何。
+  const data=JSON.parse(JSON.stringify({type:'FeatureCollection',features:input.features})) as GeoJSON.FeatureCollection
+  assertTopicGeometry(data)
+  const types=['Point','LineString','Polygon'] as const
+  const groups=types.map(type=>({type,features:data.features.filter(feature=>feature.geometry.type===type)})).filter(group=>group.features.length)
+  if(groups.reduce((count,group)=>count+group.features.length,0)!==data.features.length)throw new Error('绘制图层包含不支持的几何类型')
+  if(items.value.length+groups.length>10)throw new Error('每个专题最多保留 10 个本机图层，请先移除不再使用的图层')
+  const names=new Set(items.value.map(item=>item.name)),suffix={Point:'点',LineString:'线',Polygon:'面'}
+  const additions=groups.map(group=>{
+    const base=groups.length>1?`${title.slice(0,56)} · ${suffix[group.type]}`:title
+    let name=base,index=2
+    while(names.has(name)){const tail=`（${index++}）`;name=base.slice(0,60-tail.length)+tail}
+    names.add(name)
+    const collection:GeoJSON.FeatureCollection={type:'FeatureCollection',features:group.features}
+    return {id:`upload-${createLocalId()}`,name,fileName:`${name}（地图绘制）`,origin:'drawing',color:input.color,mode:'filled',selected:true,createdAt:new Date().toISOString(),data:markRaw(collection),sourceCrs:'EPSG:4326',encoding:'utf-8',skippedCount:0,analyzable:uploadIsPolygon(collection),fields:[{name:'ID',alias:'要素编号',type:'number'},{name:'TYPE',alias:'要素类型',type:'text'}]} satisfies UploadedTopicLayer
+  })
+  additions.forEach(item=>{addHandle(item);items.value.push(item);expanded.value[item.id]=true})
+  announce();persist();emit('imported')
+  await nextTick()
+}
 async function open(){opened.value=true;validation.value='';await nextTick();dialog.value?.showModal();emit('dialog',true)}
 function close(){request++;clearTimeout(parseTimer);worker?.terminate();worker=undefined;busy.value=false;dialog.value?.close();opened.value=false;emit('dialog',false)}
 function choose(event:Event){files.value=Array.from((event.target as HTMLInputElement).files||[]);if(!name.value.trim()){const shp=files.value.find(file=>/\.shp$/i.test(file.name));if(shp)name.value=shp.name.replace(/\.shp$/i,'').slice(0,60)}}
@@ -87,7 +114,7 @@ watch(()=>props.scope,async scope=>{
   finally{if(current===loadVersion)loading.value=false}
 },{immediate:true})
 onBeforeUnmount(()=>{loadVersion++;close();handles.forEach(layer=>layer.remove());handles.clear();renderer.remove();emit('change',[])})
-defineExpose({open,select})
+defineExpose({open,select,addDrawings})
 </script>
 
 <template>

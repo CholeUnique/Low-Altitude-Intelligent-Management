@@ -78,6 +78,8 @@ export interface MapServiceCategoryValue {
   label: string
   /** 与所属图层同色相、按分类数量拉开的深浅色。 */
   color: string
+  /** 行政区分类所包含的原始要素 ID，供后端裁切读取真实几何。 */
+  objectIds?: (string|number)[]
 }
 
 export interface MapServiceCategoryFilter {
@@ -135,7 +137,7 @@ function administrativeCodeField(fields:{name?:string;alias?:string}[],layerName
 }
 
 /** 行政边界使用真实服务几何，在地图上绘制双层描边，不依赖影像导出的样式。 */
-export async function createAdministrativeBoundaryLayer(service: MapServiceItem, color = '#9AEEFE'): Promise<MapServiceLayerHandle> {
+export async function createAdministrativeBoundaryLayer(service: MapServiceItem, color = /村级|行政村|村界/.test(service.name)?'#ffcf70':'#74dfff'): Promise<MapServiceLayerHandle> {
   const url = serviceRoot(service.serviceUrl)
   const layerId = Number(service.arcGisLayerId)
   const metadata = await getMapServiceLayerMetadata(service)
@@ -174,7 +176,7 @@ export async function createAdministrativeBoundaryLayer(service: MapServiceItem,
   if (!bounds.isValid()) throw new Error('行政边界图层没有有效几何数据')
   let selected=new Set(entries.map(entry=>entry.value))
   const canSelect=Boolean(objectIdField&&entries.length===fills.length)
-  const categories=[...new Map(entries.map(entry=>[entry.value,{value:entry.value,label:entry.label,color}])).values()]
+  const categories=[...new Map(entries.map(entry=>[entry.value,{value:entry.value,label:entry.label,color,objectIds:entries.filter(other=>other.value===entry.value).map(other=>other.id as string|number)}])).values()]
   const duplicateNames=new Set(categories.filter(category=>categories.some(other=>other.value!==category.value&&other.label===category.label)).map(category=>category.label))
   categories.forEach(category=>{
     if(duplicateNames.has(category.label))category.label+=`（${category.value.replace(/^[^:]+:/,'')}）`
@@ -218,6 +220,7 @@ export interface MapFeatureAttributeRow {
 }
 
 export interface IdentifiedMapFeature {
+  clipped?:boolean
   serviceId: string
   serviceName: string
   title: string
@@ -2696,11 +2699,12 @@ export async function getMapServiceLayerMetadata(service: MapServiceItem) {
 }
 
 /** 专题按字段读取完整结果，复用 ID 分批机制，不受旧服务 1000 条上限影响。 */
-export async function queryMapServiceFeatures(service: MapServiceItem, fields: string[], where = '1=1', geometry = false,options:{signal?:AbortSignal;maxFeatures?:number}={}) {
+export async function queryMapServiceFeatures(service: MapServiceItem, fields: string[], where = '1=1', geometry = false,options:{signal?:AbortSignal;maxFeatures?:number;extent?:{west:number;south:number;east:number;north:number}}={}) {
   const metadata = await getMapServiceLayerMetadata(service)
   const knownFields = new Set((metadata.fields || []).map(field => field.name))
   if (fields.some(field => !knownFields.has(field))) throw new Error('所选字段不存在于当前图层')
   const parameters = new URLSearchParams({ where, outFields: fields.join(','), returnGeometry: String(geometry), outSR: '4326' })
+  if(options.extent){const {west,south,east,north}=options.extent;parameters.set('geometry',JSON.stringify({xmin:west,ymin:south,xmax:east,ymax:north,spatialReference:{wkid:4326}}));parameters.set('geometryType','esriGeometryEnvelope');parameters.set('inSR','4326');parameters.set('spatialRel','esriSpatialRelIntersects')}
   const result = await queryAllFeatures(servicePath(serviceRoot(service.serviceUrl), `${service.arcGisLayerId}/query`), parameters,options)
   return { features: result.features || [], objectIdField: metadata.fields?.find(field => field.type === 'esriFieldTypeOID')?.name || 'OBJECTID' }
 }

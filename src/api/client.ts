@@ -40,10 +40,21 @@ function quoteLongIntegers(text: string) {
       end += 1
     }
     if (end === digitsStart) { out += char; index += 1; continue }
+    // 数字必须整体消费。不能把经纬度的小数部分当作一个独立 int64 加引号。
+    let integer = true
+    if (text[end] === '.') {
+      integer = false; end += 1
+      while (end < text.length && text[end]! >= '0' && text[end]! <= '9') end += 1
+    }
+    if (text[end] === 'e' || text[end] === 'E') {
+      integer = false; end += 1
+      if (text[end] === '+' || text[end] === '-') end += 1
+      while (end < text.length && text[end]! >= '0' && text[end]! <= '9') end += 1
+    }
     const raw = text.slice(index, end)
     const next = text[end] ?? ''
     const isStandalone = next === '' || next === ',' || next === '}' || next === ']' || /\s/.test(next)
-    if (raw.replace('-', '').length >= 16 && isStandalone) {
+    if (integer && /^-?(?:0|[1-9]\d*)$/.test(raw) && raw.replace('-', '').length >= 16 && isStandalone) {
       out += `"${raw}"`
     } else {
       out += raw
