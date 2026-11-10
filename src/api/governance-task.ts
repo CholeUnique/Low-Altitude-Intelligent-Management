@@ -64,8 +64,10 @@ export interface GovernanceTaskPageQuery {
   pageNum: number
   pageSize: number
   keyword?: string
-  /** 当前工作流节点办理人。 */
+  /** 任务执行负责人（biz_task.assignee_id），不是工作流当前节点的处理人；后者见 currentHandlerId。 */
   assigneeId?: string
+  /** 当前节点处理人：按工作流未结束节点（PENDING/PROCESSING）的 assignee_id 匹配，与 assigneeId 相互独立。 */
+  currentHandlerId?: string
   sceneCode?: string
   taskStatus?: GovernanceTaskStatus
   priority?: number
