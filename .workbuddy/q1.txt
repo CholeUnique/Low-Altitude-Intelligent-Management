@@ -1,0 +1,70 @@
+﻿=== /api/v1/biz/facility/qrcode
+ method: post | summary: 鐢熸垚璁炬柦浜岀淮鐮侊紙PNG锛?
+ desc: 鍓嶇鎻愪緵绉诲姩绔笂鎶ラ〉鍩虹鍦板潃 url锛屾湇鍔＄鎷兼帴 facilityId/ts/sign锛圚MAC-SHA256 绛惧悕锛屽尶鍚嶄笂鎶ラ槻浼€狅紝榛樿 24h 鏃舵晥锛夊悗鐢熸垚 PNG銆傝繑鍥炰簩杩涘埗娴侊紙ResponseEntity锛夛紝閿欒浠嶄负 BaseRsp JSON锛堝叏椤圭洰涓嬭浇绫讳緥澶栨儻渚嬶級銆傞敊璇爜锛?0801 璁炬柦涓嶅瓨鍦ㄣ€?0809 鐢熸垚澶辫触銆?
+ body ref: #/components/schemas/BizFacilityQrcodeReq
+ responses: 403, 200
+ security: [{'bearerAuth': []}]
+
+=== /api/v1/biz/facility/qrcode/content
+ method: post | summary: 鐢熸垚閫氱敤鍐呭浜岀淮鐮侊紙PNG锛?
+ desc: 鍐呭瀹屽叏鐢卞墠绔粰瀹氾紙鈮?000 瀛楃锛夛紝鏈嶅姟绔笉鍋氭嫾鎺ワ紝鐢ㄤ簬涓婃姤椤电鍚嶇爜涔嬪鐨勮嚜瀹氫箟鐮佲€斺€斿吀鍨嬪満鏅负鐧惧害鍦板浘瀵艰埅鍙岀爜鏂规锛氶粯璁?https 鏍囨敞椤电爜锛坅pi.map.baidu.com/marker锛屽井淇?鐩告満鍙壂锛変笌鐧惧害鍦板浘 App scheme 鐮侊紙baidumap://map/marker锛屼粎鐧惧害鍦板浘 App 鍐呭彲璇嗗埆锛屽井淇?娴忚鍣ㄦ棤娉曡繕鍘熷睘棰勬湡锛夈€傝繑鍥炰簩杩涘埗娴侊紙ResponseEntity锛夛紝閿欒浠嶄负 BaseRsp JSON锛堝叏椤圭洰涓嬭浇绫讳緥澶栨儻渚嬶級銆傞敊璇爜锛?0809 鐢熸垚澶辫触锛堝唴瀹硅秴鍑轰簩缁寸爜瀹归噺绛夛級銆?
+ body ref: #/components/schemas/BizFacilityQrcodeContentReq
+ responses: 403, 200
+ security: [{'bearerAuth': []}]
+
+--- schema BizFacilityQrcodeReq
+{
+ "type": "object",
+ "description": "璁炬柦浜岀淮鐮佺敓鎴愯姹?,
+ "properties": {
+  "deptId": {
+   "type": "integer",
+   "format": "int64",
+   "description": "閮ㄩ棬 ID锛堥儴闂ㄨ瑙掔瓫閫夛紱涓虹┖鍒欏彇鐧诲綍鏃惰繘鍏ョ殑閮ㄩ棬銆侫DMIN 鍙寚瀹氫换鎰忛儴闂紝鍏朵粬瑙掕壊浠呭彲浼犺嚜韬墍灞為儴闂級"
+  },
+  "id": {
+   "type": "integer",
+   "format": "int64",
+   "description": "璁炬柦 ID"
+  },
+  "url": {
+   "type": "string",
+   "description": "绉诲姩绔笂鎶ラ〉鍩虹鍦板潃锛堝 https://xxx/facility-report锛夛紝鏈嶅姟绔嫾鎺ョ鍚嶅弬鏁?,
+   "minLength": 1
+  },
+  "size": {
+   "type": "integer",
+   "format": "int32",
+   "description": "浜岀淮鐮佽竟闀匡紙鍍忕礌锛岄粯璁?300锛岃寖鍥?120-1000锛?
+  }
+ },
+ "required": [
+  "id",
+  "url"
+ ]
+}
+
+--- schema BizFacilityQrcodeContentReq
+{
+ "type": "object",
+ "description": "閫氱敤鍐呭浜岀淮鐮佺敓鎴愯姹?,
+ "properties": {
+  "content": {
+   "type": "string",
+   "description": "浜岀淮鐮佸唴瀹癸紙浠绘剰鏂囨湰/URL锛屽惈 baidumap:// 绛?App scheme锛?,
+   "maxLength": 1000,
+   "minLength": 0
+  },
+  "size": {
+   "type": "integer",
+   "format": "int32",
+   "description": "浜岀淮鐮佽竟闀匡紙鍍忕礌锛岄粯璁?300锛岃寖鍥?120-1000锛?
+  }
+ },
+ "required": [
+  "content"
+ ]
+}
+
+securitySchemes: ['bearerAuth']
+global security: None
