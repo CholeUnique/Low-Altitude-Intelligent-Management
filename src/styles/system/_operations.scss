@@ -137,11 +137,60 @@
     h3, b, dt { color: var(--ui-text); }
     p, small, dd { color: var(--ui-body); }
     dl, .create-summary article, .selected-spot-box, .priority-section, .file-picker { background: var(--ui-input); border-color: var(--ui-border); }
-    button.cancel, .spot-action-dialog__cancel, .priority-options button { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+    button.cancel, .spot-action-dialog__cancel, .priority-options button:not(.active) { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
   }
   .service-picker-body label { border-color: var(--ui-divider); }
   .service-picker-body label:hover { background: var(--ui-hover); }
   .service-picker-body label.added, .service-picker-tip { background: var(--ui-input); color: var(--ui-muted); }
+}
+#app :is(.upload-dialog, .task-create-dialog) {
+  color: var(--ui-body); background: var(--ui-surface-raised); border: 1px solid var(--ui-border);
+  > header, > footer { background: transparent; border-color: var(--ui-divider); color: var(--ui-text); }
+  h2, h3, b, strong, legend, label > span { color: var(--ui-text); }
+  small, em, p, .upload-form small, .upload-form span { color: var(--ui-body); }
+  .upload-form input:not([type=checkbox]):not([type=file]), .upload-form textarea, .task-name-field input {
+    color: var(--ui-text); background: var(--ui-input); border-color: var(--ui-border); color-scheme: dark;
+  }
+  .upload-form .el-select .el-select__input { background: transparent; border: 0; }
+  .upload-form fieldset, .preview-panel, .mapping-panel, .create-summary article, .selected-spot-box,
+  .priority-section, .create-tip, .file-picker, .file-names {
+    color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border);
+  }
+  .file-picker:hover, .file-picker:focus-within, .file-picker.selected { background: var(--ui-selected); border-color: var(--ui-accent); }
+  .preview-table-scroll { background: transparent; }
+  .preview-table-scroll :is(th, td), .mapping-row, .section-title, .selected-spot-list article { border-color: var(--ui-divider); }
+  .preview-table-scroll th { color: var(--ui-text); background: var(--ui-input); }
+  .preview-table-scroll td { color: var(--ui-body); background: transparent; }
+  .preview-heading > span, .selected-spot-list em { color: var(--ui-accent); background: var(--ui-selected); }
+  .create-summary strong { color: var(--ui-accent); }
+  .create-summary strong.text-value { color: var(--ui-text); }
+  .priority-options button.active, .priority-options button[aria-pressed=true] {
+    color: #072941; background: #ffd84d; border-color: #ffe784; box-shadow: 0 0 0 2px #ffd84d24;
+  }
+  .priority-options button:hover:not(:disabled):not(.active) { color: var(--ui-accent); background: var(--ui-hover); }
+}
+#app .task-create-dialog {
+  max-height: calc(100dvh - 40px); display: flex; flex-direction: column;
+  > header { grid-template-columns: minmax(0, 1fr) 32px; }
+  .task-dialog-body { min-height: 0; overflow: auto; }
+  > header, > footer { flex: none; }
+}
+// The offline upload is also used by FlightTaskReviewPanel, outside .general-review.
+// Theme its date trigger and validation/footer states explicitly in that host too.
+#app .upload-dialog .spot-datetime__input {
+  color: var(--ui-text); background: var(--ui-input); border-color: var(--ui-border); color-scheme: dark;
+  &.empty { color: var(--ui-muted); }
+  .spot-datetime__clock { color: var(--ui-accent); }
+  i { color: var(--ui-muted); }
+  i:hover { color: var(--ui-text); background: var(--ui-hover); }
+}
+#app .upload-dialog p.upload-error {
+  color: #ffb5bd; background: rgb(245 108 108 / 13%); border: 1px solid rgb(245 108 108 / 32%);
+  border-radius: var(--ui-control-radius); line-height: 1.6;
+}
+#app .upload-dialog > footer button:is(.cancel, .secondary) {
+  color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border);
+  &:hover:not(:disabled) { color: var(--ui-accent); background: var(--ui-hover); border-color: var(--ui-accent); }
 }
 #app .flight-plan-calendar {
   padding: 16px;

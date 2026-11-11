@@ -18,16 +18,24 @@ import TopicAnalysisProgress from './TopicAnalysisProgress.vue'
 import { matchesTopicText,matchesTopicProperties } from '@/utils/topic-layer-search'
 import { useUserStore } from '@/stores/user'
 import { useFarmlandComparisonStore } from '@/stores/farmland-comparison'
+import { compareFarmlandRegions } from '@/utils/farmland-region-comparison'
+import { spatialAttributeWhere } from '@/utils/spatial-geometry-input'
+import type { RegionSelection } from '@/api/region-clip'
+interface AdministrativeOptions {key:string;name:string;serviceId:string;layerId:number;options:{value:string;name:string;objectIds:(string|number)[]}[]}
 interface FilterRow { id:number; field:string; op:'EQ'|'IN'; values:string }
 interface Selection { label:'A'|'B'; serviceId:string; layerId:string; layers:SpatialLayer[]; filters:FilterRow[]; loading:boolean; error:string; revision:number }
 interface ResultGroup extends FarmlandPartition { id:string; layer:Raw<L.GeoJSON>; visible:boolean; mode:'filled'|'boundary' }
 interface Result { id:string; name:string; operation:SpatialAnalysisOperation;remote:boolean;colors:Record<string,string>;groups?:ResultGroup[];statistics?:AnalysisStatistic[];uploadName?:string;summary:SpatialAnalysisSummary; data:Raw<SpatialCollection>; difference:Raw<SpatialCollection>; layer:Raw<L.GeoJSON>; visible:boolean; restore:string[]; details:boolean; refreshing:boolean; error:string }
-const props=withDefaults(defineProps<{map:L.Map; open:boolean; context:string; sources:{id:string;name:string}[]; visibleKeys:string[];uploads?:UploadedTopicLayer[];farmland?:boolean;defaults?:{a?:SpatialInput;b?:SpatialInput};keyword?:string;layerOrder?:Record<string,number>;operation?:SpatialAnalysisOperation;loadGeometry?:(input:SpatialInput,signal:AbortSignal,within?:SpatialCollection)=>Promise<SpatialCollection>}>(),{uploads:()=>[],operation:'difference'})
+const props=withDefaults(defineProps<{map:L.Map; open:boolean; context:string; sources:{id:string;name:string}[]; visibleKeys:string[];uploads?:UploadedTopicLayer[];farmland?:boolean;defaults?:{a?:SpatialInput;b?:SpatialInput};keyword?:string;regions?:AdministrativeOptions[];layerOrder?:Record<string,number>;operation?:SpatialAnalysisOperation;loadGeometry?:(input:SpatialInput,signal:AbortSignal,within?:SpatialCollection)=>Promise<SpatialCollection>}>(),{uploads:()=>[],operation:'difference'})
 const emit=defineEmits<{close:[];upload:[];hide:[keys:string[]];restore:[keys:string[]];legend:[items:SpatialResultLegend[]];layerkeys:[keys:string[]];statistics:[items:AnalysisStatistics[]];matches:[count:number]}>()
 const user=useUserStore(),comparisonStore=useFarmlandComparisonStore(),dialog=ref<HTMLDialogElement>()
 const selection=(label:'A'|'B'):Selection=>({label,serviceId:'',layerId:'',layers:[],filters:[],loading:false,error:'',revision:0})
 const a=reactive(selection('A')),b=reactive(selection('B')),selections=[a,b]
 const rangeId=ref('')
+const regionChoices=ref<string[]>([]),regionKeyword=ref('')
+const chosenRegions=computed<RegionSelection[]>(()=>regionOptions.value.map(group=>({serviceId:group.serviceId,layerId:group.layerId,objectIds:[...new Set(group.options.filter(option=>regionChoices.value.includes(`${group.key}:${option.value}`)).flatMap(option=>option.objectIds))]})).filter(group=>group.objectIds.length>0))
+const regionOptions=computed(()=>props.regions||[])
+const regionScopeName=computed(()=>regionOptions.value.flatMap(group=>group.options.filter(option=>regionChoices.value.includes(`${group.key}:${option.value}`)).map(option=>option.name)).join('、'))
 const minAreaMu=ref<number|string>(squareMetresToMu(4))
 const busy=ref(false),stage=ref(''),validation=ref(''),notice=ref(''),failed=ref(false),results=ref<Result[]>([])
 const analysisProgress=ref<number>()
@@ -111,6 +119,7 @@ function stopWaiting(notify=true){
 }
 function clear(){
   stopWaiting(false)
+  regionChoices.value=[];regionKeyword.value=''
   selections.forEach(side=>{side.revision++;layerControllers.get(side)?.abort();Object.assign(side,{serviceId:'',layerId:'',layers:[],filters:[],loading:false,error:''})})
   detailControllers.forEach(abort=>abort.abort());detailControllers.clear()
   results.value.forEach(result=>result.layer.remove());results.value=[];analysisSequence=0;emit('close');notice.value='';clearTimeout(toastTimer)
@@ -227,12 +236,14 @@ async function finish(){
     if(String(minAreaMu.value).trim()===''||!Number.isFinite(area)||area<0||area>10000)throw new Error('最小图斑面积须在 0–15 亩之间')
   }catch(error){validation.value=errorText(error);return}
   const operation=props.operation,keys=[sourceKey(a),sourceKey(b)],restore=keys.filter(key=>props.visibleKeys.includes(key)),deptId=user.activeDeptId
+  const regionSelection=chosenRegions.value.map(region=>({...region,objectIds:[...region.objectIds]})),scopeName=regionScopeName.value,hasRegionScope=regionChoices.value.length>0
   const snapshot=(side:Selection):SpatialSource=>({serviceId:side.serviceId,serviceName:uploaded(side)?uploaded(side)!.origin==='drawing'?'地图绘制':'本机上传':props.sources.find(source=>source.id===side.serviceId)?.name||side.serviceId,layerId:selected(side)!.layerId,layerName:selected(side)!.name,filters:spatialFilters(side.filters,selected(side)!.fields)})
   const sources={sourceA:snapshot(a),sourceB:snapshot(b)},locals=[uploaded(a),uploaded(b)],comparisonScope=comparisonStore.scope
   const request=++job,abort=new AbortController();controller=abort;busy.value=true;analysisProgress.value=undefined;stage.value='正在读取完整输入图层…';notice.value='';emit('close')
   try{
     let summary:SpatialAnalysisSummary,data:SpatialCollection
-    const remote=operation==='difference'&&!locals.some(Boolean)
+    const scoped=props.farmland&&operation==='difference'&&hasRegionScope
+    const remote=operation==='difference'&&!locals.some(Boolean)&&!scoped
     if(props.farmland&&operation==='coverage'){
       const range=availableUploads.value.find(item=>item.id===rangeId.value)
       if(!range)throw new Error('请选择上传的面图层作为规划范围')
@@ -250,7 +261,12 @@ async function finish(){
       data={type:'FeatureCollection',features:result.partitions.filter(group=>!group.aggregate).flatMap(group=>group.data.features)}
       display(data,summary,restore,operation,false,result.partitions,range.name);emit('hide',[...keys,`upload:${range.id}`]);toast('范围覆盖分析完成');return
     }
-    if(remote){
+    if(scoped){
+      if(locals.some(Boolean))throw new Error('行政区范围对比请选择已发布的高标田、永农基准图层')
+      if(!regionSelection.length)throw new Error('所选行政区已不可用，请重新选择')
+      const response=await compareFarmlandRegions({deptId:deptId||'',combineMode:'UNION',regions:regionSelection,targets:[sourceA,sourceB].map((source,index)=>({serviceId:source.serviceId,layerId:source.layerId,where:spatialAttributeWhere(source.filters,selected(selections[index]!)!.fields)}))},area,sources,{signal:abort.signal,progress:percent=>{if(request===job)analysisProgress.value=percent},stage:message=>{if(request===job)stage.value=message}})
+      summary=response.summary;data=response.data
+    }else if(remote){
       stage.value=props.farmland?'后端正在执行高标田与永农对比分析…':'后端正在执行对称差分分析…'
       const response=await analyzeSpatialOverlay({deptId,sourceA,sourceB,minAreaSqm:area,includeOverlapSpots:!!props.farmland},{signal:abort.signal,progress:percent=>{if(request===job)analysisProgress.value=percent}})
       if(request!==job)return
@@ -275,9 +291,9 @@ async function finish(){
     }
     if(request!==job)return
     if(props.farmland&&operation==='difference'){
-      if(!remote)throw new Error('高标田与永农对比分析需要使用已发布的两类基准图层')
+      if(!remote&&!scoped)throw new Error('高标田与永农对比分析需要使用已发布的两类基准图层')
       const partitions=splitFarmlandOverlay(data,summary as import('@/api/spatial-analysis').SpatialOverlaySummary)
-      display(data,summary,restore,operation,true,partitions);comparisonStore.remember(summary as import('@/api/spatial-analysis').SpatialOverlaySummary,'analysis',comparisonScope);emit('hide',keys);toast('高标田与永农对比分析完成');return
+      display(data,summary,restore,operation,remote,partitions,scoped?scopeName:undefined);if(!scoped)comparisonStore.remember(summary as import('@/api/spatial-analysis').SpatialOverlaySummary,'analysis',comparisonScope);emit('hide',keys);toast('高标田与永农对比分析完成');return
     }
     if(!data.features.length){if(operation==='difference'&&summary.diffArea>0)throw new Error('后端未返回统计中存在的不重叠区域');toast('分析完成：没有满足面积阈值的结果图斑，输入图层保持显示');return}
     display(data,summary,restore,operation,remote)
@@ -330,6 +346,16 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
         <div class="overlay-intro"><svg viewBox="0 0 120 64" aria-hidden="true"><path d="M10 10h62v42H10z" fill="#f8c36b55" stroke="#f8c36b"/><path d="M45 24h62v35H45z" fill="#a998ff55" stroke="#a998ff"/><path d="M45 24h27v28H45z" :fill="coverage?'#57d2a3':'#102f3b'"/></svg><div><b>{{ coverage?(farmland?'上传范围与高标田、永农的覆盖关系':'上传范围与目标图层的覆盖关系'):(farmland?'高标田与永农对比分析':'两图层对称差分（保留来源）') }}</b><p>{{ farmland?(coverage?'将上传范围裁切为仅在永农、仅在高标田、同时满足、同时不满足四类区域。':'输出高标田独有、永农独有及两者交集，分别控制显示；统计在右侧展示。'):(coverage?'将上传范围裁切为目标范围内、外两部分，显示各自面积和占比。':'输出一个不重叠区域图层：黄色为仅 A，紫色为仅 B。图例和点击详情显示具体图层名称。') }}</p></div></div>
         <p v-if="coverage&&!availableUploads.length" class="overlay-error">请先上传一个面图层。<button type="button" class="text-button" @click="emit('close');emit('upload')">上传 SHP</button></p>
         <label v-if="farmland&&coverage">上传范围 U <em>*</em><ElSelect :empty-values="[null, undefined]" :append-to="dialog" :popper-options="{ strategy: 'fixed' }" class="system-select" popper-class="system-select-options" v-model="rangeId" aria-label="上传分析范围" required><ElOption value="" disabled label="请选择上传的面图层" /><ElOption v-for="item in availableUploads" :key="item.id" :value="item.id" :label="String(item.name)" /></ElSelect></label>
+        <fieldset v-if="farmland&&!coverage" class="comparison-regions"><legend>行政区范围（可多选）</legend>
+          <input v-model="regionKeyword" aria-label="搜索分析行政区" placeholder="搜索乡镇、街道或村名" />
+          <p>不勾选时对比全范围；勾选后按所选行政区的合并边界精确裁切再对比。</p>
+          <div class="comparison-region-options">
+            <section v-for="group in regionOptions" :key="group.key"><h3>{{ group.name }}</h3>
+              <label v-for="option in group.options.filter(option=>!regionKeyword.trim()||option.name.includes(regionKeyword.trim()))" :key="option.value"><input v-model="regionChoices" type="checkbox" :value="`${group.key}:${option.value}`" :aria-label="`对比范围 ${group.name} ${option.name}`" />{{ option.name }}</label>
+            </section>
+          </div>
+          <p v-if="!regionOptions.length">行政区属性正在预加载，请稍后…</p><p v-else>已选 {{ regionChoices.length }} 个行政区 <button v-if="regionChoices.length" type="button" class="text-button" @click="regionChoices=[]">清空选择</button></p>
+        </fieldset>
         <fieldset v-for="side in selections" :key="side.label"><legend>{{ farmland?(side.label==='A'?'高标田基准数据':'永农基准数据'):`图层 ${side.label} · ${side.label==='A'?'基准数据':'对比数据'}` }}</legend>
           <div class="overlay-output-grid"><label>{{ coverage&&!farmland&&side.label==='A'?'上传范围 U':'数据来源' }} <em>*</em><ElSelect :empty-values="[null, undefined]" :append-to="dialog" :popper-options="{ strategy: 'fixed' }" class="system-select" popper-class="system-select-options" v-model="side.serviceId" required :aria-label="`图层${side.label}地图服务`" @change="loadLayers(side)"><ElOption value="" disabled label="请选择图层来源" /><optgroup v-if="farmland||!coverage||side.label==='B'" label="已发布服务"><ElOption v-for="source in sources" :key="source.id" :value="source.id" :label="String(source.name)" /></optgroup><optgroup v-if="!farmland" label="本机上传面图层"><ElOption v-for="item in availableUploads" :key="item.id" :value="`upload:${item.id}`" :label="String(item.name)" /></optgroup></ElSelect></label>
           <label>分析图层 <em>*</em><ElSelect :empty-values="[null, undefined]" :append-to="dialog" :popper-options="{ strategy: 'fixed' }" class="system-select" popper-class="system-select-options" v-model="side.layerId" required :disabled="side.loading||!side.layers.length" :aria-label="`图层${side.label}分析图层`" @change="side.filters=[]"><ElOption value="" disabled :label="String(side.loading?'正在读取后端图层…':'请选择面图层')" /><ElOption v-for="layer in side.layers" :key="layer.layerId" :value="String(layer.layerId)" :disabled="!layer.analyzable" :label="String(layer.name) + String(layer.analyzable?'':`（${layer.geometryType}，不可分析）`)" /></ElSelect></label></div>
@@ -361,4 +387,5 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
 .farmland-result-layers{display:contents}.analysis-result-children{margin-left:6px;padding-left:10px;border-left:1px solid #719dad38}.analysis-layer-item{padding:4px 0 10px;min-width:0}.analysis-layer-item+.analysis-layer-item{border-top:1px solid #719dad20;padding-top:12px}.analysis-group-switch{display:flex;align-items:center;gap:7px;cursor:pointer}.analysis-group-switch>input{margin:0;width:12px;height:12px;flex:none;accent-color:#39c7d5}.analysis-group-switch>span{flex:1;min-width:0;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.analysis-group-switch>small{flex:none;color:#8fb4c1;font-size:12px;font-variant-numeric:tabular-nums}.analysis-layer-item>.layer-display-mode{margin-top:7px;padding-left:19px}
 
 :global(.topic-analysis-popup .leaflet-popup-content-wrapper),:global(.topic-analysis-popup .leaflet-popup-tip){background:#103342f7;color:#dceff3;box-shadow:0 8px 26px #00131b66}:global(.topic-analysis-popup .leaflet-popup-content){margin:14px 16px}:global(.topic-analysis-popup .leaflet-popup-close-button){color:#bddae5}:global(.topic-analysis-popup .overlay-result-properties){margin:0;max-height:240px;overflow:auto;scrollbar-width:none;font-size:12px;line-height:1.7}:global(.topic-analysis-popup .overlay-result-properties>div){display:grid;grid-template-columns:64px minmax(0,1fr);gap:12px;padding:8px 0;border-bottom:1px solid #87b6c429}:global(.topic-analysis-popup .overlay-result-properties>div:last-child){border-bottom:0}:global(.topic-analysis-popup dt){color:#94bdc9}:global(.topic-analysis-popup dd){margin:0;color:#e2f2f6;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.comparison-region-options{max-height:190px;overflow:auto;display:grid;gap:10px;scrollbar-width:thin}.comparison-region-options h3{margin:0 0 7px;font-size:14px;color:#cae5ec}.comparison-region-options section{display:flex;flex-wrap:wrap;gap:8px 16px}.comparison-region-options section h3{flex-basis:100%}.comparison-region-options label{display:flex;flex-direction:row;align-items:center;gap:7px;font-size:13px}.comparison-region-options input[type=checkbox]{width:15px;height:15px;min-height:0;accent-color:#45d3e4}.comparison-regions>input{width:100%;box-sizing:border-box}
 </style>

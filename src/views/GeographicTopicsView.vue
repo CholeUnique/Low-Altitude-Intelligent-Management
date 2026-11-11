@@ -114,6 +114,10 @@ function hoverTargets():TopicHoverTarget[]{
 // 专题目录独立于任务业务场景；仅使用当前部门接口实际返回的可用图层。
 const availableLayers = computed(() => layers.value)
 const baselineInputs=computed(()=>farmlandDefaults(layers.value))
+const analysisRegions=computed(()=>layers.value.filter(item=>item.role==='boundary').map(item=>({
+  key:item.key,name:item.service.name,serviceId:item.key.split('/')[0]!,layerId:Number(item.service.arcGisLayerId),
+  options:(item.handle?.categoryFilter?.values||[]).map(value=>({value:value.value,name:value.label,objectIds:value.objectIds||[]})),
+})).filter(item=>Number.isInteger(item.layerId)&&item.options.length))
 const overlaySources = computed(() => groupTopicLayers(layers.value.filter(item => item.role !== 'imagery')).map(group => ({id:group.id,name:group.name})))
 const overlayVisibleKeys = computed(() => [...layers.value.filter(item => item.visible && !item.analysisHidden && (!item.categories.length || item.categories.some(category => category.checked))).map(item => item.key),...uploadedLayers.value.filter(item=>item.selected).map(item=>`upload:${item.id}`)])
 function openOverlay(operation:SpatialAnalysisOperation='difference') { overlayOperation.value=operation;configOpen.value=false; clearFeatureSelection(); overlayOpen.value=true }
@@ -232,6 +236,7 @@ function legendAllSelected(item: TopicLayer) { return !item.analysisHidden && it
 function legendPartSelected(item: TopicLayer) { return !item.analysisHidden && !legendAllSelected(item) && item.categories.some(category => category.checked) }
 function applyLegendSelection(item: TopicLayer) {
   if(item.categories.length)item.analysisHidden=!item.categories.some(category=>category.checked)
+  if(!item.analysisHidden&&!item.handle){void setVisible(item,true);return}
   applyFilter(item)
   syncPublishedLayer(item)
 }
@@ -553,7 +558,7 @@ async function prepare(item: TopicLayer) {
         if (existing) { existing.count++; return }
         const name = String(attributes.DLMC || value || '未分类')
         const standard = ['land', 'permanent', 'parcel'].includes(item.role) ? resolveC5Style(item.categoryField === 'DLBM' ? value : '', name) : undefined
-        groups.set(value, { value, name, count:1, checked:true, style:standard })
+        groups.set(value, { value, name, count:1, checked:!item.analysisHidden, style:standard })
       })
       item.categories = [...groups.values()].sort((a,b) => a.value.localeCompare(b.value, 'zh-CN'))
       item.ready = true
@@ -563,7 +568,7 @@ async function prepare(item: TopicLayer) {
     item.handle = markRaw(handle)
     if(item.role==='boundary'&&handle.categoryFilter){
       item.categoryField=handle.categoryFilter.fieldName
-      item.categories=handle.categoryFilter.values.map(value=>({value:value.value,name:value.label,count:1,checked:true,color:value.color}))
+      item.categories=handle.categoryFilter.values.map(value=>({value:value.value,name:value.label,count:1,checked:!item.analysisHidden,color:value.color}))
       item.ready=true
     }
     handle.setHoverEnabled?.(false)
@@ -573,8 +578,8 @@ async function prepare(item: TopicLayer) {
     applyDisplayMode(item)
     applyFilter(item)
     syncPublishedLayer(item)
-    if (item.role === 'boundary' && handle.bounds?.isValid()) map.fitBounds(handle.bounds, { padding:[45,45], maxZoom:14 })
-  } catch (reason) { if (current(item, request)) { item.error = reason instanceof Error ? reason.message : '数据读取失败'; item.visible = false } }
+    if (item.visible && item.role === 'boundary' && handle.bounds?.isValid()) map.fitBounds(handle.bounds, { padding:[45,45], maxZoom:14 })
+  } catch (reason) { if (current(item, request)) { item.error = reason instanceof Error ? reason.message : '数据读取失败'; if(!item.analysisHidden)item.visible = false } }
   finally { if (current(item, request)) item.pending = false }
 }
 async function setVisible(item: TopicLayer, visible: boolean, remember = false) {
@@ -591,6 +596,19 @@ async function setVisible(item: TopicLayer, visible: boolean, remember = false) 
 }
 async function selectImagery(key: string) { await Promise.all(imageryLayers.value.map(item => setVisible(item, item.key === key,true))) }
 let initialSceneScope=''
+let preloadTimer:ReturnType<typeof setTimeout>|undefined
+function preloadFarmlandLayers(){
+  clearTimeout(preloadTimer)
+  const request=version
+  preloadTimer=setTimeout(async()=>{
+    for(const item of layers.value.filter(item=>baselineInputs.value.keys.includes(item.key)&&item.analysisHidden&&!item.handle)){
+      if(request!==version||!map)return
+      let task=inFlight.get(item.key)
+      if(!task){task=prepare(item);inFlight.set(item.key,task)}
+      try{await task}finally{if(inFlight.get(item.key)===task)inFlight.delete(item.key)}
+    }
+  },800)
+}
 async function applyScene() {
   const initializeDefaults=initialSceneScope!==uploadScope.value
   initialSceneScope=uploadScope.value
@@ -606,11 +624,18 @@ async function applyScene() {
     applyDisplayMode(item)
     item.categories.forEach(category => { category.checked = true })
     const defaultVisible = [boundary?.key,imagery?.key,...(props.topic.id === HIGH_STANDARD_TOPIC_ID ? baselineInputs.value.keys : props.topic.id===FACILITIES_TOPIC_ID?layers.value.filter(item=>item.role==='facility').map(item=>item.key):[])].includes(item.key)
-    return setVisible(item, initializeFarmland&&item.role!=='imagery' ? baselineInputs.value.keys.includes(item.key) : preference?.visible ?? defaultVisible)
+    if(initializeFarmland&&baselineInputs.value.keys.includes(item.key)&&!baselineInputs.value.initialKeys.includes(item.key)){
+      // Configured catalogue entries remain listed; only their map checkbox is initially off.
+      item.visible=true;item.analysisHidden=true;item.categories.forEach(category=>{category.checked=false})
+      return Promise.resolve()
+    }
+    return setVisible(item, initializeFarmland&&item.role!=='imagery' ? baselineInputs.value.initialKeys.includes(item.key) : preference?.visible ?? defaultVisible)
   }))
+  if(initializeFarmland)preloadFarmlandLayers()
 }
 async function loadData() {
   if (!map) return
+  clearTimeout(preloadTimer)
   clearRegionClip(false)
   clearFeatureSelection()
   expandedLegendLayers.value = {}
@@ -676,7 +701,7 @@ onMounted(() => {
 })
 watch(mapLegendGroups, () => void observeLegend(), { flush: 'post' })
 onMounted(() => void observeLegend())
-onBeforeUnmount(() => { regionStatisticsController?.abort();clearTimeout(propertySearchTimer);propertySearchController?.abort();clearRegionClip(false);legendResizeObserver?.disconnect(); clearFeatureSelection();featureHover?.destroy();featureHover=undefined; version++; document.removeEventListener('fullscreenchange', updateFullscreen); resizeObserver?.disconnect(); map?.remove(); map = undefined })
+onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.abort();clearTimeout(propertySearchTimer);propertySearchController?.abort();clearRegionClip(false);legendResizeObserver?.disconnect(); clearFeatureSelection();featureHover?.destroy();featureHover=undefined; version++; document.removeEventListener('fullscreenchange', updateFullscreen); resizeObserver?.disconnect(); map?.remove(); map = undefined })
 </script>
 
 <template>
@@ -714,7 +739,7 @@ onBeforeUnmount(() => { regionStatisticsController?.abort();clearTimeout(propert
         <button v-if="regionClipError&&!regionClipBusy" type="button" @click="queueRegionClip">重试裁切</button>
       </section>
       <div class="legend-content"><div class="legend-layer-list"><p v-if="propertySearchBusy" role="status">正在搜索图层属性…</p><p v-if="propertySearchError" role="alert">{{ propertySearchError }}<button type="button" @click="queuePropertySearch">重试</button></p>
-        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :farmland="isFarmland" :defaults="baselineInputs" :keyword="layerKeyword" :layer-order="detailLayerOrder" @matches="analysisSearchMatches=$event" @layerkeys="rememberAddedLayers" @statistics="analysisStatistics=$event" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
+        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :farmland="isFarmland" :defaults="baselineInputs" :regions="analysisRegions" :keyword="layerKeyword" :layer-order="detailLayerOrder" @matches="analysisSearchMatches=$event" @layerkeys="rememberAddedLayers" @statistics="analysisStatistics=$event" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
         <TopicUploadedLayers v-if="toolsMap" ref="uploadPanel" :map="toolsMap" :scope="uploadScope" :keyword="layerKeyword" integrated :layer-order="detailLayerOrder" @change="updateUploads" @dialog="uploadDialogOpen=$event" @imported="uploaded" />
         <p v-if="!legendLayers.length && !pending && !propertySearchBusy && !localSearchMatches">{{ layerKeyword.trim() ? '没有匹配的已开启图层或属性，可修改关键词或在场景配置中开启图层。' : '暂无已开启的分类图层，可在场景配置中选择。' }}</p>
         <TopicLayerCard v-for="item in legendLayers" :key="item.key" v-model:expanded="expandedLegendLayers[item.key]" :title="item.service.name" :subtitle="item.service.name!==item.sourceName?item.sourceName:undefined" :category-count="item.categories.length" :checked="legendAllSelected(item)" :indeterminate="legendPartSelected(item)" class="published-layer" :data-layer-key="`published:${item.key}`" :style="{order:layers.findIndex(layer=>layer.key===item.key)}" @select="selectLegend(item,$event?'all':'none')">

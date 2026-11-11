@@ -682,7 +682,7 @@ onBeforeUnmount(() => {
     </section>
 
     <div v-if="taskCreateVisible" class="dialog-mask" @click.self="!creatingTasks && (taskCreateVisible = false)">
-      <section class="task-create-dialog">
+      <section class="task-create-dialog" role="dialog" aria-modal="true" aria-label="创建核查任务">
         <header>
           <div><b>创建核查任务</b><small>系统将按“一图斑一任务”生成 {{ selected.length }} 个核查任务</small></div>
           <button :disabled="creatingTasks" aria-label="关闭" @click="taskCreateVisible = false">×</button>
@@ -703,7 +703,7 @@ onBeforeUnmount(() => {
           </section>
           <section class="priority-section">
             <div><b>任务优先级</b><small>将应用到本次创建的全部任务</small></div>
-            <div class="priority-options"><button v-for="item in [{ value: 0, label: '低' }, { value: 1, label: '中' }, { value: 2, label: '高' }]" :key="item.value" :class="{ active: taskPriority === item.value }" @click="taskPriority = item.value">{{ item.label }}</button></div>
+            <div class="priority-options"><button v-for="item in [{ value: 0, label: '低' }, { value: 1, label: '中' }, { value: 2, label: '高' }]" :key="item.value" :class="{ active: taskPriority === item.value }" type="button" :aria-pressed="taskPriority === item.value" :disabled="creatingTasks" @click="taskPriority = item.value">{{ item.label }}</button></div>
           </section>
           <div class="create-tip"><b>创建规则</b><span>当前后端固定按“一图斑一任务”创建；场景与执行部门继承所选图斑。任务生成后将按来源图斑保存上方填写的名称。</span></div>
           <p v-if="taskCreateError" class="dialog-error">{{ taskCreateError }}</p>

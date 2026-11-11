@@ -16,7 +16,7 @@ export function validateCompareGroup(group:SpatialCompareGroup,kind:'OVERLAP'|'A
   let area=0
   for(const feature of data.features){
     const properties=feature.properties
-    if(properties?.diffType!==kind||typeof properties.areaSqm!=='number'||!Number.isFinite(properties.areaSqm)||properties.areaSqm<=0)throw new Error(`后端 ${kind} 分组包含来源不符或零面积图斑，请修复结果后重试`)
+    if(properties?.diffType!==kind||typeof properties.areaSqm!=='number'||!Number.isFinite(properties.areaSqm)||properties.areaSqm<=0)throw new Error(`后端 ${kind} 分组包含来源不符或零面积图斑（序号 ${properties?.seqNo??'—'}，分类 ${properties?.diffType??'缺失'}，面积 ${properties?.areaSqm??'缺失'}），请修复结果后重试`)
     area+=properties.areaSqm
   }
   if(Math.abs(area-group.areaSqm)>Math.max(.05,data.features.length*.00011))throw new Error('后端分组面积与已返回图斑面积不一致，未展示不完整结果')

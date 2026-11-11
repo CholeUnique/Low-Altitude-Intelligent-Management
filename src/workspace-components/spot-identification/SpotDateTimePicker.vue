@@ -124,8 +124,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="spot-time">
-            <b>选择时间</b><small>小时</small><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" :model-value="draft.getHours()" @change="setHour"><ElOption v-for="hour in hours" :key="hour" :value="hour" :label="String(pad(hour))" /></ElSelect>
-            <small>分钟</small><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" :model-value="draft.getMinutes()" @change="setMinute"><ElOption v-for="minute in minutes" :key="minute" :value="minute" :label="String(pad(minute))" /></ElSelect>
+            <b>选择时间</b><small>小时</small><ElSelect :empty-values="[null, undefined]" :append-to="panel" :popper-options="{ strategy: 'fixed' }" class="system-select" popper-class="system-select-options" :model-value="draft.getHours()" @change="setHour"><ElOption v-for="hour in hours" :key="hour" :value="hour" :label="String(pad(hour))" /></ElSelect>
+            <small>分钟</small><ElSelect :empty-values="[null, undefined]" :append-to="panel" :popper-options="{ strategy: 'fixed' }" class="system-select" popper-class="system-select-options" :model-value="draft.getMinutes()" @change="setMinute"><ElOption v-for="minute in minutes" :key="minute" :value="minute" :label="String(pad(minute))" /></ElSelect>
             <strong>{{ pad(draft.getHours()) }} : {{ pad(draft.getMinutes()) }}</strong>
           </div>
         </div>

@@ -27,6 +27,8 @@ html[data-ui-theme] :is(.system-select-options, .todo-filter-options) .el-select
 html[data-ui-theme] :is(.system-select-options, .todo-filter-options) .el-select-dropdown__item.is-selected { background: var(--ui-selected); color: var(--ui-accent); font-weight: 600; }
 html[data-ui-theme] :is(.system-select-options, .todo-filter-options) .el-select-dropdown__item.is-disabled { color: var(--el-text-color-disabled); background: transparent; }
 html[data-ui-theme] :is(.system-select-options, .todo-filter-options) .el-popper__arrow::before { background: var(--ui-surface-raised); border-color: var(--ui-border); }
+// Upload modals live at z-index 3000; their dropdowns must remain above the mask.
+html[data-ui-theme] .spot-upload-select-options.el-popper { z-index: 3100 !important; }
 #app :is(.collection-pagination, .flight-review footer, .general-review footer) .el-select.system-select { width: 110px; min-width: 110px; flex: 0 0 110px; }
 html[data-ui-theme='dark'] .spot-datetime-panel {
   color: var(--ui-body); background: var(--ui-surface-raised); border-color: var(--ui-border);

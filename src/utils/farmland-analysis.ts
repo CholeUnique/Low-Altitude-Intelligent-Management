@@ -29,7 +29,7 @@ export function farmlandDefaults<T extends {key:string;sourceName:string;role:st
   const boundary = township || village || candidates.find(item=>item.role==='boundary'||/行政区/.test(item.service.name))
   const input = (item:T|undefined):SpatialInput|undefined => item && /^\d+$/.test(item.key.split('/')[1]||'') ? {serviceId:item.key.split('/')[0]!,layerId:Number(item.key.split('/')[1]),filters:[]} : undefined
   return {
-    a:input(a),b:input(b),boundary:input(boundary),
+    a:input(a),b:input(b),boundary:input(boundary),initialKeys:boundary?[boundary.key]:[],
     keys:[b?.key,township?.key,a?.key,village?.key].filter((key):key is string=>!!key),
   }
 }
