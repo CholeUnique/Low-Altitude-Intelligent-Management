@@ -1,0 +1,9 @@
+﻿--- facility-alert @6761 ---
+lity-history li strong{color:#1e607a}.facility-history li small{color:#93a8b2}.facility-history li span{line-height:1.4}.facility-empty{color:#90a4af;font-size:12px;line-height:1.6}.facility-warning,.facility-alert{flex:none;padding:8px 11px;border:1px solid #efd89b;border-radius:5px;background:#fff9e8;color:#8c651b;font-size:12px}.
+
+--- facility-alert @6895 ---
+y{color:#90a4af;font-size:12px;line-height:1.6}.facility-warning,.facility-alert{flex:none;padding:8px 11px;border:1px solid #efd89b;border-radius:5px;background:#fff9e8;color:#8c651b;font-size:12px}.facility-alert{border-color:#ebb3aa;background:#fff3f0;color:#b34e42}.facility-alert button{margin-left:8px;border:0;background:none;c
+
+--- facility-alert @6965 ---
+lity-alert{flex:none;padding:8px 11px;border:1px solid #efd89b;border-radius:5px;background:#fff9e8;color:#8c651b;font-size:12px}.facility-alert{border-color:#ebb3aa;background:#fff3f0;color:#b34e42}.facility-alert button{margin-left:8px;border:0;background:none;color:inherit;text-decoration:underline;cursor:pointer}.facility-loadin
+

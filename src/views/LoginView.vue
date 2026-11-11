@@ -11,7 +11,7 @@ const router = useRouter()
 const route = useRoute()
 const user = useUserStore()
 const loading = ref(false)
-const username = ref('admin')
+const username = ref('')
 const password = ref('')
 const loginError = ref('')
 

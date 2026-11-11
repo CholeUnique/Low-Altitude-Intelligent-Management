@@ -1,0 +1,3 @@
+FILE LoginView-BnnKvq19.js
+  contains "admin" (lowercase quoted): false
+  context: {if(!u.value.trim()||!c.value){l.value="请输入账号和密码"
