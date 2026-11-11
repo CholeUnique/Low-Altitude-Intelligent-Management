@@ -17,6 +17,7 @@ import SpotDateTimePicker from './SpotDateTimePicker.vue'
 
 const emit = defineEmits<{ close: []; uploaded: [result: RecognitionSpotCreateResult] }>()
 const user = useUserStore()
+const uploadDialog = ref<HTMLElement>()
 const scenes = ref<SceneDictionaryItem[]>([])
 const imageryMapServices = ref<MapServiceItem[]>([])
 let optionsRequestVersion = 0
@@ -190,7 +191,7 @@ function close() { if (!busy.value) emit('close') }
 
 <template>
   <div class="upload-mask" @click.self="close">
-    <section class="upload-dialog" role="dialog" aria-modal="true" aria-labelledby="spot-upload-title">
+    <section ref="uploadDialog" class="upload-dialog" role="dialog" aria-modal="true" aria-labelledby="spot-upload-title">
       <header><div><h2 id="spot-upload-title">线下AI识别结果上传</h2><small>先解析预览并核对类型映射，确认后才正式保存图斑</small></div><button type="button" aria-label="关闭" :disabled="busy" @click="close">×</button></header>
       <div class="upload-form">
         <div class="wide upload-file-field">
@@ -202,23 +203,23 @@ function close() { if (!busy.value) emit('close') }
           <small v-if="files.length" class="file-names" :title="fileNames">{{ fileNames }}</small>
           <small class="file-help">请同时选择 .shp、.dbf、.shx、.prj、.cpg 文件，<strong>至少包含 .shp 和 .dbf</strong>。</small>
         </div>
-        <label><span>所属场景 <WorkbenchRequiredMark /></span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="form.sceneCode" :disabled="loading || busy"><ElOption value="" disabled label="请选择场景" /><ElOption v-for="scene in scenes" :key="scene.id" :value="scene.code" :label="String(scene.name)" /></ElSelect></label>
+        <label><span>所属场景 <WorkbenchRequiredMark /></span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options spot-upload-select-options" :append-to="uploadDialog" :popper-options="{ strategy: 'fixed' }" v-model="form.sceneCode" :disabled="loading || busy"><ElOption value="" disabled label="请选择场景" /><ElOption v-for="scene in scenes" :key="scene.id" :value="scene.code" :label="String(scene.name)" /></ElSelect></label>
         <label><span>图斑标题</span><input v-model="form.title" class="clear-hint-on-focus" placeholder="不填则使用默认标题" /></label>
         <label><span>发现时间</span><SpotDateTimePicker v-model="form.foundTime" /></label>
         <fieldset class="wide"><legend>参考影像地图服务 <WorkbenchRequiredMark /></legend><label v-for="service in imageryMapServices" :key="service.id"><input v-model="form.mapServiceIds" type="checkbox" :value="service.id" />{{ service.name }}</label><small v-if="!imageryMapServices.length">{{ loading ? '正在读取影像服务…' : '暂无已启用的影像地图服务' }}</small></fieldset>
         <label class="wide"><span>图斑描述</span><textarea v-model="form.description" class="clear-hint-on-focus" placeholder="请输入图斑情况或判定依据"></textarea></label>
         <section v-if="previewResult" class="preview-panel wide" aria-label="图斑解析预览">
           <div class="preview-heading"><div><b>解析预览</b><small>共 {{ previewResult.featureCount }} 条要素，以下最多展示前 50 条；批次有效期为 30 分钟。</small></div><span>尚未入库</span></div>
-          <label class="type-field"><span>违法类型来源字段 <WorkbenchRequiredMark /></span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="typeField"><ElOption value="" disabled label="请选择包含类型信息的属性字段" /><ElOption v-for="field in previewResult.fields" :key="field.name" :value="field.name" :label="String(field.name) + String(field.type ? ` · ${field.type}` : '') + '（' + String(field.distinctValues?.length || 0) + ' 种取值）'" /></ElSelect></label>
+          <label class="type-field"><span>违法类型来源字段 <WorkbenchRequiredMark /></span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options spot-upload-select-options" :append-to="uploadDialog" :popper-options="{ strategy: 'fixed' }" v-model="typeField"><ElOption value="" disabled label="请选择包含类型信息的属性字段" /><ElOption v-for="field in previewResult.fields" :key="field.name" :value="field.name" :label="String(field.name) + String(field.type ? ` · ${field.type}` : '') + '（' + String(field.distinctValues?.length || 0) + ' 种取值）'" /></ElSelect></label>
           <div v-if="selectedField" class="mapping-panel"><strong>逐项确认类型映射</strong><small>该字段的每个不同取值都必须映射，未完成时不能入库。类型来自当前场景的可用异常类型配置。</small>
             <p v-if="abnormalTypesLoading" class="mapping-empty">正在读取当前场景的异常类型…</p>
             <p v-else-if="abnormalTypesError" class="mapping-empty">{{ abnormalTypesError }}</p>
             <p v-if="!distinctValues.length" class="mapping-empty">此字段没有可映射的取值，请选择其他字段。</p>
-            <div v-for="value in distinctValues" :key="value" class="mapping-row"><span :title="value">{{ value || '（空值）' }}</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="typeMappings[value]" :aria-label="`${value || '空值'}的异常类型`" :disabled="abnormalTypesLoading || !abnormalTypes.length"><ElOption value="" disabled label="请选择异常类型" /><ElOption v-for="item in abnormalTypes" :key="item.value" :value="item.value" :label="String(item.label)" /></ElSelect></div>
+            <div v-for="value in distinctValues" :key="value" class="mapping-row"><span :title="value">{{ value || '（空值）' }}</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options spot-upload-select-options" :append-to="uploadDialog" :popper-options="{ strategy: 'fixed' }" v-model="typeMappings[value]" :aria-label="`${value || '空值'}的异常类型`" :disabled="abnormalTypesLoading || !abnormalTypes.length"><ElOption value="" disabled label="请选择异常类型" /><ElOption v-for="item in abnormalTypes" :key="item.value" :value="item.value" :label="String(item.label)" /></ElSelect></div>
           </div>
           <div class="preview-table-scroll"><table><thead><tr><th>序号</th><th>几何类型</th><th>面积（㎡）</th><th v-for="field in previewResult.fields" :key="field.name">{{ field.name }}</th></tr></thead><tbody><tr v-for="item in previewResult.preview" :key="item.seq"><td>{{ item.seq }}</td><td>{{ item.geometryType || '—' }}</td><td>{{ item.areaSqm ?? '—' }}</td><td v-for="field in previewResult.fields" :key="field.name" :title="formatProperty(item.properties?.[field.name])">{{ formatProperty(item.properties?.[field.name]) }}</td></tr></tbody></table><p v-if="!previewResult.preview.length">没有可展示的要素样例。</p></div>
         </section>
-        <p v-if="error" class="upload-error wide">{{ error }}</p>
+        <p v-if="error" class="upload-error wide" role="alert">{{ error }}</p>
       </div>
       <footer><button type="button" class="cancel" :disabled="busy" @click="close">取消</button><button v-if="previewResult" type="button" class="secondary" :disabled="busy" @click="previewUpload">重新解析</button><button v-if="!previewResult" type="button" class="primary" :disabled="loading || busy" @click="previewUpload">{{ previewing ? '正在解析…' : '解析并预览' }}</button><button v-else type="button" class="primary" :disabled="busy" @click="confirmUpload">{{ uploading ? '正在导入…' : '确认映射并导入' }}</button></footer>
     </section>

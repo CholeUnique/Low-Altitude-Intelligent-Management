@@ -17,6 +17,7 @@ const defaults=farmlandDefaults([
  {key:'9/3',sourceName:high.serviceName,role:'boundary',service:{name:'村级行政区划'}},
 ])
 assert.deepEqual(defaults.keys,['9/0','9/1','9/2','9/3']);assert.equal(defaults.a.layerId,2);assert.equal(defaults.b.layerId,0);assert.equal(defaults.boundary.layerId,1)
+assert.deepEqual(defaults.initialKeys,['9/1'],'Keep all four catalogue layers but initially render only township boundaries')
 const features=[make('A_ONLY',100,1),make('B_ONLY',200,2),make('OVERLAP',300,3)]
 const summary={sourceA:high,sourceB:permanent,onlyAArea:100,onlyBArea:200,overlapArea:300,diffArea:300,spotCount:3,minAreaSqm:4}
 const split=splitFarmlandOverlay(collection(features),summary)
