@@ -1,0 +1,76 @@
+=== WfSubmitReq (desc: 工作流节点提交请求) ===
+  nodeInstId           integer   节点实例ID
+  resultData           object    表单内容（键值对，result 键为路由结论）
+  targetAssigneeId     integer   下一节点处理人ID（下发/有问题整改时必填）
+  targetDeptId         integer   下一节点处理部门ID（可空则沿用任务部门）
+  deadline             string    下一节点期限（可空则按路由/节点默认期限）
+  required: ['nodeInstId']
+
+=== WfNodeInstanceVO (desc: 工作流节点实例) ===
+  id                   integer   节点实例ID
+  flowInstanceId       integer   流程实例ID
+  bizTaskId            integer   业务任务ID
+  taskNo               string    任务编号
+  taskName             string    任务名称
+  nodeKey              string    节点标识
+  nodeType             string    节点类型：REVIEW/IMPLEMENT/UAV_RECHECK/RECTIFY/FINISH
+  nodeName             string    节点展示名（快照）
+  status               string    节点状态：PENDING/PROCESSING/COMPLETED/SKIPPED/TERMINATED/TRANSFERRED
+  deptId               integer   处理部门ID
+  deptName             string    处理部门名称
+  assigneeId           integer   处理人ID
+  assigneeName         string    处理人姓名
+  deadline             string    期限（超期仅标记不自动流转，D3）
+  overdue              boolean   是否超期（deadline < 当前时间且未提交）
+  prevNodeInstId       integer   前一节点实例ID（链路追溯）
+  transferFromId       integer   转办/改派来源节点实例ID
+  submitTime           string    提交时间
+  createTime           string    创建时间
+  required: None
+
+=== WfFlowDetailVO (desc: 工作流详情) ===
+  flowInstanceId       integer   流程实例ID
+  flowKey              string    流程标识
+  flowName             string    流程名称
+  status               string    流程状态：RUNNING/FINISHED/REJECTED/CANCELLED
+  bizTaskId            integer   业务任务ID
+  startTime            string    流程启动时间
+  endTime              string    流程结束时间
+  currentNode                    当前待办节点（可空：流程已结束）
+  timeline             array     节点时间线（按创建时间升序，含转办历史链）
+  required: None
+
+=== WfNodeDetailVO (desc: 工作流节点完整信息) ===
+  id                   integer   节点实例ID
+  flowInstanceId       integer   流程实例ID
+  bizTaskId            integer   业务任务ID
+  taskNo               string    任务编号
+  taskName             string    任务名称
+  nodeKey              string    节点标识
+  nodeType             string    节点类型：REVIEW/IMPLEMENT/UAV_RECHECK/RECTIFY/FINISH
+  nodeName             string    节点展示名（快照）
+  status               string    节点状态：PENDING/PROCESSING/COMPLETED/SKIPPED/TERMINATED/TRANSFERRED
+  deptId               integer   处理部门ID
+  deptName             string    处理部门名称
+  assigneeId           integer   处理人ID
+  assigneeName         string    处理人姓名
+  deadline             string    期限（超期仅标记不自动流转，D3）
+  overdue              boolean   是否超期（deadline < 当前时间且未提交）
+  prevNodeInstId       integer   前一节点实例ID（链路追溯）
+  transferFromId       integer   转办/改派来源节点实例ID
+  submitTime           string    提交时间
+  createTime           string    创建时间
+  resultData                     节点填写内容（form_json 动态结构）
+  files                array     节点附件列表
+  operateLogs          array     节点操作记录（按时间升序）
+  required: None
+
+=== /api/v1/workflow/submit ===
+按节点类型分派 Handler：审核下发/拒绝、核查结论、整改完成、复核结论、结束收尾。
+
+=== 描述里含 RECHECK_AUDIT / 部门审核 / FINISH_FACILITY 的位置 ===
+  RECHECK_AUDIT  0 处
+  FINISH_FACILITY 0 处
+  部门审核           0 处
+  DEPT_AUDIT     0 处
+  AUDIT_DEPT     0 处

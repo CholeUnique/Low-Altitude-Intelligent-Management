@@ -54,7 +54,9 @@ export function facilityHandoff(node: WorkflowNode | undefined, draft: Record<st
   const key = node && facilityNodeKey(node)
   if (key === 'case-archive' || !key) return { required: false, label: '' }
   if (node && isMergedCheck(node, flow)) return { required: true, label: '区县分局复核办理人' }
-  if (node && (normalizedKey(node) === 'RECHECK_AUDIT' || (isFacilityRepairFlow(flow) && key === 'department-recheck'))) return { required: false, label: draft.result === 'NOT_PASS' ? '退回原现场核查办理人继续核查修复，无需另选办理人。' : '复核通过后自动结束任务，无需指定下一办理人。' }
+  // 复核通过后流程进入「部门审核」节点，后端要求显式指定办理人（处理人必填）；
+  // 复核不通过时由后端自动退回原现场核查办理人，无需前端选择。
+  if (node && (normalizedKey(node) === 'RECHECK_AUDIT' || (isFacilityRepairFlow(flow) && key === 'department-recheck'))) return draft.result === 'NOT_PASS' ? { required: false, label: '复核不通过将退回原现场核查办理人继续核查修复，无需另选办理人。' } : { required: true, label: '部门审核办理人' }
   return { required: true, label: key === 'department-review' ? '现场核查办理人' : key === 'on-site-verification' ? draft.faultConfirmed === '属实' ? '维修处置办理人' : '结案归档办理人' : key === 'facility-repair' ? '部门复核办理人' : draft.repairResult === '退回重修' ? '维修处置办理人' : '结案归档办理人' }
 }
 
@@ -95,7 +97,7 @@ export function facilityWorkflow(flow?: TaskWorkflow) {
   const steps: Array<{key:string;name:string;description:string}> = [...FARMLAND_FACILITY_STEPS]
   if (isFacilityRepairFlow(flow)) {
     steps[2] = { key: 'on-site-verification', name: '现场核查修复', description: '核查故障并完成维修，或提交无问题、申请废弃结论，统一进入部门复核' }
-    steps[4] = { key: 'case-archive', name: '结案归档', description: '部门复核通过后自动结束任务，设施状态由后端同步更新，无需人工再次提交' }
+    steps[4] = { key: 'case-archive', name: '结案归档', description: '部门复核通过并完成部门审核后进行结案归档，设施状态由后端同步更新' }
   }
   else if (instances.some(node => facilityNodeKey(node) === 'facility-repair')) steps.splice(3, 0, { key:'facility-repair', name:'设施维修', description:'记录工程设施维修处置及完成情况' })
   return steps.map((step, index) => {
@@ -135,8 +137,8 @@ export function facilitySubmission(node: WorkflowNode, draft: Record<string,stri
       result = draft.repairResult === '通过' ? 'NO_PROBLEM' : 'PROBLEM'
     }
   } else if (key === 'case-archive') {
-    if (normalizedKey(node) === 'FINISH_FACILITY' || isFacilityRepairFlow(flow)) throw new Error('该流程由部门复核后自动结束，无需再次提交结案。')
-    if (!draft.closureConclusion?.trim() || !draft.closureSummary?.trim()) throw new Error('请填写结案结论与说明。')
+    // 结案归档节点由后端流转到当前人时需要人工提交（如：复核通过 → 部门审核 → 结案归档），
+    // 不再前端拦截；表单字段以页面实际渲染为准，这里不额外强制必填。
   } else throw new Error('该节点暂未配置提交规则，请核对后端流程定义。')
   const needsTarget = facilityHandoff(node, draft, flow).required
   if (needsTarget && !target?.id) throw new Error('请选择下一节点办理人。')

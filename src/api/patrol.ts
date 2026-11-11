@@ -367,6 +367,41 @@ export async function getFlightTaskMedia(params: PageQuery) {
   return toMediaList(data)
 }
 
+/** 从机槽记录的 child_json 里解析子机（飞机）信息；顶层 sn 是机槽的，直播要用飞机的 SN。 */
+function droneInfoOf(device: Record<string, unknown>): { sn: string; callsign?: string; nickname?: string; online?: boolean } {
+  const raw = device.childJson ?? device.child_json
+  const parseEntries = (text: string): Array<Record<string, unknown>> => {
+    try {
+      const parsed: unknown = JSON.parse(text)
+      if (Array.isArray(parsed)) return parsed.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object' && !Array.isArray(entry))
+      // 单个子机对象（实测 DOCK3 的 childJson 是 {"sn":...} 形式）。
+      return parsed && typeof parsed === 'object' ? [parsed as Record<string, unknown>] : []
+    } catch { return [] }
+  }
+  let entries: Array<Record<string, unknown>> = []
+  if (Array.isArray(raw)) {
+    entries = raw.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object' && !Array.isArray(entry))
+  } else if (typeof raw === 'string' && raw.trim()) {
+    entries = parseEntries(raw)
+  } else if (raw && typeof raw === 'object') {
+    entries = [raw as Record<string, unknown>]
+  }
+  for (const entry of entries) {
+    const sn = valueOf(entry, 'sn', 'droneSn', 'aircraftSn')
+    if (sn) {
+      const onlineRaw = entry.device_online_status ?? entry.deviceOnlineStatus
+      return {
+        sn,
+        callsign: valueOf(entry, 'callsign') || undefined,
+        nickname: valueOf(entry, 'nickname', 'deviceName', 'name') || undefined,
+        online: onlineRaw == null ? undefined : (onlineRaw === true || onlineRaw === 1 || onlineRaw === '1'),
+      }
+    }
+  }
+  // 兜底：记录本身已是飞机（无 child_json）时沿用顶层 sn。
+  return { sn: valueOf(device, 'sn', 'droneSn', 'aircraftSn') }
+}
+
 export async function getLiveStreams(): Promise<{ list: LiveStream[]; total: number; onlineDeviceCount: number }> {
   // 直播由在线设备提供，与是否存在执行中的飞行任务无关。
   const devicePage = await apiClient.post<never, { records?: Array<Record<string, unknown>> }>('/v1/uav/device/page', {
@@ -377,9 +412,14 @@ export async function getLiveStreams(): Promise<{ list: LiveStream[]; total: num
     Number(device.deviceOnlineStatus ?? device.onlineStatus ?? device.online ?? 0) === 1,
   )
   const results = await Promise.allSettled(onlineDevices.map(async (device) => {
-    const sn = valueOf(device, 'sn', 'droneSn', 'aircraftSn')
-    if (!sn) throw new Error('在线设备未返回 SN')
-    return toDeviceLiveStream(device, await getLiveShareCode(sn))
+    // 设备分页返回的是机槽（机场）记录，顶层 sn 是机槽 SN；直播/分享码接口要求飞机 SN，取 child_json 里的子机 SN。
+    // 飞机离线时其直播流不可用，回退到机槽摄像头（DOCK_CAMERA）。
+    const drone = droneInfoOf(device)
+    const dockSn = valueOf(device, 'sn')
+    const useDockFeed = drone.online === false && !!dockSn
+    const sn = useDockFeed ? dockSn : drone.sn
+    if (!sn) throw new Error('在线设备未返回飞机 SN')
+    return toDeviceLiveStream(device, { ...drone, sn }, await getLiveShareCode(sn), useDockFeed)
   }))
   const list = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
   return { list, total: list.length, onlineDeviceCount: onlineDevices.length }
@@ -432,19 +472,20 @@ function shareEmbedUrl(shareCode: string) {
   }
 }
 
-function toDeviceLiveStream(device: Record<string, unknown>, response: unknown): LiveStream {
+function toDeviceLiveStream(device: Record<string, unknown>, drone: { sn: string; callsign?: string; nickname?: string }, response: unknown, useDockFeed = false): LiveStream {
   const share = unwrapLiveResponse(response)
-  const sn = valueOf(device, 'sn', 'droneSn', 'aircraftSn')
+  const sn = drone.sn
   const playUrl = valueOf(share, 'playUrl', 'play_url', 'streamUrl', 'stream_url', 'hlsUrl', 'hls_url', 'flvUrl', 'flv_url')
   // /v1/uav/live/share-code 的 data 约定为 { code, expireTime, sn }。
   // apiClient 已解包最外层业务响应，因此这里的 code 就是直播分享码。
   const shareCode = valueOf(share, 'shareCode', 'share_code', 'liveShareCode', 'live_share_code', 'shareId', 'share_id', 'code')
   const returnedEmbedUrl = valueOf(share, 'embedUrl', 'embed_url', 'shareLink', 'share_link', 'liveUrl', 'live_url')
+  const dockName = valueOf(device, 'nickname', 'deviceName', 'name', 'deviceModelName') || sn
   return {
     id: String(device.id ?? sn),
     aircraftId: sn,
-    callsign: valueOf(device, 'callsign') || undefined,
-    aircraftName: valueOf(device, 'nickname', 'deviceName', 'name', 'deviceModelName') || sn,
+    callsign: useDockFeed ? undefined : (drone.callsign || valueOf(device, 'callsign') || undefined),
+    aircraftName: useDockFeed ? `${dockName}（机槽画面）` : drone.callsign || drone.nickname || dockName || sn,
     status: 'ONLINE',
     protocol: playUrl ? liveProtocol(playUrl) : 'OTHER',
     playUrl,
