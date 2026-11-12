@@ -28,6 +28,7 @@ declare module 'vue' {
     ElSelect: typeof import('element-plus/es')['ElSelect']
     FacilityEditDialog: typeof import('./src/components/FacilityEditDialog.vue')['default']
     FacilityLedgerMap: typeof import('./src/components/FacilityLedgerMap.vue')['default']
+    FacilityNearbyPhoto: typeof import('./src/components/FacilityNearbyPhoto.vue')['default']
     FacilityQrcodeDialog: typeof import('./src/components/FacilityQrcodeDialog.vue')['default']
     FacilityReportDialog: typeof import('./src/components/FacilityReportDialog.vue')['default']
     FacilityReportImageGallery: typeof import('./src/components/FacilityReportImageGallery.vue')['default']

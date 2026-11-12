@@ -95,18 +95,7 @@ const mapLayers = computed<DashboardMapLayer[]>(() => {
 })
 // 无人机航线尚未接入真实后端接口，图层保留但当前不展示伪造航线。
 const patrolRoutes = computed(() => [])
-// 汇总接口可能包含归属其他单位场景的历史任务；首页任务统计统一基于完成
-// 部门与场景归属过滤后的任务明细计算，确保总数与场景圆环、任务列表一致。
-const unitTaskSummary = computed(() => currentUnitTasks.value.reduce((summary, task) => {
-  summary.total += 1
-  if (task.taskStatus === 0) summary.pending += 1
-  else if (task.taskStatus === 1) summary.executing += 1
-  else if (task.taskStatus === 2) summary.pendingVerify += 1
-  else if (task.taskStatus === 3) summary.failed += 1
-  else if (task.taskStatus === 4) summary.canceled += 1
-  else if (task.taskStatus === 5) summary.finished += 1
-  return summary
-}, { total: 0, pending: 0, executing: 0, pendingVerify: 0, failed: 0, canceled: 0, finished: 0 }))
+const unitTaskSummary = computed(() => statistics.value?.taskSummary)
 /**
  * 直接按当前部门任务接口返回的全部真实任务归并场景。
  * 已明确属于其他单位的场景会在任务可见性规则中排除；后端新增且尚未写入
@@ -150,13 +139,13 @@ function percentage(numerator: number | undefined, denominator: number | undefin
 }
 
 const taskStatusLegend = computed(() => [
-  { name: '执行中', count: unitTaskSummary.value.executing, color: '#35c8f2' },
-  { name: '已完成', count: unitTaskSummary.value.finished, color: '#55e5cf' },
-  { name: '待执行', count: unitTaskSummary.value.pending, color: '#7389ef' },
-  { name: '待核查', count: unitTaskSummary.value.pendingVerify, color: '#e8be6c' },
-  { name: '已失败', count: unitTaskSummary.value.failed, color: '#ec8298' },
-  { name: '已取消', count: unitTaskSummary.value.canceled, color: '#64879b' },
-].filter((item, index) => index < 3 || item.count > 0))
+  { name: '执行中', count: unitTaskSummary.value?.executing, color: '#35c8f2' },
+  { name: '已完成', count: unitTaskSummary.value?.finished, color: '#55e5cf' },
+  { name: '待执行', count: unitTaskSummary.value?.pending, color: '#7389ef' },
+  { name: '待核查', count: unitTaskSummary.value?.pendingVerify, color: '#e8be6c' },
+  { name: '已失败', count: unitTaskSummary.value?.failed, color: '#ec8298' },
+  { name: '已取消', count: unitTaskSummary.value?.canceled, color: '#64879b' },
+].filter((item, index) => index < 3 || (item.count ?? 0) > 0))
 const fleetRingItems = computed(() => [{ name: '在线', count: uavDeviceSummary.value?.onlineCount, color: '#38e0c1' }, { name: '离线', count: uavDeviceSummary.value?.offlineCount, color: '#64879b' }])
 const mediaRingItems = computed(() => [{ name: '照片', count: uavMediaSummary.value?.photoCount, color: '#45a8ff' }, { name: '视频', count: uavMediaSummary.value?.videoCount, color: '#55e5cf' }, { name: '其他', count: uavMediaSummary.value?.otherCount, color: '#9b8cff' }])
 const governanceCompletionRate = computed(() => percentage(
@@ -588,7 +577,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <h2>任务办理成效</h2>
                 <button v-if="user.hasPermission('task-list')" class="overview-header-link" type="button" aria-label="进入任务列表" @click="openTaskList">任务列表 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div v-if="sceneTaskChartItems.length" class="scene-task-chart">
+              <div v-if="sceneTaskChartItems.length || unitTaskSummary" class="scene-task-chart">
                 <div class="scene-task-hover-card" :class="{ 'is-visible': hoveredSceneTask }" role="status">
                   <i v-if="hoveredSceneTask" :style="{ backgroundColor: hoveredSceneTask.color, boxShadow: `0 0 8px ${hoveredSceneTask.color}` }"></i>
                   <span>{{ hoveredSceneTask?.name }}</span>
@@ -624,7 +613,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                   </svg>
                   <div class="scene-task-ring__center"><b><DashboardFlipNumber :value="governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%`" /></b><span>任务完成率</span></div>
                 </div>
-                <dl class="metric-legend task-state-legend"><div><dt><i class="legend-muted"></i>任务总数</dt><dd><DashboardFlipNumber :value="sceneTaskTotal" /></dd></div><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd><DashboardFlipNumber :value="item.count" /></dd></div></dl></div>
+                <dl class="metric-legend task-state-legend"><div><dt><i class="legend-muted"></i>任务总数</dt><dd><DashboardFlipNumber :value="unitTaskSummary?.total ?? '—'" /></dd></div><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd><DashboardFlipNumber :value="item.count ?? '—'" /></dd></div></dl></div>
                 <div class="scene-task-legend" aria-label="场景任务数图例">
                   <button
                     v-if="user.hasPermission('task-list')"

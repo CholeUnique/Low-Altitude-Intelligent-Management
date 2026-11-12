@@ -8,6 +8,7 @@ import OverviewMapScale from '@/components/OverviewMapScale.vue'
 import TopicMapLegend from '@/components/TopicMapLegend.vue'
 import FacilityReportDialog from '@/components/FacilityReportDialog.vue'
 import FacilityQrcodeDialog from '@/components/FacilityQrcodeDialog.vue'
+import FacilityNearbyPhoto from '@/components/FacilityNearbyPhoto.vue'
 import jiulongTownBoundary from '@/assets/geo/jiulong-town.json'
 
 const user = useUserStore()
@@ -27,6 +28,14 @@ function facilityCoordinates(geometry?: GeoJSON.Geometry | null) {
   const center = bounds.getCenter()
   return `${center.lng.toFixed(6)}, ${center.lat.toFixed(6)}`
 }
+const photoCoordinate = computed(() => {
+  const geometry = selected.value?.geometry
+  if (!geometry) return undefined
+  const bounds = L.geoJSON({ type: 'Feature', properties: {}, geometry } as GeoJSON.Feature).getBounds()
+  if (!bounds.isValid()) return undefined
+  const center = bounds.getCenter()
+  return { longitude: center.lng, latitude: center.lat }
+})
 const detailRows = computed(() => {
   const item = selected.value
   if (!item) return []
@@ -225,7 +234,7 @@ onBeforeUnmount(() => { version++; observer?.disconnect(); legendObserver?.disco
     </aside>
     <aside v-if="selected" class="category-panel" aria-label="要素详情">
       <div class="category-header"><div><small>FEATURE DETAILS</small><h2>要素详情</h2></div><button class="icon-button" type="button" title="关闭要素详情" aria-label="关闭要素详情" @click="closeFacilityDetail">×</button></div>
-      <div class="feature-details"><p v-if="detailError" role="alert">{{ detailError }}</p><dl><div><dt>设施类型</dt><dd>{{ selected.category }}</dd></div><div><dt>几何类型</dt><dd>{{ selected.geometryType }}</dd></div><div v-for="row in detailRows" :key="row.name"><dt :title="row.name">{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl><p v-if="!detailRows.length" class="empty">暂无要素属性信息</p></div>
+      <div class="feature-details"><p v-if="detailError" role="alert">{{ detailError }}</p><dl><div><dt>设施类型</dt><dd>{{ selected.category }}</dd></div><div><dt>几何类型</dt><dd>{{ selected.geometryType }}</dd></div><div v-for="row in detailRows" :key="row.name"><dt :title="row.name">{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl><p v-if="!detailRows.length" class="empty">暂无要素属性信息</p><FacilityNearbyPhoto :key="`${user.activeDeptId}:${selected.key}`" :coordinate="photoCoordinate" :geometry-type="selected.geometryType" /></div>
       <div class="feature-actions"><button type="button" @click="openReport">问题上报</button><button type="button" @click="openQrcode">设施二维码</button></div>
     </aside>
     <FacilityReportDialog v-if="reportTarget && user.activeDeptId" :key="`report-${reportTarget.id}`" :record="reportTarget" :dept-id="user.activeDeptId" @close="reportTarget = undefined" @reported="load()" />
