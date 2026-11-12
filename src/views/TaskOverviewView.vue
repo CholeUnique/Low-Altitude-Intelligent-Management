@@ -28,16 +28,7 @@ let statusChart: EChartsType | undefined
 let requestVersion = 0
 let resizeObserver: ResizeObserver | undefined
 
-const taskSummary = computed(() => tasks.value.reduce((summary, task) => {
-  summary.total += 1
-  if (task.taskStatus === 0) summary.pending += 1
-  else if (task.taskStatus === 1) summary.executing += 1
-  else if (task.taskStatus === 2) summary.pendingVerify += 1
-  else if (task.taskStatus === 3) summary.failed += 1
-  else if (task.taskStatus === 4) summary.canceled += 1
-  else if (task.taskStatus === 5) summary.finished += 1
-  return summary
-}, { total: 0, pending: 0, executing: 0, pendingVerify: 0, failed: 0, canceled: 0, finished: 0 }))
+const taskSummary = computed(() => statistics.value?.taskSummary)
 const kpis = computed(() => [
   { label: '任务总数', value: taskSummary.value?.total, icon: '▣', tone: 'blue', note: '全部治理任务' },
   { label: '执行中', value: taskSummary.value?.executing, icon: '▶', tone: 'cyan', note: '正在办理任务' },
@@ -112,8 +103,8 @@ const overdueCount = computed(() => tasks.value.filter((task) =>
 const efficiencyItems = computed(() => [
   {
     label: '任务办结率',
-    value: percent(taskSummary.value?.finished, taskSummary.value?.total),
-    note: `${taskSummary.value?.finished ?? 0} / ${taskSummary.value?.total ?? 0} 个`,
+    value: taskSummary.value ? percent(taskSummary.value.finished, taskSummary.value.total) : '—',
+    note: taskSummary.value ? `${taskSummary.value.finished} / ${taskSummary.value.total} 个` : '统计数据暂不可用',
     tone: 'blue',
   },
   {
