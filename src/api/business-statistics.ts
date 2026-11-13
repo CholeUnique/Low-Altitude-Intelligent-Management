@@ -47,6 +47,7 @@ export interface BusinessSceneStat {
   sceneName: string
   category?: string
   taskCount: number
+  taskStatusCounts?: Array<{ status: number; desc: string; count: number }>
   abnormalCount: number
   /** 异常图斑总面积，单位 m²。 */
   abnormalArea: number
@@ -153,6 +154,24 @@ export interface BusinessDashboardStatistics {
   taskSummary: BusinessTaskSummary
   abnormalSummary: BusinessAbnormalSummary
   trend: BusinessTrend
+}
+
+export type BusinessStatisticsResults = { [K in keyof BusinessDashboardStatistics]: PromiseSettledResult<BusinessDashboardStatistics[K]> }
+
+/** 各统计独立返回结果，避免单个接口失败影响其他模块。 */
+export async function getBusinessDashboardStatisticsResults(query: BusinessStatisticsQuery = {}): Promise<BusinessStatisticsResults> {
+  const missingDept = !query.deptId
+  const read = <T>(path: string, body: BusinessStatisticsQuery): Promise<T> => missingDept
+    ? Promise.reject(new Error('未获取到当前单位标识，无法加载单位统计数据。'))
+    : apiClient.post<never, T>(path, body) as unknown as Promise<T>
+  const [overview, sceneStats, taskSummary, abnormalSummary, trend] = await Promise.allSettled([
+    read<BusinessOverview>('/v1/biz/statistics/overview', query),
+    read<BusinessSceneStat[]>('/v1/biz/statistics/scene-stat', query),
+    read<BusinessTaskSummary>('/v1/biz/statistics/task-summary', query),
+    read<BusinessAbnormalSummary>('/v1/biz/statistics/abnormal-summary', query),
+    read<BusinessTrend>('/v1/biz/statistics/trend', { ...query, days: query.days ?? 7 }),
+  ])
+  return { overview, sceneStats, taskSummary, abnormalSummary, trend }
 }
 
 /** 支持按当前部门、场景直接汇总，不需要读取每个任务的异常分页。 */

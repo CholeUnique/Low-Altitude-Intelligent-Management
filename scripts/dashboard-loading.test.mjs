@@ -114,7 +114,23 @@ function functions(ast, names) {
 const view = scriptAst('src/views/DashboardView.vue')
 assert.doesNotMatch(view.script, /getTaskAbnormalPage/, 'Homepage never requests per-task abnormal pages')
 assert.match(view.component, /:focus-geometry-pending="sceneGeometryPending"/)
-const viewFunctions = functions(view.ast, ['loadTaskRanges', 'loadSceneAbnormalCounts'])
+assert.match(view.script, /statistics\.value\?\.sceneStats/, 'Scene ring uses full backend scene statistics')
+const statsSource = readFileSync('src/api/business-statistics.ts', 'utf8')
+const statsAst = ts.createSourceFile('business-statistics.ts', statsSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+const statsFn = statsAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'getBusinessDashboardStatisticsResults')
+const statsModule = { exports: {} }
+const callsByPath = []
+new Function('module', 'exports', 'apiClient', compile(statsFn.getText(statsAst)))(statsModule, statsModule.exports, {
+  post: async (path, query) => { callsByPath.push({ path, query }); if (path.endsWith('/trend')) throw new Error('trend unavailable'); return { marker: path } },
+})
+const independent = await statsModule.exports.getBusinessDashboardStatisticsResults({ deptId: 'dept-2' })
+assert.equal(independent.trend.status, 'rejected')
+assert.equal(independent.taskSummary.status, 'fulfilled', 'A failed trend must not discard task totals')
+assert.equal(independent.sceneStats.status, 'fulfilled', 'A failed trend must not discard scene statistics')
+assert(callsByPath.every(call => call.query.deptId === 'dept-2'), 'Every statistics request keeps department scope')
+const noDepartment = await statsModule.exports.getBusinessDashboardStatisticsResults({})
+assert(Object.values(noDepartment).every(result => result.status === 'rejected'), 'Missing department must not request unscoped data')
+const viewFunctions = functions(view.ast, ['loadTaskRanges'])
 const viewState = {
   activeScene: { value: undefined }, currentUnitTasksLoaded: { value: true },
   currentUnitTasks: { value: [{ id: 'a', sceneCode: 'A' }, { id: 'b', sceneCode: 'B' }] },
@@ -125,7 +141,7 @@ const selectedScenes = [], scopedQueries = []
 const lazy = new Function('context', `const {${Object.keys(viewState).join(',')}, geometryLoader, findOrganizationScene, resolveWorkspaceSceneId, loadDashboardSceneCounts, getBusinessAbnormalSummary} = context;
   let geometryRequestVersion = 0, statisticsRequestVersion = 1, abnormalCountRequestVersion = 0;
   ${viewFunctions}
-  return {loadTaskRanges, loadSceneAbnormalCounts};`)(
+  return {loadTaskRanges};`)(
   { ...viewState, geometryLoader: { async load(tasks) { selectedScenes.push(tasks.map(task => task.id)); return Object.fromEntries(tasks.map(task => [task.id, geometry(task.id)])) } },
     findOrganizationScene: (_org, code) => ({ id: code }), resolveWorkspaceSceneId: code => code,
     loadDashboardSceneCounts, getBusinessAbnormalSummary: async query => { scopedQueries.push(query); return { total: 9 } },
@@ -135,9 +151,6 @@ assert.deepEqual(selectedScenes, [], 'Ordinary homepage triggers zero task GeoJS
 viewState.activeScene.value = { id: 'B' }
 await lazy.loadTaskRanges()
 assert.deepEqual(selectedScenes, [['b']], 'Entering a scene requests only that scene geometry')
-await lazy.loadSceneAbnormalCounts(viewState.currentUnitTasks.value, 1, 'dept-2', [{ sceneCode: 'A', abnormalCount: 3 }])
-assert.deepEqual(scopedQueries, [{ deptId: 'dept-2', sceneCode: 'B' }], 'Fallback summary retains both scene and department scope')
-assert.deepEqual(viewState.sceneAbnormalCounts.value, { A: 3, B: 9 })
 
 // Execute actual map initialization with a Leaflet stub that records the viewport at tile attachment.
 const mapSource = scriptAst('src/components/DashboardMap.vue')

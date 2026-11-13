@@ -5,17 +5,16 @@ import { LineChart, PieChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
-import { getBusinessDashboardStatistics, type BusinessDashboardStatistics } from '@/api/business-statistics'
+import { getBusinessDashboardStatisticsResults, type BusinessDashboardStatistics } from '@/api/business-statistics'
 import { getGovernanceTaskPage, type GovernanceTask } from '@/api/governance-task'
 import { collectPages } from '@/api/pagination'
 import { useUserStore } from '@/stores/user'
 import { isTaskVisibleForOrganization } from '@/utils/scene-visibility'
-import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
 
 use([LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 const user = useUserStore()
-const statistics = ref<BusinessDashboardStatistics>()
+const statistics = ref<Partial<BusinessDashboardStatistics>>()
 const tasks = ref<GovernanceTask[]>([])
 const statisticsLoading = ref(true)
 const tasksLoading = ref(true)
@@ -42,7 +41,7 @@ const trendItems = computed(() => {
     const date = task.createTime?.slice(0, 10)
     if (date) taskCountsByDate.set(date, (taskCountsByDate.get(date) || 0) + 1)
   })
-  return (statistics.value?.trend.items ?? []).map((item) => ({
+  return (statistics.value?.trend?.items ?? []).map((item) => ({
     ...item,
     taskCount: taskCountsByDate.get(item.date.slice(0, 10)) || 0,
   }))
@@ -60,31 +59,10 @@ const statusItems = computed(() => {
   ].filter((item) => item.value > 0)
 })
 const sceneRanking = computed(() => {
-  const grouped = new Map<string, { sceneId: string; sceneCode: string; sceneName: string; taskCount: number }>()
-  tasks.value.forEach((task) => {
-    const key = resolveWorkspaceSceneId(task.sceneCode, task.sceneName) || task.sceneCode || task.sceneName || 'uncategorized'
-    const current = grouped.get(key)
-    grouped.set(key, {
-      sceneId: key,
-      sceneCode: task.sceneCode,
-      sceneName: task.sceneName || task.sceneCode || '未分类场景',
-      taskCount: (current?.taskCount || 0) + 1,
-    })
-  })
-  return [...grouped.values()].sort((left, right) => right.taskCount - left.taskCount).slice(0, 5)
+  return [...(statistics.value?.sceneStats || [])].filter(scene => scene.taskCount > 0)
+    .sort((left, right) => right.taskCount - left.taskCount).slice(0, 5)
 })
 const maxSceneTasks = computed(() => Math.max(1, ...sceneRanking.value.map((item) => item.taskCount)))
-const sceneStatusBreakdown = computed(() => {
-  const grouped = new Map<string, { pending: number; processing: number; closed: number }>()
-  for (const task of tasks.value) {
-    const current = grouped.get(task.sceneName) ?? { pending: 0, processing: 0, closed: 0 }
-    if (task.taskStatus === 5) current.closed += 1
-    else if (task.taskStatus === 0) current.pending += 1
-    else current.processing += 1
-    grouped.set(task.sceneName, current)
-  }
-  return grouped
-})
 
 const completedTasks = computed(() => tasks.value.filter((task) => task.taskStatus === 5))
 const timedCompletedTasks = computed(() => completedTasks.value.filter((task) => task.actualEndTime && task.planEndTime))
@@ -211,17 +189,28 @@ async function loadData() {
   const version = ++requestVersion
   statisticsLoading.value = true
   tasksLoading.value = true
+  statistics.value = undefined
   statisticsError.value = ''
   tasksError.value = ''
   const deptId = user.activeDeptId
   const organizationId = user.organizationId
   const [statisticsResult, tasksResult] = await Promise.allSettled([
-    getBusinessDashboardStatistics({ deptId, days: 7 }),
+    getBusinessDashboardStatisticsResults({ deptId, days: 7 }),
     collectPages((pageNum, pageSize) => getGovernanceTaskPage({ pageNum, pageSize, deptId, organizationId })),
   ])
   if (version !== requestVersion) return
 
-  if (statisticsResult.status === 'fulfilled') statistics.value = statisticsResult.value
+  if (statisticsResult.status === 'fulfilled') {
+    const result = statisticsResult.value
+    statistics.value = {
+      overview: result.overview.status === 'fulfilled' ? result.overview.value : undefined,
+      sceneStats: result.sceneStats.status === 'fulfilled' ? result.sceneStats.value : undefined,
+      taskSummary: result.taskSummary.status === 'fulfilled' ? result.taskSummary.value : undefined,
+      abnormalSummary: result.abnormalSummary.status === 'fulfilled' ? result.abnormalSummary.value : undefined,
+      trend: result.trend.status === 'fulfilled' ? result.trend.value : undefined,
+    }
+    if (Object.values(result).some(item => item.status === 'rejected')) statisticsError.value = '部分统计接口读取失败'
+  }
   else {
     statistics.value = undefined
     statisticsError.value = statisticsResult.reason instanceof Error ? statisticsResult.reason.message : '任务统计加载失败'
@@ -279,17 +268,17 @@ onBeforeUnmount(() => {
     <section class="kpi-grid" aria-label="任务关键指标">
       <article v-for="kpi in kpis" :key="kpi.label" class="kpi-card" :class="`is-${kpi.tone}`">
         <i>{{ kpi.icon }}</i>
-        <div><span>{{ kpi.label }}</span><strong>{{ tasksLoading ? '—' : (kpi.value ?? 0) }}</strong><small>{{ kpi.note }}</small></div>
+        <div><span>{{ kpi.label }}</span><strong>{{ statisticsLoading ? '—' : (kpi.value ?? '—') }}</strong><small>{{ kpi.note }}</small></div>
       </article>
     </section>
 
     <section class="overview-grid">
       <article class="panel trend-panel">
-        <header><div><h2>任务趋势</h2><p>近 {{ statistics?.trend.days ?? 7 }} 日任务与异常变化</p></div><em>单位：个</em></header>
+        <header><div><h2>任务趋势</h2><p>近 {{ statistics?.trend?.days ?? 7 }} 日任务与异常变化</p></div><em>单位：个</em></header>
         <div class="chart-wrap">
           <div ref="trendContainer" class="chart"></div>
           <div v-if="statisticsLoading" class="panel-state">正在加载趋势数据…</div>
-          <div v-else-if="statisticsError" class="panel-state error">趋势数据暂不可用</div>
+          <div v-else-if="!statistics?.trend" class="panel-state error">趋势数据暂不可用</div>
           <div v-else-if="!trendItems.length" class="panel-state">暂无任务趋势数据</div>
         </div>
       </article>
@@ -298,16 +287,16 @@ onBeforeUnmount(() => {
         <header><div><h2>任务状态分布</h2><p>当前任务全生命周期状态</p></div></header>
         <div class="chart-wrap">
           <div ref="statusContainer" class="chart"></div>
-          <div v-if="tasksLoading" class="panel-state">正在加载状态统计…</div>
-          <div v-else-if="tasksError" class="panel-state error">状态统计暂不可用</div>
+          <div v-if="statisticsLoading" class="panel-state">正在加载状态统计…</div>
+          <div v-else-if="!statistics?.taskSummary" class="panel-state error">状态统计暂不可用</div>
           <div v-else-if="!statusItems.length" class="panel-state">暂无任务状态数据</div>
         </div>
       </article>
 
       <article class="panel ranking-panel">
         <header><div><h2>场景任务排行</h2><p>按任务总数由高到低排列</p></div></header>
-        <div v-if="tasksLoading" class="panel-state standalone">正在加载场景数据…</div>
-        <div v-else-if="tasksError" class="panel-state standalone error">场景排行暂不可用</div>
+        <div v-if="statisticsLoading" class="panel-state standalone">正在加载场景数据…</div>
+        <div v-else-if="!statistics?.sceneStats" class="panel-state standalone error">场景排行暂不可用</div>
         <div v-else-if="!sceneRanking.length" class="panel-state standalone">暂无场景任务数据</div>
         <ol v-else class="ranking-list">
           <li v-for="(scene, index) in sceneRanking" :key="scene.sceneId || scene.sceneCode">
@@ -315,11 +304,10 @@ onBeforeUnmount(() => {
             <div>
               <span><strong>{{ scene.sceneName }}</strong><em>{{ scene.taskCount }} 个任务</em></span>
               <i><u :style="{ width: `${scene.taskCount / maxSceneTasks * 100}%` }"></u></i>
-              <small v-if="sceneStatusBreakdown.get(scene.sceneName)" class="scene-statuses">
-                <span>未处理 {{ sceneStatusBreakdown.get(scene.sceneName)?.pending }}</span>
-                <span>处理中 {{ sceneStatusBreakdown.get(scene.sceneName)?.processing }}</span>
-                <span>已结案 {{ sceneStatusBreakdown.get(scene.sceneName)?.closed }}</span>
+              <small v-if="scene.taskStatusCounts?.length" class="scene-statuses">
+                <span v-for="item in scene.taskStatusCounts" :key="item.status">{{ item.desc }} {{ item.count }}</span>
               </small>
+              <small v-else class="scene-statuses">状态统计暂不可用</small>
             </div>
           </li>
         </ol>
@@ -459,7 +447,7 @@ onBeforeUnmount(() => {
 .ranking-list em { color: #8f9dac; font-size: 12px; font-style: normal; white-space: nowrap; }
 .ranking-list i { height: 5px; display: block; margin-top: 6px; overflow: hidden; background: #eef2f5; border-radius: 3px; }
 .ranking-list u { height: 100%; display: block; min-width: 3px; background: linear-gradient(90deg, #46a9df, #2684cb); border-radius: 3px; }
-.scene-statuses { display: flex!important; gap: 9px; margin-top: 5px; color: #8b99a7; font-size: 12px; }
+.scene-statuses { display: flex!important; flex-wrap: wrap; gap: 4px 9px; margin-top: 5px; color: #8b99a7; font-size: 12px; }
 .scene-statuses span { display: inline; }
 .efficiency-grid { min-height: 220px; display: grid; grid-template-columns: repeat(4, 1fr); align-items: center; padding: 20px 18px; }
 .efficiency-grid > div { min-width: 0; padding: 12px 18px; text-align: center; border-right: 1px solid #edf1f4; }
