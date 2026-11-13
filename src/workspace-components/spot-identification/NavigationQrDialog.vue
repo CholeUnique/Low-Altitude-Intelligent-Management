@@ -134,7 +134,7 @@ onBeforeUnmount(() => { objectUrls.forEach((url) => URL.revokeObjectURL(url)) })
             @click="baiduAppMode = !baiduAppMode">{{ baiduAppMode ? '用微信/相机扫' : '用百度地图App扫' }}</button>
         </div>
 
-        <p v-if="activeApp === 'baidu'" class="origin-note">百度地图:默认码用微信或相机扫描进入定位页;若使用百度地图App扫码，点击二维码下方的按钮切换后再扫。</p>
+        <p v-if="activeApp === 'baidu'" class="origin-note">百度地图默认码使用微信或相机扫描进入定位页;若使用百度地图App扫码，请先点击二维码下方的按钮切换后再扫。</p>
       </section>
     </div>
   </Teleport>

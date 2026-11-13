@@ -12,8 +12,8 @@ import { isAgricultureTopicDepartment } from '@/utils/topic-access'
 import { useUserStore } from '@/stores/user'
 import { getGovernanceTaskGeometry, getGovernanceTaskPage, type GovernanceTask, type TaskGeometryFeatureCollection } from '@/api/governance-task'
 import { getScene } from '@/mocks/portal'
-import { getBusinessAbnormalSummary, getBusinessDashboardStatistics, type BusinessDashboardStatistics, type BusinessSceneStat } from '@/api/business-statistics'
-import { createDashboardGeometryLoader, loadDashboardSceneCounts } from '@/utils/dashboard-loading'
+import { getBusinessDashboardStatisticsResults, type BusinessDashboardStatistics } from '@/api/business-statistics'
+import { createDashboardGeometryLoader } from '@/utils/dashboard-loading'
 import { getDepartmentOptions, getMyDepartments, switchDepartment } from '@/api/auth'
 import {
   getLiveStreams,
@@ -32,13 +32,12 @@ import type { DashboardMapLayer } from '@/types'
 const router = useRouter()
 const route = useRoute()
 const user = useUserStore()
-const statistics = ref<BusinessDashboardStatistics>()
+const statistics = ref<Partial<BusinessDashboardStatistics>>()
 const statisticsLoading = ref(false)
 const statisticsError = ref('')
 const currentUnitTasks = ref<GovernanceTask[]>([])
 const currentUnitTasksLoaded = ref(false)
 /** 当前部门的场景级完整汇总，不再扫描任务异常分页。 */
-const sceneAbnormalCounts = ref<Record<string, number>>({})
 const taskRanges = ref<Record<string, TaskGeometryFeatureCollection>>({})
 const taskRangesLoading = ref(false)
 const geometryLoader = createDashboardGeometryLoader(taskId => getGovernanceTaskGeometry(taskId, undefined, false, user.activeDeptId))
@@ -53,7 +52,6 @@ const uavMediaSummary = ref<UavMediaSummary>()
 const isMapClearScreen = ref(false)
 let statisticsRequestVersion = 0
 let geometryRequestVersion = 0
-let abnormalCountRequestVersion = 0
 let livePreviewRequestVersion = 0
 const sceneId = computed(() => typeof route.params.sceneId === 'string' ? route.params.sceneId : '')
 const organization = computed(() => user.organization)
@@ -96,11 +94,7 @@ const mapLayers = computed<DashboardMapLayer[]>(() => {
 // 无人机航线尚未接入真实后端接口，图层保留但当前不展示伪造航线。
 const patrolRoutes = computed(() => [])
 const unitTaskSummary = computed(() => statistics.value?.taskSummary)
-/**
- * 直接按当前部门任务接口返回的全部真实任务归并场景。
- * 已明确属于其他单位的场景会在任务可见性规则中排除；后端新增且尚未写入
- * 静态配置的场景仍按接口编码保留，避免合法新业务在首页被漏计。
- */
+/** 根据当前部门场景统计绘制圆环，不受任务分页数量限制。 */
 const sceneBusinessStats = computed(() => {
   const groupedScenes = new Map<string, {
     id: string
@@ -112,14 +106,14 @@ const sceneBusinessStats = computed(() => {
     visual: string
   }>()
 
-  currentUnitTasks.value.forEach((task) => {
+  ;(statistics.value?.sceneStats || []).forEach((task) => {
     const scene = findOrganizationScene(organization.value, task.sceneCode, task.sceneName)
     const resolvedSceneId = resolveWorkspaceSceneId(task.sceneCode, task.sceneName)
     const id = scene?.id || resolvedSceneId || task.sceneCode || task.sceneName || 'uncategorized'
     const name = scene?.name || task.sceneName || task.sceneCode || '未分类场景'
     const current = groupedScenes.get(id)
-    const taskCount = (current?.taskCount || 0) + 1
-    const abnormalCount = sceneAbnormalCounts.value[id]
+    const taskCount = (current?.taskCount || 0) + (Number(task.taskCount) || 0)
+    const abnormalCount = (current?.abnormalCount || 0) + (Number(task.abnormalCount) || 0)
     groupedScenes.set(id, {
       id,
       code: current?.code || task.sceneCode,
@@ -131,7 +125,7 @@ const sceneBusinessStats = computed(() => {
     })
   })
 
-  return [...groupedScenes.values()]
+  return [...groupedScenes.values()].filter(item => item.taskCount > 0)
 })
 function percentage(numerator: number | undefined, denominator: number | undefined) {
   if (typeof numerator !== 'number' || typeof denominator !== 'number' || denominator <= 0) return undefined
@@ -160,13 +154,13 @@ const abnormalTypeLabels: Record<string, string> = {
   NON_GRAIN: '非粮化',
   ILLEGAL_BUILD: '违法建设',
 }
-const recognitionItems = computed(() => (statistics.value?.abnormalSummary.typeCounts || [])
+const recognitionItems = computed(() => (statistics.value?.abnormalSummary?.typeCounts || [])
   .map((item) => ({ ...item, name: abnormalTypeLabels[item.key] || abnormalTypeLabels[item.name] || item.name }))
   .sort((a, b) => b.count - a.count).map((item, index) => ({ ...item, color: ['#45a8ff','#55e5cf','#a17cff','#ffbd4a','#ff738d','#57d68d'][index % 6]! })))
 // 优先采用后端亩口径（areaTotalMu，已按 2 位小数换算）；旧版接口缺省时回退到面积合计（㎡）前端换算。
 const formatRecognitionArea = computed(() => {
-  const mu = statistics.value?.abnormalSummary.areaTotalMu
-  return typeof mu === 'number' && Number.isFinite(mu) ? formatMu(mu) : formatSquareMetresAsMu(statistics.value?.abnormalSummary.areaTotal)
+  const mu = statistics.value?.abnormalSummary?.areaTotalMu
+  return typeof mu === 'number' && Number.isFinite(mu) ? formatMu(mu) : formatSquareMetresAsMu(statistics.value?.abnormalSummary?.areaTotal)
 })
 const sceneTaskRingColors = ['#37ead7', '#45a8ff', '#a17cff', '#ffbd4a', '#ff738d', '#57d68d']
 const sceneTaskTotal = computed(() => sceneBusinessStats.value.reduce((total, item) => total + Math.max(item.taskCount, 0), 0))
@@ -294,23 +288,6 @@ async function loadTaskRanges() {
   }
 }
 
-/** 优先复用 scene-stat；缺失场景按 sceneCode 补一次完整汇总，不按任务累加。 */
-async function loadSceneAbnormalCounts(tasks: GovernanceTask[], requestVersion: number, deptId: string | undefined, sceneStats: BusinessSceneStat[]) {
-  const currentAbnormalRequest = ++abnormalCountRequestVersion
-  const isCurrent = () => requestVersion === statisticsRequestVersion && currentAbnormalRequest === abnormalCountRequestVersion
-  const byCode = await loadDashboardSceneCounts(tasks.map(task => task.sceneCode), sceneStats,
-    sceneCode => getBusinessAbnormalSummary({ deptId, sceneCode }), isCurrent)
-  if (!isCurrent()) return
-  const counts: Record<string, number> = {}
-  tasks.forEach(task => {
-    const scene = findOrganizationScene(organization.value, task.sceneCode, task.sceneName)
-    const id = scene?.id || resolveWorkspaceSceneId(task.sceneCode, task.sceneName) || task.sceneCode || task.sceneName || 'uncategorized'
-    const count = byCode[task.sceneCode]
-    if (count !== undefined) counts[id] = count
-  })
-  sceneAbnormalCounts.value = counts
-}
-
 const departmentNameMatchers = {
   'natural-resources': /自然资源.*规划|自然资源/,
   'agriculture-rural': /农业农村/,
@@ -364,7 +341,6 @@ async function loadBusinessStatistics(resetExisting = false) {
     currentUnitTasks.value = []
     taskRanges.value = {}
     taskRangesLoading.value = false
-    sceneAbnormalCounts.value = {}
   }
 
   if (user.authMode === 'real' && !deptId) {
@@ -383,7 +359,7 @@ async function loadBusinessStatistics(resetExisting = false) {
   }
 
   // 立即绑定拒绝处理，避免任务接口较慢时统计接口的失败成为未处理的 Promise。
-  const statisticsPromise = Promise.allSettled([getBusinessDashboardStatistics({ deptId })])
+  const statisticsPromise = getBusinessDashboardStatisticsResults({ deptId })
   const taskPromise = getGovernanceTaskPage({ pageNum: 1, pageSize: 100, deptId, organizationId })
 
   try {
@@ -401,24 +377,18 @@ async function loadBusinessStatistics(resetExisting = false) {
       currentUnitTasks.value = []
       currentUnitTasksLoaded.value = false
       taskRanges.value = {}
-      sceneAbnormalCounts.value = {}
     }
 
     const statisticsResult = await statisticsPromise
     if (requestVersion !== statisticsRequestVersion) return
-    const statisticsPage = statisticsResult[0]
-    if (statisticsPage?.status === 'fulfilled') {
-      statistics.value = statisticsPage.value
-      statisticsError.value = ''
-    } else {
-      // 后台轮询失败不能把当前统计卡片清空，只更新错误提示供用户主动重试。
-      if (!statistics.value) statistics.value = undefined
-      statisticsError.value = statisticsPage?.status === 'rejected' && statisticsPage.reason instanceof Error
-        ? statisticsPage.reason.message
-        : '统计接口请求失败'
+    statistics.value = {
+      overview: statisticsResult.overview.status === 'fulfilled' ? statisticsResult.overview.value : undefined,
+      sceneStats: statisticsResult.sceneStats.status === 'fulfilled' ? statisticsResult.sceneStats.value : undefined,
+      taskSummary: statisticsResult.taskSummary.status === 'fulfilled' ? statisticsResult.taskSummary.value : undefined,
+      abnormalSummary: statisticsResult.abnormalSummary.status === 'fulfilled' ? statisticsResult.abnormalSummary.value : undefined,
+      trend: statisticsResult.trend.status === 'fulfilled' ? statisticsResult.trend.value : undefined,
     }
-    void loadSceneAbnormalCounts(currentUnitTasks.value, requestVersion, deptId,
-      statisticsPage?.status === 'fulfilled' ? statisticsPage.value.sceneStats || [] : [])
+    statisticsError.value = Object.values(statisticsResult).some(result => result.status === 'rejected') ? '部分统计接口读取失败' : ''
   } catch (error) {
     // 防御性兜底：无论任何解析/渲染异常，均不可让首页永久处于加载状态。
     statisticsError.value = error instanceof Error ? error.message : '首页数据加载失败'
@@ -489,7 +459,6 @@ const dashboardRefreshTimer = window.setInterval(() => {
 onBeforeUnmount(() => {
   window.clearInterval(dashboardRefreshTimer)
   statisticsRequestVersion += 1
-  abnormalCountRequestVersion += 1
   geometryRequestVersion += 1
   livePreviewRequestVersion += 1
   geometryLoader.clear()
@@ -562,8 +531,8 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <h2>智能识别成果</h2>
                 <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div class="recognition-summary"><DashboardCategoryRing :value="statistics?.abnormalSummary.total ?? '—'" label="识别图斑" :total="statistics?.abnormalSummary.total" :items="recognitionItems" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatRecognitionArea }}<small>亩</small></dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview.resultCount ?? '—'" /></dd></div></dl></div>
-              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary.total || 1, 1) * 100}%`, background: item.color }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">暂无识别分类数据</div></div>
+              <div class="recognition-summary"><DashboardCategoryRing :value="statistics?.abnormalSummary?.total ?? '—'" label="识别图斑" :total="statistics?.abnormalSummary?.total" :items="recognitionItems" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview?.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatRecognitionArea }}<small>亩</small></dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview?.resultCount ?? '—'" /></dd></div></dl></div>
+              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary?.total || 1, 1) * 100}%`, background: item.color }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">{{ statistics?.abnormalSummary ? '暂无识别分类数据' : '识别统计暂不可用' }}</div></div>
             </section>
             <section v-if="isAgricultureTopicDepartment(user)" class="overview-float-panel topic-data-panel">
               <header>
@@ -615,6 +584,8 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 </div>
                 <dl class="metric-legend task-state-legend"><div><dt><i class="legend-muted"></i>任务总数</dt><dd><DashboardFlipNumber :value="unitTaskSummary?.total ?? '—'" /></dd></div><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd><DashboardFlipNumber :value="item.count ?? '—'" /></dd></div></dl></div>
                 <div class="scene-task-legend" aria-label="场景任务数图例">
+                  <div v-if="!statistics?.sceneStats" class="float-empty">场景统计暂不可用</div>
+                  <div v-else-if="!sceneTaskChartItems.length" class="float-empty">暂无场景任务数据</div>
                   <button
                     v-if="user.hasPermission('task-list')"
                     v-for="item in sceneTaskChartItems"
@@ -638,7 +609,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                   </div>
                 </div>
               </div>
-              <div v-else class="float-empty">暂无场景任务数据</div>
+              <div v-else class="float-empty">{{ statisticsLoading ? '正在读取任务统计…' : statistics?.sceneStats ? '暂无场景任务数据' : '场景统计暂不可用' }}</div>
             </section>
 
           </aside>

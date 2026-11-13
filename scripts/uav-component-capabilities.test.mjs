@@ -154,10 +154,11 @@ function mount(path, dependencies, expose) {
   let transientFailure = false
   const h = mount('src/workspace-components/realtime-cruise/GlobalLiveCruisePanel.vue', {
     '@/stores/user': { useUserStore: () => user }, '@/utils/uav-component-capabilities': capabilities,
+    '@/api/pagination': load(readFileSync('src/api/pagination.ts', 'utf8'), {}),
     '@/workspace-components/shared/component-feedback': feedback,
     '@/api/patrol': {
       getRoutes: async () => ({ list: [] }), getLiveStreams: async () => ({ list: [] }),
-      getUavFlightTaskOptions: async () => ({ list: tasks }),
+      getUavFlightTaskOptions: async ({ pageNum }) => ({ list: pageNum === 1 ? tasks.slice(0, 2) : tasks.slice(2), total: tasks.length }),
       getUavComponentUrl: async (type, target) => {
         calls.push({ type, target })
         if (transientFailure) throw new Error('网络超时')
