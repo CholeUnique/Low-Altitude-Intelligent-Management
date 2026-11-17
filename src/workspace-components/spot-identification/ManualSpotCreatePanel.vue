@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { ElTooltip } from 'element-plus'
+import { computed, ref, watch } from 'vue'
 import { addRecognitionSpot, getRecognitionSpotTypes } from '@/api/recognition-spot'
 import type { RecognitionAbnormalType, RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import type { MapServiceItem } from '@/api/map-service'
@@ -45,22 +44,6 @@ const selectedMapServiceIds = ref<Array<string | number>>([])
 const submitting = ref(false)
 const submitError = ref('')
 const submitSuccess = ref('')
-const aiNoticePending = ref(false)
-let aiNoticeTimer: ReturnType<typeof setTimeout> | undefined
-
-function showAiPendingNotice() {
-  if (aiNoticeTimer) clearTimeout(aiNoticeTimer)
-  aiNoticePending.value = true
-  aiNoticeTimer = setTimeout(() => {
-    aiNoticePending.value = false
-    aiNoticeTimer = undefined
-  }, 3000)
-}
-
-onBeforeUnmount(() => {
-  if (aiNoticeTimer) clearTimeout(aiNoticeTimer)
-})
-
 const boundaryReady = computed(() => props.coordinates.length >= 3)
 const canSubmit = computed(() => Boolean(selectedSceneCode.value && abnormalType.value && title.value.trim() && boundaryReady.value
   && selectedMapServiceIds.value.length && !props.drawing && !submitting.value))
@@ -171,26 +154,13 @@ function toggleMapServiceSelection(serviceId: string | number, checked: boolean)
   <section class="manual-spot-panel panel">
     <div class="manual-spot-heading">
       <span>新增异常图斑</span>
-      <ElTooltip
-        popper-class="ai-recognition-tooltip"
-        :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }"
-        placement="top-end"
-        effect="light"
-        @hide="aiNoticePending = false"
-      >
-        <template #content>
-          <div class="ai-tooltip-card" :class="{ 'is-pending': aiNoticePending }" role="status">
-            <strong>{{ aiNoticePending ? '该功能待后端接入' : 'AI智能新增异常图斑' }}</strong>
-          </div>
-        </template>
-        <button type="button" class="ai-recognition-button" aria-label="AI智能新增异常图斑" @click="showAiPendingNotice">AI识别</button>
-      </ElTooltip>
+      <button type="button" class="cancel-create" :disabled="submitting" @click="emit('cancel-drawing')">取消</button>
     </div>
     <div class="manual-spot-form">
       <div class="geometry-card field--wide" :class="{ ready: boundaryReady, drawing }">
         <div><b>{{ drawStatus }}</b><small v-if="drawing" class="drawing-tip">可在全屏下窗口绘制</small></div>
         <button v-if="!drawing" type="button" :disabled="!drawingAvailable" @click="emit('start-drawing')">{{ boundaryReady ? '重绘' : '绘制' }}</button>
-        <button v-else class="cancel" type="button" @click="emit('cancel-drawing')">取消</button>
+        <button v-else class="cancel" type="button" :disabled="submitting" @click="emit('cancel-drawing')">取消</button>
       </div>
       <div v-if="drawing" class="drawing-actions field--wide">
         <button type="button" :disabled="!coordinates.length" @click="emit('undo-point')">撤销一点</button>
@@ -201,13 +171,15 @@ function toggleMapServiceSelection(serviceId: string | number, checked: boolean)
       <label class="field"><span>异常类型 <WorkbenchRequiredMark /></span><ElSelect class="system-select" popper-class="system-select-options" :empty-values="[null, undefined]" v-model="abnormalType" :disabled="!selectedSceneCode || abnormalTypesLoading"><ElOption value="" disabled :label="abnormalTypesLoading ? '正在读取异常类型…' : '请选择异常类型'" /><ElOption v-for="item in abnormalTypes" :key="item.value" :value="item.value" :label="item.label" /></ElSelect><small v-if="abnormalTypesError" class="field-error">{{ abnormalTypesError }}</small></label>
       <label class="field"><span>发现时间</span><SpotDateTimePicker v-model="foundTime" placeholder="选择时间" compact /></label>
       <label class="field field--wide"><span>图斑标题 <WorkbenchRequiredMark /></span><input v-model="title" maxlength="100" placeholder="请输入图斑标题" /></label>
-      <fieldset class="reference-services field--wide">
-        <legend>参考影像地图服务 <WorkbenchRequiredMark /></legend>
+      <div class="reference-services field--wide" role="group" aria-labelledby="reference-services-label">
+        <span id="reference-services-label" class="reference-services__label">参考影像地图服务 <WorkbenchRequiredMark /></span>
+        <div class="reference-services__content">
         <div v-if="mapServices.length" class="reference-service-list">
           <label v-for="service in mapServices" :key="service.id"><input type="checkbox" :checked="selectedMapServiceIds.some((id) => String(id) === String(service.id))" @change="toggleMapServiceSelection(service.id, ($event.target as HTMLInputElement).checked)" /><span :title="service.name">{{ service.name }}</span><small v-if="selectedMapServiceIds.some((id) => String(id) === String(service.id))">第 {{ selectedMapServiceIds.findIndex((id) => String(id) === String(service.id)) + 1 }} 期</small></label>
         </div>
         <small v-else>暂无已启用的影像地图服务</small>
-      </fieldset>
+        </div>
+      </div>
       <label class="field field--wide"><span>图斑描述</span><textarea v-model="description" maxlength="500" placeholder="请输入图斑描述"></textarea></label>
       <p v-if="submitError" class="submit-message submit-message--error">{{ submitError }}</p>
       <p v-if="submitSuccess" class="submit-message submit-message--success">{{ submitSuccess }}</p>
@@ -218,12 +190,13 @@ function toggleMapServiceSelection(serviceId: string | number, checked: boolean)
 
 <style scoped lang="scss">
 .manual-spot-panel{min-height:0;display:flex;flex-direction:column;overflow:hidden;background:linear-gradient(180deg,#fff 0%,#f7fbfc 100%)}
-.manual-spot-heading{flex:0 0 50px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 15px;color:#173f57;border-bottom:1px solid #dce8ee;font-size:19px;font-weight:700}.ai-recognition-button{flex:none;padding:6px 10px;color:#08799d;background:#e8f6fa;border:1px solid #9ed4e3;border-radius:5px;font-size:12px;font-weight:700;line-height:1.2;cursor:pointer;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}.ai-recognition-button:hover{color:#fff;background:#168eb3;border-color:#168eb3;box-shadow:0 2px 8px #08779c32}.ai-recognition-button:focus-visible{outline:2px solid #08799d;outline-offset:2px}
-.ai-tooltip-card{padding:9px 12px;border-radius:7px;background:linear-gradient(135deg,#fff,#f3fafc);font-family:var(--ui-font)}.ai-tooltip-card strong{display:block;color:#173f57;font-size:12px;line-height:1.4;white-space:nowrap}.ai-tooltip-card.is-pending{background:linear-gradient(135deg,#fff,#fff5f6)}.ai-tooltip-card.is-pending strong{color:#c43b4d}
+.manual-spot-heading{flex:0 0 50px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 15px;color:#173f57;border-bottom:1px solid #dce8ee;font-size:19px;font-weight:700}
+.cancel-create{padding:6px 10px;color:var(--ui-body);background:var(--ui-input);border:1px solid var(--ui-border);border-radius:5px;font-size:13px;cursor:pointer}.cancel-create:hover:not(:disabled){background:var(--ui-hover)}.cancel-create:disabled{opacity:.5;cursor:not-allowed}
 .manual-spot-form{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-content:start;gap:12px;padding:15px;overflow-x:hidden;overflow-y:auto;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#8aa9b7 #edf4f7}.manual-spot-form::-webkit-scrollbar{width:8px}.manual-spot-form::-webkit-scrollbar-track{background:#edf4f7}.manual-spot-form::-webkit-scrollbar-thumb{background:#8aa9b7;border:2px solid #edf4f7;border-radius:8px}.manual-spot-form::-webkit-scrollbar-thumb:hover{background:#668b9c}.field--wide{grid-column:1/-1}.field{min-width:0;display:flex;flex-direction:column;gap:6px}.field>span{color:#486879;font-size:13px;font-weight:700}.field em{color:#d84a59;font-style:normal}.field input,.field select,.field textarea{width:100%;min-width:0;box-sizing:border-box;color:#294b5d;background:#fff;border:1px solid #c6d9e3;border-radius:5px;outline:none;font:inherit;font-size:13px}.field input,.field select{height:40px;padding:0 10px}.field textarea{height:72px;padding:10px;resize:none;line-height:1.5}.field input:focus,.field select:focus,.field textarea:focus{border-color:#1597bc;box-shadow:0 0 0 2px #1597bc1b}.field input:disabled{color:#567180;background:#edf3f6}.field select:hover,.field select:focus{color:#fff;background:#075273}.field select option{color:#38586a;background:#fff}
 .field input:focus::placeholder,.field textarea:focus::placeholder{color:transparent}
 .field-error{color:#b84450;font-size:12px;line-height:1.4}
 .reference-services{min-width:0;margin:0;padding:10px 11px;border:1px solid #c6d9e3;border-radius:5px}.reference-services legend{padding:0 4px;color:#486879;font-size:13px;font-weight:700}.reference-services em{color:#d84a59;font-style:normal}.reference-services>small{color:#718d9b;font-size:12px}.reference-service-list{max-height:112px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;overflow:auto}.reference-service-list label{min-width:0;display:flex;align-items:center;gap:8px;color:#38596a;font-size:12px;line-height:1.4;cursor:pointer}.reference-service-list input{flex:none;width:15px;height:15px;margin:0;accent-color:#168eb3}.reference-service-list span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-service-list small{flex:none;padding:2px 5px;color:#087b9d;background:#e5f5f9;border-radius:3px;font-size:12px}
+.reference-services{display:flex;flex-direction:column;gap:6px;padding:0;border:0;background:transparent}.reference-services__label{color:#486879;font-size:13px;font-weight:700;line-height:1.4}.reference-services__content{min-width:0;padding:10px 11px;border:1px solid #c6d9e3;border-radius:5px}.reference-services__content>small{color:#718d9b;font-size:12px}
 .geometry-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:9px;padding:11px;background:#edf5f8;border:1px dashed #8fb9ca;border-radius:6px}.geometry-card.ready{background:#e8f7f1;border-color:#55b18f}.geometry-card.drawing{background:#e8f5fb;border-color:#1598bd;box-shadow:0 0 0 2px #1598bd12}.geometry-card b,.geometry-card small{display:block}.geometry-card b{color:#244b5e;font-size:13px}.geometry-card small{margin-top:4px;color:#718994;font-size:12px;line-height:1.35}.geometry-card .drawing-tip{color:#d84a59}.geometry-card button,.drawing-actions button,.submit-button{border:0;border-radius:5px;cursor:pointer}.geometry-card button{min-width:58px;padding:8px 10px;color:#fff;background:#168eb3;font-size:12px;font-weight:700}.geometry-card button.cancel{background:#6e8390}.geometry-card button:disabled,.drawing-actions button:disabled,.submit-button:disabled{cursor:not-allowed;opacity:.48}
 .drawing-actions{display:flex;gap:7px}.drawing-actions button{min-height:34px;padding:0 10px;color:#466776;background:#fff;border:1px solid #bfd3dc;font-size:12px}.drawing-actions button.finish{margin-left:auto;color:#fff;background:#168eb3;border-color:#168eb3}.submit-message{grid-column:1/-1;margin:0;padding:9px 10px;border-radius:4px;font-size:12px;line-height:1.5;word-break:break-all}.submit-message--error{color:#b84450;background:#fff0f2}.submit-message--success{color:#167254;background:#e4f6ef}.submit-button{height:42px;color:#fff;background:linear-gradient(135deg,#159ac0,#08779c);box-shadow:0 4px 10px #08779c32;font-size:14px;font-weight:800}.submit-button:hover:not(:disabled){background:linear-gradient(135deg,#1089ad,#05688a)}
 @media(max-width:1180px){.manual-spot-form{grid-template-columns:1fr;padding:10px}.field--wide{grid-column:auto}.field textarea{height:52px}}

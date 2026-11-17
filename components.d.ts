@@ -34,6 +34,7 @@ declare module 'vue' {
     FacilityReportDialog: typeof import('./src/components/FacilityReportDialog.vue')['default']
     FacilityReportImageGallery: typeof import('./src/components/FacilityReportImageGallery.vue')['default']
     FacilityReportPhotos: typeof import('./src/components/FacilityReportPhotos.vue')['default']
+    FilterActions: typeof import('./src/components/FilterActions.vue')['default']
     ManagementNavIcon: typeof import('./src/components/ManagementNavIcon.vue')['default']
     MapServiceManagementPanel: typeof import('./src/components/MapServiceManagementPanel.vue')['default']
     MetadataManagementPanel: typeof import('./src/components/MetadataManagementPanel.vue')['default']

@@ -21,6 +21,21 @@ const first = task('A'), second = task('B'), third = task('C')
 const all = { task: () => true, media: () => true }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
+// Device filters reach the media API and use a separate cache from unfiltered results.
+{
+  const calls = []
+  const pager = pagerApi.createCollectionMediaPager([first], async params => {
+    calls.push(params)
+    return { list: [photo(params.droneSn || 'all')], total: 1 }
+  })
+  await pager.readUntil(1, all)
+  const filtered = await pager.readUntil(1, { ...all, droneSn: 'drone-1' })
+  assert.equal(filtered.entries[0].media.id, 'drone-1')
+  assert.equal(calls[1].droneSn, 'drone-1')
+  assert.equal(pager.taskMedia('A', 'drone-1')[0].id, 'drone-1')
+  assert.equal(pager.taskMedia('A')[0].id, 'all')
+}
+
 // A short task fills the first screen from B, with fixed backend page sizes and cached overflow.
 {
   const calls = []
@@ -66,7 +81,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 }
 
 let source = readFileSync('src/views/DataResultsView.vue', 'utf8')
-source = source.replace('</script>', 'defineExpose({ pageMedia, currentPage, pageSize, filteredMedia, knownTotal, hasMoreMedia, mediaSummaryTotal, summaryError, error, mediaScanLoading, keyword, taskFilter, mediaTypeFilter, loadMediaPage, loadTasks, setPage, previewMedia, previewTask, previewItems, previewIndex, previewSwitching, previewNotice, openMedia, switchPreview, closePreview });\n</script>')
+source = source.replace('</script>', 'defineExpose({ pageMedia, currentPage, pageSize, filteredMedia, knownTotal, hasMoreMedia, mediaSummaryTotal, summaryError, error, mediaScanLoading, keyword, taskFilter, mediaTypeFilter, loadMediaPage, loadTasks, setPage, previewMedia, previewTask, previewItems, previewIndex, previewSwitching, previewNotice, openMedia, switchPreview, closePreview, draftFilters, applyFilters, resetFilters });\n</script>')
 const compiled = compileScript(parse(source).descriptor, { id: 'collection-pagination-test' }).content
 globalThis.window = { setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {} }
 const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode: () => null, nextSibling: () => null })
@@ -76,6 +91,7 @@ async function harness(records, options = {}) {
   let hook = options.hook
   const component = load(compiled, {
     vue: Vue,
+    '@/components/FilterActions.vue': { default: {} },
     '@/api/patrol': {
       getUavFlightTaskOptions: async ({ pageNum }) => {
         calls.push({ kind: 'tasks', pageNum })
@@ -116,6 +132,15 @@ const mediaCalls = calls => calls.filter(call => call.kind === 'media')
   assert.deepEqual(mediaCalls(calls).map(call => `${call.taskId}:${call.pageNum}`), ['A:1'])
   assert.equal(vm.mediaSummaryTotal, 83, 'Summary is exact without scanning all media')
   assert.equal(vm.pageMedia.length, 40)
+  vm.draftFilters.taskFilter = 'B'
+  await flush()
+  assert.equal(vm.pageMedia[0].task.id, 'A', 'Editing a filter does not change the results')
+  vm.applyFilters()
+  await flush()
+  assert.equal(vm.pageMedia[0].task.id, 'B', 'Query applies the chosen task')
+  vm.resetFilters()
+  await flush()
+  assert.equal(vm.pageMedia[0].task.id, 'A', 'Reset restores the unfiltered list')
   const entry = vm.pageMedia.at(-1)
   vm.openMedia(entry.media, entry.task, vm.filteredMedia)
   await vm.switchPreview(1)

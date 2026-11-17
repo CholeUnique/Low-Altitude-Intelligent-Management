@@ -168,7 +168,7 @@ function statusLabel(value: number) {
   return statuses.find((item) => item.value === value)?.label || '未知状态'
 }
 function spotSourceLabel(value: string) {
-  return ({ MANUAL_UPLOAD: '文件上传', MANUAL_DRAW: '手工绘制', API_IMPORT: '接口导入', TASK_ABNORMAL: '任务识别' } as Record<string, string>)[value] || value
+  return ({ MANUAL_UPLOAD: '离线AI识别', MANUAL_DRAW: '手工绘制', API_IMPORT: '接口导入', TASK_ABNORMAL: '任务识别' } as Record<string, string>)[value] || value
 }
 function formatTime(value?: string) {
   return value ? value.replace('T', ' ').slice(0, 16) : '-'
@@ -612,7 +612,7 @@ onBeforeUnmount(() => {
     <section class="review-layout">
       <aside class="spot-list panel">
         <header><b>问题图斑列表</b><span>{{ filtered.length }} / {{ visibleRecords.length }} 处</span></header>
-        <div class="filters"><input v-model="keyword" placeholder="搜索图斑编号、名称或类型" /><div><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="sceneFilter" aria-label="场景筛选"><ElOption value="" label="全部场景" /><ElOption v-for="item in sceneOptions" :key="item.value" :value="item.value" :label="String(item.label)" /></ElSelect><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="statusFilter"><ElOption value="" label="全部状态" /><ElOption v-for="item in statuses" :key="item.value" :value="item.value" :label="String(item.label)" /></ElSelect></div></div>
+        <div class="filters"><input class="ui-filter-search" v-model="keyword" placeholder="搜索图斑编号、名称或类型" /><div><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="sceneFilter" aria-label="场景筛选"><ElOption value="" label="全部场景" /><ElOption v-for="item in sceneOptions" :key="item.value" :value="item.value" :label="String(item.label)" /></ElSelect><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="statusFilter"><ElOption value="" label="全部状态" /><ElOption v-for="item in statuses" :key="item.value" :value="item.value" :label="String(item.label)" /></ElSelect></div></div>
         <div class="spot-scroll">
           <button
             v-for="(item,index) in filtered"

@@ -298,7 +298,7 @@ onMounted(async () => {
     <div class="permission-layout">
       <section class="user-card">
         <header><div><h3>{{ isSystemAdmin ? '选择用户' : '选择普通用户' }}</h3><span>{{ users.length }} 人</span></div></header>
-        <form class="user-search" @submit.prevent="loadUsers"><input v-model.trim="userKeyword" placeholder="搜索账号、姓名或手机号"><button type="submit">查询</button></form>
+        <form class="user-search" @submit.prevent="loadUsers"><input class="ui-filter-search" v-model.trim="userKeyword" placeholder="搜索账号、姓名或手机号"><button type="submit">查询</button></form>
         <div class="user-list">
           <div v-if="userLoading" class="permission-empty">正在加载用户…</div>
           <div v-else-if="!users.length" class="permission-empty">暂无符合条件的用户</div>

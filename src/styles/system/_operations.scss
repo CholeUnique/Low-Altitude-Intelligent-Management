@@ -83,6 +83,12 @@
 }
 
 #app .general-review .stat-grid > article { background: var(--ui-panel-background); border-color: var(--ui-border); }
+html[data-ui-theme='light'] #app .recognition-content .governance-page .create-spot-bar {
+  .review-button:not(:disabled) { color: #087a58; }
+  .detail-action--revoke:not(:disabled) { color: #b83f48; }
+  .detail-action--ignore:not(:disabled) { color: #956000; }
+  .create-spot-button:not(:disabled) { color: #0879aa; }
+}
 #app .general-review .stat-grid article strong { color: var(--ui-text); font-size: 28px; }
 #app .general-review .stat-grid article small { color: var(--ui-muted); font-size: 12px; }
 #app .general-review .stat-grid article span { color: var(--ui-muted); font-size: 13px; }
@@ -118,14 +124,21 @@
   }
   .submit-message--success { color: #7ce2bf; background: rgb(32 201 151 / 13%); }
   .spot-action-button--revoke, .detail-action--revoke { color: #ffaaaa; }
+  .create-spot-bar button { background: var(--ui-input); border-color: var(--ui-border); }
+  .create-spot-bar .review-button:not(:disabled) { color: #63dfb7; }
+  .create-spot-bar .detail-action--revoke:not(:disabled) { color: #ff9b9f; }
+  .create-spot-bar .detail-action--ignore:not(:disabled) { color: #ffc875; }
+  .create-spot-bar .create-spot-button:not(:disabled) { color: #72caff; }
+  .create-spot-bar button:hover:not(:disabled) { background: var(--ui-hover); border-color: var(--ui-accent); }
+  .create-spot-bar button:disabled { color: var(--ui-muted); background: var(--ui-input); border-color: var(--ui-border); }
   .detail :is(dt, dd), .spot-detail dl > div { border-color: var(--ui-divider); }
   .manual-spot-form { scrollbar-color: #527c94 transparent; }
   .manual-spot-form::-webkit-scrollbar-track { background: transparent; }
   .manual-spot-form::-webkit-scrollbar-thumb { background: #527c94; border-color: transparent; }
-  .field > span, .reference-services legend, .reference-service-list label { color: var(--ui-body); }
-  .reference-services, .geometry-card { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
+  .field > span, .reference-services__label, .reference-service-list label { color: var(--ui-body); }
+  .reference-services__content, .geometry-card { color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); }
   .geometry-card b { color: var(--ui-text); }
-  .geometry-card small, .reference-services > small { color: var(--ui-muted); }
+  .geometry-card small, .reference-services__content > small { color: var(--ui-muted); }
   .field input, .field textarea, .task-name-field input, .upload-form :is(input, textarea) {
     color: var(--ui-body); background: var(--ui-input); border-color: var(--ui-border); color-scheme: dark;
   }
@@ -224,6 +237,20 @@
   .daily-list article > b { color: var(--ui-text); font-size: 14px; }
   .daily-list article > span, .daily-list article > small, .daily-panel > footer { color: var(--ui-muted); font-size: 12px; }
   .daily-panel > footer { background: var(--ui-surface); }
+  .plan-list-panel { grid-template-rows: 48px minmax(0, 1fr) auto; }
+  .plan-list-panel > header { background: var(--ui-surface-raised); color: var(--ui-muted); border-color: var(--ui-divider); font-size: 15px; }
+  .plan-list-panel article { min-height: 78px; padding-block: 8px; color: var(--ui-body); border-color: var(--ui-divider); cursor: pointer; font-size: 14px; }
+  .plan-list-panel article:hover, .plan-list-panel article:focus-visible { background: var(--ui-hover); }
+  .plan-list-panel article:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: -2px; }
+  .plan-list-panel article b { color: var(--ui-text); font-size: 15px; }
+  .plan-list-panel article small { color: var(--ui-muted); font-size: 13px; }
+  .plan-list-panel article em { font-size: 13px; }
+  .plan-list-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 19px; border-top: 1px solid var(--ui-divider); background: var(--ui-surface-raised); color: var(--ui-muted); font-size: 13px; }
+  .plan-list-pagination__controls, .plan-list-pagination label { display: flex; align-items: center; gap: 10px; }
+  .plan-list-pagination .plan-list-page-size { width: 100px; }
+  .plan-list-pagination button { padding: 6px 11px; border: 1px solid var(--ui-border); border-radius: 5px; color: var(--ui-body); background: var(--ui-input); cursor: pointer; }
+  .plan-list-pagination button:not(:disabled):hover { background: var(--ui-hover); color: var(--ui-text); }
+  .plan-list-pagination button:disabled { opacity: .45; cursor: not-allowed; }
 }
 html[data-ui-theme='light'] #app .flight-plan-calendar {
   .day-cell.muted { background: #e7edf1; }

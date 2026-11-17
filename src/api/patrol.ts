@@ -18,6 +18,9 @@ export interface PageQuery {
   keyword?: string
   projectId?: string
   taskId?: string
+  planId?: string
+  droneSn?: string
+  gatewaySn?: string
   flightTaskId?: string
   status?: number
   waylineId?: string
@@ -37,6 +40,8 @@ export interface UavDeviceOption {
   cameraSummary?: string
   longitude?: number
   latitude?: number
+  kind?: 'dock' | 'aircraft' | 'device'
+  children?: UavDeviceOption[]
 }
 
 export interface UavDeviceFlightStatistic {
@@ -49,6 +54,17 @@ export interface UavDeviceFlightStatistic {
   flightTime?: number
   statStartDate?: string
   statEndDate?: string
+}
+
+export interface UavDroneSummary {
+  sn: string
+  droneName?: string
+  droneType?: string
+  flightCount?: number
+  flightDistance?: number
+  flightTime?: number
+  executingCount?: number
+  noEndTimeCount?: number
 }
 
 export interface UavDeviceState {
@@ -210,6 +226,8 @@ export async function getUavDeviceOptions(): Promise<UavDeviceOption[]> {
       : ''
     const longitude = Number(item.longitude ?? item.lng ?? item.lon)
     const latitude = Number(item.latitude ?? item.lat)
+    const modelType = String(item.deviceModelType ?? item.deviceModelName ?? '').toUpperCase()
+    const children = parseDeviceChildren(item.childJson ?? item.child_json, id)
     return {
       id,
       label: `${name}${model}`,
@@ -221,7 +239,37 @@ export async function getUavDeviceOptions(): Promise<UavDeviceOption[]> {
       cameraSummary: summarizeDeviceCameras(item.cameraList),
       longitude: Number.isFinite(longitude) && Math.abs(longitude) <= 180 ? longitude : undefined,
       latitude: Number.isFinite(latitude) && Math.abs(latitude) <= 90 ? latitude : undefined,
+      kind: modelType.includes('DOCK') || children.length ? 'dock' : 'device',
+      children,
     }
+  })
+}
+
+/** 子机保留独立身份和状态，不用机巢信息填充缺失字段。 */
+export function parseDeviceChildren(raw: unknown, parentId: string): UavDeviceOption[] {
+  let value = raw
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value) as unknown } catch { return [] }
+  }
+  const entries = Array.isArray(value) ? value : value && typeof value === 'object' ? [value] : []
+  const seen = new Set<string>()
+  return entries.flatMap((entry): UavDeviceOption[] => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const child = entry as Record<string, unknown>
+    const sn = valueOf(child, 'sn', 'droneSn', 'aircraftSn')
+    if (!sn || seen.has(sn)) return []
+    seen.add(sn)
+    const modelInfo = child.device_model ?? child.deviceModel
+    const modelRecord = modelInfo && typeof modelInfo === 'object' && !Array.isArray(modelInfo) ? modelInfo as Record<string, unknown> : {}
+    const model = valueOf(modelRecord, 'name', 'type') || valueOf(child, 'deviceModelName', 'droneType')
+    const name = valueOf(child, 'callsign', 'nickname', 'deviceName', 'name') || sn
+    const onlineRaw = child.device_online_status ?? child.deviceOnlineStatus ?? child.onlineStatus ?? child.online
+    const online = onlineRaw === undefined || onlineRaw === null ? undefined : onlineRaw === true || onlineRaw === 1 || onlineRaw === '1' || onlineRaw === 'true'
+    const camera = child.camera_list ?? child.cameraList
+    return [{ id: `${parentId}:aircraft:${sn}`, kind: 'aircraft', sn, label: name, callsign: valueOf(child, 'callsign') || undefined, model: model || undefined, online,
+      cameraList: camera == null ? undefined : typeof camera === 'string' ? camera : JSON.stringify(camera),
+      cameraSummary: camera == null ? undefined : summarizeDeviceCameras(typeof camera === 'string' ? camera : JSON.stringify(camera)),
+    }]
   })
 }
 
@@ -238,6 +286,22 @@ export async function getUavDeviceFlightStatistics(sn: string): Promise<UavDevic
     flightTime: optionalNumber(item.flightTime),
     statStartDate: item.statStartDate == null ? undefined : String(item.statStartDate),
     statEndDate: item.statEndDate == null ? undefined : String(item.statEndDate),
+  }))
+}
+
+/** 按实际执行飞行器汇总任务；距离为米，时长为秒。 */
+export async function getUavDroneSummary(sn: string): Promise<UavDroneSummary[]> {
+  const data = await apiClient.post<never, Array<Record<string, unknown>> | null>('/v1/uav/device/drone-summary', { sn })
+  if (!Array.isArray(data)) throw new Error('飞行器统计接口返回的数据格式无效。')
+  return data.map(item => ({
+    sn: String(item.sn ?? ''),
+    droneName: item.droneName == null ? undefined : String(item.droneName),
+    droneType: item.droneType == null ? undefined : String(item.droneType),
+    flightCount: optionalNumber(item.flightCount),
+    flightDistance: optionalNumber(item.flightDistance),
+    flightTime: optionalNumber(item.flightTime),
+    executingCount: optionalNumber(item.executingCount),
+    noEndTimeCount: optionalNumber(item.noEndTimeCount),
   }))
 }
 
@@ -274,9 +338,9 @@ export async function getUavDeviceAlarms(sn: string): Promise<{ list: UavDeviceA
     pageNum: 1,
     pageSize: 200,
   })
-  const list = (data.records || []).map((item, index) => ({
+  const list = (data.records || []).filter(item => String(item.sn ?? '') === sn).map((item, index) => ({
     id: String(item.id ?? `${sn}-${index}`),
-    sn: String(item.sn ?? sn),
+    sn: String(item.sn),
     level: optionalNumber(item.level),
     module: optionalNumber(item.module),
     code: item.hmsKey == null ? undefined : String(item.hmsKey),
@@ -367,7 +431,7 @@ export async function getFlightTaskMedia(params: PageQuery) {
   return toMediaList(data)
 }
 
-/** 从机槽记录的 child_json 里解析子机（飞机）信息；顶层 sn 是机槽的，直播要用飞机的 SN。 */
+/** 从机巢记录的 child_json 里解析子机（飞机）信息；顶层 sn 是机巢的，直播要用飞机的 SN。 */
 function droneInfoOf(device: Record<string, unknown>): { sn: string; callsign?: string; nickname?: string; online?: boolean } {
   const raw = device.childJson ?? device.child_json
   const parseEntries = (text: string): Array<Record<string, unknown>> => {
@@ -412,8 +476,8 @@ export async function getLiveStreams(): Promise<{ list: LiveStream[]; total: num
     Number(device.deviceOnlineStatus ?? device.onlineStatus ?? device.online ?? 0) === 1,
   )
   const results = await Promise.allSettled(onlineDevices.map(async (device) => {
-    // 设备分页返回的是机槽（机场）记录，顶层 sn 是机槽 SN；直播/分享码接口要求飞机 SN，取 child_json 里的子机 SN。
-    // 飞机离线时其直播流不可用，回退到机槽摄像头（DOCK_CAMERA）。
+    // 设备分页返回的是机巢（机场）记录，顶层 sn 是机巢 SN；直播/分享码接口要求飞机 SN，取 child_json 里的子机 SN。
+    // 飞机离线时其直播流不可用，回退到机巢摄像头（DOCK_CAMERA）。
     const drone = droneInfoOf(device)
     const dockSn = valueOf(device, 'sn')
     const useDockFeed = drone.online === false && !!dockSn
@@ -485,7 +549,7 @@ function toDeviceLiveStream(device: Record<string, unknown>, drone: { sn: string
     id: String(device.id ?? sn),
     aircraftId: sn,
     callsign: useDockFeed ? undefined : (drone.callsign || valueOf(device, 'callsign') || undefined),
-    aircraftName: useDockFeed ? `${dockName}（机槽画面）` : drone.callsign || drone.nickname || dockName || sn,
+    aircraftName: useDockFeed ? `${dockName}（机巢画面）` : drone.callsign || drone.nickname || dockName || sn,
     status: 'ONLINE',
     protocol: playUrl ? liveProtocol(playUrl) : 'OTHER',
     playUrl,

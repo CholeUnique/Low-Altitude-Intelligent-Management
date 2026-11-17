@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import FilterActions from '@/components/FilterActions.vue'
 import { useRouter } from 'vue-router'
 import { ElSelect, ElOption } from 'element-plus'
 import 'element-plus/es/components/select/style/css'
@@ -23,6 +24,9 @@ const selectedScene = ref('')
 const sceneOptions = computed(() => [...new Map(tasks.value.filter(task => task.sceneName).map(task => [task.sceneCode || task.sceneName, { code: task.sceneCode || task.sceneName, name: task.sceneName }])).values()])
 const processType = ref<TodoTaskStatus | ''>('pending')
 const deadlineSort = ref<TodoDeadlineSort>('default')
+const draftFilters = reactive<{ keyword: string; selectedScene: string; processType: TodoTaskStatus | ''; deadlineSort: TodoDeadlineSort }>({ keyword: '', selectedScene: '', processType: 'pending', deadlineSort: 'default' })
+function applyFilters() { keyword.value = draftFilters.keyword; selectedScene.value = draftFilters.selectedScene; processType.value = draftFilters.processType; deadlineSort.value = draftFilters.deadlineSort }
+function resetFilters() { Object.assign(draftFilters, { keyword: '', selectedScene: '', processType: 'pending', deadlineSort: 'default' }); applyFilters() }
 let requestVersion = 0
 
 const currentUserId = computed(() => String(user.currentUser?.id || ''))
@@ -98,6 +102,7 @@ async function loadTasks() {
     if (version !== requestVersion) return
     tasks.value = result.records
     if (selectedScene.value && !sceneOptions.value.some(scene => scene.code === selectedScene.value)) selectedScene.value = ''
+    if (draftFilters.selectedScene && !sceneOptions.value.some(scene => scene.code === draftFilters.selectedScene)) draftFilters.selectedScene = ''
     warnings.value = result.warnings
   } catch (reason) {
     if (version !== requestVersion) return
@@ -125,10 +130,11 @@ onBeforeUnmount(() => {
     <div class="todo-layout">
       <main class="todo-main">
         <section class="todo-filters">
-          <label class="search-control">搜索任务<div><span>⌕</span><input v-model="keyword" placeholder="任务名称、编号、场景或部门" /></div></label>
-          <label>业务场景<ElSelect v-model="selectedScene" aria-label="按待办场景筛选" popper-class="todo-filter-options"><ElOption label="全部场景" value="" /><ElOption v-for="scene in sceneOptions" :key="scene.code" :value="scene.code" :label="scene.name" /></ElSelect></label>
-          <label>处理类型<ElSelect v-model="processType" aria-label="处理类型" popper-class="todo-filter-options"><ElOption label="全部类型" value="" /><ElOption label="已处理" value="handled" /><ElOption label="待处理" value="pending" /><ElOption label="已结案" value="archived" /></ElSelect></label>
-          <label>排序方式<ElSelect v-model="deadlineSort" aria-label="待办排序方式" popper-class="todo-filter-options"><ElOption label="默认排序" value="default" /><ElOption label="截止时间由近到远" value="asc" /><ElOption label="截止时间由远到近" value="desc" /></ElSelect></label>
+          <label class="search-control">搜索任务<div><span>⌕</span><input class="ui-filter-search" v-model="draftFilters.keyword" placeholder="任务名称、编号、场景或部门" @keyup.enter="applyFilters" /></div></label>
+          <label>业务场景<ElSelect v-model="draftFilters.selectedScene" aria-label="按待办场景筛选" popper-class="todo-filter-options"><ElOption label="全部场景" value="" /><ElOption v-for="scene in sceneOptions" :key="scene.code" :value="scene.code" :label="scene.name" /></ElSelect></label>
+          <label>处理类型<ElSelect v-model="draftFilters.processType" aria-label="处理类型" popper-class="todo-filter-options"><ElOption label="全部类型" value="" /><ElOption label="已处理" value="handled" /><ElOption label="待处理" value="pending" /><ElOption label="已结案" value="archived" /></ElSelect></label>
+          <label>排序方式<ElSelect v-model="draftFilters.deadlineSort" aria-label="待办排序方式" popper-class="todo-filter-options"><ElOption label="默认排序" value="default" /><ElOption label="截止时间由近到远" value="asc" /><ElOption label="截止时间由远到近" value="desc" /></ElSelect></label>
+                  <FilterActions @query="applyFilters" @reset="resetFilters" />
         </section>
 
         <p v-if="error" class="todo-warning">真实待办加载失败：{{ error }}。请重试。</p>
@@ -221,6 +227,9 @@ onBeforeUnmount(() => {
 }
 @media(max-width:1100px){.todo-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.todo-filters{grid-template-columns:minmax(0,1fr)}}
+
+.todo-filters{grid-template-columns:minmax(100px,1fr) minmax(130px,220px) minmax(100px,120px) minmax(130px,180px) auto;align-items:end;overflow-x:auto}
+.todo-filters :deep(.filter-actions){grid-column:auto}
 </style>
 
 <style lang="scss">

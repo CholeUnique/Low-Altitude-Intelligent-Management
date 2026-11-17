@@ -1,5 +1,6 @@
 @use './badges';
 
+
 #app .task-center-content { display: flex; flex-direction: column; overflow: hidden; color: var(--ui-body); background: var(--ui-page-background); }
 #app .task-center-content .content-heading { flex: none; min-height: 76px; padding: 16px 20px; border-color: var(--ui-divider); background: transparent; }
 #app .task-center-content .content-heading h1 { font-size: 22px; line-height: 28px; color: var(--ui-text); }
@@ -138,3 +139,6 @@ html[data-ui-theme] .todo-filter-options .el-select-dropdown__item.is-hovering, 
   #app .detail-main { grid-template-rows: auto 360px auto; }
   #app .detail-bottom > .detail-panel { height: 320px; }
 }
+
+#app .task-list-page .task-filters { grid-template-columns: minmax(95px, 1.15fr) minmax(105px, .9fr) minmax(95px, .8fr) minmax(180px, 1.6fr) minmax(105px, .9fr) minmax(85px, .7fr) auto; overflow-x: auto; }
+#app .task-list-page .task-filters .filter-actions { grid-column: auto; }

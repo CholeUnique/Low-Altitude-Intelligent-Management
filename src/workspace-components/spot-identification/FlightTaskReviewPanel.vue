@@ -1,24 +1,28 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import FilterActions from '@/components/FilterActions.vue'
 import { ElTooltip } from 'element-plus'
 import { Calendar, FolderOpened, Picture, VideoCamera } from '@element-plus/icons-vue'
 import { isMockMode } from '@/api/client'
 import { getUavMediaSummary, type UavMediaSummary } from '@/api/patrol'
 import { getMetadataOptions } from '@/api/metadata'
 import { regionPaths } from '@/utils/region-path'
+import { algorithms } from '@/mocks/algorithm-catalog'
 import type { RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import {
   getFlightReviewMedia,
   getFlightReviewMediaFile,
   getFlightReviewPlanRegion,
-  getFlightReviewPlans,
+  getFlightReviewResultPage,
   getFlightReviewTasks,
-  getRegionBoundaryStatus,
+  getFlightPlanDevices,
   recalculateFlightPlanRegion,
   type FlightReviewMedia,
   type FlightReviewPlan,
   type FlightReviewTask,
   type FlightReviewPage,
+  type FlightPlanDevice,
+  type FlightReviewResultQuery,
 } from '@/api/flight-review'
 import { useUserStore } from '@/stores/user'
 import SpotUploadDialog from './SpotUploadDialog.vue'
@@ -34,6 +38,7 @@ interface PlanRow {
   routeType: string
   taskType: string
   device: string
+  devices: FlightPlanDevice[]
   completedAt: string
   durationMinutes?: number
   imageCount: number
@@ -42,19 +47,19 @@ interface PlanRow {
   mediaFailed: boolean
   mediaPending: boolean
   fileCount?: number
-  countFailed: boolean
 }
 
 const user = useUserStore()
 const plans = ref<FlightReviewPlan[]>([])
+const resultTotal = ref(0)
 const tasks = ref<FlightReviewTask[]>([])
+const planDevices = ref<Record<string, FlightPlanDevice[]>>({})
+const deviceLoadFailed = ref(false)
 const mediaByTask = ref<Record<string, FlightReviewMedia[]>>({})
 const failedMediaTasks = ref<string[]>([])
 const completedMediaTaskIds = ref<string[]>([])
 const loading = ref(false)
-const mediaLoading = ref(false)
-const taskMediaTotals = ref<Record<string, number>>({})
-const failedCountTasks = ref<string[]>([])
+const planMediaTotals = ref<Record<string, number>>({})
 const departmentMediaSummary = ref<UavMediaSummary>({})
 const summaryFailed = ref(false)
 const openingPlanId = ref('')
@@ -80,9 +85,11 @@ const routeTypeFilter = ref('')
 const taskTypeFilter = ref('')
 const deviceFilter = ref('')
 /** 区划筛选的“未判定”哨兵值：后端按轨迹未判定区划时 regionCode 为空。 */
-const REGION_UNSET = '__unset__'
 const regionFilter = ref('')
 const regionPathLabels = ref(new Map<string, string>())
+const regionMetadataReady = ref(false)
+const regionMetadataAvailable = ref(false)
+const attemptedRegionPlans = new Set<string>()
 function regionLabel(plan: FlightReviewPlan) {
   if (!plan.regionCode) return '未判定'
   return regionPathLabels.value.get(plan.regionCode) || plan.regionName || plan.regionCode
@@ -90,6 +97,13 @@ function regionLabel(plan: FlightReviewPlan) {
 const startDate = ref('')
 const endDate = ref('')
 const resultTypeFilter = ref('')
+const draftFilters = reactive({ planKeyword: '', regionFilter: '', routeTypeFilter: '', taskTypeFilter: '', deviceFilter: '', startDate: '', endDate: '', resultTypeFilter: '' })
+function applyFilters() {
+  planKeyword.value = draftFilters.planKeyword; regionFilter.value = draftFilters.regionFilter; routeTypeFilter.value = draftFilters.routeTypeFilter
+  taskTypeFilter.value = draftFilters.taskTypeFilter; deviceFilter.value = draftFilters.deviceFilter; startDate.value = draftFilters.startDate
+  endDate.value = draftFilters.endDate; resultTypeFilter.value = draftFilters.resultTypeFilter; currentPage.value = 1
+}
+function resetFilters() { Object.assign(draftFilters, { planKeyword: '', regionFilter: '', routeTypeFilter: '', taskTypeFilter: '', deviceFilter: '', startDate: '', endDate: '', resultTypeFilter: '' }); applyFilters() }
 const currentPage = ref(1)
 const pageSize = ref(16)
 const detailPlanId = ref('')
@@ -111,8 +125,11 @@ const downloadError = ref('')
 const mediaPreviewStatus = ref<Record<string, 'ready' | 'error'>>({})
 const uploadVisible = ref(false)
 const uploadMessage = ref('')
-const aiNoticePlanId = ref('')
+const aiPlan = ref<FlightReviewPlan | null>(null)
+const selectedAlgorithmId = ref('')
+const aiUnavailable = ref(false)
 let aiNoticeTimer: ReturnType<typeof setTimeout> | undefined
+const aiAlgorithms = algorithms.filter(algorithm => algorithm.family === 'ai')
 let videoLoadTimer: ReturnType<typeof setTimeout> | undefined
 let loadVersion = 0
 let previewRequestVersion = 0
@@ -179,13 +196,17 @@ function endPreviewImageDrag(event: PointerEvent) {
   if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId)
 }
 
-function showAiPendingNotice(planId: string) {
+function openAiRecognition(plan: FlightReviewPlan) {
   if (aiNoticeTimer) clearTimeout(aiNoticeTimer)
-  aiNoticePlanId.value = planId
-  aiNoticeTimer = setTimeout(() => {
-    aiNoticePlanId.value = ''
-    aiNoticeTimer = undefined
-  }, 3000)
+  selectedAlgorithmId.value = ''
+  aiUnavailable.value = false
+  aiPlan.value = plan
+}
+function showAiUnavailable() {
+  if (!selectedAlgorithmId.value) return
+  if (aiNoticeTimer) clearTimeout(aiNoticeTimer)
+  aiUnavailable.value = true
+  aiNoticeTimer = setTimeout(() => { aiUnavailable.value = false }, 3000)
 }
 function handleSpotUploaded(result: RecognitionSpotCreateResult) {
   uploadVisible.value = false
@@ -429,7 +450,6 @@ async function readTaskMedia(taskId: string, version: number) {
   try {
     const first = await getFlightReviewMedia(taskId, 1, 200, deptId)
     if (version !== loadVersion) return
-    taskMediaTotals.value = { ...taskMediaTotals.value, [taskId]: first.total }
     publishTaskMedia(taskId, first.records, version)
     const pageCount = Math.ceil(first.total / first.pageSize)
     if (pageCount > 1) {
@@ -472,24 +492,6 @@ async function forEachTask(taskList: FlightReviewTask[], version: number, read: 
   }))
 }
 
-async function loadAllCounts(taskList: FlightReviewTask[], version: number) {
-  const deptId = user.activeDeptId
-  const totals: Record<string, number> = {}
-  const failures: string[] = []
-  await forEachTask(taskList, version, async task => {
-    try {
-      // 只查询一条素材，用接口 total 判断计划是否有成果。
-      const result = await getFlightReviewMedia(task.id, 1, 1, deptId)
-      totals[task.id] = result.total
-    } catch {
-      failures.push(task.id)
-    }
-  })
-  if (version !== loadVersion) return
-  taskMediaTotals.value = totals
-  failedCountTasks.value = failures
-}
-
 async function loadDepartmentSummary(version: number) {
   try {
     const result = await getUavMediaSummary(user.activeDeptId)
@@ -497,39 +499,39 @@ async function loadDepartmentSummary(version: number) {
   } catch { if (version === loadVersion) summaryFailed.value = true }
 }
 
-let classificationVersion = 0
-async function loadFilteredMedia() {
-  const version = loadVersion
-  const classification = ++classificationVersion
-  if (!resultTypeFilter.value || loading.value) { mediaLoading.value = false; return }
-  mediaLoading.value = true
-  try {
-    await forEachTask(baseFilteredRows.value.flatMap(row => row.tasks), version, task => loadTaskMedia(task.id, version))
-  } finally {
-    if (version === loadVersion && classification === classificationVersion) mediaLoading.value = false
+function resultQuery(pageNum = currentPage.value, size = pageSize.value): FlightReviewResultQuery {
+  return {
+    deptId: user.activeDeptId, pageNum, pageSize: size,
+    keyword: planKeyword.value.trim() || undefined,
+    regionCode: regionFilter.value || undefined, waylineType: routeTypeFilter.value || undefined,
+    type: taskTypeFilter.value || undefined, droneSn: deviceFilter.value || undefined,
+    startTime: startDate.value ? `${startDate.value}T00:00:00` : undefined,
+    endTime: endDate.value ? `${endDate.value}T23:59:59` : undefined,
+    mediaType: resultTypeFilter.value === 'image' ? 'photo' : resultTypeFilter.value || undefined,
   }
 }
 
 async function loadData() {
   const version = ++loadVersion
   closeDetail()
-  currentPage.value = 1
   plans.value = []
+  resultTotal.value = 0
   tasks.value = []
+  planDevices.value = {}
+  deviceLoadFailed.value = false
   mediaByTask.value = {}
   failedMediaTasks.value = []
   completedMediaTaskIds.value = []
-  taskMediaTotals.value = {}
-  failedCountTasks.value = []
+  planMediaTotals.value = {}
   departmentMediaSummary.value = {}
   summaryFailed.value = false
   actionError.value = ''
   actionNotice.value = ''
+  aiPlan.value = null
   openingPlanId.value = ''
   pendingMedia = new Map()
   mediaPreviewStatus.value = {}
   loading.value = true
-  mediaLoading.value = false
   error.value = ''
   if (isMockMode()) {
     error.value = 'AI线索发现仅展示真实后端数据，请切换到真实接口模式。'
@@ -539,18 +541,25 @@ async function loadData() {
   try {
     const deptId = user.activeDeptId
     void loadDepartmentSummary(version)
-    const [planList, taskList] = await Promise.all([
-      readAll((pageNum) => getFlightReviewPlans(deptId, pageNum)),
+    const [result, taskList] = await Promise.all([
+      getFlightReviewResultPage(resultQuery()),
       readAll((pageNum) => getFlightReviewTasks(deptId, pageNum)),
     ])
     if (version !== loadVersion) return
-    plans.value = planList.filter((plan) => plan.id)
-    const planIds = new Set(plans.value.map((plan) => plan.id))
-    tasks.value = taskList.filter((task) => task.id && planIds.has(task.planId))
-    await loadAllCounts(tasks.value, version)
-    if (version !== loadVersion) return
-    loading.value = false
-    void loadFilteredMedia()
+    const lastPage = Math.max(1, Math.ceil(result.total / pageSize.value))
+    if (currentPage.value > lastPage) { currentPage.value = lastPage; return }
+    plans.value = result.records.filter(plan => plan.id)
+    resultTotal.value = result.total
+    tasks.value = taskList.filter(task => task.id)
+    planMediaTotals.value = Object.fromEntries(plans.value.map(plan => [plan.id, plan.mediaFileCount!]))
+    try {
+      const devices = await getFlightPlanDevices(plans.value.map(plan => plan.id), deptId)
+      if (version !== loadVersion) return
+      planDevices.value = devices
+    } catch {
+      if (version !== loadVersion) return
+      deviceLoadFailed.value = true
+    }
   } catch (reason) {
     if (version !== loadVersion) return
     plans.value = []
@@ -567,17 +576,19 @@ const rows = computed<PlanRow[]>(() => plans.value.map((plan) => {
   const linkedTasks = tasks.value.filter((task) => task.planId === plan.id)
   const media = linkedTasks.flatMap((task) => mediaByTask.value[task.id] || [])
   const completedTimes = linkedTasks.map((task) => task.endTime).filter(Boolean).sort()
-  const completedAt = completedTimes[completedTimes.length - 1] || ''
+  const completedAt = plan.finishTime || completedTimes[completedTimes.length - 1] || ''
   const durations = linkedTasks.map(durationOf).filter((value): value is number => value !== undefined)
   const counts = { image: 0, video: 0, other: 0 }
+  const devices = planDevices.value[plan.id] || []
   media.forEach((item) => { counts[mediaKind(item)] += 1 })
   return {
     plan,
     tasks: linkedTasks,
     media,
     routeType: plan.waylineType || linkedTasks.find((task) => task.waylineType)?.waylineType || '',
-    taskType: linkedTasks.find((task) => task.type)?.type || '',
-    device: plan.sn || linkedTasks.find((task) => task.sn)?.sn || '',
+    taskType: plan.type || '',
+    devices,
+    device: [...new Set(devices.filter(item => item.droneSn).map(item => item.droneName || item.droneSn))].join('、'),
     completedAt,
     durationMinutes: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0)) : undefined,
     imageCount: counts.image,
@@ -585,57 +596,21 @@ const rows = computed<PlanRow[]>(() => plans.value.map((plan) => {
     otherCount: counts.other,
     mediaFailed: linkedTasks.some((task) => failedMediaTasks.value.includes(task.id)),
     mediaPending: linkedTasks.some((task) => !completedMediaTaskIds.value.includes(task.id)),
-    fileCount: linkedTasks.every(task => taskMediaTotals.value[task.id] !== undefined)
-      ? linkedTasks.reduce((sum, task) => sum + taskMediaTotals.value[task.id]!, 0) : undefined,
-    countFailed: linkedTasks.some(task => failedCountTasks.value.includes(task.id)),
+    fileCount: planMediaTotals.value[plan.id],
   }
-}).sort((left, right) => {
-  // 排序仅依据任务信息，避免素材陆续加载后记录跨页跳动。
-  return right.completedAt.localeCompare(left.completedAt) || left.plan.name.localeCompare(right.plan.name)
 }))
-const routeTypes = computed(() => [...new Set(rows.value.map((row) => row.routeType).filter(Boolean))])
-const taskTypes = computed(() => [...new Set(rows.value.map((row) => row.taskType).filter(Boolean))])
-const devices = computed(() => [...new Set(rows.value.map((row) => row.device).filter(Boolean))])
-// 区划选项取自已载入计划的实际判定结果，保证筛选项与数据一致（未判定的单独归为“未判定”）。
-const regions = computed(() => {
-  const labels = new Map<string, string>()
-  rows.value.forEach((row) => {
-    if (row.plan.regionCode) labels.set(row.plan.regionCode, regionLabel(row.plan))
-  })
-  return [...labels].sort((left, right) => left[1].localeCompare(right[1], 'zh-CN')).map(([code, label]) => ({ code, label }))
+const routeTypes = computed(() => [...new Set([...tasks.value.map(task => task.waylineType), ...rows.value.map(row => row.routeType)].filter(Boolean))])
+const taskTypes = computed(() => [...new Set(['0', '1', ...rows.value.map(row => row.taskType)].filter(Boolean))])
+const devices = computed(() => {
+  const values = new Map<string, { sn: string; name: string }>()
+  tasks.value.filter(task => task.sn).forEach(task => values.set(task.sn, { sn: task.sn, name: task.deviceType ? `${task.deviceType} · ${task.sn}` : task.sn }))
+  rows.value.flatMap(row => row.devices).filter(device => device.droneSn).forEach(device => values.set(device.droneSn, { sn: device.droneSn, name: device.droneName || device.droneSn }))
+  return [...values.values()]
 })
-const hasUnassignedRegion = computed(() => rows.value.some((row) => !row.plan.regionCode))
-/** 区划重算接口仅管理员可用（后端同样按 403 拦截）。 */
-const canRecalcRegion = computed(() => user.currentUser?.role === 'ADMIN')
-const recalcPlanId = ref('')
-const baseFilteredRows = computed(() => rows.value.filter((row) => {
-  // 只有全部关联任务都确认没有素材时才排除；未知或查询失败不能当成零。
-  if (row.fileCount === 0) return false
-  const query = planKeyword.value.trim().toLowerCase()
-  if (query && !`${row.plan.name} ${row.plan.id} ${row.plan.waylineName}`.toLowerCase().includes(query)) return false
-  if (routeTypeFilter.value && row.routeType !== routeTypeFilter.value) return false
-  if (taskTypeFilter.value && row.taskType !== taskTypeFilter.value) return false
-  if (deviceFilter.value && row.device !== deviceFilter.value) return false
-  if (regionFilter.value === REGION_UNSET) {
-    if (row.plan.regionCode) return false
-  } else if (regionFilter.value && row.plan.regionCode !== regionFilter.value) return false
-  const completedDate = row.completedAt.slice(0, 10)
-  if (startDate.value && (!completedDate || completedDate < startDate.value)) return false
-  if (endDate.value && (!completedDate || completedDate > endDate.value)) return false
-  return true
-}))
-const filteredRows = computed(() => baseFilteredRows.value.filter(row => {
-  // 查询失败时无法判断类型，保留该计划并提示数量不完整。
-  if (resultTypeFilter.value && row.mediaFailed) return true
-  if (resultTypeFilter.value === 'image' && !row.imageCount) return false
-  if (resultTypeFilter.value === 'video' && !row.videoCount) return false
-  if (resultTypeFilter.value === 'other' && !row.otherCount) return false
-  return true
-}))
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / pageSize.value)))
-const pageRows = computed(() => filteredRows.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
-const resultsLoading = computed(() => loading.value || Boolean(resultTypeFilter.value && mediaLoading.value))
-watch(pageCount, count => { currentPage.value = Math.min(currentPage.value, count) })
+const regions = computed(() => [...regionPathLabels.value].filter(([code]) => /^\d{6}$/.test(code)).map(([code, label]) => ({ code, label })))
+const pageCount = computed(() => Math.max(1, Math.ceil(resultTotal.value / pageSize.value)))
+const pageRows = computed(() => rows.value)
+const resultsLoading = computed(() => loading.value)
 const detailRow = computed(() => rows.value.find((row) => row.plan.id === detailPlanId.value))
 /** 成果弹窗只列可预览的图片/视频；.DSC/.DAT 等后端附带文件不进列表。 */
 const detailMedia = computed(() => [...(detailRow.value?.media || [])]
@@ -646,11 +621,15 @@ const previewOrdinal = computed(() => previewMedia.value ? detailMedia.value.fin
 watch(() => previewMedia.value ? `${mediaKey(previewMedia.value)}|${previewMedia.value.localFileUrl}|${previewMedia.value.originalUrl}|${previewMedia.value.thumbnailUrl}` : '', () => { resetPreviewImageTransform(); void initializePreview() })
 watch(mediaFullscreen, resetPreviewImageTransform)
 watch([planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, regionFilter, startDate, endDate, resultTypeFilter, pageSize], () => { currentPage.value = 1 })
-watch([resultTypeFilter, planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, regionFilter, startDate, endDate], () => { void loadFilteredMedia() })
-watch(() => user.activeDeptId, () => { void loadData() }, { immediate: true })
+watch([planKeyword, routeTypeFilter, taskTypeFilter, deviceFilter, regionFilter, startDate, endDate, resultTypeFilter, pageSize, currentPage], () => { void loadData() })
+watch(() => user.activeDeptId, () => { currentPage.value = 1; void loadData() }, { immediate: true })
+watch([plans, regionMetadataReady, () => user.currentUser?.role], () => { void recalculateMissingRegions() })
 onMounted(() => {
   window.addEventListener('keydown', handleDetailKeydown)
-  void getMetadataOptions('ADMIN_REGION').then(options => { regionPathLabels.value = regionPaths(options) }).catch(() => { regionPathLabels.value = new Map() })
+  void getMetadataOptions('ADMIN_REGION').then(options => {
+    regionPathLabels.value = regionPaths(options)
+    regionMetadataAvailable.value = true
+  }).catch(() => { regionPathLabels.value = new Map() }).finally(() => { regionMetadataReady.value = true })
 })
 onBeforeUnmount(() => {
   loadVersion += 1
@@ -664,30 +643,39 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleDetailKeydown)
 })
 
-/** 重算为空时给出可执行的原因：边界未导入 → 未开启轨迹 → 轨迹无有效航点。 */
-async function undeterminedRegionReason(row: PlanRow) {
-  try {
-    const boundary = await getRegionBoundaryStatus()
-    if (!boundary.ready) return '区划重算未判定：区县边界尚未导入（边界条数 0），后端此时不做判定。请管理员先导入区县边界 GeoJSON 再重算。'
-  } catch { /* 状态接口不可用时继续按计划信息判断 */ }
-  if (!row.plan.enableTrace) return '区划重算未判定：该计划未开启轨迹记录（enableTrace=0），后端拿不到航点，无法按轨迹判定区划。'
-  return '区划重算未判定：该计划的轨迹没有落在任何区县边界内，请确认航点坐标与边界数据坐标系一致。'
+function hasCompleteRegionName(plan: FlightReviewPlan) {
+  const name = regionPathLabels.value.get(plan.regionCode) || plan.regionName || ''
+  return name.split(/\s*[/／]\s*/).filter(Boolean).length >= 3 || /(?:省|自治区|市).*(?:市|自治州|地区|盟).*(?:区|县|旗|市)/.test(name)
 }
-/** 管理员重算单条计划的所属区划：按轨迹重新判定后回读一次，就地更新行内区划。 */
-async function recalcRegion(row: PlanRow) {
-  if (recalcPlanId.value) return
-  recalcPlanId.value = row.plan.id
-  actionError.value = ''
-  actionNotice.value = ''
-  try {
-    await recalculateFlightPlanRegion(row.plan.id, user.activeDeptId)
-    const region = await getFlightReviewPlanRegion(row.plan.id, user.activeDeptId)
-    row.plan.regionCode = region.regionCode
-    row.plan.regionName = region.regionName
-    if (!region.regionCode) actionNotice.value = await undeterminedRegionReason(row)
-  } catch (reason) {
-    actionError.value = reason instanceof Error ? `区划重算失败：${reason.message}` : '区划重算失败，请稍后重试。'
-  } finally { recalcPlanId.value = '' }
+
+/** 重算为管理员接口；每次进入页面同一部门的计划最多尝试一次。 */
+async function recalculateMissingRegions() {
+  if (!regionMetadataReady.value || user.currentUser?.role !== 'ADMIN') return
+  const version = loadVersion
+  const deptId = user.activeDeptId
+  const candidates = plans.value.filter(plan => {
+    const key = `${deptId ?? ''}:${plan.id}`
+    // 字典不可用时无法判断名称是否完整，只处理明确缺少编码的计划。
+    if (attemptedRegionPlans.has(key) || (plan.regionCode && (!regionMetadataAvailable.value || hasCompleteRegionName(plan)))) return false
+    attemptedRegionPlans.add(key)
+    return true
+  })
+  let next = 0
+  let failed = 0
+  await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
+    while (next < candidates.length && version === loadVersion) {
+      const plan = candidates[next++]!
+      try {
+        await recalculateFlightPlanRegion(plan.id, deptId)
+        if (version !== loadVersion) return
+        const region = await getFlightReviewPlanRegion(plan.id, deptId)
+        if (version !== loadVersion) return
+        plan.regionCode = region.regionCode
+        plan.regionName = region.regionName
+      } catch { if (version === loadVersion) failed++ }
+    }
+  }))
+  if (version === loadVersion && failed) actionNotice.value = `${failed} 条飞行计划的区划自动补算失败，请稍后重试。`
 }
 async function openDetail(row: PlanRow) {
   if (openingPlanId.value) return
@@ -721,34 +709,32 @@ function csvCell(value: string | number) {
   return `"${safe.replace(/"/g, '""')}"`
 }
 async function exportList() {
-  if (!baseFilteredRows.value.length || exporting.value) return
+  if (!resultTotal.value || exporting.value) return
   const version = loadVersion
-  const exportPlans = [...baseFilteredRows.value]
-  const filterSnapshot = JSON.stringify([planKeyword.value, routeTypeFilter.value, taskTypeFilter.value, deviceFilter.value, regionFilter.value, startDate.value, endDate.value, resultTypeFilter.value])
+  const query = resultQuery(1, 200)
   exporting.value = true
   actionError.value = ''
   try {
-    await forEachTask(exportPlans.flatMap(row => row.tasks), version, task => loadTaskMedia(task.id, version))
+    const exportPlans = await readAll(pageNum => getFlightReviewResultPage({ ...query, pageNum }))
+    const exportDevices = await getFlightPlanDevices(exportPlans.map(plan => plan.id), query.deptId)
     if (version !== loadVersion) return
-    if (filterSnapshot !== JSON.stringify([planKeyword.value, routeTypeFilter.value, taskTypeFilter.value, deviceFilter.value, regionFilter.value, startDate.value, endDate.value, resultTypeFilter.value])) {
-      actionError.value = '筛选条件已变化，请重新导出清单。'
-      return
-    }
-    if (exportPlans.some(row => row.tasks.some(task => failedMediaTasks.value.includes(task.id)))) {
-      actionError.value = '部分成果读取失败，未导出不完整的清单，请重试。'
-      return
-    }
-  const headers = ['飞行计划', '计划ID', '所属区划', '关联需求工单', '航线类型', '任务类型', '执行设备SN', '完成时间', '时长(分钟)', '图片', '视频', '其他文件']
-  const content = [headers, ...filteredRows.value.map((row) => [
-    row.plan.name, row.plan.id, regionLabel(row.plan), '--', routeTypeLabel(row.routeType), taskTypeLabel(row.taskType), display(row.device),
-    dateTime(row.completedAt), row.durationMinutes ?? '--', row.imageCount, row.videoCount, row.otherCount,
-  ])].map((line) => line.map(csvCell).join(',')).join('\r\n')
-  const url = URL.createObjectURL(new Blob(['\ufeff', content], { type: 'text/csv;charset=utf-8' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'AI线索发现清单.csv'
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+    const headers = ['飞行计划', '计划ID', '所属区划', '关联需求工单', '航线类型', '任务类型', '执行设备', '完成时间', '时长(分钟)', '素材文件数']
+    const lines = exportPlans.map(plan => {
+      const linkedTasks = tasks.value.filter(task => task.planId === plan.id)
+      const durations = linkedTasks.map(durationOf).filter((value): value is number => value !== undefined)
+      const duration = durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0)) : '--'
+      const names = [...new Set((exportDevices[plan.id] || []).filter(device => device.droneSn).map(device => device.droneName || device.droneSn))].join('、')
+      return [plan.name, plan.id, regionLabel(plan), '--', routeTypeLabel(plan.waylineType), taskTypeLabel(plan.type), display(names), dateTime(plan.finishTime || ''), duration, plan.mediaFileCount ?? '—']
+    })
+    const content = [headers, ...lines].map(line => line.map(csvCell).join(',')).join('\r\n')
+    const url = URL.createObjectURL(new Blob(['\ufeff', content], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'AI线索发现清单.csv'
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (reason) {
+    if (version === loadVersion) actionError.value = reason instanceof Error ? reason.message : '导出清单失败，请重试。'
   } finally { exporting.value = false }
 }
 </script>
@@ -757,20 +743,20 @@ async function exportList() {
   <div class="flight-review">
     <section class="filter-panel panel">
       <div class="filter-grid">
-        <label>飞行计划<input v-model="planKeyword" class="plan-keyword-input" placeholder="计划名称 / 编号" /></label>
-        <label>所属区划<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="regionFilter"><ElOption value="" label="全部区划" /><ElOption v-for="item in regions" :key="item.code" :value="item.code" :label="String(item.label)" /><ElOption v-if="hasUnassignedRegion" :value="REGION_UNSET" label="未判定" /></ElSelect></label>
-        <label>需求工单号<input placeholder="待关联接口接入" disabled title="后端暂未提供飞行计划与需求工单的关联关系" /></label>
-        <label>航线类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="routeTypeFilter"><ElOption value="" label="全部航线" /><ElOption v-for="item in routeTypes" :key="item" :value="item" :label="String(routeTypeLabel(item))" /></ElSelect></label>
-        <label>任务类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="taskTypeFilter"><ElOption value="" label="全部类型" /><ElOption v-for="item in taskTypes" :key="item" :value="item" :label="String(taskTypeLabel(item))" /></ElSelect></label>
-        <label>飞行设备<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="deviceFilter"><ElOption value="" label="全部设备" /><ElOption v-for="item in devices" :key="item" :value="item" :label="String(item)" /></ElSelect></label>
-        <label>完成日期 · 起<input v-model="startDate" type="date" /></label>
-        <label>完成日期 · 止<input v-model="endDate" type="date" :min="startDate || undefined" /></label>
-        <label>成果类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="resultTypeFilter"><ElOption value="" label="全部文件" /><ElOption value="image" label="图片" /><ElOption value="video" label="视频" /><ElOption value="other" label="其他文件" /></ElSelect></label>
+        <label>飞行计划<input v-model="draftFilters.planKeyword" class="ui-filter-search plan-keyword-input" placeholder="计划名称" @keyup.enter="applyFilters" /></label>
+        <label>所属区划<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.regionFilter"><ElOption value="" label="全部区划" /><ElOption v-for="item in regions" :key="item.code" :value="item.code" :label="String(item.label)" /></ElSelect></label>
+        <label>航线类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.routeTypeFilter"><ElOption value="" label="全部航线" /><ElOption v-for="item in routeTypes" :key="item" :value="item" :label="String(routeTypeLabel(item))" /></ElSelect></label>
+        <label>任务类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.taskTypeFilter"><ElOption value="" label="全部类型" /><ElOption v-for="item in taskTypes" :key="item" :value="item" :label="String(taskTypeLabel(item))" /></ElSelect></label>
+        <label>飞行设备<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.deviceFilter"><ElOption value="" label="全部设备" /><ElOption v-for="item in devices" :key="item.sn" :value="item.sn" :label="item.name" /></ElSelect></label>
+        <label>完成日期 · 起<input v-model="draftFilters.startDate" type="date" /></label>
+        <label>完成日期 · 止<input v-model="draftFilters.endDate" type="date" :min="draftFilters.startDate || undefined" /></label>
+        <label>成果类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.resultTypeFilter"><ElOption value="" label="全部文件" /><ElOption value="image" label="图片" /><ElOption value="video" label="视频" /></ElSelect></label>
+        <FilterActions @query="applyFilters" @reset="resetFilters" />
       </div>
     </section>
 
     <section class="summary-grid">
-      <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><Calendar /></i><div><span>飞行计划</span><strong>{{ resultsLoading ? '—' : filteredRows.length }}</strong><small>{{ failedCountTasks.length || (resultTypeFilter && failedMediaTasks.length) ? '部分成果读取失败，数量待确认' : '当前筛选结果' }}</small></div></article>
+      <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><Calendar /></i><div><span>飞行计划</span><strong>{{ resultsLoading ? '—' : resultTotal }}</strong><small>当前筛选结果</small></div></article>
       <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><Picture /></i><div><span>图片文件</span><strong>{{ departmentMediaSummary.photoCount?.toLocaleString() ?? '—' }}</strong><small>{{ summaryFailed ? '部门素材统计读取失败' : '当前部门素材统计，不随列表筛选变化' }}</small></div></article>
       <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><VideoCamera /></i><div><span>视频文件</span><strong>{{ departmentMediaSummary.videoCount?.toLocaleString() ?? '—' }}</strong><small>{{ summaryFailed ? '部门素材统计读取失败' : '当前部门素材统计，不随列表筛选变化' }}</small></div></article>
       <article class="summary-card panel"><i class="summary-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="2.75" y="2.75" width="18.5" height="18.5" rx="2" /><path d="M12 2.75v18.5M2.75 12h18.5" opacity=".55" /><path d="m4.5 9 3-3 3.2 2.2m3.2 9.4 2.2-2.1 3.2 1" opacity=".8" /><path d="m4.5 19.5 3.2-4.2 2.8-1.6 3.2-3.5 5.8-5.7" stroke-width="2" /></svg></i><div><span>正射成果</span><strong>--</strong><small>待后端提供成果关联</small></div></article>
@@ -781,36 +767,25 @@ async function exportList() {
     <p v-if="uploadMessage" class="upload-success" role="status">{{ uploadMessage }}</p>
 
     <section class="result-panel panel">
-      <header><div><h2>全部飞行结果</h2><span>{{ resultsLoading ? '正在核实成果…' : `已载入计划 · ${filteredRows.length} 条` }}</span><span v-if="mediaLoading" class="loading-note">正在读取成果文件 · {{ completedMediaTaskIds.length }}/{{ tasks.length }} 个任务</span></div><button type="button" class="outline-button" :disabled="resultsLoading || exporting || !baseFilteredRows.length" @click="exportList">{{ exporting ? '正在生成…' : '导出清单' }}</button></header>
+      <header><div><h2>全部飞行结果</h2><span>{{ resultsLoading ? '正在读取成果…' : `符合条件的计划 · ${resultTotal} 条` }}</span></div><button type="button" class="outline-button" :disabled="resultsLoading || exporting || !resultTotal" @click="exportList">{{ exporting ? '正在生成…' : '导出清单' }}</button></header>
       <div v-if="error" class="state error"><strong>成果读取失败</strong><span>{{ error }}</span><button type="button" @click="loadData">重新加载</button></div>
       <div v-else-if="resultsLoading" class="state">正在核实飞行计划及成果，请稍候…</div>
-      <div v-else-if="!filteredRows.length" class="state">{{ mediaLoading && resultTypeFilter ? '正在读取符合条件的成果…' : '当前条件下暂无飞行计划' }}</div>
+      <div v-else-if="!resultTotal" class="state">当前条件下暂无飞行计划</div>
       <template v-else>
-        <div v-if="failedCountTasks.length" class="warning">{{ failedCountTasks.length }} 个飞行任务的成果数量读取失败，相关计划暂时保留，总数待确认。请重新加载。</div>
+        <div v-if="deviceLoadFailed" class="warning">飞行计划关联设备读取失败，请重新加载。</div>
         <div v-if="failedMediaTasks.length" class="warning">{{ failedMediaTasks.length }} 个飞行任务的素材未能读取；相关数量可能不完整，可重新加载。</div>
         <div class="table-scroll"><table><thead><tr><th>飞行计划 / 结果目录</th><th>所属区划</th><th>关联需求工单</th><th>航线类型</th><th>任务类型</th><th>执行设备</th><th>完成时间</th><th>时长</th><th>成果文件</th><th>操作</th></tr></thead><tbody>
           <tr v-for="row in pageRows" :key="row.plan.id">
             <td><div class="plan-cell"><span class="folder-icon" aria-hidden="true"><FolderOpened /></span><div><b :title="row.plan.name">{{ display(row.plan.name) }}</b><small>计划 ID：{{ row.plan.id }}</small><small v-if="row.tasks.length">{{ row.tasks.length }} 个关联飞行任务</small></div></div></td>
-            <td :class="{ muted: !row.plan.regionCode }" :title="row.plan.regionCode ? `${regionLabel(row.plan)}（${row.plan.regionCode}）` : '后端未按轨迹判定所属区划'">{{ regionLabel(row.plan) }}</td><td class="muted">--</td><td><span class="soft-tag">{{ routeTypeLabel(row.routeType) }}</span></td><td>{{ taskTypeLabel(row.taskType) }}</td><td>{{ display(row.device) }}<small v-if="row.plan.deviceType" class="cell-sub">{{ row.plan.deviceType }}</small></td><td>{{ dateTime(row.completedAt) }}</td><td>{{ row.durationMinutes === undefined ? '--' : `${row.durationMinutes} min` }}</td>
-            <td><div v-if="row.mediaFailed && !row.media.length" class="media-count failed">素材读取失败</div><div v-else-if="!row.media.length" class="muted">{{ row.fileCount === undefined ? (row.countFailed ? '数量读取失败' : '数量读取中…') : row.fileCount ? `${row.fileCount} 个文件` : '--' }}</div><div v-else class="media-count"><span v-if="row.imageCount">图 {{ row.imageCount }}</span><span v-if="row.videoCount">视 {{ row.videoCount }}</span><span v-if="row.otherCount">其他 {{ row.otherCount }}</span><span v-if="row.mediaPending">统计中…</span><span v-else-if="row.mediaFailed" class="failed">部分读取失败</span></div></td>
+            <td :class="{ muted: !row.plan.regionCode }" :title="row.plan.regionCode ? `${regionLabel(row.plan)}（${row.plan.regionCode}）` : '后端未按轨迹判定所属区划'">{{ regionLabel(row.plan) }}</td><td class="muted">--</td><td><span class="soft-tag">{{ routeTypeLabel(row.routeType) }}</span></td><td>{{ taskTypeLabel(row.taskType) }}</td><td><template v-for="device in row.devices.filter(item => item.droneSn)" :key="`${device.droneSn}-${device.gatewaySn}`"><span :title="device.droneSn">{{ device.droneName || device.droneSn }}</span><small v-if="device.droneType" class="cell-sub">{{ device.droneType }}</small></template><span v-if="!row.device" class="muted">{{ deviceLoadFailed ? '读取失败' : '--' }}</span></td><td>{{ dateTime(row.completedAt) }}</td><td>{{ row.durationMinutes === undefined ? '--' : `${row.durationMinutes} min` }}</td>
+            <td>{{ row.fileCount === undefined ? '—' : `${row.fileCount} 个文件` }}</td>
             <td><div class="row-actions">
               <button class="view-button" type="button" :disabled="!!openingPlanId || row.fileCount === 0" @click="openDetail(row)">{{ openingPlanId === row.plan.id ? '正在读取…' : '查看成果' }}</button>
-              <ElTooltip
-                :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }"
-                placement="top-end"
-                effect="light"
-                trigger="click"
-                :visible="aiNoticePlanId === String(row.plan.id)"
-                :disabled="row.fileCount === 0"
-              >
-                <template #content><div class="ai-upload-tooltip is-pending" role="status"><strong>AI模型暂未在线接入</strong></div></template>
-                <button class="view-button" type="button" :disabled="row.fileCount === 0" :aria-label="`${display(row.plan.name)}：AI识别`" @click="showAiPendingNotice(String(row.plan.id))">AI识别</button>
-              </ElTooltip>
-              <button v-if="canRecalcRegion" class="view-button recalc-button" type="button" :disabled="recalcPlanId === row.plan.id" title="按航线航点轨迹重新判定所属区划（仅管理员）" @click="recalcRegion(row)">{{ recalcPlanId === row.plan.id ? '重算中…' : '重算区划' }}</button>
+              <button class="view-button" type="button" :disabled="row.fileCount === 0" :aria-label="`${display(row.plan.name)}：AI识别`" @click="openAiRecognition(row.plan)">AI识别</button>
             </div></td>
           </tr>
         </tbody></table></div>
-        <footer><span>共 {{ filteredRows.length }} 条计划 · {{ failedCountTasks.length || failedMediaTasks.length ? '部分成果读取失败，数量待确认' : '成果文件按需读取' }}</span><div><button type="button" :disabled="currentPage <= 1" @click="currentPage--">‹</button><b>{{ currentPage }} / {{ pageCount }}</b><button type="button" :disabled="currentPage >= pageCount" @click="currentPage++">›</button><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="pageSize" aria-label="每页条数"><ElOption :value="8" label="8 条/页" /><ElOption :value="16" label="16 条/页" /><ElOption :value="32" label="32 条/页" /></ElSelect></div></footer>
+        <footer><span>共 {{ resultTotal }} 条计划 · {{ failedMediaTasks.length ? '部分素材预览读取失败' : '成果文件按需读取' }}</span><div><button type="button" :disabled="currentPage <= 1" @click="currentPage--">‹</button><b>{{ currentPage }} / {{ pageCount }}</b><button type="button" :disabled="currentPage >= pageCount" @click="currentPage++">›</button><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="pageSize" aria-label="每页条数"><ElOption :value="8" label="8 条/页" /><ElOption :value="16" label="16 条/页" /><ElOption :value="32" label="32 条/页" /></ElSelect></div></footer>
       </template>
     </section>
 
@@ -851,6 +826,14 @@ async function exportList() {
         </div>
       </section>
     </div>
+    <ElDialog :model-value="!!aiPlan" class="ai-recognition-dialog" title="AI识别" width="min(480px, 92vw)" align-center append-to-body @update:model-value="(open: boolean) => { if (!open) aiPlan = null }">
+      <div class="ai-selection-dialog">
+        <p>选择算法，识别飞行成果中的异常信息。</p>
+        <div class="ai-selection-plan"><span>飞行计划</span><strong :title="aiPlan?.name">{{ aiPlan?.name }}</strong></div>
+        <label class="ai-selection-field"><span>识别算法</span><ElSelect v-model="selectedAlgorithmId" class="system-select" popper-class="system-select-options" placeholder="请选择算法"><ElOption v-for="algorithm in aiAlgorithms" :key="algorithm.id" :value="algorithm.id" :label="algorithm.name" /></ElSelect></label>
+      </div>
+      <template #footer><div class="ai-selection-actions"><button type="button" @click="aiPlan = null">取消</button><ElTooltip :visible="aiUnavailable" placement="right" effect="light" popper-class="ai-pending-popper" :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }"><template #content><div class="ai-pending-tip" role="status">该功能暂未开放</div></template><button type="button" class="primary" :disabled="!selectedAlgorithmId" @click="showAiUnavailable">确认</button></ElTooltip></div></template>
+    </ElDialog>
     <div v-if="actionError" class="action-toast error" role="alert">{{ actionError }}<button type="button" aria-label="关闭提示" @click="actionError = ''">×</button></div>
     <div v-if="actionNotice" class="action-toast notice" role="status">{{ actionNotice }}<button type="button" aria-label="关闭提示" @click="actionNotice = ''">×</button></div>
     <SpotUploadDialog v-if="uploadVisible" @close="uploadVisible = false" @uploaded="handleSpotUploaded" />
@@ -874,6 +857,7 @@ async function exportList() {
   box-sizing: border-box;
   margin: 0;
 }
+@media (min-width: 1501px) { .flight-review .filter-grid { grid-template-columns: 1.15fr 1.05fr repeat(6, minmax(105px, 1fr)); } }
 .flight-review .filter-grid label {
   display: flex;
   flex-direction: column;
@@ -935,10 +919,18 @@ async function exportList() {
 .action-toast.error { background: #8e3544; border-color: #e26d7b; }
 .action-toast.notice { background: #7c5a1f; border-color: #dcb264; }
 .action-toast button { position: absolute; top: 4px; right: 7px; border: 0; background: transparent; color: #fff; font-size: 20px; line-height: 1; cursor: pointer; }
-.ai-upload-tooltip { padding: 9px 12px; border-radius: 7px; background: linear-gradient(135deg,#fff,#f3fafc); font-family: var(--ui-font); }
-.ai-upload-tooltip strong { display: block; color: #173f57; font-size: 12px; line-height: 1.4; white-space: nowrap; }
-.ai-upload-tooltip.is-pending { background: linear-gradient(135deg,#fff,#fff5f6); }
-.ai-upload-tooltip.is-pending strong { color: #c43b4d; }
+.ai-selection-dialog { display: grid; gap: 16px; color: var(--ui-body); }
+.ai-selection-dialog p { margin: 0; line-height: 1.6; }
+.ai-selection-plan { display: flex; gap: 12px; align-items: center; padding: 11px 12px; background: var(--ui-input); border: 1px solid var(--ui-border); border-radius: 6px; }
+.ai-selection-plan span { flex: none; color: var(--ui-muted); }
+.ai-selection-plan strong { overflow: hidden; color: var(--ui-text); text-overflow: ellipsis; white-space: nowrap; }
+.ai-selection-field { display: grid; gap: 8px; font-weight: 600; }
+.ai-selection-field .system-select { width: 100%; }
+.ai-pending-tip { padding: 9px 12px; border-radius: 7px; color: #c43b4d; background: #fff5f6; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ai-selection-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.ai-selection-actions button { min-width: 76px; padding: 8px 16px; color: var(--ui-body); background: var(--ui-input); border: 1px solid var(--ui-border); border-radius: 5px; cursor: pointer; }
+.ai-selection-actions button.primary { color: #fff; background: var(--ui-action); border-color: var(--ui-action); }
+.ai-selection-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .upload-success { margin: 0; padding: 8px 12px; color: #147254; background: #def4eb; border-radius: 5px; font-size: 12px; }
 @media(max-width:1500px) { .flight-review .summary-grid { grid-template-columns: repeat(4,minmax(0,1fr)) 220px; } .flight-review .summary-actions { grid-column: auto; } }
 @media(max-width:1050px) { .flight-review .summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .flight-review .summary-actions { grid-column: 1/-1; flex-direction: row; } }
@@ -997,4 +989,12 @@ async function exportList() {
 .detail-dialog>header button { flex: none; }
 .detail-dialog.is-fullscreen .media-stage :deep(.shared-video-player) { right: 0; width: 100%; }
 @media(max-width:800px) { .detail-backdrop:not(.is-fullscreen) { padding: 8px; } .detail-body { grid-template-columns: 180px minmax(0,1fr); } .detail-heading { gap: 12px; } .detail-heading h2 { font-size: 20px; } .detail-heading__summary { gap: 3px; padding-left: 12px; } .detail-heading__summary strong { font-size: 14px; } .detail-dialog .detail-heading__summary small { font-size: 12px; } .preview-unavailable { margin: 12px; padding: 18px; } .fullscreen-nav.previous { left: 8px; } .fullscreen-nav.next { right: 8px; } }
+
+.flight-review .filter-grid{grid-template-columns:minmax(105px,1.1fr) repeat(7,minmax(105px,1fr)) auto;align-items:end;overflow-x:auto}
+.flight-review .filter-grid :deep(.filter-actions){grid-column:auto}
+</style>
+
+<style lang="scss">
+.el-dialog.ai-recognition-dialog { background: var(--ui-surface-raised, #15394f); }
+.el-popper.ai-pending-popper, .el-popper.ai-pending-popper > .el-popper__arrow::before { background: #fff5f6; }
 </style>

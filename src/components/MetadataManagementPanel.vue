@@ -391,7 +391,7 @@ watch(() => props.sceneCode, () => {
           <button v-if="!isSceneScoped || !types.length" class="metadata-button metadata-button--primary" type="button" @click="openTypeEditor('add')">＋ 新增类型</button>
         </header>
         <form v-if="!isSceneScoped" class="metadata-filter type-filter" @submit.prevent="loadTypes(false)">
-          <input v-model.trim="typeFilters.keyword" placeholder="搜索类型名称或编码">
+          <input class="ui-filter-search" v-model.trim="typeFilters.keyword" placeholder="搜索类型名称或编码">
           <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="typeFilters.status"><ElOption value="" label="全部状态" /><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect>
           <button type="submit">查询</button>
         </form>
@@ -417,7 +417,7 @@ watch(() => props.sceneCode, () => {
         </header>
         <div v-if="selectedType" class="metadata-overview"><div><span>全部条目</span><strong>{{ items.length }}</strong></div><div><span>启用条目</span><strong>{{ enabledItemCount }}</strong></div><div><span>层级节点</span><strong>{{ flatTreeNodes.length }}</strong></div><div><span>业务可选项</span><strong>{{ flatOptionNodes.length }}</strong></div></div>
         <form v-if="itemView === 'list'" class="metadata-filter item-filter" @submit.prevent="loadItems">
-          <input v-model.trim="itemFilters.keyword" placeholder="搜索条目名称或编码">
+          <input class="ui-filter-search" v-model.trim="itemFilters.keyword" placeholder="搜索条目名称或编码">
           <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-if="!isSceneScoped" v-model="itemFilters.parentId"><ElOption value="" label="全部层级" /><ElOption value="0" label="仅一级条目" /><ElOption v-for="item in items" :key="item.id" :value="item.id" :label="String(item.name)" /></ElSelect>
           <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="itemFilters.status"><ElOption value="" label="全部状态" /><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect>
           <button type="submit">查询</button>

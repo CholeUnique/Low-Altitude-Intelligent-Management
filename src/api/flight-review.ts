@@ -28,6 +28,23 @@ export interface FlightReviewPlan {
   regionName: string
   /** 1=开启轨迹记录；为 0 时后端拿不到航点，区划无法判定。 */
   enableTrace: number
+  mediaFileCount?: number
+  finishTime?: string
+  resultCount?: number
+}
+
+export interface FlightReviewResultQuery {
+  deptId?: string
+  pageNum: number
+  pageSize: number
+  keyword?: string
+  regionCode?: string
+  waylineType?: string
+  type?: string
+  droneSn?: string
+  startTime?: string
+  endTime?: string
+  mediaType?: string
 }
 
 export interface FlightReviewTask {
@@ -40,6 +57,34 @@ export interface FlightReviewTask {
   deviceType: string
   startTime: string
   endTime: string
+}
+
+export interface FlightPlanDevice {
+  droneSn: string
+  droneName: string
+  droneType: string
+  gatewaySn: string
+  gatewayName: string
+  gatewayType: string
+}
+
+/** 后端每次最多接受 200 个计划 ID；保留字符串以避免大整数精度丢失。 */
+export async function getFlightPlanDevices(planIds: string[], deptId?: string): Promise<Record<string, FlightPlanDevice[]>> {
+  const result: Record<string, FlightPlanDevice[]> = {}
+  for (let i = 0; i < planIds.length; i += 200) {
+    const data = await apiClient.post<never, RawRecord[]>('/v1/uav/flight-plan/devices', { planIds: planIds.slice(i, i + 200), deptId })
+    if (!Array.isArray(data)) throw new Error('计划关联设备接口未返回有效数据。')
+    for (const item of data) {
+      const planId = value(item, 'planId')
+      if (!planId) continue
+      const devices = Array.isArray(item.devices) ? item.devices : []
+      result[planId] = devices.filter((device): device is RawRecord => !!device && typeof device === 'object').map(device => ({
+        droneSn: value(device, 'droneSn'), droneName: value(device, 'droneName'), droneType: value(device, 'droneType'),
+        gatewaySn: value(device, 'gatewaySn'), gatewayName: value(device, 'gatewayName'), gatewayType: value(device, 'gatewayType'),
+      }))
+    }
+  }
+  return result
 }
 
 export interface FlightReviewMedia {
@@ -80,6 +125,24 @@ function page<T>(raw: RawPage, map: (record: RawRecord) => T): FlightReviewPage<
     total: Number(raw.total ?? raw.records.length) || 0,
     pageSize: Math.max(1, Number(raw.pageSize) || raw.records.length || 200),
   }
+}
+
+export async function getFlightReviewResultPage(query: FlightReviewResultQuery) {
+  const data = await apiClient.post<never, RawPage>('/v1/uav/flight-plan/result/page', query)
+  return page(data, (item): FlightReviewPlan => {
+    const mediaFileCount = Number(item.mediaFileCount)
+    if (item.mediaFileCount === null || item.mediaFileCount === undefined || !Number.isSafeInteger(mediaFileCount) || mediaFileCount < 0) {
+      throw new Error('飞行计划成果分页未返回有效的素材文件数量。')
+    }
+    return {
+      id: value(item, 'id'), name: value(item, 'name'), type: value(item, 'type'),
+      waylineId: value(item, 'waylineId'), waylineName: value(item, 'waylineName'), waylineType: value(item, 'waylineType'),
+      sn: value(item, 'sn'), deviceType: value(item, 'deviceType'), regionCode: value(item, 'regionCode'),
+      regionName: value(item, 'regionName'), enableTrace: Number(item.enableTrace ?? 0) || 0,
+      mediaFileCount, finishTime: value(item, 'finishTime'),
+      resultCount: item.resultCount == null ? undefined : Number(item.resultCount),
+    }
+  })
 }
 
 /** 研判页直接使用真实 UAV 分页接口，不读取演示数据。 */
@@ -129,8 +192,8 @@ export async function getFlightReviewTasks(deptId: string | undefined, pageNum: 
     name: value(item, 'name'),
     type: value(item, 'type'),
     waylineType: value(item, 'waylineType'),
-    sn: value(item, 'sn') || value(item, 'droneSn'),
-    deviceType: value(item, 'deviceType') || value(item, 'droneType'),
+    sn: value(item, 'droneSn'),
+    deviceType: value(item, 'droneType'),
     startTime: value(item, 'startTime'),
     endTime: value(item, 'endTime'),
   }))
@@ -151,6 +214,11 @@ export async function getFlightReviewMedia(taskId: string, pageNum: number, page
     longitude: coordinate(item, ['longitude', 'lng', 'lon'], 180),
     latitude: coordinate(item, ['latitude', 'lat'], 90),
   }))
+}
+
+export async function getFlightReviewPlanMediaTotal(planId: string, deptId?: string): Promise<number> {
+  const data = await apiClient.post<never, RawPage>('/v1/uav/flight-task/media/page', { planId, pageNum: 1, pageSize: 1, deptId })
+  return page(data, item => item).total
 }
 
 /** 只允许通过当前 API 服务读取后端素材，避免向第三方地址发送登录令牌。 */

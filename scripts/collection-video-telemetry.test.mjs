@@ -75,6 +75,7 @@ const SharedPlayer = load(compileScript(parse(sharedSource).descriptor, { id: 's
 }).default
 const View = load(compileScript(descriptor, { id: 'collection-test', inlineTemplate: true }).content, {
   vue: Vue,
+  '@/components/FilterActions.vue': { __esModule: true, default: {} },
   '@/api/patrol': {
     getUavMediaSummary: async () => ({ photoCount: 1, videoCount: 3 }),
     getUavFlightTaskOptions: async () => ({ list: [taskA, taskB], total: 2 }),

@@ -517,7 +517,7 @@ async function selectPlan(id: string) {
             <div><h2>{{ componentSelectorTitle }}</h2><p>{{ componentSelectorHint }}</p></div>
             <button type="button" aria-label="关闭选择面板" @click="dismissComponentSelector">×</button>
           </header>
-          <input v-model="componentSelectorKeyword" class="component-selector__search" placeholder="搜索名称、区域、设备或 ID" />
+          <input v-model="componentSelectorKeyword" class="ui-filter-search component-selector__search" placeholder="搜索名称、区域、设备或 ID" />
           <div v-if="componentSelectorLoading" class="component-selector__state">正在读取可选择记录…</div>
           <div v-else-if="componentSelectorError" class="component-selector__state is-error">
             <span>{{ componentSelectorError }}</span>
@@ -579,7 +579,7 @@ async function selectPlan(id: string) {
             <button @click="newRouteVisible = true">⇧ 导入航线</button>
           </div>
           <div class="route-filter">
-            <input v-model="routeKeyword" placeholder="筛选当前航线…" />
+            <input class="ui-filter-search" v-model="routeKeyword" placeholder="筛选当前航线…" />
             <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="statusFilter">
               <ElOption value="" label="全部状态" />
               <ElOption :value="'草稿'" label="草稿" />

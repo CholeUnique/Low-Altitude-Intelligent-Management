@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
+import FilterActions from '@/components/FilterActions.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   addRequestTicket,
@@ -33,6 +34,7 @@ const showCreate = ref(false)
 const submitting = ref(false)
 const scopeCoordinates = ref<[number, number][]>([])
 const filters = reactive<{ name: string; type: string; priority: string; status: string }>({ name: '', type: '', priority: '', status: '' })
+const appliedFilters = reactive({ ...filters })
 const form = reactive({ name: '', type: '', description: '', contactPerson: '', contactNumber: '', startTime: '', endTime: '', frequency: '', priority: '1', resultTypes: [] as string[] })
 const resultTypeOptions = [
   ['PHOTO', '照片'], ['VIDEO', '视频'], ['LIVE', '直播'], ['MODEL_2D', '二维成果'],
@@ -99,10 +101,10 @@ async function loadPage() {
     const data = await getRequestTicketPage({
       pageNum: pageNum.value,
       pageSize: pageSize.value,
-      name: filters.name.trim() || undefined,
-      type: filters.type || undefined,
-      priority: filters.priority === '' ? undefined : Number(filters.priority),
-      status: filters.status === '' ? undefined : Number(filters.status),
+      name: appliedFilters.name.trim() || undefined,
+      type: appliedFilters.type || undefined,
+      priority: appliedFilters.priority === '' ? undefined : Number(appliedFilters.priority),
+      status: appliedFilters.status === '' ? undefined : Number(appliedFilters.status),
     })
     records.value = data.records
     total.value = data.total
@@ -147,8 +149,8 @@ async function loadInitial() {
   await Promise.all([loadPage(), loadSummary()])
 }
 
-function applyFilters() { pageNum.value = 1; void loadPage() }
-function resetFilters() { Object.assign(filters, { name: '', type: '', priority: '', status: '' }); pageNum.value = 1; void loadPage() }
+function applyFilters() { Object.assign(appliedFilters, filters); pageNum.value = 1; void loadPage() }
+function resetFilters() { Object.assign(filters, { name: '', type: '', priority: '', status: '' }); applyFilters() }
 function changePage(next: number) { if (next < 1 || next > pageCount.value || next === pageNum.value) return; pageNum.value = next; void loadPage() }
 function resetForm() {
   Object.assign(form, { name: '', type: '', description: '', contactPerson: '', contactNumber: '', startTime: '', endTime: '', frequency: '', priority: '1', resultTypes: [] })
@@ -215,7 +217,7 @@ onMounted(() => void loadInitial())
       <article><i>↗</i><div><span>执行中</span><b>{{ displayCount(summaryCounts.running) }}<small>条</small></b><em>按计划推进中的工单</em></div></article>
       <article><i>✓</i><div><span>已完成</span><b>{{ displayCount(summaryCounts.completed) }}<small>条</small></b><em>可查看历史执行记录</em></div></article>
     </section>
-    <section class="ticket-card filters-card"><header><b>筛选工单</b><button type="button" @click="resetFilters">重置筛选</button></header><div class="filter-grid"><label><span>工单名称</span><input v-model="filters.name" placeholder="搜索工单名称" @keyup.enter="applyFilters" /></label><label><span>工单类型</span><ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="filters.type" @change="applyFilters"><ElOption value="" label="全部类型" /><ElOption v-for="item in types" :key="item.id" :value="item.name" :label="String(item.name)" /></ElSelect></label><label><span>优先级</span><ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="filters.priority" @change="applyFilters"><ElOption value="" label="全部优先级" /><ElOption value="0" label="高" /><ElOption value="1" label="中" /><ElOption value="2" label="低" /></ElSelect></label><label><span>工单状态</span><ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="filters.status" @change="applyFilters"><ElOption value="" label="全部状态" /><ElOption value="0" label="待执行" /><ElOption value="1" label="执行中" /><ElOption value="2" label="已完成" /><ElOption value="3" label="已关闭" /></ElSelect></label></div></section>
+    <section class="ticket-card filters-card"><header><b>筛选工单</b></header><div class="filter-grid"><label><span>工单名称</span><input class="ui-filter-search" v-model="filters.name" placeholder="搜索工单名称" @keyup.enter="applyFilters" /></label><label><span>工单类型</span><ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="filters.type"><ElOption value="" label="全部类型" /><ElOption v-for="item in types" :key="item.id" :value="item.name" :label="String(item.name)" /></ElSelect></label><label><span>优先级</span><ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="filters.priority"><ElOption value="" label="全部优先级" /><ElOption value="0" label="高" /><ElOption value="1" label="中" /><ElOption value="2" label="低" /></ElSelect></label><label><span>工单状态</span><ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="filters.status"><ElOption value="" label="全部状态" /><ElOption value="0" label="待执行" /><ElOption value="1" label="执行中" /><ElOption value="2" label="已完成" /><ElOption value="3" label="已关闭" /></ElSelect></label><FilterActions @query="applyFilters" @reset="resetFilters" /></div></section>
     <section class="ticket-card table-card"><header><div><b>工单列表</b><span>共 {{ total }} 条结果</span></div><button class="create-ticket-button" type="button" @click="openCreate"><span aria-hidden="true">＋</span> 新建工单</button></header><div class="table-wrap"><table><thead><tr><th>工单编号</th><th>工单名称</th><th>工单描述</th><th>工单类型</th><th>优先级</th><th>状态</th><th>工单期限</th><th>操作</th></tr></thead><tbody><tr v-for="ticket in records" :key="ticket.id"><td><b class="number">{{ ticket.number || ticket.id }}</b></td><td><b>{{ ticket.name }}</b><small>{{ ticket.createByName || '--' }}</small></td><td class="description">{{ ticket.description || '--' }}</td><td><span class="type-tag">{{ typeLabel(ticket.type) }}</span></td><td><span class="priority" :class="`p-${ticket.priority}`">{{ priorityLabel(ticket.priority) }}</span></td><td><span class="status" :class="`s-${ticket.status}`">{{ statusLabel(ticket.status) }}</span></td><td>{{ formatTime(ticket.startTime) }}<br />至 {{ formatTime(ticket.endTime) }}</td><td><button type="button" @click="openDetail(ticket.id)">查看</button><button type="button" class="danger" @click="removeTicket(ticket)">删除</button></td></tr><tr v-if="loading"><td colspan="8" class="empty-row">正在加载需求工单…</td></tr><tr v-else-if="error"><td colspan="8" class="empty-row error">{{ error }}</td></tr><tr v-else-if="!records.length"><td colspan="8" class="empty-row">暂无符合条件的需求工单</td></tr></tbody></table></div><footer><span>第 {{ pageNum }} / {{ pageCount }} 页，共 {{ total }} 条</span><div><button :disabled="pageNum <= 1" @click="changePage(pageNum - 1)">‹</button><b>{{ pageNum }}</b><button :disabled="pageNum >= pageCount" @click="changePage(pageNum + 1)">›</button></div></footer></section>
     <p v-if="message" class="ticket-message" @click="message = ''">{{ message }}</p>
 
@@ -295,4 +297,7 @@ onMounted(() => void loadInitial())
 .filter-grid{padding:14px 15px}.filter-grid label span{margin-bottom:7px;font-size:13px}.filter-grid input,.filter-grid select{height:38px;font-size:14px}
 .table-wrap table{font-size:13px}.table-wrap th{height:44px;font-size:15px}.table-wrap td{height:62px;font-size:13px;line-height:1.5}.table-wrap td>b{font-size:14px}.table-wrap td>small{font-size:12px}.type-tag,.priority{padding:4px 8px;font-size:12px}.status{font-size:12px}.table-wrap td button{font-size:13px}.table-card>footer{height:46px;font-size:12px}
 .form-grid input[readonly]{color:#496a7a;background:#f1f6f8;cursor:default}
+
+.filter-grid{grid-template-columns:repeat(4,minmax(0,1fr)) auto;align-items:end}
+.filter-grid{grid-template-columns:minmax(90px,1.1fr) repeat(3,minmax(110px,1fr)) auto;overflow-x:auto}
 </style>

@@ -876,7 +876,7 @@ onMounted(loadProfile)
           </div>
           <section class="panel table-panel">
             <form class="filter-bar" @submit.prevent="searchUsers">
-              <input v-model.trim="userFilters.keyword" placeholder="搜索账号、姓名或手机号">
+              <input class="ui-filter-search" v-model.trim="userFilters.keyword" placeholder="搜索账号、姓名或手机号">
               <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-if="isAdmin" v-model="userFilters.role"><ElOption value="" label="全部账号角色" /><ElOption value="ADMIN" label="系统管理员" /><ElOption value="USER" label="普通用户及部门管理员" /></ElSelect>
               <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="userFilters.status"><ElOption value="" label="全部状态" /><ElOption :value="1" label="启用" /><ElOption :value="0" label="禁用" /></ElSelect>
               <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-if="isAdmin" v-model="userFilters.defaultDeptId"><ElOption value="" label="全部部门" /><ElOption v-for="dept in departments" :key="dept.id" :value="String(dept.id)" :label="String(dept.name)" /></ElSelect>
@@ -912,7 +912,7 @@ onMounted(loadProfile)
           </div>
           <section class="panel table-panel">
             <form class="filter-bar" @submit.prevent="loadDepartments()">
-              <input v-model.trim="departmentFilters.keyword" placeholder="搜索部门名称或编码">
+              <input class="ui-filter-search" v-model.trim="departmentFilters.keyword" placeholder="搜索部门名称或编码">
               <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="departmentFilters.status"><ElOption value="" label="全部状态" /><ElOption :value="1" label="启用" /><ElOption :value="0" label="停用" /></ElSelect>
               <button class="button button--primary" type="submit">查询</button>
               <button class="button button--ghost" type="button" @click="Object.assign(departmentFilters, { keyword: '', status: '' }); loadDepartments()">重置</button>

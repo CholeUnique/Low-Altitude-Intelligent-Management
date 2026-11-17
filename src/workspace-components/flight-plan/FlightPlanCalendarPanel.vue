@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import FilterActions from '@/components/FilterActions.vue'
 import { getFlightPlans, getFlightTaskPage } from '@/api/patrol'
 import { useUserStore } from '@/stores/user'
 import type { FlightPlanItem } from '@/mocks/route-planning'
@@ -18,7 +19,15 @@ let loadSequence = 0
 const keyword = ref('')
 const statusFilter = ref<number | ''>('')
 const deviceFilter = ref('')
+const draftKeyword = ref('')
+const draftStatusFilter = ref<number | ''>('')
+const draftDeviceFilter = ref('')
+function applyFilters() { keyword.value = draftKeyword.value; statusFilter.value = draftStatusFilter.value; deviceFilter.value = draftDeviceFilter.value; listPage.value = 1 }
+function resetFilters() { draftKeyword.value = ''; draftStatusFilter.value = ''; draftDeviceFilter.value = ''; applyFilters() }
 const displayMode = ref<'calendar' | 'list'>('calendar')
+const listPage = ref(1)
+const listPageSize = ref(20)
+const listBody = ref<HTMLElement | null>(null)
 const now = new Date()
 const cursor = ref(new Date(now.getFullYear(), now.getMonth(), 1))
 const selectedDate = ref(dateKey(now))
@@ -57,6 +66,11 @@ const filteredPlans = computed(() => plans.value.filter((plan) => {
     && (statusFilter.value === '' || plan.status === statusFilter.value)
     && (!deviceFilter.value || plan.sn === deviceFilter.value)
 }))
+const listPageCount = computed(() => Math.max(1, Math.ceil(filteredPlans.value.length / listPageSize.value)))
+const pagedPlans = computed(() => filteredPlans.value.slice((listPage.value - 1) * listPageSize.value, listPage.value * listPageSize.value))
+watch([keyword, statusFilter, deviceFilter, listPageSize, () => user.activeDeptId], () => { listPage.value = 1 })
+watch(listPageCount, (count) => { listPage.value = Math.min(listPage.value, count) })
+watch([listPage, listPageSize], () => { if (listBody.value) listBody.value.scrollTop = 0 })
 const monthPlans = computed(() => filteredPlans.value.filter((plan) => plan.date.startsWith(monthKey.value)))
 const unscheduledCount = computed(() => filteredPlans.value.filter((plan) => !/^\d{4}-\d{2}-\d{2}$/.test(plan.date)).length)
 const selectedPlans = computed(() => filteredPlans.value.filter((plan) => plan.date === selectedDate.value)
@@ -228,10 +242,9 @@ watch(() => user.activeDeptId, () => void loadPlans())
 
     <section class="toolbar">
       <div class="toolbar-leading">
-        <div class="toolbar-title"><b>飞行排期</b><span>查看每日计划与执行进度</span></div>
         <div class="month-switch"><button type="button" aria-label="上个月" @click="moveMonth(-1)">‹</button><b>{{ monthTitle }}</b><button type="button" aria-label="下个月" @click="moveMonth(1)">›</button><button type="button" class="today" @click="goToday">今天</button></div>
       </div>
-      <div class="filters"><input v-model="keyword" aria-label="搜索飞行任务或计划" placeholder="搜索任务、计划、航线或设备" /><label>状态<ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="statusFilter"><ElOption value="" label="全部状态" /><ElOption v-for="status in availableStatuses" :key="status" :value="status" :label="String(statusLabel(status))" /></ElSelect></label><label>设备<ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="deviceFilter"><ElOption value="" label="全部设备" /><ElOption v-for="device in availableDevices" :key="device" :value="device" :label="String(device)" /></ElSelect></label><div class="mode-switch"><button type="button" :class="{ active: displayMode === 'calendar' }" @click="displayMode = 'calendar'">日历</button><button type="button" :class="{ active: displayMode === 'list' }" @click="displayMode = 'list'">列表</button></div></div>
+      <div class="filters"><div class="plan-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" /></svg><input class="ui-filter-search" v-model="draftKeyword" @keyup.enter="applyFilters" aria-label="搜索飞行任务或计划" placeholder="搜索任务、计划、航线或设备" /></div><label>状态<ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="draftStatusFilter"><ElOption value="" label="全部状态" /><ElOption v-for="status in availableStatuses" :key="status" :value="status" :label="String(statusLabel(status))" /></ElSelect></label><label>设备<ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="draftDeviceFilter"><ElOption value="" label="全部设备" /><ElOption v-for="device in availableDevices" :key="device" :value="device" :label="String(device)" /></ElSelect></label><FilterActions @query="applyFilters" @reset="resetFilters" /><div class="mode-switch"><button type="button" :class="{ active: displayMode === 'calendar' }" @click="displayMode = 'calendar'">日历</button><button type="button" :class="{ active: displayMode === 'list' }" @click="displayMode = 'list'">列表</button></div></div>
     </section>
 
     <div v-if="warning" class="data-warning" role="status">{{ warning }}</div>
@@ -242,7 +255,7 @@ watch(() => user.activeDeptId, () => void loadPlans())
         <div class="weekday"><b v-for="day in ['周一','周二','周三','周四','周五','周六','周日']" :key="day">{{ day }}</b></div>
         <div class="calendar-grid" :style="{ '--week-count': calendarDays.length / 7 }">
           <div v-for="day in calendarDays" :key="day.key" class="day-cell" :class="{ muted: !day.currentMonth, selected: selectedDate === day.key, today: day.today }" @click="selectDay(day.key)">
-            <button type="button" class="day-cell__heading" :aria-label="`选择 ${day.key}`" @click.stop="selectDay(day.key)"><strong>{{ day.day }}</strong><small v-if="day.plans.length">{{ day.plans.length }} 架次</small></button>
+            <button type="button" class="day-cell__heading" :aria-label="`选择 ${day.key}`" @click.stop="selectDay(day.key)"><strong>{{ day.day }}</strong></button>
             <div class="day-cell__items" @wheel.stop>
               <button v-for="plan in day.plans" :key="plan.id" type="button" class="day-cell__item" :class="statusTone(plan.status)" :title="plan.title" @click.stop="showDetails(plan)"><em>{{ planTime(plan) }}</em><span>{{ plan.title }}</span></button>
             </div>
@@ -262,7 +275,22 @@ watch(() => user.activeDeptId, () => void loadPlans())
       </aside>
     </section>
 
-    <section v-else class="plan-list-panel"><header><span>任务 / 计划名称</span><span>执行时间</span><span>航线</span><span>设备</span><span>状态</span></header><div><article v-for="plan in filteredPlans" :key="plan.id"><span><b>{{ plan.title }}</b><small v-if="plan.planTitle && plan.planTitle !== plan.title">所属计划：{{ plan.planTitle }}</small><small>{{ plan.taskId ? `任务 ID：${plan.taskId}` : `计划 ID：${plan.planId}` }}</small></span><span>{{ plan.date || '日期未返回' }} {{ planTime(plan) }}</span><span>{{ plan.area }}</span><span>{{ plan.sn || '-' }}<small>{{ plan.deviceType || '' }}</small></span><span><em :class="statusTone(plan.status)" :title="plan.statusDetail || ''">{{ statusLabel(plan.status, plan.statusText) }}</em></span></article><div v-if="!filteredPlans.length" class="empty">暂无符合条件的飞行排期</div></div></section>
+    <section v-else class="plan-list-panel">
+      <header><span>任务 / 计划名称</span><span>执行时间</span><span>航线</span><span>设备</span><span>状态</span></header>
+      <div ref="listBody" class="plan-list-body">
+        <article v-for="plan in pagedPlans" :key="plan.id" role="button" tabindex="0" @click="showDetails(plan)" @keydown.enter.prevent="showDetails(plan)" @keydown.space.prevent="showDetails(plan)"><span><b>{{ plan.title }}</b><small v-if="plan.planTitle && plan.planTitle !== plan.title">所属计划：{{ plan.planTitle }}</small><small>{{ plan.taskId ? `任务 ID：${plan.taskId}` : `计划 ID：${plan.planId}` }}</small></span><span>{{ plan.date || '日期未返回' }} {{ planTime(plan) }}</span><span>{{ plan.area }}</span><span>{{ plan.sn || '-' }}<small>{{ plan.deviceType || '' }}</small></span><span><em :class="statusTone(plan.status)" :title="plan.statusDetail || ''">{{ statusLabel(plan.status, plan.statusText) }}</em></span></article>
+        <div v-if="!filteredPlans.length" class="empty">暂无符合条件的飞行排期</div>
+      </div>
+      <footer class="plan-list-pagination" aria-label="飞行排期分页">
+        <span>共 {{ filteredPlans.length }} 条</span>
+        <div class="plan-list-pagination__controls">
+          <label>每页 <ElSelect v-model="listPageSize" class="system-select plan-list-page-size" popper-class="system-select-options" aria-label="每页显示条数"><ElOption v-for="size in [10, 20, 50, 100]" :key="size" :value="size" :label="`${size} 条`" /></ElSelect></label>
+          <button type="button" :disabled="listPage <= 1" @click="listPage--">上一页</button>
+          <span>第 {{ listPage }} / {{ listPageCount }} 页</span>
+          <button type="button" :disabled="listPage >= listPageCount" @click="listPage++">下一页</button>
+        </div>
+      </footer>
+    </section>
     <ElDialog :model-value="!!selectedItem" class="flight-detail-dialog" :title="selectedItem?.taskId ? '飞行架次详情' : '飞行计划详情'" width="min(560px, 92vw)" append-to-body destroy-on-close @update:model-value="(open: boolean) => { if (!open) selectedItem = null }">
       <div v-if="selectedItem" class="flight-detail">
         <h3>{{ selectedItem.title }}</h3>
@@ -338,10 +366,8 @@ watch(() => user.activeDeptId, () => void loadPlans())
 .day-cell.selected,.day-cell.selected:hover{z-index:1;background:#eef9fc;box-shadow:inset 0 0 0 2px #31a9c4}
 .day-cell .day-cell__heading{display:flex;height:29px;align-items:flex-start;justify-content:space-between;gap:4px;font-size:14px}
 .day-cell.today>.day-cell__heading{display:flex;width:auto;height:29px;margin:0;border-radius:0;color:inherit;background:transparent}
-.day-cell__heading strong{display:grid;width:27px;height:27px;place-items:center;border-radius:50%;font-size:13px;font-weight:700}
+.day-cell__heading strong{display:grid;width:27px;height:27px;place-items:center;transform:translate(-4px,-3px);border-radius:50%;font-size:13px;font-weight:700}
 .day-cell.today .day-cell__heading strong{color:#fff;background:#169fbb}
-.day-cell__heading small{padding:3px 6px;border-radius:10px;color:#47839a;background:#eaf4f7;font-size:12px;font-weight:700;white-space:nowrap}
-.day-cell.muted .day-cell__heading small{display:none}
 .day-cell>i{display:flex;min-width:0;align-items:center;gap:7px;margin-top:5px;padding:6px 7px;border-left-width:3px;border-radius:4px;font-size:12px;line-height:1.2}
 .day-cell>i em{flex:none;margin:0;font-size:12px;font-weight:700}
 .day-cell>i span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -386,6 +412,13 @@ watch(() => user.activeDeptId, () => void loadPlans())
 @media(max-width:1500px){.toolbar{flex-wrap:wrap}.toolbar-leading,.filters{width:100%}.filters{justify-content:flex-end}.calendar-layout{grid-template-columns:minmax(0,1fr) 315px}}
 @media(max-width:1280px){.filters>input{display:block}.day-cell{padding:7px 5px}.day-cell>i{gap:4px;padding:5px 4px;font-size:12px}.day-cell>i em{font-size:12px}}
 @media(max-width:980px){.calendar-layout{grid-template-columns:1fr;grid-template-rows:minmax(400px,1fr) 240px;overflow:auto}.daily-panel{display:flex}.daily-list{padding:8px}.daily-list .empty{min-height:130px}.filters{flex-wrap:wrap;justify-content:flex-start}.filters label{display:flex}}
+.day-cell .day-cell__heading,.day-cell.today>.day-cell__heading{position:absolute;top:3px;left:3px;width:27px;height:27px;margin:0}
+.day-cell__heading strong{transform:none}
+.day-cell__items{position:absolute;top:7px;right:1px;bottom:2px;left:36px;margin:0}
+.day-cell__items .day-cell__item:first-child{margin-top:0}
+
+.toolbar{flex-wrap:nowrap;overflow-x:auto}.toolbar-leading{width:auto;flex:none}.filters{width:auto;flex:1;flex-wrap:nowrap;justify-content:flex-end;min-width:max-content}.filters>input{display:block;width:205px}.filters :deep(.filter-actions){flex:none}
+.plan-search{position:relative;flex:0 0 250px;width:250px}.plan-search svg{position:absolute;z-index:1;left:10px;top:50%;width:15px;height:15px;color:var(--ui-muted);transform:translateY(-50%);pointer-events:none}.plan-search input{width:100%;height:36px;box-sizing:border-box;padding:0 9px 0 32px;border-radius:6px;outline:none;font-size:12px}.plan-search input:focus::placeholder{color:transparent}
 </style>
 
 <style lang="scss">
