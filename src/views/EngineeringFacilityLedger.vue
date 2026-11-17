@@ -5,8 +5,15 @@ import { useUserStore } from '@/stores/user'
 import FacilityEditDialog from '@/components/FacilityEditDialog.vue'
 import FacilityReportDialog from '@/components/FacilityReportDialog.vue'
 import FacilityQrcodeDialog from '@/components/FacilityQrcodeDialog.vue'
+import { useRouter } from 'vue-router'
+import { facilityStatisticDestination } from '@/utils/facility-navigation'
 
 const user = useUserStore()
+const router = useRouter()
+function openStatistic(label: string) {
+  const destination = facilityStatisticDestination(label)
+  if (destination) void router.push(destination.route)
+}
 const canManage = computed(() => user.currentUser?.role === 'ADMIN' || user.isActiveDepartmentAdmin)
 const editOpen = ref(false), editRecord = ref<FacilityRecord>(), pendingDelete = ref<FacilityRecord>(), deleteBusy = ref(false), deleteError = ref('')
 const reportRecord = ref<FacilityRecord>(), qrcodeRecord = ref<FacilityRecord>()
@@ -91,13 +98,12 @@ watch(() => user.activeDeptId, () => { keyword.value = ''; facilityType.value = 
 
 <template>
   <section class="ledger">
-    <header><div><div class="eyebrow">专题分析 / 高标准农田工程设施管理 / 设施台账</div></div><div class="actions"><button v-if="canManage" :disabled="!user.activeDeptId" @click="openAdd">＋ 新增设施</button><button class="secondary" @click="loadContext(); loadPage()">刷新数据</button></div></header>
     <div v-if="statsError" class="notice" role="alert">统计加载失败：{{ statsError }} <button @click="loadContext">重试</button></div>
     <div class="stats">
-      <article v-for="item in [{name:'设施总数',value:statistics?.totalCount},{name:'正常',value:statistics?.normalCount},{name:'异常',value:statistics?.abnormalCount},{name:'核查中',value:statistics?.checkingCount},{name:'废弃',value:statistics?.discardedCount}]" :key="item.name"><span>{{ item.name }}</span><strong>{{ statsLoading ? '—' : item.value ?? '—' }}</strong></article>
+      <button v-for="item in [{name:'设施总数',value:statistics?.totalCount},{name:'正常',value:statistics?.normalCount},{name:'异常',value:statistics?.abnormalCount},{name:'核查中',value:statistics?.checkingCount},{name:'废弃',value:statistics?.discardedCount}]" :key="item.name" type="button" :aria-label="`${item.name}，查看${facilityStatisticDestination(item.name)?.name}`" @click="openStatistic(item.name)"><span>{{ item.name }}</span><strong>{{ statsLoading ? '—' : item.value ?? '—' }}</strong></button>
     </div>
     <div class="card">
-      <form class="filters" @submit.prevent="search"><input v-model="keyword" aria-label="搜索设施" placeholder="搜索名称、编号、项目或行政村" /><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="facilityType" aria-label="设施类型"><ElOption value="" label="全部设施类型" /><ElOption v-for="option in typeOptions" :key="String(option.id)" :value="option.code" :label="String(option.name)" /></ElSelect><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="bizStatus" aria-label="设施状态"><ElOption value="" label="全部状态" /><ElOption value="NORMAL" label="正常" /><ElOption value="ABNORMAL" label="异常" /><ElOption value="CHECKING" label="核查中" /><ElOption value="DISCARDED" label="废弃" /></ElSelect><button type="submit">查询</button><button type="button" class="secondary" @click="reset">重置</button></form>
+      <form class="filters" @submit.prevent="search"><input class="ui-filter-search" v-model="keyword" aria-label="搜索设施" placeholder="搜索名称、编号、项目或行政村" /><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="facilityType" aria-label="设施类型"><ElOption value="" label="全部设施类型" /><ElOption v-for="option in typeOptions" :key="String(option.id)" :value="option.code" :label="String(option.name)" /></ElSelect><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="bizStatus" aria-label="设施状态"><ElOption value="" label="全部状态" /><ElOption value="NORMAL" label="正常" /><ElOption value="ABNORMAL" label="异常" /><ElOption value="CHECKING" label="核查中" /><ElOption value="DISCARDED" label="废弃" /></ElSelect><button type="submit">查询</button><button type="button" class="secondary" @click="reset">重置</button><div class="filter-actions"><button v-if="canManage" type="button" :disabled="!user.activeDeptId" @click="openAdd">＋ 新增设施</button><button type="button" class="secondary" @click="loadContext(); loadPage()">刷新数据</button></div></form>
       <p v-if="optionsError" class="notice" role="alert">设施类型加载失败：{{ optionsError }} <button @click="loadContext">重试</button></p>
       <div ref="tableWrap" class="table-wrap"><table><thead><tr><th>设施编号</th><th>设施名称</th><th>设施类型</th><th>状态</th><th>所属区划</th><th>行政村</th><th>所属项目</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in page?.records || []" :key="String(item.id)"><td>{{ item.facilityNo || '—' }}</td><td>{{ item.name || '—' }}</td><td>{{ item.typeName || item.facilityType || '—' }}</td><td>{{ item.bizStatusName || item.bizStatus || '—' }}</td><td>{{ item.regionName || '—' }}</td><td>{{ item.villageName || '—' }}</td><td>{{ item.projectName || '—' }}</td><td>{{ item.updateTime?.replace('T', ' ') || '—' }}</td><td class="row-actions"><button type="button" class="text-action" @click="openReport(item)">上报</button><button type="button" class="text-action" @click="openQrcode(item)">二维码</button><button v-if="canManage" type="button" class="text-action" @click="openEdit(item)">编辑</button><button v-if="canManage" type="button" class="text-action danger" @click="askDelete(item)">删除</button></td></tr></tbody></table>
         <div v-if="pageLoading" class="empty" role="status">正在加载设施台账…</div><div v-else-if="pageError" class="empty" role="alert">加载失败：{{ pageError }} <button @click="loadPage">重试</button></div><div v-else-if="page && !page.records.length" class="empty">{{ applied.keyword || applied.facilityType || applied.bizStatus ? '没有符合筛选条件的设施' : '暂无设施台账数据' }}</div>
@@ -112,15 +118,18 @@ watch(() => user.activeDeptId, () => { keyword.value = ''; facilityType.value = 
 </template>
 
 <style scoped>
+.ledger .stats button { display: grid; gap: 12px; padding: 18px; text-align: left; font: inherit; border: 1px solid #285468; border-radius: 6px; background: #123447; }
+.ledger .stats button:hover { border-color: #558ba9; }
 .ledger{height:100%;overflow:hidden;display:flex;flex-direction:column;box-sizing:border-box;padding:24px;background:#0c2334;color:#d7edf3}.ledger header{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px}.actions{display:flex;gap:8px;flex-wrap:wrap}.eyebrow{font-size:12px;color:#7ba9bb}.ledger h1{margin:8px 0;font-size:23px}.ledger p{margin:0;color:#8cb1c1;font-size:12px}.ledger button{cursor:pointer;border:1px solid #2384a2;border-radius:4px;background:#168eb2;color:#effcff;padding:8px 14px}.ledger button:disabled{opacity:.45;cursor:default}.ledger button.secondary{background:#123548;color:#bfe1ed;border-color:#346579}.stats{flex:none;display:grid;grid-template-columns:repeat(5,minmax(100px,1fr));gap:12px;margin-bottom:18px}.stats article{display:grid;gap:12px;padding:18px;border:1px solid #285468;border-radius:6px;background:#123447}.stats span{color:#95bdc9;font-size:12px}.stats strong{font-size:24px;color:#62d6df}.card{flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid #285468;border-radius:6px;background:#102d40;overflow:hidden}.filters{flex:none;display:flex;gap:8px;padding:14px;border-bottom:1px solid #285468}.filters input,.filters select{min-width:0;border:1px solid #315a6e;border-radius:4px;background:#0a2231;color:#d7edf3;padding:8px;font:inherit;font-size:12px}.filters input{flex:1}.filters select{width:150px}.notice{padding:10px 14px!important;color:#ffb9a8!important;font-size:12px}.notice button,.empty button{padding:2px 6px;background:transparent;border:0;color:#6ed8e8}.table-wrap{flex:1;min-height:0;overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}th,td{padding:13px 14px;text-align:left;border-bottom:1px solid #234557}th{color:#8cb9c7;font-weight:500;background:#0c2637}td{color:#d2e8ec}.row-actions{display:flex;gap:6px;flex-wrap:wrap}.ledger .row-actions .text-action{padding:4px 7px;border-color:#39768c;background:#123b4c;color:#9ce4ed;font-size:12px}.ledger .row-actions .text-action.danger{border-color:#8a4d48;background:#482d31;color:#ffb6ad}.empty{text-align:center;padding:48px 16px;color:#98b8c5;font-size:13px}footer{flex:none;display:flex;justify-content:flex-end;align-items:center;gap:10px;padding:12px 14px;color:#9abdc9;font-size:12px}footer button{padding:5px 10px!important}.delete-backdrop{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:24px;background:#00131bbd}.delete-dialog{width:min(430px,95vw);border:1px solid #6c5554;border-radius:8px;background:#123242;box-shadow:0 18px 52px #000a}.delete-dialog h2{margin:0;padding:18px 20px;border-bottom:1px solid #456170;font-size:20px}.delete-dialog p{margin:0;padding:17px 20px;color:#c4dde3;font-size:14px;line-height:1.7}.delete-dialog .delete-error{padding-top:0;color:#ffafa4}.delete-dialog footer{padding:14px 20px;border-top:1px solid #456170}.delete-dialog .danger-button{border-color:#a45048;background:#9a3d37;color:#fff}@media(max-width:800px){.stats{grid-template-columns:repeat(2,1fr)}.filters{flex-wrap:wrap}.filters input{flex-basis:100%}}
 </style>
 <style scoped>
-.filters{display:grid;grid-template-columns:minmax(220px,1.5fr) minmax(150px,1fr) minmax(150px,1fr) auto auto;align-items:center;gap:10px}
+.filters{display:grid;grid-template-columns:minmax(150px,1.5fr) minmax(110px,1fr) minmax(110px,1fr) auto auto auto;align-items:center;gap:10px}
+.filter-actions{display:flex;gap:8px;white-space:nowrap}
 .filters input,.filters :deep(.system-select){width:100%;min-width:0;box-sizing:border-box}
 .filters input{height:38px;padding:0 12px;font-size:13px}
 .filters input::placeholder{color:#81a4b2}
 .filters input:focus{outline:2px solid #2ba6c4;outline-offset:1px}
 .filters button{min-width:68px;height:38px;padding:0 14px;white-space:nowrap;font-size:13px;font-weight:600}
-@media(max-width:1000px){.filters{grid-template-columns:minmax(160px,1fr) minmax(140px,1fr) minmax(140px,1fr) auto auto}}
-@media(max-width:700px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}.filters input{grid-column:1/-1}.filters button{width:100%}}
+@media(max-width:1000px){.filters{grid-template-columns:minmax(120px,1fr) minmax(100px,1fr) minmax(100px,1fr) auto auto auto;overflow-x:auto}}
+@media(max-width:700px){.filters{grid-template-columns:minmax(120px,1fr) minmax(100px,1fr) minmax(100px,1fr) auto auto auto}.filters input{grid-column:auto}}
 </style>

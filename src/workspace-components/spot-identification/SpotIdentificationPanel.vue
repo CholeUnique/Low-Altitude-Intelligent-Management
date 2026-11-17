@@ -58,6 +58,7 @@ const selectedMapServiceIds = ref<string[]>([])
 const scenes = ref<SceneDictionaryItem[]>([])
 let sceneRequestVersion = 0
 const spotDrawing = ref(false)
+const creatingSpot = ref(false)
 const drawingPeriod = ref<number>()
 const draftCoordinates = ref<Array<[number, number]>>([])
 const pendingReview = ref<{ id: string; spotNo: string; title: string; deptId: string }>()
@@ -199,7 +200,7 @@ function formatTime(value?: string) {
   return value ? value.replace('T', ' ').slice(0, 16) : '-'
 }
 function spotSourceLabel(value: string) {
-  return ({ MANUAL_UPLOAD: '文件上传', MANUAL_DRAW: '手工绘制', API_IMPORT: '接口导入', TASK_ABNORMAL: '任务识别' } as Record<string, string>)[value] || value
+  return ({ MANUAL_UPLOAD: '离线AI识别', MANUAL_DRAW: '手工绘制', API_IMPORT: '接口导入', TASK_ABNORMAL: '任务识别' } as Record<string, string>)[value] || value
 }
 function selectSpot(id: string) {
   activeId.value = id
@@ -229,11 +230,16 @@ function drawingMode(period: ComparisonPeriod): SpotDrawingMode {
 }
 function startSpotDrawing() {
   clearSpotDrawing()
+  creatingSpot.value = true
   spotDrawing.value = true
 }
 function cancelSpotDrawing() {
   clearSpotDrawing()
   spotDrawing.value = false
+}
+function cancelSpotCreation() {
+  cancelSpotDrawing()
+  creatingSpot.value = false
 }
 function finishSpotDrawing() {
   if (draftCoordinates.value.length >= 3) spotDrawing.value = false
@@ -252,7 +258,7 @@ function clearSpotDrawing() {
   drawingPeriod.value = undefined
 }
 function handleSpotCreated(result: RecognitionSpotCreateResult) {
-  cancelSpotDrawing()
+  cancelSpotCreation()
   void loadSpots(result.spotNos?.[0])
 }
 function synchronizeMapView(view: SynchronizedMapView) {
@@ -594,6 +600,7 @@ async function confirmSpotAction() {
 }
 
 watch([() => props.tasks.map((task) => task.id).join(','), () => user.activeDeptId], () => {
+  cancelSpotCreation()
   records.value = []
   activeId.value = ''
   pendingReview.value = undefined
@@ -605,7 +612,7 @@ watch([() => props.tasks.map((task) => task.id).join(','), () => user.activeDept
   void loadSpots()
 }, { immediate: true })
 watch(() => active.value?.bizTaskId, (taskId) => {
-  cancelSpotDrawing()
+  cancelSpotCreation()
   loadHiddenImagery(taskId || `recognition-${user.activeDeptId}`)
   pendingDeleteImage.value = undefined
 })
@@ -616,7 +623,7 @@ watch(filtered, (items) => {
   }
 })
 watch(() => active.value?.id, () => {
-  cancelSpotDrawing()
+  cancelSpotCreation()
   synchronizedMapView.value = undefined
   periodsManuallySelected.value = false
   periods.value = displayableImagery.value.length >= 2 ? 2 : 1
@@ -667,7 +674,7 @@ onBeforeUnmount(() => {
       <section class="panel spot-list">
         <div class="panel-title"><span>问题图斑列表</span><small>{{ filtered.length }} / {{ records.length }} 处</small></div>
         <div class="filters">
-          <input v-model="keyword" placeholder="搜索图斑编号、名称或类型" />
+          <input class="ui-filter-search" v-model="keyword" placeholder="搜索图斑编号、名称或类型" />
           <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="sceneFilter" aria-label="场景类型"><ElOption value="" label="全部场景类型" /><ElOption v-for="[value, label] in sceneOptions" :key="value" :value="value" :label="label" /></ElSelect>
           <ElSelect class="system-select" :empty-values="[null, undefined]" popper-class="system-select-options" v-model="handleStatus" aria-label="处置状态"><ElOption value="" label="全部处置状态" /><ElOption v-for="item in statusOptions" :key="item.value" :value="item.value" :label="item.label" /></ElSelect>
         </div>
@@ -714,7 +721,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="panel analysis">
-        <div class="panel-title"><span>多期影像 / 变化分析 <small class="analysis-title-hint">（点选下方影像可切换当前显示的起始期次）</small></span><div class="analysis-actions"><button class="review-button" type="button" :disabled="!active || active.handleStatus !== -1 || reviewBusy" @click="openReview">审核通过</button><button class="detail-action detail-action--revoke" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('revoke')">撤销图斑</button><button class="detail-action detail-action--ignore" type="button" :disabled="!canOperateSpot(active) || spotActionBusy" @click="openSpotAction('ignore')">忽略图斑</button></div></div>
+        <div class="panel-title"><span>多期影像 / 变化分析 <small class="analysis-title-hint">（点选下方影像可切换当前显示的起始期次）</small></span></div>
         <div class="periods">
           <button v-for="n in [1, 2, 3, 4]" :key="n" :class="{ active: periods === n }" :disabled="n > displayableImagery.length" :title="n > displayableImagery.length ? `当前图斑仅有 ${displayableImagery.length} 期影像` : `显示 ${n} 期影像`" @click="selectPeriods(n)">{{ n }} 期影像</button>
           <span>当前对比：{{ active?.title || '未选择图斑' }}</span>
@@ -733,7 +740,14 @@ onBeforeUnmount(() => {
     </section>
 
     <aside class="right-column">
+      <section class="panel create-spot-bar">
+        <button class="review-button" type="button" title="审核通过当前异常图斑" :disabled="creatingSpot || !active || active.handleStatus !== -1 || reviewBusy" @click="openReview">审核通过</button>
+        <button class="detail-action detail-action--revoke" type="button" title="撤销当前异常图斑" :disabled="creatingSpot || !canOperateSpot(active) || spotActionBusy" @click="openSpotAction('revoke')">撤销</button>
+        <button class="detail-action detail-action--ignore" type="button" title="忽略当前异常图斑" :disabled="creatingSpot || !canOperateSpot(active) || spotActionBusy" @click="openSpotAction('ignore')">忽略</button>
+        <button class="create-spot-button" type="button" title="绘制并新增异常图斑" :disabled="creatingSpot || !displayableImagery.some((image) => Boolean(image.mapService))" @click="startSpotDrawing">新增</button>
+      </section>
       <ManualSpotCreatePanel
+        v-if="creatingSpot"
         :key="user.activeDeptId || 'no-dept'"
         :scene-code="active?.sceneCode"
         :scenes="scenes"
@@ -745,14 +759,14 @@ onBeforeUnmount(() => {
         :drawing-period="drawingPeriod"
         :coordinates="draftCoordinates"
         @start-drawing="startSpotDrawing"
-        @cancel-drawing="cancelSpotDrawing"
+        @cancel-drawing="cancelSpotCreation"
         @finish-drawing="finishSpotDrawing"
         @undo-point="undoSpotDrawingPoint"
         @clear-drawing="clearSpotDrawing"
         @map-service-selection-change="synchronizeMapServiceSelection"
         @created="handleSpotCreated"
       />
-      <section class="panel detail">
+      <section v-else class="panel detail">
         <div class="panel-title"><span>异常图斑详细信息<small v-if="detailLoading">正在读取…</small></span></div>
         <p v-if="reviewError && !pendingReview" class="review-feedback review-feedback--error" role="alert">{{ reviewError }}</p>
         <p v-if="detailError" class="review-feedback review-feedback--error" role="alert">{{ detailError }}</p>
@@ -922,14 +936,15 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 /* 新增表单可内部滚动，两个右侧面板均分可用高度。 */
-.right-column { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+.right-column { grid-template-rows: auto minmax(0, 1fr); }
+.create-spot-bar { display: flex; align-items: center; gap: 6px; padding: 10px; }
+.create-spot-bar button { flex: 1 1 auto; min-width: 0; min-height: 36px; padding: 5px 7px; border: 1px solid var(--ui-border); border-radius: 5px; font-size: 16px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.create-spot-bar button:disabled { opacity: .5; cursor: not-allowed; }
 .review-button { flex: none; padding: 6px 10px; color: #08799d; background: #e8f6fa; border: 1px solid #9ed4e3; border-radius: 5px; font-size: 12px; font-weight: 700; line-height: 1.2; cursor: pointer; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .review-button:hover:not(:disabled) { color: #fff; background: #168eb3; border-color: #168eb3; box-shadow: 0 2px 8px #08779c32; }
 .review-button:focus-visible { outline: 2px solid #08799d; outline-offset: 2px; }
 .review-button:disabled { color: #91a7b2; background: #edf3f5; border-color: #d6e2e8; cursor: not-allowed; }
-.analysis-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
 .analysis .panel-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.analysis-actions .detail-action { min-height: 28px; padding: 4px 10px; }
 .detail-action { min-height: 30px; padding: 5px 7px; border: 1px solid; border-radius: 5px; background: #fff; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .detail-action--ignore { color: #567481; border-color: #afc7d2; }
 .detail-action--ignore:hover:not(:disabled) { color: #fff; background: #607e8b; border-color: #607e8b; box-shadow: 0 2px 8px #607e8b32; }
@@ -937,12 +952,6 @@ onBeforeUnmount(() => {
 .detail-action--revoke:hover:not(:disabled) { color: #fff; background: #b96051; border-color: #b96051; box-shadow: 0 2px 8px #b9605132; }
 .detail-action:focus-visible { outline: 2px solid #08799d; outline-offset: 2px; }
 .detail-action:disabled { color: #91a7b2; background: #edf3f5; border-color: #d6e2e8; cursor: not-allowed; }
-.analysis-actions .review-button,.analysis-actions .detail-action { min-height: 34px; padding: 0 13px; border-radius: 5px; font-size: 13px; font-weight: 700; }
-.analysis-actions .review-button:not(:disabled) { color: #fff; background: #087e9f; border-color: #087e9f; }
-.analysis-actions .detail-action--ignore:not(:disabled) { color: #fff; background: #526f7e; border-color: #526f7e; }
-.analysis-actions .detail-action--revoke:not(:disabled) { color: #fff; background: #ad493e; border-color: #ad493e; }
-.analysis-actions button:not(:disabled):hover { filter: brightness(.88); }
-.analysis-actions button:disabled { color: #6e8590; background: #e6edef; border-color: #c0d0d7; opacity: 1; }
 .detail > p.review-feedback { margin: 9px 14px 0; padding: 8px 10px; font-size: 12px; }
 .review-success-toast {
   position: fixed;

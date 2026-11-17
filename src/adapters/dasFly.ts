@@ -29,6 +29,7 @@ export interface UavFlightTaskOption {
   waylineId: string
   waylineName: string
   deviceName: string
+  droneSn?: string
   status: string
   createTime: string
   componentCapabilities?: UavComponentCapabilities
@@ -207,7 +208,8 @@ export function toFlightTaskOptionList(payload: unknown): { list: UavFlightTaskO
       name: String(item.name ?? item.taskName ?? item.flightTaskName ?? `飞行任务 ${index + 1}`),
       waylineId,
       waylineName: String(item.waylineName ?? item.wayline_name ?? item.routeName ?? item.route_name ?? '未返回航线名称'),
-      deviceName: String(item.deviceName ?? item.droneName ?? item.droneSn ?? item.sn ?? '未返回飞行器'),
+      droneSn: String(item.droneSn ?? ''),
+      deviceName: String(item.droneName || item.droneSn || '未返回飞行器'),
       status: String(item.statusName ?? item.statusDesc ?? item.status ?? '未知状态'),
       createTime: String(item.createTime ?? item.startTime ?? item.executeTime ?? '').replace('T', ' ').slice(0, 16) || '—',
       componentCapabilities: parseComponentCapabilities(item.componentCapabilities),

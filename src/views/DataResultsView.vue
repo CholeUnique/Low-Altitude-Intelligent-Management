@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import FilterActions from '@/components/FilterActions.vue'
 import { getFlightTaskMedia, getUavFlightTaskOptions, getUavMediaSummary, type UavFlightTaskOption } from '@/api/patrol'
 import { createCollectionMediaPager, type CollectionMediaEntry, type CollectionMediaFilter } from '@/utils/collection-media-pager'
 import type { FlightReviewMedia } from '@/api/flight-review'
@@ -20,6 +21,9 @@ const taskFilter = ref('')
 const timeFilter = ref('')
 const deviceFilter = ref('')
 const statusFilter = ref('')
+const draftFilters = reactive({ keyword: '', mediaTypeFilter: '', taskFilter: '', timeFilter: '', deviceFilter: '', statusFilter: '' })
+function applyFilters() { keyword.value = draftFilters.keyword; mediaTypeFilter.value = draftFilters.mediaTypeFilter; taskFilter.value = draftFilters.taskFilter; timeFilter.value = draftFilters.timeFilter; deviceFilter.value = draftFilters.deviceFilter; statusFilter.value = draftFilters.statusFilter; currentPage.value = 1 }
+function resetFilters() { Object.assign(draftFilters, { keyword: '', mediaTypeFilter: '', taskFilter: '', timeFilter: '', deviceFilter: '', statusFilter: '' }); applyFilters() }
 const loading = ref(false)
 const mediaScanLoading = ref(false)
 const summaryError = ref('')
@@ -62,7 +66,7 @@ let filterTimer: ReturnType<typeof setTimeout> | undefined
 let pager: ReturnType<typeof createCollectionMediaPager> | undefined
 let previewFilter: CollectionMediaFilter | undefined
 
-const deviceOptions = computed(() => [...new Set(tasks.value.map((item) => item.deviceName).filter(Boolean))])
+const deviceOptions = computed(() => [...new Map(tasks.value.filter(item => item.droneSn).map(item => [item.droneSn!, { sn: item.droneSn!, name: item.deviceName }] as const)).values()])
 const taskOptions = computed(() => [...new Map(tasks.value.map((item) => [item.id, item.name])).entries()])
 const hasFilters = computed(() => Boolean(keyword.value.trim() || mediaTypeFilter.value || taskFilter.value || timeFilter.value || deviceFilter.value))
 function currentFilter(): CollectionMediaFilter {
@@ -72,7 +76,8 @@ function currentFilter(): CollectionMediaFilter {
   const selectedDevice = deviceFilter.value
   const selectedType = mediaTypeFilter.value
   return {
-    task: task => (!selectedTask || task.id === selectedTask) && (!selectedDevice || task.deviceName === selectedDevice),
+    droneSn: selectedDevice || undefined,
+    task: task => !selectedTask || task.id === selectedTask,
     media: (media, task) => {
       if (!isAerialMedia(media)) return false
       if (selectedType && (isVideoMedia(media) ? 'video' : 'image') !== selectedType) return false
@@ -108,7 +113,7 @@ function toReviewMedia(media: LiveMediaItem, task: UavFlightTaskOption): FlightR
 }
 function taskReviewMedia(task: UavFlightTaskOption) {
   void mediaCacheVersion.value
-  return (pager?.taskMedia(task.id) || []).map(media => toReviewMedia(media, task))
+  return (pager?.taskMedia(task.id, previewFilter?.droneSn) || []).map(media => toReviewMedia(media, task))
 }
 function openSrtInfo(media: LiveMediaItem, task: UavFlightTaskOption) {
   if (!isVideoMedia(media)) return
@@ -446,12 +451,13 @@ onBeforeUnmount(() => {
           </div>
         </header>
         <header class="collection-toolbar">
-          <label class="search-control"><i>⌕</i><input v-model="keyword" placeholder="搜索任务或数据名称..." /></label>
-          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="mediaTypeFilter" aria-label="数据类型"><ElOption value="" label="数据类型" /><ElOption value="video" label="视频" /><ElOption value="image" label="图片" /></ElSelect></label>
-          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="taskFilter"><ElOption value="" label="任务名称" /><ElOption v-for="[id, name] in taskOptions" :key="id" :value="id" :label="String(name)" /></ElSelect></label>
-          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="timeFilter"><ElOption value="" label="采集时间" /><ElOption value="1" label="最近 1 天" /><ElOption value="7" label="最近 7 天" /><ElOption value="30" label="最近 30 天" /></ElSelect></label>
-          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="deviceFilter"><ElOption value="" label="设备类型" /><ElOption v-for="item in deviceOptions" :key="item" :value="String(item)" :label="String(item)" /></ElSelect></label>
-          <label class="select-control status-select" title="等待后端提供状态码枚举"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="statusFilter" disabled><ElOption value="" label="状态（待后端枚举）" /></ElSelect></label>
+          <input class="ui-filter-search" v-model="draftFilters.keyword" aria-label="搜索任务或数据名称" placeholder="搜索任务或数据名称..." @keyup.enter="applyFilters" />
+          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.mediaTypeFilter" aria-label="数据类型"><ElOption value="" label="数据类型" /><ElOption value="video" label="视频" /><ElOption value="image" label="图片" /></ElSelect></label>
+          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.taskFilter"><ElOption value="" label="任务名称" /><ElOption v-for="[id, name] in taskOptions" :key="id" :value="id" :label="String(name)" /></ElSelect></label>
+          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.timeFilter"><ElOption value="" label="采集时间" /><ElOption value="1" label="最近 1 天" /><ElOption value="7" label="最近 7 天" /><ElOption value="30" label="最近 30 天" /></ElSelect></label>
+          <label class="select-control"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.deviceFilter"><ElOption value="" label="飞行设备" /><ElOption v-for="item in deviceOptions" :key="item.sn" :value="item.sn" :label="item.name" /></ElSelect></label>
+          <label class="select-control status-select" title="等待后端提供状态码枚举"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.statusFilter" disabled><ElOption value="" label="状态（待后端枚举）" /></ElSelect></label>
+                  <FilterActions @query="applyFilters" @reset="resetFilters" />
         </header>
 
         <div v-if="loading || (mediaScanLoading && !pageMedia.length)" class="page-state">正在读取图片与视频数据…</div>
@@ -513,6 +519,8 @@ onBeforeUnmount(() => {
 .results-page{width:100%;height:100dvh;min-height:0;display:flex;flex-direction:column;color:#243550;background:#f2f6fb;font-family:var(--ui-font)}.results-page.embedded{height:100%}.results-page>main{min-height:0;flex:1;overflow:hidden}.collection-page{height:100%;min-height:0;display:flex;flex-direction:column;padding:16px 20px 12px;overflow:hidden}.collection-toolbar{display:grid;grid-template-columns:minmax(340px,4fr) repeat(4,minmax(0,1fr));align-items:center;gap:14px;margin-bottom:16px}.search-control,.select-control{height:44px;display:flex;align-items:center;overflow:hidden;border:1px solid #dbe3ed;border-radius:7px;background:#fff;box-shadow:0 1px 2px #24405d0a}.search-control i,.select-control i{width:42px;flex:0 0 42px;color:#647590;font-size:21px;font-style:normal;text-align:center}.search-control input,.select-control select{min-width:0;height:100%;flex:1;border:0;outline:0;color:#34445e;background:#fff;font-size:14px}.search-control input::placeholder{color:#8996a9}.select-control select{padding:0 28px 0 3px;cursor:pointer}.toolbar-actions{display:flex;justify-content:flex-end;gap:12px}.toolbar-actions button{height:46px;padding:0 18px;border:1px solid #477bf3;border-radius:6px;color:#3470eb;background:#fff;font-size:14px;font-weight:600;white-space:nowrap;cursor:pointer}.toolbar-actions button.primary{color:#fff;background:linear-gradient(135deg,#435ff3,#2f7bf5);box-shadow:0 5px 14px #3868ef2e}.toolbar-actions b{margin-right:7px;font-size:20px;font-weight:400;vertical-align:-1px}.task-groups{min-height:0;flex:1;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-right:2px}.task-group{flex:0 0 auto;overflow:hidden;border:1px solid #e0e7ef;border-radius:9px;background:#fff;box-shadow:0 2px 8px #263f6410}.task-group__header{width:100%;height:56px;display:grid;grid-template-columns:19px 25px minmax(220px,1fr) auto auto 6px auto 6px minmax(130px,auto) 24px;align-items:center;gap:8px;padding:0 14px;border:0;color:#53627a;background:#fff;text-align:left;cursor:pointer}.task-group__header .chevron{color:#31425c;font-size:27px;font-style:normal;transform:rotate(0);transition:.18s}.task-group.expanded .chevron{transform:rotate(90deg)}.task-group__header .folder{color:#477ff3;font-size:20px;font-style:normal}.task-group__header strong{overflow:hidden;color:#243550;font-size:16px;text-overflow:ellipsis;white-space:nowrap}.task-group__header em{padding:5px 9px;border-radius:4px;color:#3475e8;background:#eaf2ff;font-size:12px;font-style:normal}.task-group__header em.complete{color:#2a9874;background:#e4f7ef}.task-group__header em.running{color:#3282e6;background:#e5f1ff}.task-group__header span{white-space:nowrap}.task-group__header small{color:#c6cfdb}.task-group__header>b{border:0;color:#4c5c75;background:transparent;font-size:20px;text-align:center}.task-group__body{padding:10px 16px 16px;border-top:1px solid #edf1f5}.media-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px}.media-card{min-width:0;overflow:hidden;padding:0;border:1px solid #dfe6ee;border-radius:6px;color:#283950;background:#fff;box-shadow:0 3px 10px #263e5b17;text-align:left;cursor:pointer;transition:.18s}.media-card:hover{border-color:#79a6ff;box-shadow:0 6px 16px #376cb62b;transform:translateY(-2px)}.media-preview{height:130px;display:grid;place-items:center;overflow:hidden;color:#8291a5;background:linear-gradient(135deg,#dfe8ef,#cbd9e4)}.media-preview img{width:100%;height:100%;object-fit:cover}.media-card>div:last-child{position:relative;padding:10px 12px}.media-card strong{display:block;padding-right:30px;overflow:hidden;font-size:14px;text-overflow:ellipsis;white-space:nowrap}.media-card b{position:absolute;top:6px;right:9px;color:#53627a;font-size:15px}.media-card small{display:block;margin-top:6px;color:#8895a7;font-size:12px}.group-state,.page-state{min-height:120px;display:grid;place-items:center;color:#7b899b}.page-state{height:100%}.error-state{color:#c4515b}.error-state button{margin-left:10px;padding:6px 10px;border:1px solid #d58087;border-radius:4px;color:#b9434d;background:#fff;cursor:pointer}.collection-pagination{height:52px;flex:0 0 52px;display:flex;align-items:end;justify-content:space-between;color:#718096;font-size:13px}.collection-pagination nav{display:flex;align-items:center;gap:7px}.collection-pagination select,.collection-pagination button,.collection-pagination input{height:34px;border:1px solid #d5deea;border-radius:5px;color:#53627a;background:#fff}.collection-pagination select{padding:0 25px 0 10px}.collection-pagination button{min-width:34px;padding:0 9px;cursor:pointer}.collection-pagination button.active{color:#fff;border-color:#3678ef;background:#3678ef}.collection-pagination button:disabled{opacity:.45;cursor:not-allowed}.collection-pagination label{margin-left:10px}.collection-pagination input{width:43px;margin:0 5px;text-align:center}.data-notice{position:fixed;z-index:60;top:92px;left:50%;padding:10px 18px;border-radius:5px;color:#fff;background:#243853e8;box-shadow:0 6px 20px #1c2d4866;transform:translateX(-50%)}.notice-enter-active,.notice-leave-active{transition:.2s}.notice-enter-from,.notice-leave-to{opacity:0;transform:translate(-50%,-8px)}.preview-mask{position:fixed;z-index:80;inset:0;display:grid;grid-template-rows:minmax(0,1fr) auto;place-items:center;padding:48px;background:#07111de8}.preview-mask img{max-width:92vw;max-height:82vh;object-fit:contain}.preview-mask strong{padding-top:12px;color:#fff}.preview-close{position:absolute;top:22px;right:28px;border:0;color:#fff;background:transparent;font-size:38px;cursor:pointer}
 @media(max-width:1500px){.collection-toolbar{grid-template-columns:minmax(240px,2fr) repeat(4,minmax(0,1fr));gap:9px}.toolbar-actions button{padding:0 12px}.media-grid{gap:11px}.media-preview{height:112px}.task-group__header{grid-template-columns:17px 23px minmax(180px,1fr) auto auto 4px auto 4px minmax(110px,auto) 22px}}
 @media(max-width:1180px){.collection-toolbar{grid-template-columns:repeat(4,minmax(0,1fr))}.collection-toolbar .search-control{grid-column:1/-1}.media-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.task-group__header small,.task-group__header span:nth-of-type(2){display:none}}
+
+.collection-toolbar :deep(.filter-actions){grid-column:auto}
 </style>
 
 <style scoped lang="scss">

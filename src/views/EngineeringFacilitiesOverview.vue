@@ -3,6 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { getFacilityPage, getFacilityGeoJson, getFacilityDetail, type FacilityRecord } from '@/api/facility'
+import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { createMapServiceLayer, MAP_SERVICE_IMAGERY_PANE, MAP_SERVICE_VECTOR_PANE, type MapServiceLayerHandle } from '@/utils/map-service-layer'
+import { FACILITIES_TOPIC_ID } from '@/stores/geographic-topics'
 import { useUserStore } from '@/stores/user'
 import OverviewMapScale from '@/components/OverviewMapScale.vue'
 import TopicMapLegend from '@/components/TopicMapLegend.vue'
@@ -16,6 +19,58 @@ interface Facility { key: string; record: FacilityRecord; name: string; category
 const facilities = shallowRef<Facility[]>([])
 const reportTarget = ref<FacilityRecord>(), qrcodeTarget = ref<FacilityRecord>()
 const pending = ref(false), error = ref(''), keyword = ref(''), typeFilter = ref(''), statusFilter = ref(''), page = ref(1), selectedKey = ref(''), detailError = ref('')
+const mapServices = ref<MapServiceItem[]>([])
+const selectedServices = ref<string[]>([])
+const mapServiceError = ref('')
+const mapServiceLoading = ref(false)
+let serviceVersion = 0
+const serviceLayers = new Map<string, MapServiceLayerHandle>()
+const serviceRequests = new Map<string, Promise<void>>()
+function clearMapServices() {
+  serviceVersion++
+  serviceLayers.forEach(handle => handle.layer.remove())
+  serviceLayers.clear()
+  serviceRequests.clear()
+  selectedServices.value = []
+}
+async function loadMapServices() {
+  clearMapServices()
+  const request = serviceVersion
+  mapServices.value = []
+  mapServiceError.value = ''
+  mapServiceLoading.value = true
+  try {
+    const services = await listEnabledMapServices(user.activeDeptId, FACILITIES_TOPIC_ID)
+    if (request === serviceVersion) mapServices.value = services
+  } catch (reason) {
+    if (request === serviceVersion) mapServiceError.value = reason instanceof Error ? reason.message : '地图服务列表读取失败'
+  } finally { if (request === serviceVersion) mapServiceLoading.value = false }
+}
+async function updateMapServices(ids: string[]) {
+  selectedServices.value = ids
+  mapServiceError.value = ''
+  const request = serviceVersion
+  serviceLayers.forEach((handle, id) => { if (!ids.includes(id)) { handle.layer.remove(); serviceLayers.delete(id) } })
+  await Promise.all(ids.map(async id => {
+    if (serviceLayers.has(id) || serviceRequests.has(id)) return
+    const service = mapServices.value.find(item => String(item.id) === id)
+    if (!service || !map) return
+    const job = (async () => {
+      try {
+        const handle = await createMapServiceLayer(service)
+        if (request !== serviceVersion || !selectedServices.value.includes(id) || !map) { handle.layer.remove(); return }
+        handle.layer.addTo(map)
+        serviceLayers.set(id, handle)
+      } catch (reason) {
+        if (request !== serviceVersion || !selectedServices.value.includes(id)) return
+        selectedServices.value = selectedServices.value.filter(selected => selected !== id)
+        mapServiceError.value = `${service.name}加载失败：${reason instanceof Error ? reason.message : '请重试'}`
+      }
+    })()
+    serviceRequests.set(id, job)
+    try { await job } finally { if (serviceRequests.get(id) === job) serviceRequests.delete(id) }
+  }))
+}
 const mapElement = ref<HTMLElement>(), listElement = ref<HTMLElement>()
 const scaleMap = shallowRef<L.Map>()
 const listOpen = ref(true)
@@ -77,17 +132,6 @@ let version = 0, map: L.Map | undefined, featureGroup: L.LayerGroup | undefined,
 let fitted = false
 function geometryLabel(value?: string | null) { const type = (value || '').toUpperCase(); return type.includes('POINT') ? '点' : type.includes('LINE') ? '线' : type.includes('POLYGON') ? '面' : '未知' }
 function categoryColor(category: string) { return categoryColors.value.get(category) || '#9ab2b6' }
-/** 按图例实际高度给清单面板留出底部空间，保证图例完整可见。 */
-const root = ref<HTMLElement>()
-const drawerBottom = ref(252)
-let legendObserver: ResizeObserver | undefined
-function syncLegendSpace() {
-  const legend = root.value?.querySelector('.map-symbol-legend') as HTMLElement | null
-  if (!legend) return
-  if (!legendObserver) { legendObserver = new ResizeObserver(() => syncLegendSpace()); legendObserver.observe(legend) }
-  const next = Math.min(Math.round(window.innerHeight * .62), Math.round(legend.offsetHeight + 24))
-  if (Math.abs(next - drawerBottom.value) > 2) drawerBottom.value = next
-}
 async function load() {
   const request = ++version
   pending.value = true; error.value = ''; facilities.value = []; selectedKey.value = ''; detailError.value = ''; fitted = false
@@ -112,7 +156,7 @@ async function load() {
       return { key: String(record.id), record, name: record.name || '未命名设施', category: record.typeName || record.facilityType || '未分类', geometryType: geometryLabel(geometry?.type || record.geometryType), geometry }
     })
   } catch (reason) { if (request === version) error.value = reason instanceof Error ? reason.message : '工程设施读取失败' }
-  finally { if (request === version) { pending.value = false; await nextTick(); renderMap(); await nextTick(); syncLegendSpace() } }
+  finally { if (request === version) { pending.value = false; await nextTick(); renderMap() } }
 }
 /** 地图页只保留九龙镇行政区边界这一份矢量数据，作为设施分布的范围参照。 */
 function renderJiulongBoundary(target: L.Map) {
@@ -190,6 +234,8 @@ function closeFacilityDetail() {
 onMounted(() => {
   if (!mapElement.value) return
   map = L.map(mapElement.value, { center: [32.49, 119.85], zoom: 12, attributionControl: false, zoomControl: false, preferCanvas: true })
+  map.createPane(MAP_SERVICE_IMAGERY_PANE).style.zIndex = '225'
+  map.createPane(MAP_SERVICE_VECTOR_PANE).style.zIndex = '335'
   map.createPane('facility-shapes').style.zIndex = '400'
   // 扩大点、线要素的点击容差，不改变实际绘制尺寸。
   facilityRenderer = L.canvas({ pane: 'facility-shapes', tolerance: 8 })
@@ -212,21 +258,22 @@ onMounted(() => {
   observer = new ResizeObserver(() => { map?.invalidateSize({ pan: false }) }); observer.observe(mapElement.value)
   renderMap()
 })
-watch(() => user.activeDeptId, () => { statusFilter.value = ''; typeFilter.value = ''; keyword.value = ''; void load() }, { immediate: true })
-onBeforeUnmount(() => { version++; observer?.disconnect(); legendObserver?.disconnect(); legendObserver = undefined; map?.remove(); map = undefined })
+watch(() => user.activeDeptId, () => { statusFilter.value = ''; typeFilter.value = ''; keyword.value = ''; void load(); void loadMapServices() }, { immediate: true })
+onBeforeUnmount(() => { version++; clearMapServices(); observer?.disconnect(); map?.remove(); map = undefined })
 </script>
 
 <template>
-  <section ref="root" class="facilities-overview" :style="{ '--drawer-bottom': `${drawerBottom}px` }" aria-label="工程设施地图">
+  <section class="facilities-overview" aria-label="工程设施地图">
     <div ref="mapElement" class="facility-map" aria-label="工程设施分布地图"></div>
     <OverviewMapScale :map="scaleMap" />
-    <div class="page-title"><span>专题分析 / 高标准农田工程设施管理 / 工程设施地图</span></div>
     <TopicMapLegend :groups="legendGroups" />
     <div v-if="pending || partial" class="status-toast" :class="{'is-error':partial}" :role="partial ? 'alert' : 'status'"><template v-if="partial">设施数据读取失败：{{ error }} <button type="button" @click="load">重试</button></template><template v-else>正在读取设施台账…</template></div>
-    <aside class="facility-drawer" :class="{'is-collapsed':!listOpen}" aria-label="设施清单">
-      <div class="drawer-header"><div><small>FACILITY DIRECTORY</small><h2>工程设施 <span>{{ filtered.length.toLocaleString() }}</span></h2></div><button class="icon-button" type="button" :title="listOpen ? '收起设施清单' : '展开设施清单'" :aria-label="listOpen ? '收起设施清单' : '展开设施清单'" :aria-expanded="listOpen" @click="listOpen=!listOpen">{{ listOpen ? '‹' : '›' }}</button></div>
-      <div v-show="listOpen" class="drawer-content">
-        <div class="filters"><label class="search-field"><span aria-hidden="true">⌕</span><input v-model="keyword" type="search" placeholder="搜索名称、编号、项目或行政村" aria-label="搜索设施" /></label><div class="filter-row"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="statusFilter" aria-label="设施状态"><ElOption value="" label="全部状态" /><ElOption value="NORMAL" label="正常" /><ElOption value="ABNORMAL" label="异常" /><ElOption value="CHECKING" label="核查中" /><ElOption value="DISCARDED" label="废弃" /></ElSelect><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="typeFilter" aria-label="设施分类"><ElOption value="" label="全部分类" /><ElOption v-for="[name,count] in types" :key="name" :value="name" :label="String(name) + '（' + String(count) + '）'" /></ElSelect></div></div>
+    <button class="facility-drawer-toggle" :class="{ collapsed: !listOpen }" type="button" :aria-label="listOpen ? '收起设施清单' : '展开设施清单'" :title="listOpen ? '收起设施清单' : '展开设施清单'" :aria-expanded="listOpen" @click="listOpen = !listOpen">{{ listOpen ? '‹' : '›' }}</button>
+    <aside class="facility-drawer" :class="{'is-collapsed':!listOpen}" :aria-hidden="!listOpen" :inert="!listOpen" aria-label="设施清单">
+      <div class="drawer-header"><div><small>FACILITY DIRECTORY</small><h2>工程设施 <span>{{ filtered.length.toLocaleString() }}</span></h2></div></div>
+      <div class="drawer-content">
+        <div class="map-service-picker"><label>地图服务</label><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" :model-value="selectedServices" multiple collapse-tags collapse-tags-tooltip :loading="mapServiceLoading" placeholder="选择地图服务" aria-label="地图服务" @change="updateMapServices"><ElOption v-for="service in mapServices" :key="String(service.id)" :value="String(service.id)" :label="service.name" /></ElSelect><small v-if="mapServiceError" role="alert">{{ mapServiceError }} <button type="button" @click="loadMapServices">重试</button></small><small v-else-if="!mapServiceLoading && !mapServices.length">当前专题暂无可用地图服务</small></div>
+        <div class="filters"><label class="search-field"><span aria-hidden="true">⌕</span><input class="ui-filter-search" v-model="keyword" type="search" placeholder="搜索名称、编号、项目或行政村" aria-label="搜索设施" /></label><div class="filter-row"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="statusFilter" aria-label="设施状态"><ElOption value="" label="全部状态" /><ElOption value="NORMAL" label="正常" /><ElOption value="ABNORMAL" label="异常" /><ElOption value="CHECKING" label="核查中" /><ElOption value="DISCARDED" label="废弃" /></ElSelect><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="typeFilter" aria-label="设施分类"><ElOption value="" label="全部分类" /><ElOption v-for="[name,count] in types" :key="name" :value="name" :label="String(name) + '（' + String(count) + '）'" /></ElSelect></div></div>
         <div class="list-heading"><b>设施清单</b><span>点击定位</span></div>
         <div ref="listElement" class="facility-list"><button v-for="item in pageRows" :key="item.key" type="button" class="facility-item" :class="{active:selectedKey===item.key}" @click="selectFacility(item)"><span class="facility-symbol" :style="{color:categoryColor(item.category)}">{{ item.geometryType }}</span><span class="facility-copy"><strong :title="item.name">{{ item.name }}</strong><small>{{ item.category }} · {{ item.record.bizStatusName || item.record.bizStatus || '状态未知' }}</small></span><span v-if="!item.geometry" class="facility-action">无位置</span></button><p v-if="!pageRows.length" class="empty">{{ pending ? '正在读取设施…' : '暂无符合条件的设施' }}</p></div>
         <footer><span>{{ pageSize }} 条/页　{{ page }} / {{ pages }} 页</span><div><button type="button" :disabled="page<=1" @click="page--">上一页</button><button type="button" :disabled="page>=pages" @click="page++">下一页</button></div></footer>
@@ -242,14 +289,22 @@ onBeforeUnmount(() => { version++; observer?.disconnect(); legendObserver?.disco
   </section>
 </template>
 <style scoped>
+.map-service-picker{display:grid;gap:6px;padding:12px 14px 0;font-size:12px;color:#b9dce5}.map-service-picker .system-select{width:100%}.map-service-picker small{color:#f0b6a7;overflow-wrap:anywhere}.map-service-picker button{border:0;background:none;color:#75ddea}
 .facilities-overview{--details-width:310px;position:relative;height:100%;min-height:450px;overflow:hidden;background:#102d39;color:#def2f5}.facility-map{position:absolute;inset:0;z-index:0}.page-title{position:absolute;z-index:450;top:22px;left:24px;pointer-events:none;text-shadow:0 2px 9px #00141e}.page-title span{font-size:12px;color:#a3d0dd}.page-title h1{font-size:23px;line-height:1.25;margin:8px 0 4px}.page-title p{margin:0;color:#d0e6e9;font-size:12px}.facilities-overview button{font:inherit;cursor:pointer}.map-link{position:absolute;z-index:500;right:20px;top:20px;padding:10px 14px;border:1px solid #5eafbf66;border-radius:7px;background:#0b3142eb;color:#d5eff4;box-shadow:0 6px 22px #00182055}.status-toast{position:absolute;z-index:540;top:80px;left:50%;transform:translateX(-50%);max-width:50%;padding:10px 14px;border:1px solid #467b88;border-radius:6px;background:#0b3040ef;color:#cee9ef;font-size:12px}.status-toast.is-error{color:#ffb7a7}.status-toast button{border:0;background:none;color:#75ddea}.facility-drawer,.category-panel{position:absolute;z-index:500;display:flex;flex-direction:column;overflow:hidden;border:1px solid #7ab7c33b;border-radius:10px;background:linear-gradient(145deg,#143d4bf2,#092936f2);box-shadow:0 10px 35px #00182166;backdrop-filter:blur(16px)}.facility-drawer{top:118px;bottom:var(--drawer-bottom,252px);left:20px;width:310px}.category-panel{top:80px;right:20px;bottom:180px;width:270px}.facility-drawer.is-collapsed{bottom:auto;width:auto}.drawer-header,.category-header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:15px 16px;border-bottom:1px solid #7fa9b529}.drawer-header small,.category-header small{display:block;color:#74afbc;font-size:12px;letter-spacing:1.2px}.drawer-header h2,.category-header h2{margin:5px 0 0;font-size:17px;color:#e7f8fa}.drawer-header h2 span{margin-left:5px;color:#72dce2;font-size:12px;font-weight:400}.icon-button{width:28px;height:28px;border:1px solid #719da53b;border-radius:5px;background:#39687a35;color:#c3e9ee;font-size:20px!important;line-height:20px}.icon-button:hover{background:#337b8d70}.drawer-content{display:flex;flex:1;min-height:0;flex-direction:column}.filters{padding:14px 14px 10px}.search-field{display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #6595a260;border-radius:6px;background:#0b2c39a8}.search-field span{font-size:20px;color:#9dc9d3}.search-field input{height:34px;width:100%;min-width:0;border:0;outline:0;background:none;color:#e5f5f6;font:inherit;font-size:12px}.search-field input::placeholder{color:#8bb0bd}.filter-row{display:flex;gap:7px;margin-top:8px}.filter-row select{width:50%;min-width:0;height:33px;padding:0 7px;border:1px solid #6595a260;border-radius:5px;background:#103542;color:#cde7ed;font-size:12px}.filter-row option{background:#103542}.list-heading{display:flex;justify-content:space-between;padding:10px 15px;border-top:1px solid #719dab2a;border-bottom:1px solid #719dab2a;font-size:14px}.list-heading span{color:#83adba;font-size:14px}.facility-list{flex:1;min-height:0;overflow:auto;padding:4px 8px;scrollbar-width:thin;scrollbar-color:#548391 transparent}.facility-item{height:52px;box-sizing:border-box;display:flex;align-items:center;gap:9px;width:100%;padding:10px 7px;border:0;border-radius:5px;background:transparent;color:#d7edf0;text-align:left}.facility-item:hover,.facility-item.active{background:#37859a47}.facility-symbol{display:grid;place-items:center;width:29px;height:29px;flex:none;border:1px solid #60cbd66b;border-radius:7px;background:#39bfcb21;color:#6ae0e5;font-size:12px}.facility-copy{display:grid;gap:4px;min-width:0;flex:1}.facility-copy strong,.facility-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.facility-copy strong{font-size:14px;font-weight:500}.facility-copy small{color:#8db7c2;font-size:12px}.facility-action{color:#6ecdd8;font-size:12px;white-space:nowrap}.empty{padding:20px 5px;text-align:center;color:#95bac4;font-size:12px}.drawer-content footer{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid #719dab2a;color:#9bbfc8;font-size:12px}.drawer-content footer div{display:flex;gap:6px}.drawer-content footer button{border:1px solid #507f8d;border-radius:4px;background:#214e5e;color:#c1e2e8;padding:5px 8px;font-size:12px}.drawer-content footer button:disabled{opacity:.4;cursor:default}@media(max-width:1100px){.facility-drawer{width:270px}.category-panel{width:230px}}@media(max-width:700px){.facility-drawer{left:10px;top:108px;bottom:150px;width:230px}.category-panel{right:10px;top:70px;bottom:auto;width:190px;max-height:45%}.page-title{top:15px;left:14px}.page-title h1{font-size:21px}.page-title span{font-size:12px}.map-link{right:10px;top:12px;padding:7px 9px;font-size:12px}.status-toast{top:65px;max-width:70%}}
 .feature-details{overflow:auto;min-height:0;padding:14px;scrollbar-width:thin;scrollbar-color:#548391 transparent}.feature-summary{display:grid;gap:7px;padding:14px;border:1px solid #6ac4cd35;border-radius:6px;background:#2d728635}.feature-summary small{font-size:12px;color:#8dc4cf}.feature-summary strong{font-size:15px;color:#e5f6f7;overflow-wrap:anywhere}.feature-details dl{margin:12px 0 0}.feature-details dl>div{display:grid;grid-template-columns:minmax(70px,.8fr) minmax(0,1.2fr);gap:10px;padding:10px 2px;border-bottom:1px solid #719dab2a;font-size:12px;line-height:1.6}.feature-details dt{color:#91bbc5}.feature-details dd{margin:0;color:#d8edf0;overflow-wrap:anywhere}
 .filter-row select:focus { outline: none; box-shadow: none; }
-.facility-drawer { top: 50px; }
-@media(max-width:700px) { .facility-drawer { top: 43px; } }
+.facility-drawer { top: 20px; }
+.category-panel { top: 20px; }
 .filter-row select:focus-visible { border-color: #a2c9d1; }
 @media(max-width:1100px){.facilities-overview{--details-width:270px}}
 @media(max-width:700px){.facilities-overview{--details-width:230px}.facilities-overview :deep(.map-symbol-legend){left:10px}}
+
+.facility-drawer { width: var(--details-width); height: 568px; max-height: calc(100% - 40px); bottom: auto; box-sizing: border-box; transition: translate var(--ui-panel-motion, .24s ease), opacity var(--ui-panel-motion, .24s ease); }
+.facility-drawer.is-collapsed { width: var(--details-width); bottom: auto; translate: calc(-100% - 24px) 0; opacity: 0; pointer-events: none; }
+.facilities-overview .facility-drawer-toggle { position: absolute; z-index: 515; left: calc(20px + var(--details-width)); top: 30px; display: flex; align-items: center; justify-content: center; width: 24px; height: 44px; padding: 0; border: 1px solid var(--ui-border, #78b8ce40); border-left: 0; border-radius: 0 7px 7px 0; background: var(--ui-glass, #103745ee); color: #c4d6e6; font-size: 26px; line-height: 1; transition: left var(--ui-panel-motion, .24s ease); }
+.facilities-overview .facility-drawer-toggle.collapsed { left: 0; }
+@media(max-width:700px) { .facilities-overview .facility-drawer-toggle:not(.collapsed) { left: calc(10px + var(--details-width)); } }
+@media(prefers-reduced-motion:reduce) { .facility-drawer, .facility-drawer-toggle { transition: none; } }
 
 .category-panel .feature-actions{flex:none;display:flex;gap:8px;padding:10px 14px 14px;border-top:1px solid #285468}
 .category-panel .feature-actions button{flex:1;padding:8px 10px;border:1px solid #3a7386;border-radius:5px;background:#123a4c;color:#d7eef4;font-size:12px;cursor:pointer}

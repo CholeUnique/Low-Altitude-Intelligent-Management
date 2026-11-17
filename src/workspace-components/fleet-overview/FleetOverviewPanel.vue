@@ -4,6 +4,7 @@ import { CircleCheck, Monitor, Position, Timer } from '@element-plus/icons-vue'
 import {
   getUavDeviceAlarms,
   getUavDeviceFlightStatistics,
+  getUavDroneSummary,
   getUavDeviceOptions,
   getUavDeviceState,
   getUavDeviceSummary,
@@ -13,6 +14,7 @@ import {
   type UavDeviceFlightStatistic,
   type UavDeviceOption,
   type UavDeviceState,
+  type UavDroneSummary,
   type UavDeviceSummary,
   type UavFlightSummary,
   type UavFlightTaskOption,
@@ -49,18 +51,21 @@ const healthList = ref<HTMLElement>()
 const inventoryList = ref<HTMLElement>()
 const deviceStates = ref<Record<string, UavDeviceState>>({})
 const deviceAlarms = ref<UavDeviceAlarm[]>([])
-const alarmTotal = ref<number>()
-const alarmsLoaded = ref(false)
+const alarmTotals = ref<Record<string, number>>({})
 const flightSummary = ref<UavFlightSummary>()
 const deviceSummary = ref<UavDeviceSummary>()
 const deviceFlightStatistics = ref<UavDeviceFlightStatistic[]>([])
+const droneSummary = ref<UavDroneSummary>()
 const deviceStatisticsLoading = ref(false)
 const deviceStatisticsError = ref('')
 let deviceStatisticsRequestVersion = 0
 
-const activeDevice = computed(() => devices.value.find((device) => device.id === selectedDeviceId.value) || devices.value[0])
+const allDevices = computed(() => devices.value.flatMap(device => [device, ...(device.children || [])]))
+const activeDevice = computed(() => allDevices.value.find((device) => device.id === selectedDeviceId.value) || devices.value[0])
+const selectedAlarms = computed(() => deviceAlarms.value.filter(alarm => alarm.sn === activeDevice.value?.sn))
+const selectedAlarmTotal = computed(() => activeDevice.value?.sn ? alarmTotals.value[activeDevice.value.sn] : undefined)
 const runningTasks = computed(() => flightTasks.value.filter((task) => /执行|飞行|巡航|进行/.test(task.status)).length)
-const devicesWithLocation = computed(() => devices.value.map((device) => {
+const devicesWithLocation = computed(() => allDevices.value.map((device) => {
   const state = device.sn ? deviceStates.value[device.sn] : undefined
   return { ...device, longitude: state?.longitude ?? device.longitude, latitude: state?.latitude ?? device.latitude }
 }).filter((device) => device.longitude !== undefined && device.latitude !== undefined))
@@ -84,7 +89,7 @@ const statisticsPeriod = computed(() => {
 
 function valueOf(value: number | undefined) { return value === undefined ? '--' : String(value) }
 function flightHours(value?: number) { return value === undefined ? '--' : (value / 3600).toFixed(1) }
-function deviceState(device?: UavDeviceOption) { return device ? (device.online ? '在线' : '离线') : '--' }
+function deviceState(device?: UavDeviceOption) { return device?.online === undefined ? '未知' : device.online ? '在线' : '离线' }
 function stateFor(device: UavDeviceOption) { return device.sn ? deviceStates.value[device.sn] : undefined }
 function taskForDevice(device: UavDeviceOption) {
   if (!device.sn) return undefined
@@ -119,15 +124,22 @@ async function selectDevice(deviceId: string) {
   inventoryList.value?.querySelector<HTMLElement>(selector)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
 
-async function loadSelectedDeviceStatistics(sn?: string) {
+async function loadSelectedDeviceStatistics(device?: UavDeviceOption) {
   const requestVersion = ++deviceStatisticsRequestVersion
   deviceFlightStatistics.value = []
+  droneSummary.value = undefined
   deviceStatisticsError.value = ''
-  if (!sn) return
+  const sn = device?.sn
+  if (!sn) { deviceStatisticsLoading.value = false; return }
   deviceStatisticsLoading.value = true
   try {
-    const result = await getUavDeviceFlightStatistics(sn)
-    if (requestVersion === deviceStatisticsRequestVersion) deviceFlightStatistics.value = result
+    if (device.kind === 'aircraft') {
+      const result = await getUavDroneSummary(sn)
+      if (requestVersion === deviceStatisticsRequestVersion) droneSummary.value = result.find(item => item.sn === sn)
+    } else {
+      const result = await getUavDeviceFlightStatistics(sn)
+      if (requestVersion === deviceStatisticsRequestVersion) deviceFlightStatistics.value = result.filter(item => item.sn === sn)
+    }
   } catch (error) {
     if (requestVersion === deviceStatisticsRequestVersion) {
       deviceStatisticsError.value = error instanceof Error ? error.message : '设备飞行绩效加载失败。'
@@ -149,26 +161,24 @@ async function loadFleetData() {
   if (deviceResult.status === 'fulfilled') {
     devices.value = deviceResult.value
     devicesLoaded.value = true
-    if (!devices.value.some((device) => device.id === selectedDeviceId.value)) selectedDeviceId.value = devices.value[0]?.id || ''
-    const devicesWithSn = deviceResult.value.filter((device) => device.sn)
+    if (!allDevices.value.some((device) => device.id === selectedDeviceId.value)) selectedDeviceId.value = devices.value[0]?.id || ''
+    const devicesWithSn = deviceResult.value.flatMap(device => [device, ...(device.children || [])]).filter((device) => device.sn)
     const [stateResults, alarmResults] = await Promise.all([
       Promise.allSettled(devicesWithSn.map((device) => getUavDeviceState(device.sn!))),
       Promise.allSettled(devicesWithSn.map((device) => getUavDeviceAlarms(device.sn!))),
     ])
     deviceStates.value = Object.fromEntries(stateResults.flatMap((result, index) =>
-      result.status === 'fulfilled' ? [[devicesWithSn[index]!.sn!, result.value] as const] : []))
+      result.status === 'fulfilled' && result.value.deviceSn === devicesWithSn[index]!.sn ? [[devicesWithSn[index]!.sn!, result.value] as const] : []))
     const successfulAlarms = alarmResults.filter((result): result is PromiseFulfilledResult<{ list: UavDeviceAlarm[]; total: number }> => result.status === 'fulfilled')
     deviceAlarms.value = successfulAlarms.flatMap((result) => result.value.list)
       .sort((left, right) => String(right.createTime || '').localeCompare(String(left.createTime || '')))
-    alarmTotal.value = successfulAlarms.length ? successfulAlarms.reduce((sum, result) => sum + result.value.total, 0) : undefined
-    alarmsLoaded.value = !devicesWithSn.length || successfulAlarms.length > 0
+    alarmTotals.value = Object.fromEntries(alarmResults.flatMap((result, index) => result.status === 'fulfilled' ? [[devicesWithSn[index]!.sn!, result.value.total] as const] : []))
   } else {
     devices.value = []
     devicesLoaded.value = false
     deviceStates.value = {}
     deviceAlarms.value = []
-    alarmTotal.value = undefined
-    alarmsLoaded.value = false
+    alarmTotals.value = {}
   }
   if (taskResult.status === 'fulfilled') {
     flightTasks.value = taskResult.value.list
@@ -185,14 +195,15 @@ async function loadFleetData() {
   loading.value = false
 }
 
-watch(() => activeDevice.value?.sn, (sn) => void loadSelectedDeviceStatistics(sn), { immediate: true })
+watch(() => [activeDevice.value?.sn, activeDevice.value?.kind] as const, () => void loadSelectedDeviceStatistics(activeDevice.value), { immediate: true })
 
-const refreshTimer = window.setInterval(() => void loadFleetData(), 60_000)
+const refreshTimer = window.setInterval(() => { void loadFleetData(); void loadSelectedDeviceStatistics(activeDevice.value) }, 60_000)
 onMounted(() => {
   document.addEventListener('fullscreenchange', syncMapFullscreen)
   void loadFleetData()
 })
 onBeforeUnmount(() => {
+  deviceStatisticsRequestVersion++
   document.removeEventListener('fullscreenchange', syncMapFullscreen)
   if (mapNoticeTimer) clearTimeout(mapNoticeTimer)
   if (document.fullscreenElement === mapPanel.value) void document.exitFullscreen().catch(() => {})
@@ -219,14 +230,14 @@ onBeforeUnmount(() => {
         <header><b>设备健康详情</b><span>{{ activeDevice ? '当前选中设备' : '实时状态' }}</span></header>
         <div v-if="activeDevice" ref="healthList" class="health-single">
           <article :data-device-id="activeDevice.id" class="health-device health-device--active">
-            <div class="device-name"><i><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M11 13h10l3 4-3 2H11l-3-2 3-4Z"/><path d="M9 15 5 10m18 5 4-5M9 19l-4 4m18-4 4 4"/><circle cx="4.5" cy="9.5" r="3"/><circle cx="27.5" cy="9.5" r="3"/><circle cx="4.5" cy="23.5" r="3"/><circle cx="27.5" cy="23.5" r="3"/></svg></i><div><b>{{ activeDevice.callsign || activeDevice.label }}</b><small>{{ activeDevice.sn || '--' }}</small><small>{{ activeDevice.model || '设备型号未提供' }}</small></div><em :class="{ online: activeDevice.online }">{{ deviceState(activeDevice) }}</em></div>
+            <div class="device-name"><i><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M11 13h10l3 4-3 2H11l-3-2 3-4Z"/><path d="M9 15 5 10m18 5 4-5M9 19l-4 4m18-4 4 4"/><circle cx="4.5" cy="9.5" r="3"/><circle cx="27.5" cy="9.5" r="3"/><circle cx="4.5" cy="23.5" r="3"/><circle cx="27.5" cy="23.5" r="3"/></svg></i><div><b>{{ activeDevice.callsign || activeDevice.label }}</b><small>{{ activeDevice.kind === 'dock' ? '机巢' : activeDevice.kind === 'aircraft' ? '飞行器' : '设备' }} · {{ activeDevice.sn || '--' }}</small><small>{{ activeDevice.model || '设备型号未提供' }}</small></div><em :class="{ online: activeDevice.online }">{{ deviceState(activeDevice) }}</em></div>
             <dl>
-              <div><dt><i>电</i>飞行电池</dt><dd>{{ stateFor(activeDevice)?.batteryPercent === undefined ? '--' : `${stateFor(activeDevice)?.batteryPercent}%` }}</dd></div>
-              <div><dt><i>高</i>飞行高度</dt><dd>{{ stateFor(activeDevice)?.height === undefined ? '--' : `${stateFor(activeDevice)?.height} m` }}</dd></div>
-              <div><dt><i>速</i>水平速度</dt><dd>{{ stateFor(activeDevice)?.horizontalSpeed === undefined ? '--' : `${stateFor(activeDevice)?.horizontalSpeed} m/s` }}</dd></div>
-              <div><dt><i>位</i>定位状态</dt><dd>{{ stateFor(activeDevice)?.longitude !== undefined && stateFor(activeDevice)?.latitude !== undefined ? '已定位' : '--' }}</dd></div>
-              <div><dt><i>务</i>当前任务</dt><dd :title="taskForDevice(activeDevice)?.name || '--'">{{ taskForDevice(activeDevice)?.name || '--' }}</dd></div>
-              <div><dt><i>时</i>状态时间</dt><dd>{{ alarmTime(stateFor(activeDevice)?.receiveTime) }}</dd></div>
+              <div v-if="activeDevice.kind !== 'dock'"><dt>飞行电池</dt><dd>{{ stateFor(activeDevice)?.batteryPercent === undefined ? '--' : `${stateFor(activeDevice)?.batteryPercent}%` }}</dd></div>
+              <div><dt>{{ activeDevice.kind === 'dock' ? '设备高度' : '飞行高度' }}</dt><dd>{{ stateFor(activeDevice)?.height === undefined ? '--' : `${stateFor(activeDevice)?.height} m` }}</dd></div>
+              <div><dt>水平速度</dt><dd>{{ stateFor(activeDevice)?.horizontalSpeed === undefined ? '--' : `${stateFor(activeDevice)?.horizontalSpeed} m/s` }}</dd></div>
+              <div><dt>定位状态</dt><dd>{{ stateFor(activeDevice)?.longitude !== undefined && stateFor(activeDevice)?.latitude !== undefined ? '已定位' : '--' }}</dd></div>
+              <div><dt>当前任务</dt><dd :title="taskForDevice(activeDevice)?.name || '--'">{{ taskForDevice(activeDevice)?.name || '--' }}</dd></div>
+              <div><dt>状态时间</dt><dd>{{ alarmTime(stateFor(activeDevice)?.receiveTime) }}</dd></div>
             </dl>
           </article>
         </div>
@@ -239,24 +250,40 @@ onBeforeUnmount(() => {
           <div class="device-performance-layout">
             <aside class="inventory-column">
               <div v-if="devices.length" ref="inventoryList" class="device-inventory-list">
-                <button v-for="device in devices" :key="device.id" :data-device-id="device.id" type="button" :class="{ selected: selectedDeviceId === device.id }" @click="selectDevice(device.id)">
+                <template v-for="device in devices" :key="device.id">
+                <button :data-device-id="device.id" type="button" :class="{ selected: selectedDeviceId === device.id }" @click="selectDevice(device.id)">
                   <i :class="{ online: device.online }" />
-                  <span><b>{{ device.callsign || device.label }}</b><small>设备编号：{{ device.sn || '--' }}</small><small>设备型号：{{ device.model || '未提供' }}</small><small v-if="device.cameraSummary">设备负载：{{ device.cameraSummary }}</small></span>
+                  <span><b><em class="device-kind">{{ device.kind === 'dock' ? '机巢' : '设备' }}</em>{{ device.callsign || device.label }}</b><small>设备编号：{{ device.sn || '--' }}</small><small>设备型号：{{ device.model || '未提供' }}</small><small v-if="device.cameraSummary">设备负载：{{ device.cameraSummary }}</small></span>
                   <em :class="{ online: device.online }">{{ deviceState(device) }}</em>
                 </button>
+                <button v-for="child in device.children" :key="child.id" :data-device-id="child.id" type="button" class="child-device" :class="{ selected: selectedDeviceId === child.id }" @click="selectDevice(child.id)">
+                  <i :class="{ online: child.online }" />
+                  <span><b><em class="device-kind device-kind--aircraft">飞行器</em>{{ child.callsign || child.label }}</b><small>设备编号：{{ child.sn || '--' }}</small><small>设备型号：{{ child.model || '未提供' }}</small><small v-if="child.cameraSummary">设备负载：{{ child.cameraSummary }}</small></span>
+                  <em :class="{ online: child.online }">{{ deviceState(child) }}</em>
+                </button>
+                </template>
               </div>
               <div v-else class="panel-empty compact">--<small>{{ errorMessage || '暂无机队设备数据' }}</small></div>
             </aside>
 
             <section class="performance-column">
               <div v-if="deviceStatisticsLoading" class="panel-empty panel-empty--small">…<small>正在读取设备飞行统计</small></div>
-              <div v-else-if="deviceFlightStatistics.length" class="performance-body">
+              <div v-else-if="activeDevice?.kind === 'aircraft' && droneSummary" class="performance-body">
+                <section class="performance-metrics">
+                  <article><span>累计飞行架次</span><b>{{ valueOf(droneSummary.flightCount) }} 架次</b></article>
+                  <article><span>累计飞行距离</span><b>{{ formatDistance(droneSummary.flightDistance) }}</b></article>
+                  <article><span>累计飞行时长</span><b>{{ formatDuration(droneSummary.flightTime) }}</b></article>
+                </section>
+                <p class="statistics-period"><span>统计口径</span><b>按该飞行器实际起飞的任务汇总</b></p>
+                <p class="statistics-period"><span>未计入时长</span><b>执行中 {{ valueOf(droneSummary.executingCount) }} 次 · 缺结束时间 {{ valueOf(droneSummary.noEndTimeCount) }} 次</b></p>
+              </div>
+              <div v-else-if="activeDevice?.kind !== 'aircraft' && deviceFlightStatistics.length" class="performance-body">
                 <section class="performance-metrics">
                   <article><span>累计飞行架次</span><b>{{ selectedDeviceMetrics.flightCount }} 架次</b></article>
                   <article><span>累计飞行距离</span><b>{{ formatDistance(selectedDeviceMetrics.flightDistance) }}</b></article>
                   <article><span>累计飞行时长</span><b>{{ formatDuration(selectedDeviceMetrics.flightTime) }}</b></article>
                 </section>
-                <p class="statistics-period"><span>统计周期</span><b>{{ statisticsPeriod }}</b></p>
+                <p class="statistics-period"><span>机巢统计周期</span><b>{{ statisticsPeriod }}</b></p>
                 <section class="statistics-table">
                   <header><span>任务类型</span><span>航线类型</span><span>架次</span><span>距离</span><span>时长</span></header>
                   <div class="statistics-rows">
@@ -277,9 +304,9 @@ onBeforeUnmount(() => {
       </section>
 
       <article class="panel alarm-panel">
-        <header><b>设备告警与维保</b><span>告警 {{ alarmsLoaded ? valueOf(alarmTotal) : '--' }} · 维保 --</span></header>
-        <ContinuousScrollList v-if="deviceAlarms.length" class="alarm-list" role="region" aria-label="设备告警列表"><article v-for="alarm in deviceAlarms" :key="alarm.id"><i :class="{ severe: alarm.imminent || (alarm.level !== undefined && alarm.level >= 2), recovered: Boolean(alarm.recoverTime) }">{{ alarmLevel(alarm) }}</i><div><b>{{ alarm.message || alarm.code || '--' }}</b><small>{{ alarm.sn }} · {{ alarmTime(alarm.createTime) }}</small></div><em>{{ alarm.recoverTime ? '已恢复' : '未恢复' }}</em></article></ContinuousScrollList>
-        <div v-else class="panel-empty">--<small>{{ alarmsLoaded ? '暂无设备告警，暂无维保数据' : '设备告警数据暂不可用' }}</small></div>
+        <header><b>{{ activeDevice?.kind === 'dock' ? '机巢系统级告警与维保' : activeDevice?.kind === 'aircraft' ? '飞行器告警与维保' : '设备告警与维保' }}</b><span :title="`告警 ${valueOf(selectedAlarmTotal)}${selectedAlarmTotal !== undefined && selectedAlarmTotal > selectedAlarms.length && selectedAlarms.length ? `（显示 ${selectedAlarms.length} 条）` : ''} · 维保 --`">告警 {{ valueOf(selectedAlarmTotal) }}{{ selectedAlarmTotal !== undefined && selectedAlarmTotal > selectedAlarms.length && selectedAlarms.length ? `（显示 ${selectedAlarms.length} 条）` : '' }} · 维保 --</span></header>
+        <ContinuousScrollList v-if="selectedAlarms.length" class="alarm-list" role="region" aria-label="设备告警列表"><article v-for="alarm in selectedAlarms" :key="alarm.id"><i :class="{ severe: alarm.imminent || (alarm.level !== undefined && alarm.level >= 2), recovered: Boolean(alarm.recoverTime) }">{{ alarmLevel(alarm) }}</i><div><b>{{ alarm.message || alarm.code || '--' }}</b><small>{{ alarm.sn }} · {{ alarmTime(alarm.createTime) }}</small></div><em>{{ alarm.recoverTime ? '已恢复' : '未恢复' }}</em></article></ContinuousScrollList>
+        <div v-else class="panel-empty">--<small>{{ selectedAlarmTotal === undefined ? '设备告警数据暂不可用' : selectedAlarmTotal > 0 ? '告警记录未能确认归属' : '暂无设备告警，暂无维保数据' }}</small></div>
       </article>
     </section>
 
@@ -287,6 +314,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
+.device-inventory-list button.child-device { padding-left: 28px; }
+.device-inventory-list .device-kind { display: inline-block; margin-right: 6px; padding: 2px 5px; color: #4495b5; background: #e6f5fa; border-radius: 4px; font-size: 11px; font-style: normal; line-height: 1.2; vertical-align: 1px; }
+.device-inventory-list .device-kind--aircraft { color: #39846c; background: #e4f5ed; }
 .map-header-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .map-header-actions button { flex: none; padding: 4px 9px; color: #2389ab; background: #eef8fb; border: 1px solid #a5d2e2; border-radius: 4px; font-size: 12px; cursor: pointer; }
 .map-header-actions button:hover { color: #fff; background: #178eae; }
@@ -918,10 +948,16 @@ onBeforeUnmount(() => {
 .alarm-panel > header b {
   font-size: 17px;
   letter-spacing: .2px;
+  flex: none;
+  white-space: nowrap;
 }
 
 .alarm-panel > header span {
   font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .alarm-list article {

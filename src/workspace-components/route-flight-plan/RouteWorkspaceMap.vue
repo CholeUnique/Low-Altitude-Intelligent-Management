@@ -255,7 +255,7 @@ onBeforeUnmount(() => {
 
     <div class="map-search">
       <span>⌕</span>
-      <input v-model="searchKeyword" placeholder="搜索航线名称、编号、区域…" />
+      <input class="ui-filter-search" v-model="searchKeyword" placeholder="搜索航线名称、编号、区域…" />
     </div>
 
     <aside class="map-tools">

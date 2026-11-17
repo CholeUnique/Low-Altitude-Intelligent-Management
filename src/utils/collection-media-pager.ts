@@ -10,6 +10,7 @@ interface TaskCache {
   pending?: Promise<void>
 }
 export interface CollectionMediaFilter {
+  droneSn?: string
   task: (task: UavFlightTaskOption) => boolean
   media: (media: LiveMediaItem, task: UavFlightTaskOption) => boolean
 }
@@ -17,24 +18,25 @@ export interface CollectionMediaFilter {
 /** 按任务依次填充混合列表；固定接口页大小，剩余记录缓存供下一屏使用。 */
 export function createCollectionMediaPager(
   tasks: UavFlightTaskOption[],
-  request: (params: { taskId: string; pageNum: number; pageSize: number }) => Promise<{ list: LiveMediaItem[]; total: number }>,
+  request: (params: { taskId: string; droneSn?: string; pageNum: number; pageSize: number }) => Promise<{ list: LiveMediaItem[]; total: number }>,
   pageSize = 40,
 ) {
   const caches = new Map<string, TaskCache>()
-  const cacheFor = (id: string) => {
-    let cache = caches.get(id)
+  const cacheFor = (id: string, droneSn = '') => {
+    const key = JSON.stringify([id, droneSn])
+    let cache = caches.get(key)
     if (!cache) {
       cache = { items: [], received: 0, nextPage: 1, exhausted: false }
-      caches.set(id, cache)
+      caches.set(key, cache)
     }
     return cache
   }
-  async function readNext(task: UavFlightTaskOption) {
-    const cache = cacheFor(task.id)
+  async function readNext(task: UavFlightTaskOption, droneSn = '') {
+    const cache = cacheFor(task.id, droneSn)
     if (cache.pending) return cache.pending
     if (cache.exhausted) return
     cache.pending = (async () => {
-      const result = await request({ taskId: task.id, pageNum: cache.nextPage, pageSize })
+      const result = await request({ taskId: task.id, ...(droneSn ? { droneSn } : {}), pageNum: cache.nextPage, pageSize })
       if (!result.list.length && cache.received < result.total) throw new Error('素材分页返回空数据，请重试')
       const known = new Set(cache.items.map(item => item.id))
       const added = result.list.filter(item => !known.has(item.id))
@@ -51,18 +53,18 @@ export function createCollectionMediaPager(
     const entries: CollectionMediaEntry[] = []
     for (let index = 0; index < eligibleTasks.length; index++) {
       const task = eligibleTasks[index]!
-      const cache = cacheFor(task.id)
+      const cache = cacheFor(task.id, filter.droneSn)
       let consumed = 0
       while (active()) {
         entries.push(...cache.items.slice(consumed).filter(item => filter.media(item, task)).map(media => ({ media, task })))
         consumed = cache.items.length
         if (entries.length >= count) return { entries, hasMore: !cache.exhausted || index < eligibleTasks.length - 1 }
         if (cache.exhausted) break
-        await readNext(task)
+        await readNext(task, filter.droneSn)
       }
       if (!active()) return undefined
     }
     return { entries, hasMore: false }
   }
-  return { readUntil, taskMedia: (taskId: string) => caches.get(taskId)?.items || [] }
+  return { readUntil, taskMedia: (taskId: string, droneSn = '') => caches.get(JSON.stringify([taskId, droneSn]))?.items || [] }
 }

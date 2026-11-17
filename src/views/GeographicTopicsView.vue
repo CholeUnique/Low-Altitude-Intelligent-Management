@@ -113,6 +113,22 @@ function hoverTargets():TopicHoverTarget[]{
 }
 // 专题目录独立于任务业务场景；仅使用当前部门接口实际返回的可用图层。
 const availableLayers = computed(() => layers.value)
+const mapServiceGroups = computed(() => groupTopicLayers(availableLayers.value))
+const selectedMapServices = computed(() => mapServiceGroups.value.filter(group => group.layers.some(item => item.visible)).map(group => group.id))
+const mapServiceSelectionError = ref('')
+async function selectMapServices(ids: string[]) {
+  const request = version
+  mapServiceSelectionError.value = ''
+  const wanted = new Set(ids)
+  const previouslySelected = new Set(selectedMapServices.value)
+  await Promise.all(mapServiceGroups.value.flatMap(group => {
+    if (wanted.has(group.id) === previouslySelected.has(group.id)) return []
+    return group.layers.map(item => setVisible(item, wanted.has(group.id), true))
+  }))
+  if (request !== version) return
+  const failed = mapServiceGroups.value.filter(group => wanted.has(group.id) && group.layers.some(item => item.error && !item.visible))
+  if (failed.length) mapServiceSelectionError.value = `${failed.map(group => group.name).join('、')}部分图层加载失败，请在场景配置中查看或重试。`
+}
 const baselineInputs=computed(()=>farmlandDefaults(layers.value))
 const analysisRegions=computed(()=>layers.value.filter(item=>item.role==='boundary').map(item=>({
   key:item.key,name:item.service.name,serviceId:item.key.split('/')[0]!,layerId:Number(item.service.arcGisLayerId),
@@ -635,6 +651,7 @@ async function applyScene() {
 }
 async function loadData() {
   if (!map) return
+  mapServiceSelectionError.value = ''
   clearTimeout(preloadTimer)
   clearRegionClip(false)
   clearFeatureSelection()
@@ -645,7 +662,7 @@ async function loadData() {
   layers.value.forEach(item => item.handle?.layer.remove()); layers.value = []; featureCache.clear(); inFlight.clear()
   pending.value = true; error.value = ''
   try {
-    const sources = await listEnabledMapServices(user.activeDeptId)
+    const sources = await listEnabledMapServices(user.activeDeptId, props.topic.id)
     if (request !== version) return
     const output: TopicLayer[] = []
     for (let index = 0; index < sources.length; index += 3) {
@@ -681,8 +698,7 @@ watch(() => props.topic.id, () => {
   clearFeatureSelection()
   expandedLegendLayers.value = {}
   layerKeyword.value = ''
-  // 首次数据准备过程中也同步最新专题的显隐，防止慢请求把前一个专题重新显示出来。
-  if (layers.value.length) void applyScene()
+  void loadData()
 })
 onMounted(() => {
   if (!canvas.value) return
@@ -713,7 +729,6 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
       </div>
       <OverviewMapScale :map="toolsMap" />
     </div>
-    <div class="topic-title"><span>专题分析 / {{ topic.name }}</span></div>
     <TopicMapToolbar v-if="toolsMap" :key="uploadScope" :map="toolsMap" :load-drawing="loadDrawing" :suspended="configOpen || overlayOpen || uploadDialogOpen" :coverage-enabled="topic.id===HIGH_STANDARD_TOPIC_ID" :analysis-label="isFarmland?'高标田与永农对比分析':undefined" @drawing="setDrawingTool" @overlay="openOverlay('difference')" @coverage="openOverlay('coverage')">
       <button v-if="topic.id===HIGH_STANDARD_TOPIC_ID" type="button" aria-label="上传 SHP 图层" title="上传 SHP 图层" @click="openUpload()"><Upload /></button>
       <button :aria-label="fullscreen ? '退出全屏' : '全屏展示'" :title="fullscreen ? '退出全屏' : '全屏展示'" @click="toggleFullscreen"><FullScreen /></button>
@@ -730,7 +745,8 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
     <button class="topic-details-toggle" :class="{collapsed:legendCollapsed}" :aria-label="legendCollapsed?'展开图层详情':'收起图层详情'" :aria-expanded="!legendCollapsed" @click="legendCollapsed=!legendCollapsed">{{ legendCollapsed?'›':'‹' }}</button>
     <aside class="topic-legend" :class="{'is-collapsed':legendCollapsed}" :aria-hidden="legendCollapsed" :inert="legendCollapsed">
       <header class="legend-heading"><Collection /><b>图层详情</b></header>
-      <label class="layer-search"><Search aria-hidden="true" /><input v-model="layerKeyword" type="search" aria-label="搜索图层名称或属性" placeholder="搜索图层名称或属性（如村名）" /></label>
+      <div v-if="isFarmland" class="topic-service-picker"><label>地图服务</label><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" :model-value="selectedMapServices" multiple collapse-tags collapse-tags-tooltip :loading="pending" placeholder="选择地图服务" aria-label="地图服务" @change="selectMapServices"><ElOption v-for="group in mapServiceGroups" :key="group.id" :value="group.id" :label="group.name" /></ElSelect><small v-if="mapServiceSelectionError" role="alert">{{ mapServiceSelectionError }}</small><small v-else-if="!pending && !mapServiceGroups.length">当前专题暂无可用地图服务</small></div>
+      <label class="layer-search"><Search aria-hidden="true" /><input class="ui-filter-search" v-model="layerKeyword" type="search" aria-label="搜索图层名称或属性" placeholder="搜索图层名称或属性（如村名）" /></label>
       <section v-if="regionClipActive" class="region-clip-summary" aria-label="行政区裁切状态" :aria-busy="regionClipBusy">
         <div><b>区划裁切 · {{ regionClipSelectionCount }} 个区域</b><button type="button" @click="locateClipRange">定位范围</button><button type="button" @click="clearRegionClip()">清除裁切</button></div>
         <p role="status">{{ regionClipMessage || '正在准备裁切…' }}</p>
@@ -799,6 +815,7 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
 </template>
 
 <style scoped>
+.topic-service-picker{display:grid;flex:none;gap:6px;margin:12px 12px 0;color:#b9dce5;font-size:12px}.topic-service-picker .system-select{width:100%}.topic-service-picker small{color:#9dbbc7}
 .region-clip-summary{flex:none;margin:10px 12px 0;padding:10px;border:1px solid #6bc6df40;border-radius:6px;background:#173e5180;font-size:12px;max-height:150px;overflow:auto}.region-clip-summary>div{display:flex;align-items:center;justify-content:space-between;gap:8px}.region-clip-summary b{font-size:14px;font-weight:500}.region-clip-summary button{padding:2px 0;border:0;background:none;color:#7de1e9;font-size:12px;cursor:pointer}.geographic-topics .region-clip-summary p{margin:6px 0 0;font-size:12px}.region-clip-summary details{margin-top:6px;color:#ffba98}.region-clip-summary details p{color:#ffba98;overflow-wrap:anywhere}.region-clip-switch{display:flex;align-items:center;gap:8px;padding-bottom:10px;color:#86e1e7;font-size:12px;cursor:pointer}.geographic-topics .region-clip-layer-state{margin:0 0 8px;color:#8bd9cf;font-size:12px}.geographic-topics .region-clip-layer-state.is-error{color:#ffba98}
 .geographic-topics{--details-width:320px;--left-panel-top:110px;--left-panel-bottom:22px;--details-height:clamp(200px,calc((100% - var(--left-panel-top) - var(--left-panel-bottom)) * .68),560px)}.topic-details-toggle{position:absolute;z-index:515;left:calc(20px + var(--details-width));top:calc(var(--left-panel-top) + 10px);display:flex;align-items:center;justify-content:center;width:24px;height:44px;padding:0;border:1px solid #78b8ce40;border-left:0;border-radius:0 7px 7px 0;background:#103745ee;color:#c8edf7;font-size:26px;line-height:1;cursor:pointer;transition:left .24s ease}.topic-details-toggle.collapsed{left:0}.topic-legend{transition:translate .24s ease,opacity .24s ease}.topic-legend.is-collapsed{translate:calc(-100% - 24px) 0;opacity:0;pointer-events:none}@media(max-width:1100px){.geographic-topics{--details-width:300px;--left-panel-top:160px}}@media(prefers-reduced-motion:reduce){.topic-details-toggle,.topic-legend{transition:none}}
 
@@ -812,8 +829,7 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
 .geographic-topics>.topic-tools{z-index:560}
 .config-body .config-service-group{margin:10px 0 0;border:1px solid #719dad29;border-radius:7px;overflow:hidden}.config-source-heading{display:flex;align-items:center;gap:8px;min-height:46px;padding:0 10px;background:#23485855}.config-source-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;padding:10px 0;border:0;background:transparent;color:#d9f1f7;font:inherit;text-align:left;cursor:pointer}.config-source-toggle b{font-size:14px;font-weight:500;line-height:1.7;overflow-wrap:anywhere}.config-source-switch{display:flex;align-items:center;gap:5px;flex:none;font-size:12px;cursor:pointer}.config-source-children{padding:0 10px 0 20px}.config-source-children .config-layer:last-child{border-bottom:0;margin-bottom:0}.legend-layer-name{display:grid;flex:1;min-width:0;gap:2px}.legend-layer-name b{color:#d6eaf1}.legend-layer-heading .legend-layer-name small{display:block;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#81a7b5;line-height:16px}
 .topic-legend{top:var(--left-panel-top);bottom:auto;width:var(--details-width);height:var(--details-height);max-height:none;box-sizing:border-box;border:1px solid #88bcd528;border-radius:10px;background:linear-gradient(145deg,#123846ed,#0a2938ed)}
-.geographic-topics{--details-top:50px}.topic-legend{top:var(--details-top);bottom:var(--legend-space,22px);height:auto}.topic-details-toggle{top:calc(var(--details-top) + 10px)}
-@media(max-width:1100px){.geographic-topics{--details-top:108px}}
+.geographic-topics{--details-top:20px}.topic-legend{top:var(--details-top);bottom:var(--legend-space,22px);height:auto}.topic-details-toggle{top:calc(var(--details-top) + 10px)}
 .legend-heading{min-height:50px;box-sizing:border-box;flex:0 0 50px;border-bottom:1px solid #7395a229;padding:0 15px;gap:9px;cursor:default}
 .legend-content{flex:1;min-height:0;padding:12px;overscroll-behavior:contain;scrollbar-width:none}.legend-content::-webkit-scrollbar{display:none}
 .legend-group{margin-top:8px;padding-top:0;border-top:0}.legend-layer-row{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:7px;min-height:42px;border:1px solid #719dad20;border-radius:6px;background:#153746;padding:0 8px}.legend-layer-row:hover{background:#1b4353}

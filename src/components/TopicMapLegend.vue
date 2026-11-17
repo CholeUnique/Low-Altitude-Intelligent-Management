@@ -19,7 +19,7 @@ const density = ref(1)
 let observer: ResizeObserver | undefined
 let frame = 0
 
-// 始终先测量原字号的单列；真正到达顶部边界后才分列和缩小。
+// 两列显示，并在空间不足时收紧尺寸以保留完整图例。
 function fitLegend() {
   const element = legend.value, parent = element?.parentElement
   if (!element || !parent) return
@@ -31,24 +31,25 @@ function fitLegend() {
   try {
     const top = Math.max(0, parent.getBoundingClientRect().top + parseFloat(getComputedStyle(probe).top))
     const available = Math.max(1, element.getBoundingClientRect().bottom - top)
-    const measure = (twoColumns: boolean, scale: number) => {
-      probe.classList.toggle('is-compact', twoColumns)
+    const measure = (scale: number) => {
       probe.style.setProperty('--legend-density', String(scale))
       return probe.getBoundingClientRect().height
     }
-    const needsColumns = measure(false, 1) > available
-    let scale = needsColumns ? 11 / 12 : 1
-    if (needsColumns && measure(true, scale) > available) {
+    probe.classList.remove('is-compact')
+    const needsCompact = measure(1) > available
+    probe.classList.toggle('is-compact', needsCompact)
+    let scale = needsCompact ? 11 / 12 : 1
+    if (needsCompact && measure(scale) > available) {
       let lower = 0, upper = scale
       // 字号、符号和留白一起收紧，保留全部条目，不滚动、不裁剪。
       for (let step = 0; step < 12; step++) {
         const middle = (lower + upper) / 2
-        if (measure(true, middle) <= available) lower = middle
+        if (measure(middle) <= available) lower = middle
         else upper = middle
       }
       scale = lower
     }
-    compact.value = needsColumns
+    compact.value = needsCompact
     density.value = scale
   } finally { probe.remove() }
 }
@@ -88,7 +89,7 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
     <header><h2>图例</h2></header>
     <div class="map-symbol-content" aria-label="图例符号列表">
       <div class="map-symbol-columns">
-        <section v-for="(group, groupIndex) in groups" :key="group.key" class="map-legend-group" :aria-label="group.name">
+        <section v-for="(group, groupIndex) in groups" :key="group.key" class="map-legend-group" :class="{ 'is-single': repeatsHeading(group) }" :aria-label="group.name">
           <h3 v-if="!repeatsHeading(group)">{{ group.name }}</h3>
           <ul class="map-symbol-grid">
             <li v-for="(symbol, index) in group.symbols" :key="index" class="map-symbol-row">
@@ -134,30 +135,29 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
   flex-direction: column;
   box-sizing: border-box;
   overflow: visible;
-  border: 0;
-  background: transparent;
-  color: #f1f6f5;
-  text-shadow: 0 1px 2px #001017, 0 0 4px #001017;
+  border: 1px solid #d6e0e2;
+  border-radius: 6px;
+  background: #fff;
+  color: #253f4a;
+  box-shadow: 0 2px 10px #00182038;
   pointer-events: auto;
 }
 header { flex: none; display: flex; align-items: center; justify-content: center; gap: calc(14px * var(--legend-density)); padding: calc(13px * var(--legend-density)) calc(18px * var(--legend-density)) calc(10px * var(--legend-density)); }
-header::before, header::after { content: ''; height: 1px; flex: 1; background: #e3eeec70; }
+header::before, header::after { content: ''; height: 1px; flex: 1; background: #d6e0e2; }
 h2 { margin: 0; font-size: max(14px, calc(14px * var(--legend-density))); font-weight: 600; line-height: calc(20px * var(--legend-density)); letter-spacing: calc(6px * var(--legend-density)); padding-left: calc(6px * var(--legend-density)); }
 /* 面板按内容自然撑高，所有条目直接展示，不限制高度或创建滚动区域。 */
 .map-symbol-content { padding: 0 calc(16px * var(--legend-density)) calc(12px * var(--legend-density)); overflow: visible; }
-.map-legend-group + .map-legend-group { border-top: 1px solid #e3eeec45; margin-top: calc(10px * var(--legend-density)); padding-top: calc(10px * var(--legend-density)); }
+.map-symbol-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: calc(8px * var(--legend-density)); row-gap: calc(8px * var(--legend-density)); }
+.map-legend-group { min-width: 0; grid-column: 1 / -1; }
+.map-legend-group.is-single { grid-column: auto; }
 h3 { margin: 0 0 calc(7px * var(--legend-density)); font-size: max(14px, calc(14px * var(--legend-density))); font-weight: 600; line-height: calc(18px * var(--legend-density)); overflow-wrap: anywhere; break-after: avoid-column; }
-.map-symbol-grid { list-style: none; padding: 0; margin: 0; }
+.map-symbol-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(4px * var(--legend-density)) calc(8px * var(--legend-density)); list-style: none; padding: 0; margin: 0; }
+.is-single .map-symbol-grid { grid-template-columns: minmax(0, 1fr); }
 .map-symbol-row { display: grid; grid-template-columns: calc(40px * var(--legend-density)) minmax(0, 1fr); align-items: center; column-gap: calc(8px * var(--legend-density)); min-height: calc(28px * var(--legend-density)); break-inside: avoid-column; }
-.map-symbol-row + .map-symbol-row { margin-top: calc(4px * var(--legend-density)); }
-.map-symbol { display: block; width: calc(40px * var(--legend-density)); height: calc(26px * var(--legend-density)); overflow: visible; filter: drop-shadow(0 1px 1px #001017); }
+.map-symbol { display: block; width: calc(40px * var(--legend-density)); height: calc(26px * var(--legend-density)); overflow: visible; }
 .map-symbol-label { font-size: max(12px, calc(12px * var(--legend-density))); line-height: calc(18px * var(--legend-density)); overflow-wrap: anywhere; }
-.map-symbol-legend.is-compact { width: min(380px, calc(var(--details-width, 320px) * 1.2)); }
 .is-compact header { padding: calc(8px * var(--legend-density)) calc(12px * var(--legend-density)) calc(6px * var(--legend-density)); }
-.is-compact .map-symbol-columns { column-count: 2; column-gap: calc(5px * var(--legend-density)); column-rule: 1px solid #e3eeec30; }
-.is-compact .map-legend-group + .map-legend-group { margin-top: calc(6px * var(--legend-density)); padding-top: calc(6px * var(--legend-density)); }
 .is-compact h3 { margin-bottom: calc(4px * var(--legend-density)); line-height: calc(16px * var(--legend-density)); }
 .is-compact .map-symbol-row { grid-template-columns: calc(32px * var(--legend-density)) minmax(0, 1fr); min-height: calc(24px * var(--legend-density)); column-gap: calc(6px * var(--legend-density)); }
-.is-compact .map-symbol-row + .map-symbol-row { margin-top: calc(3px * var(--legend-density)); }
 .is-compact .map-symbol { width: calc(32px * var(--legend-density)); height: calc(22px * var(--legend-density)); }
 </style>

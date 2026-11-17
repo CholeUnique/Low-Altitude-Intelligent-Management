@@ -11,7 +11,10 @@ for (const statement of ast.statements) {
     if (declaration.initializer) declarations.set(declaration.name.getText(ast), declaration.initializer.getText(ast))
   }
 }
-const algorithms = new Function(`return (${declarations.get('algorithms')})`)()
+const catalogModule = { exports: {} }
+const catalogCode = ts.transpileModule(readFileSync('src/mocks/algorithm-catalog.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+new Function('module', 'exports', catalogCode)(catalogModule, catalogModule.exports)
+const { algorithms } = catalogModule.exports
 const groups = new Function('algorithms', `return (${declarations.get('capabilityGroups')})`)(algorithms)
 const module = { exports: {} }
 const compiled = ts.transpileModule(readFileSync('src/utils/algorithm-catalog.ts', 'utf8'), {

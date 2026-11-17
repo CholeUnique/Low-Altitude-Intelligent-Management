@@ -152,7 +152,6 @@ const mapServiceGroups = ref<MapServiceGroup[]>([])
 const regionTreeGroups = ref<MapServiceRegionGroup[]>([])
 const selectedRegion = ref('')
 const regionTreeError = ref('')
-const regionPickerOpen = ref(false)
 const expandedRegions = ref<string[]>([])
 const regionKey = (type: string, code: string | null) => JSON.stringify([type, code])
 function regionEntries(nodes: MapServiceRegionNode[], depth = 0): Array<{ node: MapServiceRegionNode; depth: number }> {
@@ -167,14 +166,6 @@ const regionSelectionOptions = computed(() => regionTreeGroups.value.map(group =
   const cities = all.filter(entry => entry.depth > 0).map(entry => ({ ...entry, depth: entry.depth - 1 }))
   return { ...group, entries: cities.length ? cities : all }
 }))
-const selectedRegionLabel = computed(() => {
-  if (!selectedRegion.value) return '请选择区划'
-  if (selectedRegion.value === 'all') return '全部图层'
-  const [type, code] = JSON.parse(selectedRegion.value) as [string, string | null]
-  const group = regionTreeGroups.value.find(item => item.dataType === type)
-  const node = group && regionEntries(group.roots || []).find(entry => entry.node.code === code)?.node
-  return node ? `${group?.dataTypeName || type} / ${node.name}` : '请选择区划'
-})
 function regionServiceCount(type: string, code: string | null) {
   const group = regionTreeGroups.value.find(item => item.dataType === type)
   const node = group && regionEntries(group.roots || []).find(entry => entry.node.code === code)?.node
@@ -196,8 +187,8 @@ function toggleRegion(type: string, node: MapServiceRegionNode) {
   }
 }
 const visibleServiceGroups = computed(() => {
+  if (selectedRegion.value === 'all' || regionTreeError.value) return mapServiceGroups.value
   if (!selectedRegion.value) return []
-  if (selectedRegion.value === 'all') return mapServiceGroups.value
   const [type, code] = JSON.parse(selectedRegion.value) as [string, string | null]
   const group = regionTreeGroups.value.find(item => item.dataType === type)
   const node = group && regionEntries(group.roots || []).find(entry => entry.node.code === code)?.node
@@ -213,7 +204,6 @@ const jiulongBoundaryLoading = ref(false)
 const layerPanelCollapsed = ref(Boolean(props.floatingControls))
 async function toggleLayerPanel() {
   layerPanelCollapsed.value = !layerPanelCollapsed.value
-  regionPickerOpen.value = !layerPanelCollapsed.value
 }
 const layerPanelId = `dashboard-layers-${useId().replace(/:/g, '')}`
 const visibleMapServiceIds = ref<string[]>([])
@@ -1641,7 +1631,7 @@ onBeforeUnmount(() => {
         <div v-if="!floatingControls" class="tool-title"><b><svg class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg>图层管理</b><span class="tool-title-state">{{ mapServiceGroups.length }} 项服务</span></div>
         <div v-if="floatingControls" :id="`${layerPanelId}-search`" class="layer-manager-search"></div>
         <div class="layer-manager-list" :aria-busy="mapServicesLoading">
-          <div class="region-filter"><label>行政区划</label><button type="button" class="region-picker-trigger" :title="regionPickerOpen ? '收起' : '展开'" :aria-expanded="regionPickerOpen" @click="regionPickerOpen = !regionPickerOpen">{{ selectedRegionLabel }} <span>{{ regionPickerOpen ? '⌃' : '⌄' }}</span></button><div v-if="regionPickerOpen" class="region-picker"><button type="button" class="region-option" :class="{ active: selectedRegion === 'all' }" @click="selectedRegion = 'all'; regionPickerOpen = false">全部图层</button><section v-for="regionGroup in regionSelectionOptions" :key="regionGroup.dataType"><strong>{{ regionGroup.dataTypeName || regionGroup.dataType }}</strong><template v-for="entry in regionGroup.entries" :key="regionKey(regionGroup.dataType, entry.node.code)"><button type="button" class="region-node region-node-select" :class="{ active: selectedRegion === regionKey(regionGroup.dataType, entry.node.code) }" :style="{ paddingLeft: `${12 + entry.depth * 10}px` }" :aria-expanded="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code))" @click="selectRegion(regionGroup.dataType, entry.node)"><span>{{ entry.node.name }}（{{ regionServiceCount(regionGroup.dataType, entry.node.code) }}）</span><span class="region-node-toggle" :title="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '收起' : '展开'" aria-hidden="true">{{ expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '⌄' : '›' }}</span></button>          <div v-if="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code))" class="map-service-sort-list region-service-list" :style="{ '--region-layer-indent': `${entry.depth * 10 + 10}px` }">
+          <div class="region-filter"><div class="region-picker"><section v-for="regionGroup in regionSelectionOptions" :key="regionGroup.dataType"><strong>{{ regionGroup.dataTypeName || regionGroup.dataType }}</strong><template v-for="entry in regionGroup.entries" :key="regionKey(regionGroup.dataType, entry.node.code)"><button type="button" class="region-node region-node-select" :class="{ active: selectedRegion === regionKey(regionGroup.dataType, entry.node.code) }" :style="{ paddingLeft: `${12 + entry.depth * 10}px` }" :aria-expanded="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code))" @click="selectRegion(regionGroup.dataType, entry.node)"><span>{{ entry.node.name }}（{{ regionServiceCount(regionGroup.dataType, entry.node.code) }}）</span><span class="region-node-toggle" :title="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '收起' : '展开'" aria-hidden="true">{{ expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code)) ? '⌄' : '›' }}</span></button>          <div v-if="expandedRegions.includes(regionKey(regionGroup.dataType, entry.node.code))" class="map-service-sort-list region-service-list" :style="{ '--region-layer-indent': `${entry.depth * 10 + 10}px` }">
             <div v-for="group in mapServiceGroups.filter(item => item.source.dataType === regionGroup.dataType && (item.source.regionCode || null) === entry.node.code)" :key="group.id" class="map-service-group" :data-group-id="group.id" :data-layer-kind="groupKind(group)">
               <button :style="{ paddingLeft: `${12 + entry.depth * 10}px` }" :disabled="pendingGroupIds.has(group.id)" class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="group.name" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
                 <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em role="switch" tabindex="0" :aria-checked="isMapServiceGroupActive(group)" :aria-label="`切换${group.name}可视性`" :title="isMapServiceGroupActive(group) ? '关闭整个服务及其依赖边界' : '显示服务图层'" @pointerdown.stop @click.stop="toggleMapServiceGroupVisibility(group)" @keydown.enter.stop.prevent="toggleMapServiceGroupVisibility(group)">{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
@@ -1678,8 +1668,8 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-          </div></template></section></div><small v-if="regionTreeError">{{ regionTreeError }}，可选择全部图层</small></div>
-          <div v-if="selectedRegion === 'all' && jiulongAdminService" class="map-service-group administrative-boundary-group">
+          </div></template></section></div><small v-if="regionTreeError">{{ regionTreeError }}</small></div>
+          <div v-if="(selectedRegion === 'all' || regionTreeError) && jiulongAdminService" class="map-service-group administrative-boundary-group">
             <button class="layer-row map-service-row" @contextmenu="jiulongAdminService && onLayerContextMenu($event, jiulongAdminService)" :class="{ active: jiulongBoundaryVisible }" type="button" title="九龙镇行政区划边界" role="switch" :aria-checked="jiulongBoundaryVisible" @click="toggleJiulongBoundary">
               <i class="layer-kind" :style="jiulongAdminService ? { color: vectorRowColor(jiulongAdminService) } : undefined"><MapLocation /></i><span><b>九龙镇行政区划边界</b></span><em :title="jiulongBoundaryVisible ? '隐藏' : '显示'">{{ jiulongBoundaryVisible ? '●' : '○' }}</em>
             </button>
@@ -1687,7 +1677,7 @@ onBeforeUnmount(() => {
           <div v-if="jiulongBoundaryError" class="layer-panel-message error" role="status">{{ jiulongBoundaryError }} <button type="button" :disabled="mapServicesLoading" @click="retryJiulongBoundary">重试</button></div>
           <div v-if="mapServicesError" class="layer-panel-message error">{{ mapServicesError }}</div>
           <div v-else-if="!mapServicesLoading && !mapServiceGroups.length" class="layer-panel-message">暂无可用的地图服务</div>
-          <TransitionGroup v-else-if="selectedRegion === 'all'" tag="div" name="map-service-sort" class="map-service-sort-list">
+          <TransitionGroup v-else-if="selectedRegion === 'all' || regionTreeError" tag="div" name="map-service-sort" class="map-service-sort-list">
             <div v-for="(group, groupIndex) in visibleServiceGroups" :key="group.id" class="map-service-group" :data-group-id="group.id" :data-layer-kind="groupKind(group)"><div v-if="groupIndex === 0 || groupKind(visibleServiceGroups[groupIndex - 1]!) !== groupKind(group)" class="map-service-kind-label">{{ groupKind(group) === 'vector' ? '矢量图层' : '影像图层' }}</div>
               <button :disabled="pendingGroupIds.has(group.id)" class="layer-row map-service-row" :class="{ active: isMapServiceGroupActive(group), 'has-categories': group.layers.length === 1 && categoryPanelFor(group.layers[0]!) }" :title="group.name" :role="group.layers.length === 1 ? 'switch' : undefined" :aria-checked="group.layers.length === 1 ? isMapServiceGroupActive(group) : undefined" :aria-expanded="group.layers.length > 1 ? isMapServiceGroupExpanded(group) : (group.layers[0] ? isCategoryExpanded(group.layers[0]) : undefined)" @click="onMapServiceGroupClick(group)" @contextmenu="onGroupContextMenu($event, group)">
                 <i class="layer-kind" :style="groupIconColor(group)"><Picture v-if="layerIconKind(group.source) === 'imagery'" /><MapLocation v-else-if="group.layers.some(service => service.arcGisGeometryType)" /><svg v-else class="layer-stack-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5" /></svg></i><span><b>{{ group.name }}</b></span><em role="switch" tabindex="0" :aria-checked="isMapServiceGroupActive(group)" :aria-label="`切换${group.name}可视性`" :title="isMapServiceGroupActive(group) ? '关闭整个服务及其依赖边界' : '显示服务图层'" @pointerdown.stop @click.stop="toggleMapServiceGroupVisibility(group)" @keydown.enter.stop.prevent="toggleMapServiceGroupVisibility(group)">{{ isMapServiceGroupActive(group) ? '●' : '○' }}</em>
@@ -1759,7 +1749,7 @@ onBeforeUnmount(() => {
 
     <Teleport :to="`#${layerPanelId}-search`" :disabled="!floatingControls" defer>
     <div class="map-search" :class="{ expanded: searchExpanded || floatingControls }">
-      <input v-if="searchExpanded || floatingControls" ref="searchInput" aria-label="搜索图层属性" v-model="searchKeyword" placeholder="搜索地块类型、人名或图层属性" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="floatingControls ? searchKeyword = '' : toggleSearch()" />
+      <input class="ui-filter-search" v-if="searchExpanded || floatingControls" ref="searchInput" aria-label="搜索图层属性" v-model="searchKeyword" placeholder="搜索地块类型、人名或图层属性" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="floatingControls ? searchKeyword = '' : toggleSearch()" />
       <button class="map-search-toggle" type="button" :aria-label="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起地图搜索' : '展开地图搜索')" :title="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起搜索' : '搜索地块或地点')" @click="floatingControls ? focusFirstSearchResult() : toggleSearch()">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/></svg>
       </button>

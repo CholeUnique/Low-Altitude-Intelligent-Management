@@ -27,7 +27,7 @@ function renderDevices() {
   const bounds = L.latLngBounds([])
   props.devices.forEach((device) => {
     if (device.longitude === undefined || device.latitude === undefined) return
-    const state = device.online ? '在线' : '离线'
+    const state = device.online === undefined ? '未知' : device.online ? '在线' : '离线'
     const point: L.LatLngTuple = [device.latitude, device.longitude]
     bounds.extend(point)
     const tooltip = document.createElement('div')
@@ -37,8 +37,9 @@ function renderDevices() {
     status.textContent = state
     tooltip.append(name, status)
     L.marker(point, {
+      zIndexOffset: device.id === props.selectedDeviceId ? 1000 : 0,
       icon: L.divIcon({
-        className: `fleet-device-marker ${device.online ? 'is-online' : 'is-offline'} ${device.id === props.selectedDeviceId ? 'is-selected' : ''}`,
+        className: `fleet-device-marker ${device.online === undefined ? 'is-unknown' : device.online ? 'is-online' : 'is-offline'} ${device.id === props.selectedDeviceId ? 'is-selected' : ''}`,
         html: '<span><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M11 13h10l3 4-3 2H11l-3-2 3-4Z"/><path d="M9 15 5 10m18 5 4-5M9 19l-4 4m18-4 4 4"/><circle cx="4.5" cy="9.5" r="3"/><circle cx="27.5" cy="9.5" r="3"/><circle cx="4.5" cy="23.5" r="3"/><circle cx="27.5" cy="23.5" r="3"/></svg></span>',
         iconSize: [38, 38],
         iconAnchor: [19, 19],
@@ -99,12 +100,10 @@ onBeforeUnmount(() => {
 <style scoped>.fleet-map { width:100%; height:100%; min-height:0; background:#dbe8dc; }</style>
 <style>
 .fleet-device-marker { background:transparent; border:0; }
-.fleet-device-marker span { display:grid;width:36px;height:36px;place-items:center;border:2px solid #fff;border-radius:50%;background:#8295a1;color:#fff;box-sizing:border-box; }
+.fleet-device-marker span { display:grid;width:36px;height:36px;place-items:center;border:2px solid #c5cdd1;border-radius:50%;background:#7d8a91;color:#d9dfe2;box-sizing:border-box; }
 .fleet-device-marker svg { width:25px;height:25px;fill:currentColor;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round; }
-.fleet-device-marker.is-online span { background:#079b91;color:#eaffff;border-color:#d8ffff;box-shadow:0 0 7px #38f6dc,0 0 18px #14d9c5,0 2px 8px #17374677;animation:fleet-drone-glow 1.8s ease-in-out infinite alternate; }
-.fleet-device-marker.is-offline span { background:#7d8a91;color:#d9dfe2;border-color:#c5cdd1;box-shadow:0 2px 7px #17374655;filter:grayscale(1); }
-.fleet-device-marker.is-selected span { outline:3px solid #ffcf4e;outline-offset:3px; }
+.fleet-device-marker.is-online span { color:#eaffff;background:#079b91;border-color:#d8ffff;box-shadow:0 0 7px #38f6dc,0 0 18px #14d9c5,0 2px 8px #17374677; }
+.fleet-device-marker.is-offline span, .fleet-device-marker.is-unknown span { color:#d9dfe2;background:#7d8a91;border-color:#c5cdd1;box-shadow:0 2px 7px #17374655; }
 .fleet-device-tooltip strong,.fleet-device-tooltip span { display:block;text-align:center; }
 .fleet-device-tooltip span { margin-top:3px;color:#5b7888;font-size:12px; }
-@keyframes fleet-drone-glow { from { box-shadow:0 0 5px #38f6dc,0 0 11px #14d9c5,0 2px 8px #17374677; } to { box-shadow:0 0 10px #7ffff0,0 0 24px #14d9c5,0 2px 8px #17374677; } }
 </style>

@@ -347,7 +347,7 @@ const coverageMetrics=[['areaA','上传范围总面积'],['overlapArea','范围�
         <p v-if="coverage&&!availableUploads.length" class="overlay-error">请先上传一个面图层。<button type="button" class="text-button" @click="emit('close');emit('upload')">上传 SHP</button></p>
         <label v-if="farmland&&coverage">上传范围 U <em>*</em><ElSelect :empty-values="[null, undefined]" :append-to="dialog" :popper-options="{ strategy: 'fixed' }" class="system-select" popper-class="system-select-options" v-model="rangeId" aria-label="上传分析范围" required><ElOption value="" disabled label="请选择上传的面图层" /><ElOption v-for="item in availableUploads" :key="item.id" :value="item.id" :label="String(item.name)" /></ElSelect></label>
         <fieldset v-if="farmland&&!coverage" class="comparison-regions"><legend>行政区范围（可多选）</legend>
-          <input v-model="regionKeyword" aria-label="搜索分析行政区" placeholder="搜索乡镇、街道或村名" />
+          <input class="ui-filter-search" v-model="regionKeyword" aria-label="搜索分析行政区" placeholder="搜索乡镇、街道或村名" />
           <p>不勾选时对比全范围；勾选后按所选行政区的合并边界精确裁切再对比。</p>
           <div class="comparison-region-options">
             <section v-for="group in regionOptions" :key="group.key"><h3>{{ group.name }}</h3>

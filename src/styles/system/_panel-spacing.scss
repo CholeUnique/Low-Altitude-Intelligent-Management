@@ -1,0 +1,31 @@
+// Business pages selected for the compact panel layout.
+#app :is(.fleet-overview, .ticket-page, .flight-plan-calendar, .flight-review, .general-review) {
+  padding: 10px;
+  gap: 10px;
+}
+
+#app .fleet-overview .bottom-content { padding: 0; }
+#app :is(.fleet-overview .fleet-cards, .fleet-overview .fleet-grid,
+  .ticket-page .summary-cards, .flight-plan-calendar .metric-grid,
+  .flight-plan-calendar .calendar-layout, .flight-review .summary-grid,
+  .general-review .stat-grid, .general-review .review-layout) { gap: 10px; }
+#app .general-review > .stat-grid { margin-bottom: 0; }
+
+#app .global-live-cruise:not(.is-fullscreen) { padding: 10px; gap: 10px; }
+#app .global-live-cruise .overview-main { gap: 10px; }
+
+#app :is(.collection-page, .algorithm-page .repository-main, .ledger, .facility-dashboard) { padding: 10px; }
+#app .algorithm-page .repository-main { gap: 10px; }
+#app .collection-page :is(.collection-heading, .collection-toolbar) { margin-bottom: 10px; }
+#app .ledger > header, #app .ledger > .stats { margin-bottom: 10px; }
+#app :is(.collection-page .summary-strip, .collection-page .collection-media-grid,
+  .algorithm-page .algorithm-results, .ledger .stats,
+  .facility-dashboard .kpi-grid, .facility-dashboard .board-grid) { gap: 10px; }
+#app .facility-dashboard { gap: 10px; }
+
+#app :is(.task-overview-page, .task-list-page) .content-body,
+#app .task-center-content .content-body:has(> .todo-layout) { padding: 10px; }
+#app .task-overview-page :is(.kpi-grid, .overview-grid) { gap: 10px; }
+#app .task-overview-page .overview-grid, #app .task-list-page .task-table { margin-top: 10px; }
+#app .task-center-layout .todo-layout { gap: 10px; }
+#app .task-center-layout .todo-list { margin-top: 10px; }

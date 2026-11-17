@@ -14,8 +14,10 @@ function load(source, dependencies) {
   return module.exports
 }
 const calls = []
-const user = Vue.reactive({ activeDeptId: 'dept-a' })
-const planList = Array.from({length: 18}, (_, i) => ({id: `p${i}`, name: `Plan ${i}`, waylineName: '', waylineType: 'WAYPOINT', sn: 'dock'}))
+const user = Vue.reactive({ activeDeptId: 'dept-a', currentUser: { role: 'ADMIN' } })
+const planList = Array.from({length: 18}, (_, i) => ({id: `p${i}`, name: `Plan ${i}`, resultCount: i + 1, waylineName: '', waylineType: 'WAYPOINT', sn: 'dock', regionCode: i === 1 ? '' : '321202', regionName: i === 1 ? '' : '海陵区'}))
+const recalcCalls = []
+const resultCalls = []
 const taskList = planList.map((plan, i) => ({id: `t${i}`, planId: plan.id, name: plan.name, type:'0', startTime:'2026-09-01T10:00:00', endTime:`2026-09-${String(28-i).padStart(2,'0')}T11:00:00`}))
 let deferOld
 let deferDetail
@@ -36,18 +38,29 @@ const renderer = Vue.createRenderer({
   insert(){}, remove(){}, setText(){}, setElementText(){}, parentNode(){}, nextSibling(){}, patchProp(){}
 })
 let source = readFileSync('src/workspace-components/spot-identification/FlightTaskReviewPanel.vue','utf8')
-source = source.replace('</script>', 'defineExpose({ pageRows, rows, currentPage, loadTaskMedia, mediaByTask, departmentMediaSummary, completedMediaTaskIds, resultTypeFilter, mediaLoading, filteredRows });\n</script>')
+source = source.replace('</script>', 'defineExpose({ getVersion: () => loadVersion, pageRows, rows, currentPage, loadTaskMedia, mediaByTask, departmentMediaSummary, completedMediaTaskIds, resultTypeFilter, openAiRecognition, aiPlan, selectedAlgorithmId, aiUnavailable, aiAlgorithms, draftFilters, applyFilters, resetFilters });\n</script>')
 const script = compileScript(parse(source).descriptor, {id:'review-lazy-test'}).content
 const regionUtil = load(readFileSync('src/utils/region-path.ts','utf8'),{})
 assert.equal(regionUtil.regionPaths([{code:'32',name:'江苏省',children:[{code:'3212',name:'泰州市',children:[{code:'321202',name:'海陵区'}]}]}]).get('321202'), '江苏省 / 泰州市 / 海陵区')
 const component = load(script, {
   vue: Vue, 'vue-router': {}, 'element-plus':{ElTooltip:{}}, '@element-plus/icons-vue':{},
+  '@/components/FilterActions.vue': {},
   '@/api/client':{isMockMode:()=>false}, '@/api/patrol':{getUavMediaSummary:async()=>({photoCount:6896,videoCount:12})},
-  '@/api/metadata':{getMetadataOptions:async()=>[]}, '@/utils/region-path':regionUtil,
+  '@/api/metadata':{getMetadataOptions:async()=>[{code:'32',name:'江苏省',children:[{code:'3212',name:'泰州市',children:[{code:'321202',name:'海陵区'}]}]}]}, '@/utils/region-path':regionUtil,
+  '@/mocks/algorithm-catalog':load(readFileSync('src/mocks/algorithm-catalog.ts','utf8'),{}),
   '@/api/flight-review':{
-    getFlightReviewPlans:async()=>({records:planList,total:18,pageSize:200}),
+    getFlightReviewResultPage:async query=>{
+      resultCalls.push({...query})
+      let items=planList.filter(plan=>!query.keyword || plan.name.toLowerCase().includes(query.keyword.toLowerCase()))
+      if (query.droneSn) items=items.filter(plan=>Number(plan.id.slice(1)) % 2 === Number(query.droneSn.slice(-1)))
+      return {records:items.slice((query.pageNum-1)*query.pageSize,query.pageNum*query.pageSize).map(plan=>({...plan,mediaFileCount:plan.id==='p0'?201:1,finishTime:taskList.find(task=>task.planId===plan.id).endTime})),total:items.length,pageSize:query.pageSize}
+    },
     getFlightReviewTasks:async()=>({records:taskList,total:18,pageSize:200}),
-    getFlightReviewMedia:mediaRequest
+    getFlightReviewMedia:mediaRequest,
+    getFlightPlanDevices:async ids=>Object.fromEntries(ids.map(id=>[id,[{droneSn:`drone${Number(id.slice(1)) % 2}`,droneName:`飞机${Number(id.slice(1)) % 2}`,droneType:'M4D',gatewaySn:'dock'}]])),
+    getFlightReviewPlanMediaTotal:async (id,deptId)=> (await mediaRequest(id.replace(/^p/, 't'),1,1,deptId)).total,
+    recalculateFlightPlanRegion:async (id,deptId)=>{recalcCalls.push({id,deptId})},
+    getFlightReviewPlanRegion:async()=>({regionCode:'321202',regionName:'海陵区'})
   }, '@/stores/user':{useUserStore:()=>user},
   './SpotUploadDialog.vue':{}, './SharedVideoPlayer.vue':{}, './PhotoLocationControl.vue':{}
 }).default
@@ -56,64 +69,38 @@ const app = renderer.createApp(component)
 const vm = app.mount({})
 const flush = async()=>{ for(let i=0;i<8;i++){await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick()} }
 await flush()
-assert.equal(calls.length,18,'Initial load checks all task counts before pagination')
-assert(calls.every(call=>call.pageNum===1 && call.pageSize===1),'Initial load must not read full media pages')
-assert.equal(vm.departmentMediaSummary.photoCount,6896,'Summary independent of loaded files')
-assert.equal(vm.pageRows[0].fileCount,201,'Row count comes from total, not one returned record')
-assert.equal(Object.keys(vm.mediaByTask).length,0)
-vm.currentPage=2
+assert.equal(vm.pageRows.length, 16, 'Server provides only the current page')
+assert.equal(vm.pageRows[0].fileCount, 201, 'Uses mediaFileCount, not resultCount')
+assert.equal(calls.length, 0, 'No per-plan media count requests')
+assert.equal(resultCalls[0].pageSize, 16)
+vm.draftFilters.planKeyword = 'Plan 1'
 await flush()
-assert.equal(calls.length,18,'Changing pages does not trigger more count requests')
-vm.currentPage=1
+assert.equal(vm.pageRows.length, 16, 'Draft filters do not query')
+vm.applyFilters()
 await flush()
-assert.equal(calls.length,18,'Cached counts are reused')
-let releaseDetail
-deferDetail = new Promise(resolve=>releaseDetail=resolve)
-const first=vm.loadTaskMedia('t0',1)
-const duplicate=vm.loadTaskMedia('t0',1)
-releaseDetail()
-await Promise.all([first,duplicate])
+assert.equal(resultCalls.at(-1).keyword, 'Plan 1')
+assert.equal(vm.pageRows.length, 9)
+vm.resetFilters()
 await flush()
-assert.equal(calls.filter(c=>c.taskId==='t0'&&c.pageSize===200).length,2,'One shared request chain, two pages')
-assert.equal(vm.mediaByTask.t0.length,201,'Selected plan gets all pages so preview switching has no unloaded tail')
-assert.equal(vm.pageRows[0].plan.id,'p0','Loading media does not reorder rows')
-const before=calls.length
-await vm.loadTaskMedia('t0',1)
-assert.equal(calls.length,before,'Completed media are reused')
-let releaseOld
-deferOld=new Promise(resolve=>releaseOld=resolve)
-const old=vm.loadTaskMedia('t1',1)
-user.activeDeptId='dept-b'
+vm.currentPage = 2
 await flush()
-releaseOld()
-await old
+assert.equal(resultCalls.at(-1).pageNum, 2)
+assert.equal(vm.pageRows.length, 2)
+vm.currentPage = 1
 await flush()
-assert.equal(Object.keys(vm.mediaByTask).length,0,'Old department results cannot publish into new department')
-assert(calls.slice(-16).every(c=>c.deptId==='dept-b'&&c.pageSize===1))
-vm.resultTypeFilter='other'
+const first = vm.loadTaskMedia('t0', vm.getVersion())
+await first
 await flush()
-assert.equal(vm.filteredRows.length,18,'Explicit type filter classifies all eligible plans accurately')
-assert.equal(vm.mediaLoading,false)
-vm.resultTypeFilter=''
-emptyTasks.add('t0'); emptyTasks.add('t1')
-failingCounts.add('t2')
-user.activeDeptId='dept-c'
+assert.equal(vm.mediaByTask.t0.length, 201, 'Preview fetches all media pages')
+vm.draftFilters.resultTypeFilter = 'image'
+vm.applyFilters()
 await flush()
-assert.equal(vm.pageRows.length,16,'Removed empty plans are automatically replaced by later plans')
-assert(!vm.filteredRows.some(row=>['p0','p1'].includes(row.plan.id)),'Confirmed empty plans are hidden')
-assert(vm.filteredRows.some(row=>row.plan.id==='p2' && row.countFailed),'Count failure remains visible, not treated as empty')
-assert(!calls.filter(call=>call.deptId==='dept-c').some(call=>call.pageSize!==1),'Filtering empty plans never scans full media pages')
-emptyTasks.clear(); failingCounts.clear()
-emptyTasks.add('t16'); emptyTasks.add('t17')
-user.activeDeptId='dept-d'
+assert.equal(resultCalls.at(-1).mediaType, 'photo')
+user.activeDeptId = 'dept-b'
 await flush()
-assert.equal(vm.filteredRows.length,16,'Empty later pages are excluded before pagination is displayed')
-assert.equal(vm.currentPage,1)
-assert.equal(vm.pageRows.length,16)
-taskList.forEach(task=>emptyTasks.add(task.id))
-user.activeDeptId='dept-e'
-await flush()
-assert.equal(vm.filteredRows.length,0,'All-empty result displays an empty list')
-assert.equal(vm.currentPage,1)
+assert.equal(resultCalls.at(-1).deptId, 'dept-b')
+assert.equal(Object.keys(vm.mediaByTask).length, 0, 'Changing department clears preview data')
 app.unmount()
-console.log('Flight review lazy loading tests passed')
+console.log('Flight review server pagination and preview tests passed')
+
+

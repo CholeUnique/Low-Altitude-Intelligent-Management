@@ -1,12 +1,26 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { apiClient } from '@/api/client'
+import type { FlightReviewMedia } from '@/api/flight-review'
+import PhotoLocationControl from '@/workspace-components/spot-identification/PhotoLocationControl.vue'
 
 const props = defineProps<{ coordinate?: { longitude: number; latitude: number }; geometryType: string }>()
-interface PhotoMatch { matched: boolean; mediaId?: string | number; fileName?: string; shootTime?: string; distanceMeters?: number; localFileUrl?: string; localThumbnailUrl?: string }
+interface PhotoMatch { matched: boolean; mediaId?: string | number; fileName?: string; shootTime?: string; longitude?: number | null; latitude?: number | null; distanceMeters?: number; localFileUrl?: string; localThumbnailUrl?: string }
 const radius = ref(20)
+const shootAfterDate = ref('')
 const state = ref<'idle' | 'loading' | 'empty' | 'ready' | 'error'>('idle')
 const result = ref<PhotoMatch>(), message = ref(''), thumbnail = ref(''), original = ref('')
+const locationMedia = computed<FlightReviewMedia | undefined>(() => {
+  const photo = result.value
+  if (!photo?.matched) return undefined
+  const longitude = photo.longitude, latitude = photo.latitude
+  return {
+    id: String(photo.mediaId ?? ''), taskId: '', fileName: photo.fileName || '', type: 'image',
+    thumbnailUrl: photo.localThumbnailUrl || '', originalUrl: '', localFileUrl: photo.localFileUrl || '', shootTime: photo.shootTime || '',
+    longitude: typeof longitude === 'number' && Number.isFinite(longitude) && Math.abs(longitude) <= 180 ? longitude : undefined,
+    latitude: typeof latitude === 'number' && Number.isFinite(latitude) && Math.abs(latitude) <= 90 ? latitude : undefined,
+  }
+})
 const previewOpen = ref(false), previewLoading = ref(false), previewError = ref('')
 const scale = ref(1), offsetX = ref(0), offsetY = ref(0), dragging = ref(false)
 let pointerId: number | undefined, dragX = 0, dragY = 0, originX = 0, originY = 0
@@ -59,7 +73,7 @@ async function search() {
   controller?.abort(); controller = new AbortController()
   clearImages(); result.value = undefined; message.value = ''; state.value = 'loading'
   try {
-    const payload = { ...props.coordinate, radiusMeters: Number(radius.value) }
+    const payload = { ...props.coordinate, radiusMeters: Number(radius.value), ...(shootAfterDate.value ? { shootAfter: `${shootAfterDate.value}T00:00:00` } : {}) }
     const match = await apiClient.post<never, PhotoMatch>('/v1/uav/media/match', payload, { signal: controller.signal })
     if (version !== requestVersion) return
     if (!match?.matched) { state.value = 'empty'; return }
@@ -97,9 +111,9 @@ onBeforeUnmount(() => { requestVersion++; controller?.abort(); clearImages(); wi
   <section class="nearby-photo" aria-label="附近最新航拍照片">
     <header><span class="accent"></span><strong>附近最新航拍照片</strong></header>
     <p class="hint">{{ geometryType === '点' ? '按设施位置查询附近照片' : '按设施范围中心查询，照片可能未覆盖整个设施' }}</p>
-    <div class="query-fields"><label>半径（米）<input v-model.number="radius" type="number" min="1" max="500" /></label><button class="query" type="button" :disabled="!coordinate || state === 'loading'" @click="search">{{ state === 'loading' ? '正在查询…' : '查询最新照片' }}</button></div>
+    <div class="query-fields"><label class="date-field">拍摄日期（起）<input v-model="shootAfterDate" type="date" aria-label="拍摄日期起" /></label><label>半径（米）<input v-model.number="radius" type="number" min="1" max="500" /></label><button class="query" type="button" :disabled="!coordinate || state === 'loading'" @click="search">{{ state === 'loading' ? '正在查询…' : '查询最新照片' }}</button></div>
     <p v-if="!coordinate" class="notice">设施暂无有效坐标，无法查询</p>
-    <p v-else-if="state === 'idle'" class="notice">默认查询近 7 天的本地照片</p>
+    <p v-else-if="state === 'idle'" class="notice">{{ shootAfterDate ? '查询所选日期及之后的本地照片' : '未选择日期时默认查询近 7 天的本地照片' }}</p>
     <p v-else-if="state === 'empty'" class="notice">该范围和时间内暂无匹配照片</p>
     <p v-else-if="state === 'error'" class="notice error" role="alert">{{ message }}，请调整条件或重试</p>
     <div v-if="state === 'ready' && result" class="photo-result">
@@ -107,7 +121,7 @@ onBeforeUnmount(() => { requestVersion++; controller?.abort(); clearImages(); wi
       <div class="photo-meta"><span>拍摄时间 <b>{{ result.shootTime ? result.shootTime.replace('T', ' ').slice(0, 19) : '暂无数据' }}</b></span><span>距离设施 <b>{{ result.distanceMeters == null ? '暂无数据' : `${Number(result.distanceMeters).toFixed(1)} 米` }}</b></span></div>
       <p v-if="message" class="notice error">{{ message }}</p>
     </div>
-    <Teleport to="body"><div v-if="previewOpen" class="nearby-preview" role="dialog" aria-modal="true" aria-label="航拍照片原图" @click.self="closePreview" @wheel="zoom" @pointerdown.self="startDrag" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @dblclick="resetTransform"><button class="preview-close" type="button" aria-label="关闭原图" @click="closePreview">×</button><p v-if="previewLoading">正在读取原图…</p><div v-else-if="previewError"><p>{{ previewError }}</p><button type="button" @click="openPreview">重新加载</button></div><img v-else-if="original" :src="original" :alt="result?.fileName || '航拍照片原图'" :style="{ transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`, cursor: scale > 1 ? (dragging ? 'grabbing' : 'grab') : 'default' }" draggable="false" @pointerdown="startDrag" /></div></Teleport>
+    <Teleport to="body"><div v-if="previewOpen" class="nearby-preview" role="dialog" aria-modal="true" aria-label="航拍照片原图" @click.self="closePreview" @wheel="zoom" @pointerdown.self="startDrag" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @dblclick="resetTransform"><button class="preview-close" type="button" aria-label="关闭原图" @click="closePreview">×</button><p v-if="previewLoading">正在读取原图…</p><div v-else-if="previewError"><p>{{ previewError }}</p><button type="button" @click="openPreview">重新加载</button></div><img v-else-if="original" :src="original" :alt="result?.fileName || '航拍照片原图'" :style="{ transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`, cursor: scale > 1 ? (dragging ? 'grabbing' : 'grab') : 'default' }" draggable="false" @pointerdown="startDrag" /><PhotoLocationControl v-if="original && locationMedia" :key="locationMedia.id" :media="locationMedia" fullscreen /></div></Teleport>
   </section>
 </template>
 
@@ -117,6 +131,7 @@ onBeforeUnmount(() => { requestVersion++; controller?.abort(); clearImages(); wi
 
 <style scoped>
 .query-fields{grid-template-columns:78px minmax(0,1fr);align-items:end}.query-fields .query{width:100%;min-height:29px;margin:0;padding:6px 10px;white-space:nowrap}
+.query-fields .date-field{grid-column:1 / -1}
 .nearby-preview{overflow:hidden;touch-action:none}
 .nearby-preview img{user-select:none;will-change:transform;touch-action:none}
 </style>

@@ -141,12 +141,13 @@ export async function updateMapServiceStatus(id: string | number, status: 0 | 1)
  * 业务页面只读取当前部门可用且已启用的地图服务。请求参数和前端二次过滤
  * 同时生效，避免后端忽略筛选条件时显示其他部门或已停用的服务。
  */
-export async function listEnabledMapServices(deptId?: string | number) {
+export async function listEnabledMapServices(deptId?: string | number, topicCode?: string) {
   if (isMockMode()) return []
-  const services = await apiClient.post<never, MapServiceItem[]>('/v1/map/service/list', { deptId, status: 1 })
+  const services = await apiClient.post<never, MapServiceItem[]>('/v1/map/service/list', { deptId, status: 1, ...(topicCode ? { topicCode } : {}) })
   return (Array.isArray(services) ? services : [])
     .filter((service) => Number(service.status) === 1
       && Boolean(service.serviceUrl?.trim())
+      && (!topicCode || service.topicCode === topicCode)
       && (!deptId || !service.deptIds?.length || service.deptIds.some((id) => String(id) === String(deptId))))
     .sort(compareMapServiceTime)
 }

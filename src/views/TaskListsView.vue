@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import FilterActions from '@/components/FilterActions.vue'
 import { useRoute, useRouter } from 'vue-router'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
 import TaskRangeThumbnail from '@/components/TaskRangeThumbnail.vue'
@@ -33,6 +34,7 @@ const departments = ref<DepartmentInfo[]>([])
 const departmentLoading = ref(false)
 const departmentError = ref('')
 const sceneFilter = ref(typeof route.query.sceneId === 'string' ? route.query.sceneId : '')
+const draftFilters = reactive<{ keyword: string; status: GovernanceTaskStatus | ''; priority: number | ''; parentDeptId: string; childDeptId: string; handlerFilter: string; sceneFilter: string }>({ keyword: '', status: '', priority: '', parentDeptId: '', childDeptId: '', handlerFilter: '', sceneFilter: sceneFilter.value })
 const initialSceneCode = typeof route.query.sceneCode === 'string' ? route.query.sceneCode : ''
 const currentPage = ref(1)
 const gotoPage = ref('1')
@@ -67,7 +69,7 @@ const rootDepartments = computed(() => {
   return departments.value.filter((item) => !item.parentId || item.parentId === '0' || !ids.has(item.parentId))
 })
 const childDepartments = computed(() =>
-  departments.value.filter((item) => item.parentId === parentDeptId.value))
+  departments.value.filter((item) => item.parentId === draftFilters.parentDeptId))
 const selectedDeptId = computed(() => childDeptId.value || parentDeptId.value || user.activeDeptId)
 const tableElement = ref<HTMLElement>()
 const requestPageSize = ref(7)
@@ -277,40 +279,27 @@ async function loadHandlers(deptId?: string) {
 function openTask(task: GovernanceTask) {
   router.push(`/tasks/${task.id}`)
 }
-
-watch([keyword, status, priority, sceneFilter, parentDeptId, childDeptId], () => {
+function applyFilters() {
+  keyword.value = draftFilters.keyword; status.value = draftFilters.status; priority.value = draftFilters.priority
+  sceneFilter.value = draftFilters.sceneFilter; parentDeptId.value = draftFilters.parentDeptId; childDeptId.value = draftFilters.childDeptId; handlerFilter.value = draftFilters.handlerFilter
   currentPage.value = 1
   void loadTasks()
-})
-watch(parentDeptId, () => {
-  if (!childDepartments.value.some((item) => item.id === childDeptId.value)) childDeptId.value = ''
+}
+function resetFilters() { Object.assign(draftFilters, { keyword: '', status: '', priority: '', parentDeptId: '', childDeptId: '', handlerFilter: '', sceneFilter: '' }); applyFilters() }
+watch(() => draftFilters.parentDeptId, () => {
+  if (!childDepartments.value.some((item) => item.id === draftFilters.childDeptId)) draftFilters.childDeptId = ''
 })
 watch([currentPage, requestPageSize], () => applyTaskRecords(projectedTasks.value, latestRequest))
-// 处理人筛选改由后端按工作流节点筛选，切换时需要重新拉取；pureName 选项无法转 ID，仅本地过滤。
-let handlerFilterSilent = false
-watch(handlerFilter, () => {
-  currentPage.value = 1
-  if (handlerFilterSilent) {
-    handlerFilterSilent = false
-    applyTaskRecords(projectedTasks.value, latestRequest)
-    return
-  }
-  void loadTasks()
-})
-watch(selectedDeptId, deptId => {
-  if (handlerFilter.value) { handlerFilterSilent = true; handlerFilter.value = '' }
-  projectedTasks.value = []
-  handlerReadErrors.value = {}
+watch(() => draftFilters.childDeptId || draftFilters.parentDeptId || user.activeDeptId, (deptId, oldDeptId) => {
+  if (oldDeptId !== undefined && deptId !== oldDeptId) draftFilters.handlerFilter = ''
   void loadHandlers(deptId)
 }, {immediate:true})
-watch(selectedScene, () => {
-  if (sceneFilter.value) void loadTasks()
-})
 watch([() => user.organizationId, () => user.activeDeptId], async () => {
   // 切换单位后不能保留上一个部门的场景编码，否则会导致列表为空或串场景。
   sceneFilter.value = ''
   currentPage.value = 1
   await Promise.all([loadSceneDictionary(), loadDepartments()])
+  Object.assign(draftFilters, { sceneFilter: sceneFilter.value, parentDeptId: parentDeptId.value, childDeptId: childDeptId.value, handlerFilter: '' })
   void loadTasks()
 })
 watch(pageCount, () => setPage(currentPage.value))
@@ -327,6 +316,7 @@ onMounted(async () => {
     tableObserver.observe(tableElement.value)
   }
   await Promise.all([loadSceneDictionary(), loadDepartments()])
+  Object.assign(draftFilters, { sceneFilter: sceneFilter.value, parentDeptId: parentDeptId.value, childDeptId: childDeptId.value })
   void loadTasks()
 })
 onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRequest++;tableObserver?.disconnect()})
@@ -337,24 +327,25 @@ onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRe
     <section class="task-filters">
       <label class="search-filter">
         <span>搜索任务</span>
-        <span class="search-box"><i class="search-box__icon" aria-hidden="true"></i><input v-model="keyword" placeholder="任务名称、编号" /></span>
+        <span class="search-box"><i class="search-box__icon" aria-hidden="true"></i><input class="ui-filter-search" v-model="draftFilters.keyword" placeholder="任务名称、编号" @keyup.enter="applyFilters" /></span>
       </label>
-      <label>所属场景<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="sceneFilter" :disabled="sceneLoading"><ElOption value="" :label="String(sceneLoading ? '场景字典加载中…' : '全部场景')" /><ElOption v-for="scene in sceneOptions" :key="scene.id" :value="scene.id" :label="String(scene.shortName)" /></ElSelect></label>
-      <label>任务状态<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="status"><ElOption value="" label="全部状态" /><ElOption :value="0" label="待执行" /><ElOption :value="1" label="执行中" /><ElOption :value="2" label="待核查" /><ElOption :value="3" label="已失败" /><ElOption :value="4" label="已取消" /><ElOption :value="5" label="已完成" /></ElSelect></label>
+      <label>所属场景<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.sceneFilter" :disabled="sceneLoading"><ElOption value="" :label="String(sceneLoading ? '场景字典加载中…' : '全部场景')" /><ElOption v-for="scene in sceneOptions" :key="scene.id" :value="scene.id" :label="String(scene.shortName)" /></ElSelect></label>
+      <label>任务状态<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.status"><ElOption value="" label="全部状态" /><ElOption :value="0" label="待执行" /><ElOption :value="1" label="执行中" /><ElOption :value="2" label="待核查" /><ElOption :value="3" label="已失败" /><ElOption :value="4" label="已取消" /><ElOption :value="5" label="已完成" /></ElSelect></label>
       <label>所属部门
         <div class="department-filter">
-          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="parentDeptId" :disabled="departmentLoading">
+          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.parentDeptId" :disabled="departmentLoading">
             <ElOption value="" :label="String(departmentLoading ? '部门加载中…' : '全部一级部门')" />
             <ElOption v-for="item in rootDepartments" :key="item.id" :value="item.id" :label="String(item.name)" />
           </ElSelect>
-          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="childDeptId" :disabled="departmentLoading || !parentDeptId || !childDepartments.length">
+          <ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.childDeptId" :disabled="departmentLoading || !draftFilters.parentDeptId || !childDepartments.length">
             <ElOption value="" label="全部二级部门" />
             <ElOption v-for="item in childDepartments" :key="item.id" :value="item.id" :label="String(item.name)" />
           </ElSelect>
         </div>
       </label>
-      <label>当前处理人<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="handlerFilter" aria-label="当前处理人筛选" :disabled="taskLoading || handlerLoading"><ElOption value="" :label="String(handlerLoading ? '人员加载中…' : '全部处理人')" /><ElOption v-for="person in handlerOptions" :key="person.key" :value="person.key" :label="String(person.name)" /></ElSelect></label>
-      <label>优先级<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="priority"><ElOption value="" label="全部优先级" /><ElOption :value="2" label="高" /><ElOption :value="1" label="中" /><ElOption :value="0" label="低" /></ElSelect></label>
+      <label>当前处理人<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.handlerFilter" aria-label="当前处理人筛选" :disabled="taskLoading || handlerLoading"><ElOption value="" :label="String(handlerLoading ? '人员加载中…' : '全部处理人')" /><ElOption v-for="person in handlerOptions" :key="person.key" :value="person.key" :label="String(person.name)" /></ElSelect></label>
+      <label>优先级<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.priority"><ElOption value="" label="全部优先级" /><ElOption :value="2" label="高" /><ElOption :value="1" label="中" /><ElOption :value="0" label="低" /></ElSelect></label>
+          <FilterActions @query="applyFilters" @reset="resetFilters" />
     </section>
     <p v-if="sceneError" class="scene-dictionary-error">场景字典加载失败：{{ sceneError }}。请检查登录状态与网络后刷新页面。</p>
     <p v-if="departmentError" class="scene-dictionary-error">部门列表加载失败：{{ departmentError }}。筛选将使用当前登录部门。</p>
@@ -482,6 +473,8 @@ onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRe
   .task-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 .task-list-page .search-box{min-width:0;overflow:hidden;height:34px;border:1px solid #d8e0e7;background:#fff;align-items:center}.task-list-page .search-box input{height:100%;min-width:0;flex:1;align-self:stretch;background:transparent;border:0;border-radius:0;padding:0;box-shadow:none}
+
+.task-list-page .task-filters :deep(.filter-actions){grid-column:auto}
 </style>
 
 <style scoped>

@@ -11,26 +11,22 @@ import {
 } from '@/api/facility'
 import { useUserStore } from '@/stores/user'
 import { useRouter } from 'vue-router'
-import { FACILITIES_TOPIC_ID } from '@/stores/geographic-topics'
+import { facilityStatisticDestination } from '@/utils/facility-navigation'
 
 const user = useUserStore()
 const router = useRouter()
 function openCard(label: string) {
-  if (label === '设施总数' || label === '正常') {
-    void router.push({ name: 'recognition', params: { tab: 'topics' }, query: { topic: FACILITIES_TOPIC_ID, view: 'map' } })
-  } else if (label === '异常' || label === '核查中' || label === '废弃') {
-    void router.push({ name: 'task-list', query: { sceneCode: 'farmland-facilities' } })
-  }
+  const destination = facilityStatisticDestination(label)
+  if (destination) void router.push(destination.route)
 }
 function cardDestination(label: string) {
-  return label === '设施总数' || label === '正常' ? '工程设施地图' : label === '异常' || label === '核查中' || label === '废弃' ? '工程设施任务列表' : ''
+  return facilityStatisticDestination(label)?.name || ''
 }
 const statistics = ref<FacilityStatistics>()
 const regions = ref<FacilityRegionStat[]>([])
 const recent = ref<FacilityRecord[]>([])
 const loading = ref(false)
 const error = ref('')
-const refreshedAt = ref('')
 
 const STATUS_META = [
   { key: 'NORMAL', label: '正常', color: '#4bd6a0' },
@@ -123,7 +119,6 @@ async function loadData() {
     statistics.value = overall
     regions.value = Array.isArray(regionStats) ? regionStats : []
     recent.value = Array.isArray(page.records) ? page.records : []
-    refreshedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '设施统计读取失败'
   } finally {
@@ -137,16 +132,6 @@ watch(() => user.activeDeptId, () => void loadData())
 
 <template>
   <section class="facility-dashboard">
-    <header class="dashboard-heading">
-      <div>
-        <div class="eyebrow">专题分析 / 高标准农田工程设施管理 / 工程设施总览</div>
-      </div>
-      <div class="heading-actions">
-        <span v-if="refreshedAt">更新于 {{ refreshedAt }}</span>
-        <button type="button" :disabled="loading" @click="loadData">{{ loading ? '加载中…' : '刷新数据' }}</button>
-      </div>
-    </header>
-
     <div v-if="error" class="notice" role="alert">{{ error }}<button type="button" @click="loadData">重试</button></div>
 
     <div class="kpi-grid">
@@ -222,12 +207,6 @@ watch(() => user.activeDeptId, () => void loadData())
 <style scoped>
 /* 与首页驾驶舱一致的面板语言：玻璃拟态渐变 + 细描边 + 顶部高光线 + 底部水波纹 */
 .facility-dashboard{--panel-border:rgba(105,182,217,.20);--panel-bg:radial-gradient(ellipse at 12% 0%,rgba(107,183,215,.10),transparent 62%),linear-gradient(135deg,rgba(8,37,58,.71),rgba(5,24,41,.49));--panel-shadow:0 12px 36px #00101d55,0 2px 6px #00111e26,inset 0 1px 0 #c2ebff18;--muted:#8fb0c2;height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;gap:16px;padding:22px 24px;overflow:hidden;background:radial-gradient(circle at 16% -10%,#103a52 0,transparent 42%),#081c2b;color:#d7edf3}
-.dashboard-heading{flex:none;display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
-.eyebrow{font-size:12px;color:#9cc3d6;letter-spacing:.5px}
-.heading-actions{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px}
-.heading-actions button{padding:7px 14px;border:1px solid #2b7fa3;border-radius:6px;background:linear-gradient(135deg,#12789c,#1aa4bd);color:#effcff;font:inherit;font-size:12px;cursor:pointer;transition:filter .18s ease,box-shadow .18s ease}
-.heading-actions button:hover:not(:disabled){filter:brightness(1.12);box-shadow:0 3px 12px #0a7d9c33}
-.heading-actions button:disabled{opacity:.55;cursor:default}
 .notice{flex:none;padding:9px 12px;border:1px solid #8a4d48;border-radius:6px;background:#482d31;color:#ffb6ad;font-size:12px}
 .notice button{margin-left:8px;border:0;background:none;color:#9ce4ed;cursor:pointer;font:inherit}
 .kpi-card,.panel{position:relative;overflow:hidden;border:1px solid var(--panel-border);border-radius:12px;background:var(--panel-bg);box-shadow:var(--panel-shadow);backdrop-filter:blur(14px) saturate(1.08);-webkit-backdrop-filter:blur(14px) saturate(1.08)}
@@ -242,7 +221,7 @@ watch(() => user.activeDeptId, () => void loadData())
 .kpi-track{height:5px;border-radius:3px;background:#0a2231;overflow:hidden}
 .kpi-track i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--tone),#d8fbff66);opacity:.9;transition:width .4s ease}
 .kpi-card small{color:var(--muted);font-size:12px}
-.board-grid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:16px}
+.board-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .board-grid.bottom{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .panel{display:flex;flex-direction:column;min-height:0}
 .panel::after{position:absolute;right:0;bottom:0;left:0;height:30px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 360 36'%3E%3Cg fill='none' stroke='%2324dceb' stroke-opacity='.2'%3E%3Cpath d='M0 35Q60 0 120 26T240 22T360 30M0 30Q60 -5 120 21T240 17T360 25M0 25Q60 -10 120 16T240 12T360 20'/%3E%3C/g%3E%3C/svg%3E") center bottom/100% auto no-repeat;opacity:.18;content:"";pointer-events:none}
