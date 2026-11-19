@@ -3,8 +3,10 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { apiClient } from '@/api/client'
 import type { FlightReviewMedia } from '@/api/flight-review'
 import PhotoLocationControl from '@/workspace-components/spot-identification/PhotoLocationControl.vue'
+import { ElTooltip } from 'element-plus'
 
 const props = defineProps<{ coordinate?: { longitude: number; latitude: number }; geometryType: string }>()
+const emit = defineEmits<{ 'photo-location': [location: { longitude: number; latitude: number } | null] }>()
 interface PhotoMatch { matched: boolean; mediaId?: string | number; fileName?: string; shootTime?: string; longitude?: number | null; latitude?: number | null; distanceMeters?: number; localFileUrl?: string; localThumbnailUrl?: string }
 const radius = ref(20)
 const shootAfterDate = ref('')
@@ -71,6 +73,7 @@ async function search() {
   if (!Number.isFinite(radius.value) || radius.value <= 0 || radius.value > 500) { message.value = '搜索半径请输入 1 至 500 米'; state.value = 'error'; return }
   const version = ++requestVersion
   controller?.abort(); controller = new AbortController()
+  emit('photo-location', null)
   clearImages(); result.value = undefined; message.value = ''; state.value = 'loading'
   try {
     const payload = { ...props.coordinate, radiusMeters: Number(radius.value), ...(shootAfterDate.value ? { shootAfter: `${shootAfterDate.value}T00:00:00` } : { ignoreShootTime: true }) }
@@ -78,6 +81,9 @@ async function search() {
     if (version !== requestVersion) return
     if (!match?.matched) { state.value = 'empty'; return }
     result.value = match; state.value = 'ready'
+    if (locationMedia.value?.longitude !== undefined && locationMedia.value.latitude !== undefined) {
+      emit('photo-location', { longitude: locationMedia.value.longitude, latitude: locationMedia.value.latitude })
+    }
     if (match.localThumbnailUrl) {
       try {
         const url = await readImage(match.localThumbnailUrl, 'thumb', controller.signal)
@@ -109,8 +115,7 @@ onBeforeUnmount(() => { requestVersion++; controller?.abort(); clearImages(); wi
 
 <template>
   <section class="nearby-photo" aria-label="附近最新航拍照片">
-    <header><span class="accent"></span><strong>附近最新航拍照片</strong></header>
-    <p v-if="geometryType !== '点'" class="hint">按设施范围中心查询，照片可能未覆盖整个设施</p>
+    <header><span class="accent"></span><strong>附近最新航拍照片</strong><ElTooltip v-if="geometryType !== '点'" content="按设施范围中心查询，照片可能未覆盖整个设施" placement="top" effect="light" popper-class="facility-coverage-tooltip" :teleported="true"><button class="coverage-help" type="button" aria-label="照片覆盖范围说明">!</button></ElTooltip></header>
     <div class="query-fields"><label class="date-field">选择指定日期后的航拍照片<input v-model="shootAfterDate" type="date" aria-label="拍摄日期起" /></label><label>查询半径（米）<input v-model.number="radius" type="number" min="1" max="500" /></label><button class="query" type="button" :disabled="!coordinate || state === 'loading'" @click="search">{{ state === 'loading' ? '正在查询…' : '查询最新照片' }}</button></div>
     <p v-if="!coordinate" class="notice">设施暂无有效坐标，无法查询</p>
     <p v-else-if="state === 'idle'" class="notice">{{ shootAfterDate ? '查询所选日期及之后的本地照片' : '未选起始日期时默认查询最近一次航拍照片' }}</p>
@@ -129,11 +134,17 @@ onBeforeUnmount(() => { requestVersion++; controller?.abort(); clearImages(); wi
 .nearby-photo{margin-top:18px;padding:14px 0 2px;border-top:1px solid #719dab38;color:#d8edf0}.nearby-photo header{display:flex;align-items:center;gap:7px;font-size:13px}.accent{width:3px;height:15px;border-radius:3px;background:#4ed7df}.hint,.notice{margin:8px 0;color:#8fb5c1;font-size:11px;line-height:1.55}.notice.error{color:#ffaea3}.query-fields{display:grid;grid-template-columns:78px minmax(0,1fr);gap:8px}.query-fields label{display:grid;gap:5px;color:#91bbc5;font-size:11px}.query-fields input{box-sizing:border-box;width:100%;min-width:0;padding:6px;color:#d8edf0;background:#092a38;border:1px solid #3b6878;border-radius:5px;font-size:11px;color-scheme:dark}.query{width:100%;margin-top:10px;padding:8px;border:1px solid #3a8ca0;border-radius:5px;background:#15516a;color:#d9f7fa;font-size:12px}.query:hover{background:#1a6a80}.query:disabled{opacity:.55;cursor:not-allowed}.photo-result{margin-top:12px}.photo-preview{position:relative;display:grid;place-items:center;overflow:hidden;width:100%;height:128px;padding:0;border:1px solid #42798a;border-radius:6px;background:#092634;color:#9cc6d1}.photo-preview img{width:100%;height:100%;object-fit:cover}.photo-preview small{position:absolute;right:6px;bottom:6px;padding:3px 6px;border-radius:3px;background:#092634dd;color:#e2f8fa}.photo-meta{display:grid;gap:6px;margin-top:9px;color:#91bbc5;font-size:11px}.photo-meta span{display:flex;justify-content:space-between;gap:8px}.photo-meta b{color:#d8edf0;font-weight:500}.nearby-preview{position:fixed;inset:0;z-index:4000;display:flex;align-items:center;justify-content:center;padding:50px;background:rgba(0,12,22,.94);color:#def2f5}.nearby-preview img{max-width:100%;max-height:100%;object-fit:contain}.preview-close{position:absolute;top:20px;right:25px;width:38px;height:38px;border:1px solid #558193;border-radius:6px;background:#15394f;color:#fff;font-size:26px;cursor:pointer}
 </style>
 
+<style>
+.facility-coverage-tooltip.el-popper { max-width: 220px; color: #253f4a; background: #fff; border-color: #d5e0e6; line-height: 1.5; }
+.facility-coverage-tooltip.el-popper .el-popper__arrow::before { background: #fff; border-color: #d5e0e6; }
+</style>
+
 <style scoped>
 .query-fields{grid-template-columns:78px minmax(0,1fr);align-items:end}.query-fields .query{width:100%;min-height:29px;margin:0;padding:6px 10px;white-space:nowrap}
 .query-fields .date-field{grid-column:1 / -1}
 .nearby-photo{margin-top:14px;padding:16px 0 0;border-top:1px solid var(--ui-divider,#719dab38)}
 .nearby-photo header{margin-bottom:12px;color:var(--ui-text,#e6f1ff);font-size:14px;line-height:20px}
+.coverage-help{flex:none;width:15px;height:15px;display:grid;place-items:center;margin-left:2px;padding:0;border:1px solid #eef7fa;border-radius:50%;background:transparent;color:#fff;font:bold 11px/1 sans-serif;cursor:pointer}
 .query-fields{grid-template-columns:100px minmax(0,1fr);gap:10px}
 .query-fields label{gap:6px;color:var(--ui-muted,#9fb7c9);font-size:12px;line-height:18px}
 .query-fields input{height:36px;padding:0 9px;border-color:var(--ui-border,#3b6878);border-radius:var(--ui-control-radius,5px);background:var(--ui-input,#092a38);color:var(--ui-text,#e6f1ff);font-size:13px}

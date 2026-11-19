@@ -428,7 +428,7 @@ watch(() => props.abnormalSceneId, () => void syncAbnormalSceneFromRoute())
     <div v-if="editorOpen" class="scene-mask" @mousedown.self="editorOpen = false">
       <section class="scene-modal scene-modal--wide" role="dialog" aria-modal="true">
         <header><div><h2>{{ editorTitle }}</h2><p>配置业务场景的基础信息与运行规则</p></div><button type="button" @click="editorOpen = false">×</button></header>
-        <form class="scene-form" @submit.prevent="submitScene">
+        <form id="scene-editor-form" class="scene-form" @submit.prevent="submitScene">
           <section class="scene-form-section">
             <h3><span>01</span>基础信息</h3>
             <div class="scene-form-grid">
@@ -460,8 +460,8 @@ watch(() => props.abnormalSceneId, () => void syncAbnormalSceneFromRoute())
             <small v-else>保存场景后即可配置</small>
           </section>
           <div v-if="editorMode === 'view'" class="scene-audit"><span>创建时间：{{ formatTime(sceneForm.createTime) }}</span><span>更新时间：{{ formatTime(sceneForm.updateTime) }}</span></div>
-          <div class="scene-form-actions"><button class="scene-button scene-button--ghost" type="button" @click="editorOpen = false">{{ editorMode === 'view' ? '关闭' : '取消' }}</button><button v-if="editorMode !== 'view'" class="scene-button scene-button--primary" type="submit" :disabled="busy">{{ busy ? '保存中…' : '保存场景' }}</button></div>
         </form>
+        <footer class="scene-form-actions"><button class="scene-button scene-button--ghost" type="button" @click="editorOpen = false">{{ editorMode === 'view' ? '关闭' : '取消' }}</button><button v-if="editorMode !== 'view'" class="scene-button scene-button--primary" type="submit" form="scene-editor-form" :disabled="busy">{{ busy ? '保存中…' : '保存场景' }}</button></footer>
       </section>
     </div>
 
@@ -482,6 +482,10 @@ watch(() => props.abnormalSceneId, () => void syncAbnormalSceneFromRoute())
 </template>
 
 <style scoped>
+.scene-modal.scene-modal--wide{display:flex;flex-direction:column;overflow:hidden}
+.scene-modal--wide>header,.scene-modal--wide>footer{flex:none}
+.scene-modal--wide>.scene-form{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.scene-modal--wide>footer{border-top:1px solid #205f78}
 .scene-management{color:#dceef5}.scene-heading{min-height:54px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between}.scene-heading h2,.scene-heading p{margin:0}.scene-heading h2{color:#fff;font-size:25px}.scene-heading p{margin-top:6px;color:#75a2b4;font-size:14px}.scene-heading__title{min-width:0;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}.scene-heading__relation{margin-top:0!important;display:flex;align-items:baseline;gap:4px;color:#6f9bab!important;font-size:12px!important}.scene-heading__relation strong{max-width:460px;overflow:hidden;color:#9fc8d7;font-weight:500;text-overflow:ellipsis;white-space:nowrap}.scene-button{min-height:40px;padding:0 17px;border-radius:3px;font-size:14px;cursor:pointer}.scene-button:disabled{opacity:.55;cursor:not-allowed}.scene-button--primary{color:#fff;background:linear-gradient(135deg,#1488b5,#16a9c6);border:1px solid #42cbe9}.scene-button--primary:hover{filter:brightness(1.12)}.scene-button--ghost{color:#a8d8e8;background:#0a2738;border:1px solid #276781}.scene-button--ghost:hover{color:#fff;border-color:#3aa9d0}.scene-abnormal-entry{display:flex;align-items:center;justify-content:space-between;gap:18px}.scene-abnormal-entry p{margin:8px 0 0;color:#79a1b1;font-size:12px}.scene-abnormal-entry small{color:#6e9bad;font-size:12px}.scene-abnormal-entry .scene-button{flex:none}
 .scene-summary{margin-bottom:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}.scene-summary article{min-height:98px;padding:15px 17px;display:flex;align-items:center;gap:13px;background:linear-gradient(135deg,#0d2d41,#0a2435);border:1px solid #1b536b;border-radius:6px;box-shadow:0 9px 22px #00121d35}.scene-summary i{width:46px;height:46px;display:grid;place-items:center;flex:0 0 auto;color:#92efff;background:#0d526b;border:1px solid #2685a3;border-radius:50%;font-size:17px;font-style:normal}.scene-summary div{min-width:0}.scene-summary span,.scene-summary b,.scene-summary small{display:block}.scene-summary span{color:#80a9b8;font-size:12px}.scene-summary b{margin:3px 0;color:#f0fbff;font-size:25px}.scene-summary small{overflow:hidden;color:#5f8b9d;font-size:12px;text-overflow:ellipsis;white-space:nowrap}
 .scene-panel{overflow:hidden;background:#0b2638e8;border:1px solid #1b536b;border-radius:6px;box-shadow:0 12px 30px #00121d44}.scene-filters{padding:14px 15px;display:grid;grid-template-columns:minmax(220px,250px) minmax(280px,400px) minmax(210px,1fr) minmax(200px,1fr) auto;gap:11px;align-items:end;background:#0d2d41;border-bottom:1px solid #1b536b}.scene-filters label span{margin-bottom:6px;display:block;color:#7ea6b6;font-size:12px}.scene-filters input,.scene-filters select,.scene-form input,.scene-form select,.scene-form textarea,.assignee-form select{width:100%;min-height:40px;padding:0 11px;box-sizing:border-box;color:#e9f8fc;background:#071d2b;border:1px solid #20546a;border-radius:3px;outline:none;font-size:13px}.scene-filters input:focus,.scene-filters select:focus,.scene-form input:focus,.scene-form select:focus,.scene-form textarea:focus,.assignee-form select:focus{border-color:#37b7df;box-shadow:0 0 0 2px #1683aa22}.scene-filters>div{display:flex;gap:8px}.department-filter select{border-color:#287794;background:#0a2a3b}

@@ -13,6 +13,7 @@ export interface FacilityRecord {
   bizStatus?: string | null
   bizStatusName?: string | null
   updateTime?: string | null
+  createTime?: string | null
   geometryType?: string | null
   geometryJson?: string | null
   remark?: string | null
