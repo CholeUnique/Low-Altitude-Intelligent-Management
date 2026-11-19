@@ -9,6 +9,7 @@
   color: #c4d6e6; background: var(--ui-glass); border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); backdrop-filter: blur(14px) saturate(1.08);
 }
+#app .facilities-overview .category-panel .feature-details { background: transparent; border: 0; border-radius: 0; box-shadow: none; backdrop-filter: none; }
 #app .topic-legend { height: var(--details-height); transition: translate var(--ui-panel-motion), opacity var(--ui-panel-motion); }
 #app .topic-details-toggle { color: #c4d6e6; background: var(--ui-glass); border-color: var(--ui-border); transition: left var(--ui-panel-motion); }
 #app .legend-heading { flex: 0 0 48px; min-height: 48px; padding-inline: 16px; border-color: var(--ui-divider); }

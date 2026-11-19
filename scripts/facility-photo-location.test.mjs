@@ -26,7 +26,8 @@ component.render = () => null
 const app = renderer.createApp(component, { coordinate: { longitude: 119.8, latitude: 32.4 }, geometryType: '点' })
 const vm = app.mount({})
 await vm.search()
-assert.equal('shootAfter' in calls[0], false, 'Empty date uses the backend default')
+assert.equal(calls[0].ignoreShootTime, true, 'Empty date queries without a time limit')
+assert.equal('shootAfter' in calls[0], false, 'Unlimited query does not send a start date')
 assert.equal(vm.locationMedia.longitude, 119.85)
 assert.equal(vm.locationMedia.latitude, 32.48)
 assert.equal(vm.locationMedia.id, '212039846837891912')
@@ -34,7 +35,12 @@ response = { ...response, longitude: null, latitude: null }
 vm.shootAfterDate = '2025-01-02'
 await vm.search()
 assert.equal(calls[1].shootAfter, '2025-01-02T00:00:00', 'The selected date is inclusive from midnight')
+assert.equal('ignoreShootTime' in calls[1], false, 'Selected date must not be overridden by unlimited mode')
 assert.equal(vm.locationMedia.longitude, undefined, 'Missing photo coordinates must not fall back to facility coordinates')
 assert.equal(vm.locationMedia.latitude, undefined)
+vm.shootAfterDate = ''
+await vm.search()
+assert.equal(calls[2].ignoreShootTime, true, 'Clearing the date restores unlimited mode')
+assert.equal('shootAfter' in calls[2], false)
 app.unmount()
 console.log('Facility photo location checks passed')
