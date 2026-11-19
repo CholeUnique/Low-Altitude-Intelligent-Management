@@ -79,6 +79,9 @@ export interface MapServiceCategoryValue {
   /** 与所属图层同色相、按分类数量拉开的深浅色。 */
   color: string
   /** 行政区分类所包含的原始要素 ID，供后端裁切读取真实几何。 */
+  parentCode?: string
+  parentName?: string
+  geometries?: MapServiceSearchGeometry[]
   objectIds?: (string|number)[]
 }
 
@@ -151,7 +154,7 @@ export async function createAdministrativeBoundaryLayer(service: MapServiceItem,
   const bounds = L.latLngBounds([])
   const outlines: L.Polygon[] = []
   const fills: L.Polygon[] = []
-  const entries:{value:string;label:string;id:unknown;outline:L.Polygon;fill:L.Polygon}[]=[]
+  const entries:{value:string;label:string;id:unknown;parentCode?:string;parentName?:string;geometry:MapServiceSearchGeometry;outline:L.Polygon;fill:L.Polygon}[]=[]
   for (const feature of response.features || []) {
     const rings = feature.geometry?.rings
     if (!rings?.length) continue
@@ -170,13 +173,13 @@ export async function createAdministrativeBoundaryLayer(service: MapServiceItem,
     if(objectIdField&&id!=null){
       const name=nameField?String(feature.attributes?.[nameField]??'').trim():''
       const code=codeField?String(feature.attributes?.[codeField]??'').trim():''
-      entries.push({value:code?`code:${code}`:name?`name:${name}`:`id:${id}`,label:name||`未命名区划（${id}）`,id,outline:outlines[outlines.length-1]!,fill:fills[fills.length-1]!})
+      entries.push({value:code?`code:${code}`:name?`name:${name}`:`id:${id}`,label:name||`未命名区划（${id}）`,id,parentCode:String(feature.attributes?.XZDM||feature.attributes?.TOWN_CODE||''),parentName:String(feature.attributes?.XZMC||feature.attributes?.TOWN_NAME||''),geometry:feature.geometry!,outline:outlines[outlines.length-1]!,fill:fills[fills.length-1]!})
     }
   }
   if (!bounds.isValid()) throw new Error('行政边界图层没有有效几何数据')
   let selected=new Set(entries.map(entry=>entry.value))
   const canSelect=Boolean(objectIdField&&entries.length===fills.length)
-  const categories=[...new Map(entries.map(entry=>[entry.value,{value:entry.value,label:entry.label,color,objectIds:entries.filter(other=>other.value===entry.value).map(other=>other.id as string|number)}])).values()]
+  const categories=[...new Map(entries.map(entry=>[entry.value,{value:entry.value,label:entry.label,color,parentCode:entry.parentCode,parentName:entry.parentName,geometries:entries.filter(other=>other.value===entry.value).map(other=>other.geometry),objectIds:entries.filter(other=>other.value===entry.value).map(other=>other.id as string|number)}])).values()]
   const duplicateNames=new Set(categories.filter(category=>categories.some(other=>other.value!==category.value&&other.label===category.label)).map(category=>category.label))
   categories.forEach(category=>{
     if(duplicateNames.has(category.label))category.label+=`（${category.value.replace(/^[^:]+:/,'')}）`
@@ -200,7 +203,7 @@ export async function createAdministrativeBoundaryLayer(service: MapServiceItem,
         locateValue:async(value:string)=>{
           const selectedBounds=L.latLngBounds([])
           entries.filter(entry=>entry.value===value).forEach(entry=>selectedBounds.extend(entry.fill.getBounds()))
-          return {bounds:selectedBounds.isValid()?selectedBounds:undefined,geometryType:'esriGeometryPolygon',geometries:[]}
+          return {bounds:selectedBounds.isValid()?selectedBounds:undefined,geometryType:'esriGeometryPolygon',geometries:entries.filter(entry=>entry.value===value).map(entry=>entry.geometry)}
         },
       },
       definitionExpression:()=>{

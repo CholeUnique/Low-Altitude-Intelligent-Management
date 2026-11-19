@@ -5,7 +5,13 @@ export interface SpatialField { name:string; alias?:string; type:'text'|'number'
 export interface SpatialLayer { layerId:number; name:string; geometryType:string; analyzable:boolean; fields:SpatialField[] }
 export interface SpatialFilter { field:string; op:'EQ'|'IN'; values:string[] }
 export interface SpatialInput { serviceId:string; layerId:number; filters:SpatialFilter[] }
-export interface SpatialOverlayRequest { deptId?:string; sourceA:SpatialInput; sourceB:SpatialInput; minAreaSqm:number; includeOverlapSpots:boolean }
+export interface SpatialOverlayRequest { deptId?:string; sourceA:SpatialInput; sourceB:SpatialInput; minAreaSqm:number; includeOverlapSpots:boolean; regions?:{serviceId:string;layerId:number;objectIds:(string|number)[]}[] }
+export interface SpatialCompleteStatistics {
+  status:'RUNNING'|'SUCCEEDED'|'FAILED';progress?:number;error?:string;areaUnit:'SQM'
+  complete:{areaA:number;areaB:number;overlapArea:number;onlyAArea:number;onlyBArea:number;diffArea:number;diffRate:number|null}
+  categories:{category:'A_ONLY'|'B_ONLY'|'OVERLAP';fullAreaSqm:number;fullCount:number;outputAreaSqm:number;outputCount:number;filteredAreaSqm:number;filteredCount:number}[]
+  threshold?:{minAreaSqm:number;rule?:string;granularity?:string}
+}
 export interface SpatialSource { serviceId:string|number; serviceName:string; layerId:number; layerName:string; filters?:SpatialFilter[] }
 export interface SpatialOverlaySummary {
   resultId:string; cached:boolean; fingerprint?:string
@@ -13,13 +19,14 @@ export interface SpatialOverlaySummary {
   diffArea:number; diffAreaRaw:number; diffRate:number|null
   featureCountA:number; featureCountB:number; spotCount:number; minAreaSqm:number
   crsUsed:string; costMs:number; createTime:string; sourceA:SpatialSource; sourceB:SpatialSource
+  statistics?:SpatialCompleteStatistics
 }
 export type SpatialGeometry = GeoJSON.Polygon | GeoJSON.MultiPolygon
 export type SpatialCollection = GeoJSON.FeatureCollection<SpatialGeometry>
 export type SpatialDifferenceType = 'A_ONLY' | 'B_ONLY'
 export interface SpatialResultLegend { id:string; name:string; symbols:{label:string;color:string;mode?:'filled'|'boundary'}[] }
 export interface SpatialCompareGroup {areaSqm:number;areaMu?:number;spotCount:number;featureCollection:SpatialCollection}
-export interface SpatialGeometryCompare {areaA:number;areaB:number;crsUsed:string;minAreaSqm:number;both:SpatialCompareGroup;aOnly:SpatialCompareGroup;bOnly:SpatialCompareGroup}
+export interface SpatialGeometryCompare {areaA:number;areaB:number;crsUsed:string;minAreaSqm:number;both:SpatialCompareGroup;aOnly:SpatialCompareGroup;bOnly:SpatialCompareGroup;statistics?:SpatialCompleteStatistics}
 export interface SpatialSpot { seqNo:number; diffType:string; areaSqm:number; centerLng:number; centerLat:number; geometry:SpatialGeometry }
 export interface SpatialSpotPage { records:SpatialSpot[]; total:number; pageNum:number; pageSize:number }
 interface RequestOptions { signal?:AbortSignal }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
 import type { IdentifiedMapFeature } from '@/utils/map-service-layer'
-import { topicFeatureRows } from '@/utils/topic-feature-fields'
+import { topicFeatureRows, topicFeatureSummary } from '@/utils/topic-feature-fields'
 const props = defineProps<{features: IdentifiedMapFeature[]; selected: number; roles: Record<string,string>; embedded?:boolean}>()
 const emit = defineEmits<{select:[index:number]; close:[]}>()
 const id = useId()
@@ -18,11 +18,7 @@ const groups = computed(() => {
 const activeGroup = computed(() => groups.value.find(group => group.id === active.value?.serviceId))
 const activeRole = computed(() => active.value ? props.roles[active.value.serviceId] || '' : '')
 const rows = computed(() => active.value ? topicFeatureRows(active.value.rows,activeRole.value,active.value.serviceName) : [])
-const summary = computed(() => {
-  if (activeRole.value !== 'boundary') return {label:active.value?.typeLabel || '地块类型',value:active.value?.typeValue || '暂无地块类型'}
-  const name=rows.value.find(row=>/名称|村名|乡名/.test(row.label))
-  return {label:name?.label || '行政区名称',value:name?.value || '暂无行政区名称'}
-})
+const summary = computed(() => topicFeatureSummary(active.value?.rows||[],activeRole.value,active.value?.typeValue))
 </script>
 <template>
   <aside v-if="active" class="topic-feature-details" :class="{'is-embedded':embedded}" aria-label="要素详情">

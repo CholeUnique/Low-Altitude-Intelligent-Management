@@ -53,3 +53,8 @@ assert.equal(topicFeatureRows([{name:'db.village.XZQHMC',label:'行政区名称'
 assert.equal(topicFeatureRows([{name:'CUSTOM_CODE',label:'一田一码',value:'0000001234567890123456'}],'parcel')[0].label,'图斑编号')
 assert.equal(topicFeatureRows([{name:'CUSTOM_CODE',label:'一田一码',value:'0000001234567890123456'}],'permanent')[0].value,'0000001234567890123456','长编号和前导零必须原样保留')
 console.log('topic fields: mu conversion, explicit units, PDF labels and source preservation passed')
+
+const {topicFeatureSummary}=module.exports
+assert.deepEqual(topicFeatureSummary([{name:'YJJBNTTBBH',value:'001234'},{name:'DLMC',value:'水田'}],'permanent'),{label:'地类名称--一田一码',value:'水田--001234'})
+assert.equal(topicFeatureSummary([{name:'DCBH',value:'3212021000001'},{name:'DLMC',value:'旱地'}],'parcel').value,'旱地--3212021000001')
+assert.equal(topicFeatureSummary([{name:'OBJECTID',value:'999'}],'permanent','水田').value,'水田','OBJECTID 不能冒充一田一码')
