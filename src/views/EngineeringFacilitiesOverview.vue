@@ -295,6 +295,12 @@ onBeforeUnmount(() => { version++; clearMapServices(); observer?.disconnect(); m
 .filter-row select:focus { outline: none; box-shadow: none; }
 .facility-drawer { top: 20px; }
 .category-panel { top: 20px; }
+.category-panel { bottom: auto; max-height: calc(100% - 40px); }
+.feature-details { flex: 0 1 auto; padding: 4px 16px 16px; }
+.feature-details dl { margin: 0; }
+.feature-details dl > div { grid-template-columns: minmax(76px, .8fr) minmax(0, 1.2fr); padding: 10px 0; }
+.feature-details dt { color: var(--ui-muted, #91bbc5); }
+.feature-details dd { color: var(--ui-body, #d8edf0); }
 .filter-row select:focus-visible { border-color: #a2c9d1; }
 @media(max-width:1100px){.facilities-overview{--details-width:270px}}
 @media(max-width:700px){.facilities-overview{--details-width:230px}.facilities-overview :deep(.map-symbol-legend){left:10px}}

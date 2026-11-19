@@ -73,7 +73,7 @@ async function search() {
   controller?.abort(); controller = new AbortController()
   clearImages(); result.value = undefined; message.value = ''; state.value = 'loading'
   try {
-    const payload = { ...props.coordinate, radiusMeters: Number(radius.value), ...(shootAfterDate.value ? { shootAfter: `${shootAfterDate.value}T00:00:00` } : {}) }
+    const payload = { ...props.coordinate, radiusMeters: Number(radius.value), ...(shootAfterDate.value ? { shootAfter: `${shootAfterDate.value}T00:00:00` } : { ignoreShootTime: true }) }
     const match = await apiClient.post<never, PhotoMatch>('/v1/uav/media/match', payload, { signal: controller.signal })
     if (version !== requestVersion) return
     if (!match?.matched) { state.value = 'empty'; return }
@@ -110,10 +110,10 @@ onBeforeUnmount(() => { requestVersion++; controller?.abort(); clearImages(); wi
 <template>
   <section class="nearby-photo" aria-label="附近最新航拍照片">
     <header><span class="accent"></span><strong>附近最新航拍照片</strong></header>
-    <p class="hint">{{ geometryType === '点' ? '按设施位置查询附近照片' : '按设施范围中心查询，照片可能未覆盖整个设施' }}</p>
-    <div class="query-fields"><label class="date-field">拍摄日期（起）<input v-model="shootAfterDate" type="date" aria-label="拍摄日期起" /></label><label>半径（米）<input v-model.number="radius" type="number" min="1" max="500" /></label><button class="query" type="button" :disabled="!coordinate || state === 'loading'" @click="search">{{ state === 'loading' ? '正在查询…' : '查询最新照片' }}</button></div>
+    <p v-if="geometryType !== '点'" class="hint">按设施范围中心查询，照片可能未覆盖整个设施</p>
+    <div class="query-fields"><label class="date-field">选择指定日期后的航拍照片<input v-model="shootAfterDate" type="date" aria-label="拍摄日期起" /></label><label>查询半径（米）<input v-model.number="radius" type="number" min="1" max="500" /></label><button class="query" type="button" :disabled="!coordinate || state === 'loading'" @click="search">{{ state === 'loading' ? '正在查询…' : '查询最新照片' }}</button></div>
     <p v-if="!coordinate" class="notice">设施暂无有效坐标，无法查询</p>
-    <p v-else-if="state === 'idle'" class="notice">{{ shootAfterDate ? '查询所选日期及之后的本地照片' : '未选择日期时默认查询近 7 天的本地照片' }}</p>
+    <p v-else-if="state === 'idle'" class="notice">{{ shootAfterDate ? '查询所选日期及之后的本地照片' : '未选起始日期时默认查询最近一次航拍照片' }}</p>
     <p v-else-if="state === 'empty'" class="notice">该范围和时间内暂无匹配照片</p>
     <p v-else-if="state === 'error'" class="notice error" role="alert">{{ message }}，请调整条件或重试</p>
     <div v-if="state === 'ready' && result" class="photo-result">
@@ -132,6 +132,14 @@ onBeforeUnmount(() => { requestVersion++; controller?.abort(); clearImages(); wi
 <style scoped>
 .query-fields{grid-template-columns:78px minmax(0,1fr);align-items:end}.query-fields .query{width:100%;min-height:29px;margin:0;padding:6px 10px;white-space:nowrap}
 .query-fields .date-field{grid-column:1 / -1}
+.nearby-photo{margin-top:14px;padding:16px 0 0;border-top:1px solid var(--ui-divider,#719dab38)}
+.nearby-photo header{margin-bottom:12px;color:var(--ui-text,#e6f1ff);font-size:14px;line-height:20px}
+.query-fields{grid-template-columns:100px minmax(0,1fr);gap:10px}
+.query-fields label{gap:6px;color:var(--ui-muted,#9fb7c9);font-size:12px;line-height:18px}
+.query-fields input{height:36px;padding:0 9px;border-color:var(--ui-border,#3b6878);border-radius:var(--ui-control-radius,5px);background:var(--ui-input,#092a38);color:var(--ui-text,#e6f1ff);font-size:13px}
+.query-fields .query{height:36px;min-height:36px;border-color:var(--ui-border,#3a8ca0);border-radius:var(--ui-control-radius,5px);background:var(--ui-selected,#15516a);color:var(--ui-link,#d9f7fa);font-size:13px}
+.hint,.notice{margin:10px 0 0;color:var(--ui-muted,#9fb7c9);font-size:12px;line-height:1.5}
+.photo-meta{font-size:12px;line-height:18px}
 .nearby-preview{overflow:hidden;touch-action:none}
 .nearby-preview img{user-select:none;will-change:transform;touch-action:none}
 </style>
