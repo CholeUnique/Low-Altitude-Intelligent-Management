@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue'
 import { Aim, Compass, Delete, EditPen, InfoFilled, Location, MapLocation, Picture, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
 import L from 'leaflet'
+import { createTopicStyledServiceLayer } from '@/utils/topic-map-service'
 import { geodesicArea, formatDistance, formatArea } from '@/utils/map-measurement'
 import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
@@ -12,7 +13,6 @@ import { getMapServiceRegionTree, listEnabledMapServices, type MapServiceItem, t
 import { useUserStore } from '@/stores/user'
 import type { DashboardMapLayer, DronePatrolRoute } from '@/types'
 import {
-  createMapServiceLayer,
   createAdministrativeBoundaryLayer,
   expandMapServiceSublayers,
   probeMapService,
@@ -532,17 +532,16 @@ async function toggleMapService(service: MapServiceItem) {
   const visibilityVersion = (mapServiceVisibilityVersions.get(id) || 0) + 1
   mapServiceVisibilityVersions.set(id, visibilityVersion)
   try {
-    const color = service.arcGisGeometryType ? vectorLayerColors.value[id] || vectorLayerColor(id) : undefined
-    const handle = existing || await createMapServiceLayer(service, color, {
+    const handle = existing || await createTopicStyledServiceLayer(service, {
       fallbackRequestBounds: taizhouServiceBounds(service),
       boundsOverride: getJiulongArcGisLayerBounds(service.serviceUrl),
     })
-    if (existing && color) existing.setColor?.(color)
     if (requestVersion !== mapServiceRequestVersion || visibilityVersion !== mapServiceVisibilityVersions.get(id)) {
       handle.layer.remove()
       return
     }
     mapServiceLayers.set(id, handle)
+    if(handle.color)vectorLayerColors.value[id]=handle.color
     if (!existing) {
       let lastTileErrorTime = 0
       handle.layer.on('tileerror', (event: L.TileErrorEvent) => {
@@ -554,7 +553,7 @@ async function toggleMapService(service: MapServiceItem) {
       })
     }
     assignMapServicePane(handle.layer, paneForMapService(service))
-    handle.setFillOpacity?.(vectorFillOpacity.value[id] ?? .25)
+    handle.setFillOpacity?.(vectorFillOpacity.value[id] ?? (/行政区划/.test(service.name)?0:1))
     const viewBounds = mapServiceViewBounds(service, handle)
     if (viewBounds?.isValid() && !viewBounds.contains(map.getBounds())) {
       map.invalidateSize({ pan: false })
@@ -1347,7 +1346,7 @@ function renderHailingBoundary() {
   hailingBoundaryGroup?.remove()
   hailingBoundaryGroup = undefined
   // 九龙镇边界与默认行政区划互斥，同时只显示其中一套。
-  if (!map || props.focusLayerId || !HAILING_DISTRICT || jiulongBoundaryVisible.value || user.organizationId === 'agriculture-rural') return
+  if (!map || !HAILING_DISTRICT || jiulongBoundaryVisible.value) return
   hailingBoundaryGroup = L.layerGroup()
   const boundary = HAILING_DISTRICT as GeoJsonObject
   // Leaflet uses Canvas here, so a second stroke provides a reliable 50% dark-blue halo.
@@ -1367,7 +1366,7 @@ function renderHailingBoundary() {
     pane: 'administrative-boundaries',
     interactive: false,
     style: {
-      color: '#9AEEFE',
+      color: '#74dfff',
       weight: 4,
       opacity: 1,
       fill: false,

@@ -168,7 +168,7 @@ function display(data:SpatialCollection,summary:SpatialAnalysisSummary,restore:s
   if(partitions){
     layer=L.geoJSON()
     groups=partitions.map(part=>{
-      const group:ResultGroup={...part,data:markRaw(part.data),id:`analysis:${id}:${part.kind}`,layer:markRaw(L.geoJSON()),visible:!!part.data.features.length,mode:'filled'}
+      const group:ResultGroup={...part,data:markRaw(part.data),id:`analysis:${id}:${part.kind}`,layer:markRaw(L.geoJSON()),visible:!!part.data.features.length,mode:part.kind==='NEITHER'?'boundary':'filled'}
       group.layer=markRaw(makeLayer(group.data,()=>group.color,()=>group.mode))
       return group
     })

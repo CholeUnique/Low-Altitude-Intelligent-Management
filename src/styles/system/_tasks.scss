@@ -115,8 +115,12 @@ html[data-ui-theme] .todo-filter-options .el-select-dropdown__item.is-hovering, 
 #app .metric-grid article { background: var(--ui-panel-background); border: 1px solid var(--ui-border); border-radius: var(--ui-radius); padding: 12px; }
 #app .metric-grid span { color: var(--ui-muted); font-size: 13px; }
 #app .metric-grid b { color: var(--ui-text); font-size: 24px; line-height: 30px; }
+#app .cockpit-page .detail-layout .metric-grid > .task-status-metric b { font-size: 20px; line-height: 26px; white-space: normal; overflow-wrap: anywhere; }
 #app .metric-grid small { color: var(--ui-muted); font-size: 12px; font-weight: 400; }
 #app .detail-summary-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+#app .detail-layout .abnormal-filters { display: grid; grid-template-columns: minmax(82px, .9fr) minmax(96px, 1fr) minmax(110px, 1.6fr) auto; align-items: center; gap: 6px; padding: 6px 10px; overflow-x: auto; }
+#app .detail-layout .abnormal-filters > :is(.el-select, input) { min-width: 0; width: 100%; }
+#app .detail-layout .abnormal-filters > button { height: 36px; padding: 0 10px; white-space: nowrap; }
 #app .task-map-compare { background: var(--ui-border); }
 #app .task-map-compare__pane > header { min-height: 32px; background: var(--ui-surface-raised); color: var(--ui-body); border-color: var(--ui-divider); }
 

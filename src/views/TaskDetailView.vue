@@ -6,11 +6,12 @@ import TaskHistory from '@/components/task-center/TaskHistory.vue'
 import TaskLinkedMedia from '@/components/task-center/TaskLinkedMedia.vue'
 import FacilityReportImageGallery from '@/components/FacilityReportImageGallery.vue'
 import { projectTaskListWorkflow } from '@/utils/task-list-workflow'
-import { workflowNodeDisplayName } from '@/utils/task-workflow-state'
+import { myTaskWorkState, workflowNodeDisplayName } from '@/utils/task-workflow-state'
 import { getTaskWorkflow, type TaskWorkflow } from '@/api/task-workflow'
 import { taskImageryService } from '@/utils/task-imagery'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 import CockpitPageLayout from '@/layouts/CockpitPageLayout.vue'
 import TaskRangeMap from '@/components/TaskRangeMap.vue'
 import { getGovernanceTaskDetail, getGovernanceTaskOperateLogs, getGovernanceTaskGeometry, getTaskAbnormalPage, taskPriorityLabel } from '@/api/governance-task'
@@ -18,6 +19,7 @@ import type { GovernanceTaskDetail, GovernanceTaskOperateLog, TaskAbnormal, Task
 
 const route = useRoute()
 const router = useRouter()
+const user = useUserStore()
 const detail = ref<GovernanceTaskDetail>()
 const geometry = ref<TaskGeometryFeatureCollection>({ type: 'FeatureCollection', features: [] })
 const loading = ref(false)
@@ -41,6 +43,9 @@ let mapAbnormalRequestVersion = 0
 let taskRequestVersion = 0
 let abnormalRequestVersion = 0
 const task = computed(() => detail.value?.task)
+function openWorkspace() {
+  if (canOpenWorkspace.value && task.value) router.push({ name:'workspace', params:{sceneId:task.value.sceneCode,taskId:task.value.id} })
+}
 const facilityTask = computed(()=>isFacilityTask(task.value))
 const { facility, facts: facilityFacts, contextErrors, displayGeometry: facilityGeometry, reference: facilityReference } = useFacilityContext(detail, geometry)
 const abnormalPageCount = computed(() => Math.max(1, Math.ceil(abnormalTotal.value / 10)))
@@ -49,6 +54,8 @@ const logsLoading = ref(false)
 const logsError = ref('')
 let logsRequestVersion = 0
 const flow = ref<TaskWorkflow>()
+// 查看任务不等于参与办理；只认本人已办/正在办理的真实节点，不按部门、角色或任务负责人推断。
+const canOpenWorkspace = computed(() => !!task.value?.id && !!task.value.sceneCode && user.hasPermission('task-list') && !!myTaskWorkState(flow.value, String(user.currentUser?.id || '')))
 const displayedTask = computed(() => task.value ? projectTaskListWorkflow(task.value, flow.value) : undefined)
 const basicFields = computed<Array<[string, unknown]>>(() => [
   ['任务编号', task.value?.taskNo], ['所属部门', task.value?.deptName], ['业务场景', task.value?.sceneName],
@@ -234,6 +241,7 @@ onMounted(() => void loadTask())
         <section class="detail-panel basic-info">
           <div class="detail-title"><span class="detail-heading">任务基本信息</span><button class="detail-back" type="button" aria-label="返回任务列表" @click="router.push('/tasks/list')"><span aria-hidden="true">←</span> 返回列表</button></div>
           <div class="basic-scroll" tabindex="0" aria-label="任务基本信息，可滚动查看"><h2>{{ task.name }}</h2><div class="basic-badges"><em>{{ taskPriorityLabel(task.priority) }}优先级</em><em :class="statusClass(displayedTask?.taskStatus)">{{ displayedTask?.taskStatusDesc }}</em></div>
+          <button v-if="canOpenWorkspace" class="detail-workspace-button" type="button" @click="openWorkspace">进入工作台 <span aria-hidden="true">→</span></button>
           <template v-if="facilityTask">
             <h3 class="basic-section-title">{{ facilityReference ? '关联设施与处置需求' : '工程任务与建设需求' }}</h3>
             <p v-for="message in contextErrors" :key="message" class="context-error" role="alert">{{ message }}</p>
@@ -248,7 +256,7 @@ onMounted(() => void loadTask())
       <main class="detail-main">
         <div class="detail-summary-row">
           <section class="metric-grid">
-            <article><i>◷</i><span>任务状态<b>{{ displayedTask?.taskStatusDesc }}</b></span></article>
+            <article class="task-status-metric"><i>◷</i><span>任务状态<b>{{ displayedTask?.taskStatusDesc }}</b></span></article>
             <article v-if="facilityTask"><i>⌂</i><span>关联设施<b :title="facility?.name || '未关联'">{{ facility?.name || (facilityReference ? '资料不可用' : '未关联') }}</b></span></article>
             <article v-else><i>!</i><span>异常 / 图斑<b>{{ detail?.abnormalCount ?? 0 }}<small>个</small></b></span></article>
             <article v-if="facilityTask"><i>▧</i><span>上报照片<b>{{ detail?.reportImages.length ?? 0 }}<small>张</small></b></span></article>
@@ -280,6 +288,7 @@ onMounted(() => void loadTask())
 </template>
 
 <style scoped lang="scss">
+.detail-workspace-button{display:flex;align-items:center;justify-content:space-between;gap:8px;width:calc(100% - 24px);margin:12px;padding:9px 12px;border:1px solid #53cddd70;border-radius:7px;background:#16889e35;color:#8cecf3;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s,border-color .15s}.detail-workspace-button:hover{background:#16889e60;border-color:#75e2ee}.detail-workspace-button:focus-visible{outline:2px solid #75e2ee;outline-offset:2px}
 .detail-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: clamp(240px, 22vw, 310px) minmax(0,1fr); gap: 7px; overflow: hidden; }.detail-left { display: grid; align-content: stretch; grid-template-rows: minmax(0,1fr); gap: 7px; min-height: 0; }.detail-main { min-width: 0; min-height: 0; display: grid; grid-template-rows: clamp(62px, 8vh, 76px) minmax(220px,1fr) minmax(260px,.85fr); gap: 7px; }
 .detail-panel { min-width: 0; min-height: 0; overflow: hidden; background: linear-gradient(145deg,#042440,#03182d); border: 1px solid #0c557b; }.detail-title { height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; color: #bce7f2; background: #06385a; border-bottom: 1px solid #0b5477; font-size: 17px; font-weight: bold; }.detail-title button,.detail-title select { padding: 3px 8px; color: #74dcef; background: #052842; border: 1px solid #146284; font-size: 12px; }.detail-title span { color: #278db0; font-size: 12px; }
 .basic-info { display:flex;flex-direction:column; }.basic-info>.detail-title{flex-shrink:0}.basic-scroll{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;padding-bottom:12px}.basic-badges{margin:0 12px 9px}.basic-info h2,.basic-info dd{overflow-wrap:anywhere;white-space:pre-wrap;min-width:0}.basic-info dl{grid-template-columns:75px minmax(0,1fr)!important;gap:0 8px}.basic-info h2 { margin: 13px 12px 7px; font-size: 17px; }.basic-info em { margin-right: 5px; padding: 3px 6px; color: #65dded; background: #07516c; border: 1px solid #14718e; font-size: 12px; font-style: normal; }.basic-info dl { display: grid; grid-template-columns: 65px 1fr; margin: 0 12px; }.basic-info dt,.basic-info dd { margin: 0; padding: 5px 0; border-bottom: 1px solid #0a3b56; font-size: 14px; line-height: 1.5; }.basic-info dt { color: #628b9d; }.basic-info dd { color: #b6d7e1; }
