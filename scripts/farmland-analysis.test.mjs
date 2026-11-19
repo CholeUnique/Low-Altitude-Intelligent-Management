@@ -63,3 +63,30 @@ await assert.rejects(partitionUploadedRange(upload,highData,permData,4,{high,per
 console.log('farmland analysis: canonical defaults, three independent backend groups, four-way clipped upload partition, inclusive views, provenance and cancellation passed')
 
 assert.equal(new Set(result.partitions.flatMap(g=>g.data.features.map(f=>f.properties.coverageAtom))).size,4,'Inclusive categories share stable atoms for deduplicated rendering')
+let zeroSteps=0
+const fullWithZeros=await partitionUploadedRange(upload,highData,permData,0,{high,permanent,uploadName:'完整统计回归'},async input=>{
+  assert(input.geometryA.features.every(feature=>feature.properties.areaSqm>0),'Do not forward collapsed zero-area remnants to the next backend overlay')
+  const response=structuredClone(responses[zeroSteps++]);response.minAreaSqm=0
+  for(const [name,kind] of [['both','OVERLAP'],['aOnly','A_ONLY'],['bOnly','B_ONLY']]){
+    response[name].featureCollection.features.push(make(kind,0,59));response[name].spotCount++
+  }
+  return response
+})
+assert.deepEqual(fullWithZeros.partitions.map(group=>group.areaSqm),[60,30,40,10,20,30],'Raw coverage totals remain available even when zero-threshold backend results contain zero-area residuals')
+assert.equal(zeroSteps,3)
+let roundedSteps=0
+const roundedOutput=await partitionUploadedRange(upload,highData,permData,0,{high,permanent,uploadName:'舍入回归'},async()=>{
+  const step=roundedSteps++,response=structuredClone(responses[step]);response.minAreaSqm=0
+  if(step>0)for(const [name,kind] of [['both','OVERLAP'],['aOnly','A_ONLY'],['bOnly','B_ONLY']]){
+    const group=response[name];group.featureCollection.features=Array.from({length:300},(_,index)=>make(kind,(group.areaSqm+.03)/300,index+1));group.spotCount=300
+  }
+  return response
+})
+assert.deepEqual(roundedOutput.partitions.map(group=>group.areaSqm),[60,30,40,10,20,30],'Use backend group totals; accepted per-spot rounding must not trigger a tighter global conservation check')
+assert(roundedOutput.partitions.filter(group=>!group.aggregate).flatMap(group=>group.data.features).reduce((sum,feature)=>sum+feature.properties.areaSqm,0)>100.05,'The same rounded spots would previously have falsely exceeded the upload range')
+let invalidSteps=0
+await assert.rejects(partitionUploadedRange(upload,highData,permData,0,{high,permanent,uploadName:'不守恒回归'},async()=>{
+  const step=invalidSteps++,response=structuredClone(responses[step]);response.minAreaSqm=0
+  if(step===1)response.both=group('OVERLAP',35,59)
+  return response
+}),error=>error.message.includes('上传范围 100㎡')&&error.message.includes('四类合计 115㎡')&&error.message.includes('超出 15㎡')&&error.message.includes('投影 test'),'Actual backend group totals exceeding the range must still fail with concrete diagnostic values')

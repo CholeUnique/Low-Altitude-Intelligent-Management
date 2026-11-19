@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Raw } from 'vue'
 import L from 'leaflet'
+import { arcgisToGeoJSON } from '@terraformer/arcgis'
+import TopicAdministrativeTree from '@/components/TopicAdministrativeTree.vue'
+import type { RegionSelection } from '@/api/region-clip'
 import 'leaflet/dist/leaflet.css'
-import { FullScreen, Setting, Close, Collection, Refresh, Search, Upload } from '@element-plus/icons-vue'
+import { FullScreen, Setting, Close, Collection, Search, Upload } from '@element-plus/icons-vue'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
 import TopicLayerCard from '@/components/TopicLayerCard.vue'
-import TopicSelectionCheckbox from '@/components/TopicSelectionCheckbox.vue'
 import TopicLayerDisplayMode from '@/components/TopicLayerDisplayMode.vue'
 import TopicFeatureDetails from '@/components/TopicFeatureDetails.vue'
 import TopicAnalysisStatistics from '@/components/TopicAnalysisStatistics.vue'
@@ -14,6 +16,7 @@ import { farmlandDefaults, type AnalysisStatistics } from '@/utils/farmland-anal
 import TopicStatisticsSummary from '@/components/TopicStatisticsSummary.vue'
 import TopicMapToolbar from '@/components/TopicMapToolbar.vue'
 import TopicOverlayAnalysis from '@/components/TopicOverlayAnalysis.vue'
+import TopicLayerColumns from '@/components/TopicLayerColumns.vue'
 import TopicUploadedLayers from '@/components/TopicUploadedLayers.vue'
 import type { UploadedTopicLayer } from '@/utils/topic-upload'
 import type { DrawingLayerInput } from '@/utils/map-drawing'
@@ -66,6 +69,9 @@ async function observeLegend() {
 const layers = ref<TopicLayer[]>([])
 const legendCollapsed=ref(false)
 const analysisLegend=ref<SpatialResultLegend[]>([])
+const resultLayerKeys=ref<string[]>([])
+function updateResultLayers(keys:string[]){resultLayerKeys.value=keys;rememberAddedLayers(keys)}
+const overlayPanel=ref<InstanceType<typeof TopicOverlayAnalysis>>()
 const configOpen = ref(false), overlayOpen = ref(false), pending = ref(false), error = ref('')
 const uploadPanel=ref<InstanceType<typeof TopicUploadedLayers>>(),uploadedLayers=shallowRef<UploadedTopicLayer[]>([]),uploadDialogOpen=ref(false),overlayOperation=ref<SpatialAnalysisOperation>('difference')
 const uploadScope=computed(()=>`${user.currentUser?.id||user.currentUser?.username||'anonymous'}:${user.activeDeptId}:${props.topic.id}`)
@@ -79,8 +85,8 @@ async function loadDrawing(input:DrawingLayerInput){
 }
 const fullscreen = ref(false)
 const toolsMap = ref<Raw<L.Map>>(), drawingToolActive = ref(false)
-const businessBatchPending = ref(false)
 const regionClipSources=ref<string[]>([])
+const regionClipSelections=ref<Record<string,string[]>>({})
 const regionClipActive=computed(()=>isFarmland.value&&regionClipSources.value.length>0)
 const regionClipBusy=ref(false),regionClipError=ref(''),regionClipMessage=ref('')
 const regionClipProgress=ref<number>(),regionStatisticsProgress=ref<number>()
@@ -126,11 +132,15 @@ function setOverlaySources(keys:string[],visible:boolean) {
   keys.forEach(key=>{const item=layers.value.find(layer=>layer.key===key);if(item)selectLegend(item,visible?'all':'none')})
   uploadPanel.value?.select(keys,visible)
 }
-function showOverlayResult() {
+function showOverlayResult(_keys:string[],regions?:RegionSelection[]) {
   if(regionClipActive.value)clearRegionClip(false)
   clearFeatureSelection()
   // Result isolation affects map visibility only, never the configured layer catalogue.
   layers.value.filter(item=>item.visible&&item.role!=='imagery').forEach(item=>{
+    if(item.role==='boundary'){
+      if(regions?.length){const selected=regions.find(region=>regionClipKey(region)===item.key);const ids=new Set(selected?.objectIds.map(String)||[]);item.categories.forEach(category=>{category.checked=!!item.handle?.categoryFilter?.values.find(value=>value.value===category.value)?.objectIds?.some(id=>ids.has(String(id)))});applyLegendSelection(item)}
+      setLayerMode(item,'boundary');return
+    }
     selectLegend(item,'none')
   })
   uploadPanel.value?.select(uploadedLayers.value.map(item=>item.id),false)
@@ -145,6 +155,57 @@ function matchingCategories(item:TopicLayer){
   return item.categories.filter(category=>direct.includes(category)||matched.has(category.value))
 }
 const legendLayers = computed(() => availableLayers.value.filter(item => item.visible && item.role !== 'imagery' && matchesLayer(item)))
+
+const administrativeLayers=computed(()=>layers.value.filter(item=>item.visible&&item.role==='boundary'))
+const administrativeTreeLayers=computed(()=>administrativeLayers.value.map(item=>{
+  const values=new Map(item.handle?.categoryFilter?.values.map(value=>[value.value,value])||[])
+  const matches=new Set(matchingCategories(item).map(category=>category.value))
+  const clipping=new Set(regionClipSources.value.includes(item.key)?clippingValues(item):[])
+  return {key:item.key,name:item.service.name,pending:item.pending,error:item.error,mode:item.mode,categories:item.categories.map(category=>({...values.get(category.value),...category,clipping:clipping.has(category.value),searchMatch:!!layerKeyword.value.trim()&&matches.has(category.value)}))}
+}))
+function chooseAdministrative(key:string,value:string,checked:boolean){const item=layers.value.find(item=>item.key===key),category=item?.categories.find(category=>category.value===value);if(item&&category)setCategoryVisible(item,category,checked)}
+function clipAdministrative(key:string,value:string,checked:boolean){
+  const item=layers.value.find(item=>item.key===key),category=item?.categories.find(category=>category.value===value)
+  if(!item||!category)return
+  const selected=new Set(regionClipSources.value.includes(key)?clippingValues(item):[])
+  if(checked){selected.add(value);category.checked=true;applyLegendSelection(item)}else selected.delete(value)
+  regionClipSelections.value={...regionClipSelections.value,[key]:[...selected]}
+  regionClipSources.value=selected.size?[...new Set([...regionClipSources.value,key])]:regionClipSources.value.filter(source=>source!==key)
+}
+function modeAdministrative(key:string,value:string,mode:TopicDisplayMode){const item=layers.value.find(item=>item.key===key),category=item?.categories.find(category=>category.value===value);if(item&&category)setCategoryMode(item,category,mode)}
+async function locateAdministrative(key:string,value:string){
+  const item=layers.value.find(item=>item.key===key),location=await item?.handle?.categoryFilter?.locateValue(value)
+  if(location?.geometries.length)highlightGeometries(location.geometries.map(geometry=>arcgisToGeoJSON({geometry,attributes:{}}).geometry))
+  else if(location?.bounds?.isValid())map?.fitBounds(location.bounds,{padding:[60,60],maxZoom:17})
+}
+function highlightGeometries(geometries:GeoJSON.Geometry[]){
+  if(!map||!selectionGroup)return
+  clearFeatureSelection()
+  const collection:GeoJSON.FeatureCollection={type:'FeatureCollection',features:geometries.map(geometry=>({type:'Feature',properties:{},geometry}))}
+  const highlight=L.geoJSON(collection,{pane:'topic-selection',interactive:false,style:{color:'#ffe14a',weight:4,fillColor:'#ffe14a',fillOpacity:.18},pointToLayer:(_feature,point)=>L.circleMarker(point,{pane:'topic-selection',interactive:false,color:'#ffe14a',radius:9,fillOpacity:.6})}).addTo(selectionGroup)
+  if(highlight.getBounds().isValid())map.fitBounds(highlight.getBounds(),{paddingTopLeft:[370,90],paddingBottomRight:[100,70],maxZoom:17})
+}
+async function locateLegend(key:string,label:string){
+  clearFeatureSelection();const request=selectionVersion
+  try{
+    const result=key.startsWith('analysis-')?overlayPanel.value?.legendData(key.slice(9),label):undefined
+    const upload=uploadedLayers.value.find(item=>item.id===key)
+    if(result||upload){highlightGeometries((result||upload!.data).features.map(feature=>feature.geometry));return}
+    const item=layers.value.find(item=>item.key===key)
+    if(!item)return
+    const categories=item.categories.filter(category=>category.name===label||(props.topic.id===FACILITIES_TOPIC_ID&&facilityCategoryFromName(category.name)===label))
+    const values=new Set(categories.map(category=>category.value))
+    const clipped=regionClipStates.value[key]?.data
+    if(regionClipActive.value&&clipped){highlightGeometries(clipped.features.filter(feature=>item.role==='boundary'?administrativeIds(item).map(String).includes(String(feature.properties?.sourceObjectId)):(!values.size||values.has(String(feature.properties?.[item.categoryField])))).map(feature=>feature.geometry));return}
+    let where=expression(item)
+    if(values.size&&item.role!=='boundary')where=`(${where}) AND (${categoryWhere(item.categoryField,[...values],[])})`
+    identifyPending.value=true
+    const data=await queryMapServiceFeatures(item.service,[],where,true,{maxFeatures:20000})
+    if(request!==selectionVersion)return
+    highlightGeometries(data.features.filter(feature=>feature.geometry).map(feature=>arcgisToGeoJSON({geometry:feature.geometry!,attributes:{}}).geometry))
+  }catch(reason){if(request===selectionVersion)identifyError.value=reason instanceof Error?reason.message:'图例定位失败'}
+  finally{if(request===selectionVersion)identifyPending.value=false}
+}
 let beforeSearchExpansion:Record<string,boolean>|undefined
 watch([layerKeyword,legendLayers],()=>{
   if(layerKeyword.value.trim()){
@@ -179,8 +240,6 @@ function queuePropertySearch(){
 }
 watch(()=>JSON.stringify([layerKeyword.value,layers.value.filter(item=>item.visible).map(item=>[item.key,!!item.handle])]),queuePropertySearch)
 const imageryLayers = computed(() => availableLayers.value.filter(item => item.role === 'imagery'))
-const vectorLayers = computed(() => availableLayers.value.filter(item => item.role !== 'imagery' && matchesLayer(item)))
-const configSourceGroups = computed(() => groupTopicLayers(vectorLayers.value))
 const mapLegendGroups=computed(()=>[
   ...layers.value.filter(item=>item.visible&&!item.analysisHidden&&item.role!=='imagery'&&item.handle&&(!regionClipActive.value||(regionClipStates.value[item.key]?.status==='SUCCEEDED'&&regionClipStates.value[item.key]!.resultFeatureCount>0))).map(item=>{
     const symbols=item.role!=='boundary'&&item.categories.length?item.categories.filter(category=>category.checked).map(category=>({
@@ -203,13 +262,10 @@ const mapLegendGroups=computed(()=>[
 const farmlandStatSources = computed(() => {
   if(!isFarmland.value)return topicStatSources(layers.value.filter(item=>!item.analysisHidden))
   if(analysisStatistics.value.length)return []
-  const {a,b}=baselineInputs.value
-  const item=layers.value.find(item=>[a&&`${a.serviceId}/${a.layerId}`,b&&`${b.serviceId}/${b.layerId}`].includes(item.key)&&item.visible&&!item.analysisHidden&&(!item.categories.length||item.categories.some(category=>category.checked)))
+  const {a}=baselineInputs.value
+  const item=layers.value.find(item=>a&&item.key===`${a.serviceId}/${a.layerId}`&&item.visible&&!item.analysisHidden&&(!item.categories.length||item.categories.some(category=>category.checked)))
   return item?[{id:item.key.split('/')[0]!,name:item.sourceName}]:[]
 })
-const businessAllSelected = computed(() => vectorLayers.value.length > 0 && vectorLayers.value.every(item => item.visible))
-const businessPartSelected = computed(() => !businessAllSelected.value && vectorLayers.value.some(item => item.visible))
-const roleNames: Record<TopicRole, string> = { land:'国土调查底类', permanent:'永久基本农田', boundary:'行政边界', changes:'变化线索', facility:'项目设施', project:'项目范围', parcel:'耕地地块', imagery:'遥感影像', unconfigured:'通用图层' }
 let map: L.Map | undefined, resizeObserver: ResizeObserver | undefined, version = 0
 const featureCache = new Map<string, Awaited<ReturnType<typeof queryMapServiceFeatures>>>()
 const inFlight = new Map<string, Promise<void>>()
@@ -235,6 +291,11 @@ function applyFilter(item: TopicLayer) {
 function legendAllSelected(item: TopicLayer) { return !item.analysisHidden && item.categories.every(category => category.checked) }
 function legendPartSelected(item: TopicLayer) { return !item.analysisHidden && !legendAllSelected(item) && item.categories.some(category => category.checked) }
 function applyLegendSelection(item: TopicLayer) {
+  if(item.role==='boundary'&&regionClipSources.value.includes(item.key)&&regionClipSelections.value[item.key]){
+    const selected=clippingValues(item)
+    if(selected.length!==regionClipSelections.value[item.key]!.length)regionClipSelections.value={...regionClipSelections.value,[item.key]:selected}
+    if(!selected.length)regionClipSources.value=regionClipSources.value.filter(key=>key!==item.key)
+  }
   if(item.categories.length)item.analysisHidden=!item.categories.some(category=>category.checked)
   if(!item.analysisHidden&&!item.handle){void setVisible(item,true);return}
   applyFilter(item)
@@ -252,23 +313,12 @@ function setCategoryVisible(item: TopicLayer,category: Category,checked: boolean
   category.checked=checked
   applyLegendSelection(item)
 }
-async function selectBusinessLayers(mode: 'all' | 'none') {
-  if (businessBatchPending.value) return
-  businessBatchPending.value = true
-  const targets = vectorLayers.value.map(item => ({ item, visible:mode === 'all' }))
-  try { await Promise.all(targets.map(({item,visible}) => setVisible(item,visible,true))) }
-  finally { businessBatchPending.value = false }
+function clippingValues(item:TopicLayer){
+  const explicit=regionClipSelections.value[item.key]
+  return item.categories.filter(category=>category.checked&&(!explicit||explicit.includes(category.value))).map(category=>category.value)
 }
-function sourceAllSelected(group:{layers:TopicLayer[]}) { return group.layers.every(item => item.visible) }
-function sourcePartSelected(group:{layers:TopicLayer[]}) { return !sourceAllSelected(group) && group.layers.some(item => item.visible) }
-async function selectSource(group:{layers:TopicLayer[]},visible:boolean) {
-  if (businessBatchPending.value) return
-  businessBatchPending.value = true
-  try { await Promise.all(group.layers.map(item => setVisible(item,visible,true))) }
-  finally { businessBatchPending.value = false }
-}
-function administrativeIds(item:TopicLayer) {
-  const selected=new Set(item.categories.filter(category=>category.checked).map(category=>category.value))
+function administrativeIds(item:TopicLayer,clipping=false) {
+  const selected=new Set(clipping?clippingValues(item):item.categories.filter(category=>category.checked).map(category=>category.value))
   return [...new Set(item.handle?.categoryFilter?.values.filter(value=>selected.has(value.value)).flatMap(value=>value.objectIds||[])||[])]
 }
 function clipStyle(item:TopicLayer){return {mode:item.mode,color:item.handle?.color||'#56bccc',categoryField:item.categoryField,categories:item.categories,boundary:item.role==='boundary'}}
@@ -286,21 +336,19 @@ const regionClipRequest=computed<RegionClipRequest|undefined>(()=>{
   const baselines=new Set([baselineInputs.value.a,baselineInputs.value.b].filter(Boolean).map(input=>`${input!.serviceId}/${input!.layerId}`))
   return {
     deptId:user.activeDeptId||'',combineMode:'UNION',
-    regions:layers.value.filter(item=>regionClipSources.value.includes(item.key)).map(item=>({serviceId:item.key.split('/')[0]!,layerId:Number(item.service.arcGisLayerId),objectIds:administrativeIds(item)})).filter(item=>item.objectIds.length),
+    regions:layers.value.filter(item=>regionClipSources.value.includes(item.key)).map(item=>({serviceId:item.key.split('/')[0]!,layerId:Number(item.service.arcGisLayerId),objectIds:administrativeIds(item,true)})).filter(item=>item.objectIds.length),
     // 基准面始终完整裁切供统计；地图分类只控制显示，不改变区域总量。
     targets:layers.value.filter(item=>(item.visible||baselines.has(item.key)||regionClipSources.value.includes(item.key))&&item.role!=='imagery'&&Number.isInteger(item.service.arcGisLayerId)&&item.service.arcGisGeometryType).map(item=>({serviceId:item.key.split('/')[0]!,layerId:item.service.arcGisLayerId!,where:baselines.has(item.key)?'1=1':expression(item)})),
   }
 })
-const regionClipSelectionCount=computed(()=>regionClipSources.value.reduce((sum,key)=>sum+(layers.value.find(item=>item.key===key)?.categories.filter(category=>category.checked).length||0),0))
-function setRegionClipSource(item:TopicLayer,enabled:boolean){
-  regionClipSources.value=enabled?[...new Set([...regionClipSources.value,item.key])]:regionClipSources.value.filter(key=>key!==item.key)
-}
+const regionClipSelectionCount=computed(()=>regionClipSources.value.reduce((sum,key)=>{const item=layers.value.find(item=>item.key===key);return sum+(item?clippingValues(item).length:0)},0))
+
 function clearRegionClip(restore=true){
   regionStatisticsController?.abort();regionStatistics.value=[];regionStatisticsBusy.value=false;regionStatisticsGeometry.clear();activeRegionStatId.value=''
 
   regionClipVersion++;clearTimeout(regionClipTimer);regionClipController?.abort();regionClipController=undefined
   regionClipDisplays.forEach(display=>display.destroy());regionClipDisplays.clear()
-  regionClipSources.value=[];regionClipStates.value={};regionClipBusy.value=false;regionClipError.value='';regionClipMessage.value='';lastLocatedRegions=''
+  regionClipSources.value=[];regionClipSelections.value={};regionClipStates.value={};regionClipBusy.value=false;regionClipError.value='';regionClipMessage.value='';lastLocatedRegions=''
   if(restore)layers.value.forEach(syncPublishedLayer)
 }
 function locateClipRange(){
@@ -353,7 +401,7 @@ async function executeRegionClip(input:RegionClipRequest,request:number){
         if(!map.getPane(pane))map.createPane(pane)
         map.getPane(pane)!.style.zIndex=item.role==='boundary'?'350':/point/i.test(item.service.arcGisGeometryType||'')?'345':/polyline/i.test(item.service.arcGisGeometryType||'')?'340':'335'
         const display=createRegionClipLayer(map,state.data,item.service,metadata,pane,clipStyle(item),feature=>{
-          if(drawingToolActive.value||configOpen.value||overlayOpen.value||uploadDialogOpen.value)return false
+          if(item.role==='boundary'||drawingToolActive.value||configOpen.value||overlayOpen.value||uploadDialogOpen.value)return false
           clearFeatureSelection();featureCandidates.value=[feature];selectFeature(0);return true
         })
         display.setMemberships(item.handle?.categoryFilter?.values||[]);display.update(clipStyle(item))
@@ -366,6 +414,7 @@ async function executeRegionClip(input:RegionClipRequest,request:number){
     },notice:message=>{if(request===regionClipVersion)regionClipMessage.value=message},layer:install})
     if(request!==regionClipVersion||abort.signal.aborted||!map)return
     regionClipStates.value=states
+    overlayPanel.value?.hideAll();uploadPanel.value?.select(uploadedLayers.value.map(item=>item.id),false)
     const selectedRegions=JSON.stringify(input.regions)
     if(selectedRegions!==lastLocatedRegions&&locateClipRange())lastLocatedRegions=selectedRegions
     const failures=Object.values(states).filter(state=>state.status!=='SUCCEEDED')
@@ -461,7 +510,7 @@ async function identifyFeature(event: L.LeafletMouseEvent) {
   if(regionClipActive.value){
     clearFeatureSelection()
     // 边界模式的面内部没有原生 SVG 点击，使用当前已显示的裁切几何命中，不能查询未裁切服务。
-    featureCandidates.value=layers.value.filter(item=>item.visible&&!item.analysisHidden).slice().reverse().flatMap(item=>regionClipDisplays.get(item.key)?.identify(event.latlng)||[])
+    featureCandidates.value=layers.value.filter(item=>item.visible&&!item.analysisHidden&&item.role!=='boundary').slice().reverse().flatMap(item=>regionClipDisplays.get(item.key)?.identify(event.latlng)||[])
     if(featureCandidates.value.length)selectFeature(0)
     return
   }
@@ -470,7 +519,7 @@ async function identifyFeature(event: L.LeafletMouseEvent) {
   const point = map.latLngToContainerPoint(event.latlng)
   const nw = map.containerPointToLatLng(point.subtract([6,6])), se = map.containerPointToLatLng(point.add([6,6]))
   const envelope = {west:Math.min(nw.lng,se.lng),east:Math.max(nw.lng,se.lng),south:Math.min(nw.lat,se.lat),north:Math.max(nw.lat,se.lat)}
-  const visible = layers.value.filter(item => item.visible && !item.analysisHidden && item.handle && item.role !== 'imagery' && expression(item) !== '1=0')
+  const visible = layers.value.filter(item => item.visible && !item.analysisHidden && item.handle && item.role !== 'imagery' && item.role !== 'boundary' && expression(item) !== '1=0')
   identifyPending.value = true
   const results: PromiseSettledResult<IdentifiedMapFeature[]>[] = []
   for (let offset=0; offset<visible.length; offset+=4) {
@@ -705,7 +754,7 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
 </script>
 
 <template>
-  <section ref="root" class="geographic-topics" :style="{ '--legend-space': `${legendSpace}px` }" aria-label="专题地图">
+  <section ref="root" class="geographic-topics" :style="{ '--legend-space': `${legendSpace}px`, '--details-width':isFarmland?(resultLayerKeys.length?'min(560px, calc(100% - 50px))':'min(320px, calc(100% - 50px))'):undefined }" aria-label="专题地图">
     <div ref="canvas" class="topic-map" :class="{'topic-map--drawing':drawingToolActive}"></div>
     <div class="topic-map-reference">
       <div class="topic-north" role="img" aria-label="指北针：上方为北">
@@ -728,7 +777,7 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
       <TopicFeatureDetails v-if="featureCandidates.length" embedded :features="featureCandidates" :selected="selectedFeature" :roles="featureRoles" @select="selectFeature" @close="clearFeatureSelection" />
     </div>
     <button class="topic-details-toggle" :class="{collapsed:legendCollapsed}" :aria-label="legendCollapsed?'展开图层详情':'收起图层详情'" :aria-expanded="!legendCollapsed" @click="legendCollapsed=!legendCollapsed">{{ legendCollapsed?'›':'‹' }}</button>
-    <aside class="topic-legend" :class="{'is-collapsed':legendCollapsed}" :aria-hidden="legendCollapsed" :inert="legendCollapsed">
+    <aside class="topic-legend" :class="{'is-collapsed':legendCollapsed,'has-result-columns':isFarmland&&resultLayerKeys.length>0}" :aria-hidden="legendCollapsed" :inert="legendCollapsed">
       <header class="legend-heading"><Collection /><b>图层详情</b></header>
       <label class="layer-search"><Search aria-hidden="true" /><input v-model="layerKeyword" type="search" aria-label="搜索图层名称或属性" placeholder="搜索图层名称或属性（如村名）" /></label>
       <section v-if="regionClipActive" class="region-clip-summary" aria-label="行政区裁切状态" :aria-busy="regionClipBusy">
@@ -738,12 +787,13 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
         <details v-if="regionClipError"><summary role="alert">{{ regionClipBusy?'正在更新裁切':'部分或全部图层未显示' }}</summary><p>{{ regionClipError }}</p></details>
         <button v-if="regionClipError&&!regionClipBusy" type="button" @click="queueRegionClip">重试裁切</button>
       </section>
-      <div class="legend-content"><div class="legend-layer-list"><p v-if="propertySearchBusy" role="status">正在搜索图层属性…</p><p v-if="propertySearchError" role="alert">{{ propertySearchError }}<button type="button" @click="queuePropertySearch">重试</button></p>
-        <TopicOverlayAnalysis v-if="toolsMap" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :farmland="isFarmland" :defaults="baselineInputs" :regions="analysisRegions" :keyword="layerKeyword" :layer-order="detailLayerOrder" @matches="analysisSearchMatches=$event" @layerkeys="rememberAddedLayers" @statistics="analysisStatistics=$event" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
+      <div class="legend-content" :class="{'legend-content--split':isFarmland&&resultLayerKeys.length>0}"><TopicLayerColumns :split="isFarmland&&resultLayerKeys.length>0"><template #original><p v-if="propertySearchBusy" role="status">正在搜索图层属性…</p><p v-if="propertySearchError" role="alert">{{ propertySearchError }}<button type="button" @click="queuePropertySearch">重试</button></p>
+
         <TopicUploadedLayers v-if="toolsMap" ref="uploadPanel" :map="toolsMap" :scope="uploadScope" :keyword="layerKeyword" integrated :layer-order="detailLayerOrder" @change="updateUploads" @dialog="uploadDialogOpen=$event" @imported="uploaded" />
         <p v-if="!legendLayers.length && !pending && !propertySearchBusy && !localSearchMatches">{{ layerKeyword.trim() ? '没有匹配的已开启图层或属性，可修改关键词或在场景配置中开启图层。' : '暂无已开启的分类图层，可在场景配置中选择。' }}</p>
-        <TopicLayerCard v-for="item in legendLayers" :key="item.key" v-model:expanded="expandedLegendLayers[item.key]" :title="item.service.name" :subtitle="item.service.name!==item.sourceName?item.sourceName:undefined" :category-count="item.categories.length" :checked="legendAllSelected(item)" :indeterminate="legendPartSelected(item)" class="published-layer" :data-layer-key="`published:${item.key}`" :style="{order:layers.findIndex(layer=>layer.key===item.key)}" @select="selectLegend(item,$event?'all':'none')">
-          <label v-if="isFarmland&&item.role==='boundary'&&item.handle?.categoryFilter" class="region-clip-switch"><input type="checkbox" :checked="regionClipSources.includes(item.key)" :aria-label="`${item.service.name}用于区划裁切`" @change="setRegionClipSource(item,($event.target as HTMLInputElement).checked)" />用于区划裁切</label>
+        <TopicAdministrativeTree v-if="isFarmland&&administrativeLayers.length" :layers="administrativeTreeLayers" :keyword="layerKeyword" :style="{order:layers.findIndex(item=>item.role==='boundary')}" @all="administrativeLayers.forEach(item=>selectLegend(item,$event?'all':'none'))" @select="chooseAdministrative" @clip="clipAdministrative" @mode="modeAdministrative" @locate="locateAdministrative" />
+        <TopicLayerCard v-for="item in legendLayers.filter(item=>!isFarmland||item.role!=='boundary')" :key="item.key" v-model:expanded="expandedLegendLayers[item.key]" :title="item.service.name" :category-count="item.categories.length" :checked="legendAllSelected(item)" :indeterminate="legendPartSelected(item)" class="published-layer" :data-layer-key="`published:${item.key}`" :style="{order:layers.findIndex(layer=>layer.key===item.key)}" @select="selectLegend(item,$event?'all':'none')">
+
           <p v-if="regionClipActive&&clipLayerMessage(item)" class="region-clip-layer-state" :class="{'is-error':regionClipStates[item.key]?.status==='FAILED'}">{{ clipLayerMessage(item) }}</p>
           <TopicLayerDisplayMode v-if="item.service.arcGisGeometryType || item.role==='boundary'" :mode="layerUsesMode(item,'filled')?'filled':layerUsesMode(item,'boundary')?'boundary':'mixed'" :name="`legend-mode-${item.key}`" :label="`${item.service.name}图例显示模式`" :class="{'has-categories':item.categories.length>0}" @change="setLayerMode(item,$event)" />
           <div v-for="category in matchingCategories(item)" :key="category.value" class="category-entry">
@@ -760,39 +810,18 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
           </div>
           <template v-if="item.handle?.bounds?.isValid()" #actions><button type="button" @click="locatePublishedLayer(item)">定位</button></template>
         </TopicLayerCard>
-      </div></div>
+      </template><template #results>
+        <TopicOverlayAnalysis v-if="toolsMap" ref="overlayPanel" :map="toolsMap" :open="overlayOpen" :context="uploadScope" :sources="overlaySources" :uploads="uploadedLayers" :operation="overlayOperation" :farmland="isFarmland" :defaults="baselineInputs" :regions="analysisRegions" :keyword="layerKeyword" :layer-order="detailLayerOrder" @matches="analysisSearchMatches=$event" @layerkeys="updateResultLayers" @statistics="analysisStatistics=$event" :load-geometry="loadAnalysisGeometry" :visible-keys="overlayVisibleKeys" @close="overlayOpen=false" @upload="openUpload(true)" @hide="showOverlayResult" @legend="analysisLegend=$event" @restore="setOverlaySources($event,true)" />
+      </template></TopicLayerColumns></div>
     </aside>
-    <TopicMapLegend :groups="mapLegendGroups" />
+    <TopicMapLegend :groups="mapLegendGroups" interactive @select="locateLegend" />
     <TopicAnalysisProgress v-if="regionClipBusy || regionStatisticsBusy" :title="regionClipBusy?'行政区裁切运行中':'区域统计计算中'" :message="regionClipBusy?(regionClipMessage||'正在提交后端裁切任务…'):regionStatisticsMessage" :progress="regionClipBusy?regionClipProgress:regionStatisticsProgress" />
     <Transition name="topic-drawer"><aside v-if="configOpen" class="topic-config" aria-label="场景配置">
       <header><div><small>SCENE SETTINGS</small><h2>场景配置</h2></div><button aria-label="关闭场景配置" @click="configOpen=false"><Close /></button></header>
       <div class="config-body">
         <p v-if="topicStore.storageError" role="alert">{{ topicStore.storageError }}</p>
         <section><h3>背景影像</h3><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" aria-label="背景影像" :model-value="imageryLayers.find(item=>item.visible)?.key || ''" @change="selectImagery(String($event))"><ElOption value="" label="仅基础底图" /><ElOption v-for="item in imageryLayers" :key="item.key" :value="item.key" :label="String(item.service.name)" /></ElSelect></section>
-        <section><h3>业务数据 <small>{{ configSourceGroups.length }} 个服务 · {{ vectorLayers.length }} 个图层</small></h3>
-          <div class="selection-actions" role="group" aria-label="业务数据批量选择">
-            <TopicSelectionCheckbox title="业务数据" :count="vectorLayers.length" :checked="businessAllSelected" :indeterminate="businessPartSelected" :disabled="pending || businessBatchPending || !vectorLayers.length" @change="selectBusinessLayers($event?'all':'none')" />
-            <small v-if="businessBatchPending" role="status">正在应用…</small>
-          </div>
-          <p v-if="!vectorLayers.length && layerKeyword.trim()">没有匹配的业务图层。</p>
-          <section v-for="group in configSourceGroups" :key="group.id" class="config-service-group" :data-source-id="group.id" :aria-label="group.name">
-            <div class="config-source-heading">
-              <button class="config-source-toggle" :aria-expanded="!collapsedConfigSources[group.id]" :title="group.name" @click="collapsedConfigSources[group.id] = !collapsedConfigSources[group.id]"><i class="disclosure-triangle" :class="{expanded:!collapsedConfigSources[group.id]}"></i><b>{{ group.name }}</b></button>
-              <label class="config-source-switch"><input type="checkbox" :aria-label="`${group.name}整组显示`" :checked="sourceAllSelected(group)" :indeterminate="sourcePartSelected(group)" :disabled="pending || businessBatchPending" @change="selectSource(group,($event.target as HTMLInputElement).checked)" /><span>整组</span></label>
-            </div>
-            <div v-show="!collapsedConfigSources[group.id]" class="config-source-children">
-          <div v-for="item in group.layers" :key="item.key" class="config-layer">
-            <label><input :checked="item.visible" :disabled="businessBatchPending" type="checkbox" @change="setVisible(item,($event.target as HTMLInputElement).checked,true)" /><span><b>{{ item.service.name }}</b><small>{{ roleNames[item.role] }}{{ item.categoryField ? ` · ${item.categoryField}` : '' }}</small></span><Refresh v-if="item.pending" class="pending-icon" /></label>
-            <fieldset v-if="item.service.arcGisGeometryType || item.role === 'boundary'" class="display-mode" :aria-label="`${item.service.name}配置显示模式`"><legend class="visually-hidden">图层显示</legend>
-              <label><input :checked="layerUsesMode(item,'filled')" type="radio" :name="`config-mode-${item.key}`" value="filled" @change="setLayerMode(item,'filled')" />铺满模式</label>
-              <label><input :checked="layerUsesMode(item,'boundary')" type="radio" :name="`config-mode-${item.key}`" value="boundary" @change="setLayerMode(item,'boundary')" />边界模式</label>
-            </fieldset>
-            <p v-if="item.error" role="alert">{{ item.error }} <button @click="setVisible(item,true,true)">重试</button></p>
-          </div>
-            </div>
-          </section>
-        </section>
-        <section v-if="topic.id === HIGH_STANDARD_TOPIC_ID"><h3>专题统计</h3><TopicStatisticsSummary area-in-mu /></section>
+
       </div>
     </aside></Transition>
   </section>
@@ -826,6 +855,7 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
 @media(max-width:1100px){.topic-legend{width:var(--details-width);max-height:none}.topic-inspector-rail{width:280px}}
 @media(prefers-reduced-motion:reduce){.disclosure-triangle{transition:none}}
 .topic-map--drawing :deep(.jiulong-feature-tooltip){display:none}
+.legend-content.legend-content--split{overflow:hidden}
 .topic-legend>.layer-search{flex:none;margin:12px 12px 0}.legend-content{overflow:auto}.legend-layer-list{display:flex;flex-direction:column;gap:8px;min-height:0}.legend-layer-list>.legend-group{flex:none;margin-top:0}.topic-farmland-stat{max-height:min(68dvh,100%)}.topic-farmland-stat :deep(.analysis-statistics){flex:1;min-height:0}
 .published-layer :deep(.layer-display-mode.has-categories){margin-bottom:8px}
 </style>

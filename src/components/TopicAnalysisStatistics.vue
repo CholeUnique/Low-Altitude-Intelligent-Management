@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { AnalysisStatistics } from '@/utils/farmland-analysis'
 import { formatSquareMetresAsMu } from '@/utils/topic-area'
+import TopicCompleteStatistics from './TopicCompleteStatistics.vue'
 defineProps<{items:AnalysisStatistics[]}>()
 const rate = (value:number|null|undefined) => value == null ? '—' : (value*100).toLocaleString('zh-CN',{maximumFractionDigits:2})
 </script>
 <template>
   <div class="analysis-statistics" aria-label="分析统计列表">
     <section v-for="item in items" :key="item.id" :aria-label="item.title">
-      <h3>{{ item.title }}</h3><p>{{ item.sources.join(' · ') }}</p>
+      <h3>{{ item.title }} <TopicCompleteStatistics :title="item.title" :metrics="item.fullMetrics" :error="item.fullError" /></h3><p>{{ item.sources.join(' · ') }}</p>
       <dl><div v-for="metric in item.metrics" :key="metric.label" :class="{'ratio-row':metric.areaSqm===undefined}"><dt>{{ metric.label }}</dt><dd><strong>{{ metric.areaSqm===undefined ? rate(metric.ratio) : formatSquareMetresAsMu(metric.areaSqm) }}</strong><small v-if="metric.areaSqm!==undefined || metric.ratio!=null">{{ metric.areaSqm===undefined?'%':'亩' }}</small></dd></div></dl>
     </section>
   </div>

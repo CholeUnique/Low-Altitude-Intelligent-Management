@@ -73,6 +73,12 @@ assert.equal(result.geometryAnalysisResult({...response,aOnly:group('A_ONLY',999
 assert.throws(()=>result.geometryAnalysisResult({...response,aOnly:group('A_ONLY',11000)},'coverage',sources,{a:1,b:1}),/超过上传总面积/)
 assert.throws(()=>result.validateCompareGroup({...response.aOnly,spotCount:2},'A_ONLY'),/数量不完整/)
 assert.throws(()=>result.validateCompareGroup({...group('A_ONLY',1),areaSqm:2},'A_ONLY'),/面积不一致/)
-assert.throws(()=>result.validateCompareGroup({areaSqm:0,spotCount:1,featureCollection:{type:'FeatureCollection',features:[feature('B_ONLY',0)]}},'B_ONLY'),/零面积/)
+const zeroGroup={areaSqm:0,spotCount:1,featureCollection:{type:'FeatureCollection',features:[feature('B_ONLY',0)]}}
+assert.equal(result.validateCompareGroup(zeroGroup,'B_ONLY').features.length,0,'Zero-area remnants at threshold zero cannot block full statistics')
+assert.equal(zeroGroup.featureCollection.features.length,1,'Do not mutate cached backend results')
+const tiny=feature('A_ONLY',1e-12),zero=feature('A_ONLY',0)
+assert.deepEqual(result.validateCompareGroup({areaSqm:1e-12,spotCount:2,featureCollection:{type:'FeatureCollection',features:[zero,tiny]}},'A_ONLY').features,[tiny],'Retain every strictly positive sliver; do not substitute a positive minimum threshold')
+for(const invalid of [-1,NaN,Infinity,undefined,'0'])assert.throws(()=>result.validateCompareGroup({areaSqm:0,spotCount:1,featureCollection:{type:'FeatureCollection',features:[feature('A_ONLY',invalid)]}},'A_ONLY'),/无效面积/)
+assert.throws(()=>result.validateCompareGroup(zeroGroup,'A_ONLY'),/来源不符/,'A zero area does not excuse a wrong source classification')
 assert.throws(()=>result.geometryAnalysisResult({...response,bOnly:undefined},'coverage',sources,{a:1,b:1}),/完整的面积统计/)
 console.log('topic uploads and geometry analysis: projection, DBF Chinese/long IDs, component validation, limits, filters, exact backend clipping and coverage accounting passed')

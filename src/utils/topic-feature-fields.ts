@@ -82,3 +82,11 @@ export function topicFeatureRows(rows: MapFeatureAttributeRow[], role: string,la
     return label?featureRow(row,label):[]
   })
 }
+
+/** 一田一码必须取业务编号，不能拿 OBJECTID 代替。 */
+export function topicFeatureSummary(rows:MapFeatureAttributeRow[],role:string,type=''){
+  const find=(name:string)=>rows.find(row=>(fieldName(row.name)===name||row.label===(name==='DCBH'?'调查编号':name==='YJJBNTTBBH'?'永久基本农田图斑编号':'地类名称'))&&row.value&&row.value!=='—')?.value
+  const number=role==='permanent'||(!find('DCBH')&&!!find('YJJBNTTBBH'))?find('YJJBNTTBBH'):find('DCBH')
+  const land=find('DLMC')||type||'未提供地类名称'
+  return {label:'地类名称--一田一码',value:number?`${land}--${number}`:land}
+}

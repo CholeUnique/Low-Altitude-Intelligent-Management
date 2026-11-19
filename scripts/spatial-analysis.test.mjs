@@ -21,6 +21,9 @@ const summary=await api.analyzeSpatialOverlay(input,{signal})
 assert.equal(summary.resultId,'9223372036854775805');assert.equal(summary.areaA,122.456,'Never recompute or round backend statistics in the API')
 assert.deepEqual(calls.at(-1).body,input);assert.equal(calls.at(-1).options.timeout,180000)
 assert(!('geometry' in calls.at(-1).body),'Send layer references, never browser-loaded source geometry')
+const scopedInput={...input,regions:[{serviceId:'9',layerId:4,objectIds:[2,22]}]}
+await api.analyzeSpatialOverlay(scopedInput,{signal})
+assert.deepEqual(calls.at(-1).body.regions,scopedInput.regions,'Full and filtered statistics use the same selected administrative boundaries, including disconnected parts')
 const asyncCalls=[],percentages=[]
 handle=async(path,body)=>{asyncCalls.push(path);assert.equal(body.deptId,'1');return path.endsWith('/status')?{resultId:summary.resultId,status:'SUCCEEDED',progress:100,areaA:122.456,diffArea:5.67}:{resultId:summary.resultId,status:'RUNNING',progress:10,areaA:0,diffArea:0}}
 const asyncSummary=await api.analyzeSpatialOverlay(input,{signal,pollMs:0,progress:value=>percentages.push(value)})

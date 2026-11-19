@@ -5,7 +5,7 @@ import { PUBLISHED_ANALYSIS_MAX_FEATURES } from './spatial-geometry-input'
 
 export type SpatialAnalysisOperation='difference'|'coverage'
 export type SpatialAnalysisSummary=Pick<SpatialOverlaySummary,'sourceA'|'sourceB'|'areaA'|'areaB'|'overlapArea'|'onlyAArea'|'onlyBArea'|'diffArea'|'minAreaSqm'|'crsUsed'|'featureCountA'|'featureCountB'|'spotCount'>
-  &Partial<Pick<SpatialOverlaySummary,'resultId'|'cached'|'costMs'|'createTime'|'diffAreaRaw'|'diffRate'>>
+  &Partial<Pick<SpatialOverlaySummary,'resultId'|'cached'|'costMs'|'createTime'|'diffAreaRaw'|'diffRate'|'statistics'>>
   &{coverageRate?:number|null;outsideRate?:number|null;unreturnedArea?:number}
 export const COVERAGE_COLORS={INSIDE:'#00e6a0',OUTSIDE:'#ff8c24'}
 export function validateCompareGroup(group:SpatialCompareGroup,kind:'OVERLAP'|'A_ONLY'|'B_ONLY'):SpatialCollection {
@@ -16,17 +16,22 @@ export function validateCompareGroup(group:SpatialCompareGroup,kind:'OVERLAP'|'A
   let area=0
   for(const feature of data.features){
     const properties=feature.properties
-    if(properties?.diffType!==kind||typeof properties.areaSqm!=='number'||!Number.isFinite(properties.areaSqm)||properties.areaSqm<=0)throw new Error(`后端 ${kind} 分组包含来源不符或零面积图斑（序号 ${properties?.seqNo??'—'}，分类 ${properties?.diffType??'缺失'}，面积 ${properties?.areaSqm??'缺失'}），请修复结果后重试`)
+    if(properties?.diffType!==kind||typeof properties.areaSqm!=='number'||!Number.isFinite(properties.areaSqm)||properties.areaSqm<0)throw new Error(`后端 ${kind} 分组包含来源不符或无效面积图斑（序号 ${properties?.seqNo??'—'}，分类 ${properties?.diffType??'缺失'}，面积 ${properties?.areaSqm??'缺失'}），请修复结果后重试`)
     area+=properties.areaSqm
   }
   if(Math.abs(area-group.areaSqm)>Math.max(.05,data.features.length*.00011))throw new Error('后端分组面积与已返回图斑面积不一致，未展示不完整结果')
-  return data
+  // A zero-threshold operation can return collapsed/rounded-to-zero remnants. They
+  // contribute no reported area and must not block full statistics or feed the next
+  // overlay. Keep every strictly positive sliver, however small; validate the raw
+  // count, classification, geometry and area accounting before removing only zeros.
+  return data.features.some(feature=>feature.properties!.areaSqm===0)?{...data,features:data.features.filter(feature=>feature.properties!.areaSqm>0)}:data
 }
 export function geometryAnalysisResult(response:SpatialGeometryCompare,operation:SpatialAnalysisOperation,sources:{sourceA:SpatialSource;sourceB:SpatialSource},counts:{a:number;b:number}) {
   if(!response||![response.areaA,response.areaB,response.minAreaSqm,response.both?.areaSqm,response.aOnly?.areaSqm,response.bOnly?.areaSqm].every(value=>Number.isFinite(value)&&value>=0))throw new Error('后端未返回完整的面积统计')
   const aOnly=validateCompareGroup(response.aOnly,'A_ONLY')
   const second=operation==='coverage'?validateCompareGroup(response.both,'OVERLAP'):validateCompareGroup(response.bOnly,'B_ONLY')
   const summary:SpatialAnalysisSummary={...sources,areaA:response.areaA,areaB:response.areaB,overlapArea:response.both.areaSqm,onlyAArea:response.aOnly.areaSqm,onlyBArea:response.bOnly.areaSqm,diffArea:response.aOnly.areaSqm+response.bOnly.areaSqm,diffRate:response.areaA?(response.aOnly.areaSqm+response.bOnly.areaSqm)/response.areaA:null,minAreaSqm:response.minAreaSqm,crsUsed:response.crsUsed,featureCountA:counts.a,featureCountB:counts.b,spotCount:aOnly.features.length+second.features.length}
+  summary.statistics=response.statistics
   if(operation==='difference')return {summary,data:annotateSpatialDifference({type:'FeatureCollection',features:[...aOnly.features,...second.features]},sources)}
   const retained=response.both.areaSqm+response.aOnly.areaSqm
   if(retained>response.areaA+Math.max(.05,response.areaA*1e-7))throw new Error('后端范围内与范围外面积超过上传总面积，请核对统计口径')

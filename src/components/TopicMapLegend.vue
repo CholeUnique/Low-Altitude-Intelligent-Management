@@ -12,7 +12,8 @@ interface LegendSymbol {
   administrative?: boolean
 }
 interface LegendGroup { key: string; name: string; symbols: LegendSymbol[] }
-const props = defineProps<{ groups: LegendGroup[] }>()
+const props = defineProps<{ groups: LegendGroup[]; interactive?:boolean }>()
+const emit=defineEmits<{select:[key:string,label:string]}>()
 const legend = ref<HTMLElement>()
 const compact = ref(false)
 const density = ref(1)
@@ -91,7 +92,7 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
         <section v-for="(group, groupIndex) in groups" :key="group.key" class="map-legend-group" :aria-label="group.name">
           <h3 v-if="!repeatsHeading(group)">{{ group.name }}</h3>
           <ul class="map-symbol-grid">
-            <li v-for="(symbol, index) in group.symbols" :key="index" class="map-symbol-row">
+            <li v-for="(symbol, index) in group.symbols" :key="index" class="map-symbol-row" :class="{interactive}" :role="interactive?'button':undefined" :tabindex="interactive?0:undefined" :aria-label="interactive?`定位并高亮 ${symbol.label}`:undefined" @click="interactive&&emit('select',group.key,symbol.label)" @keydown.enter.prevent="interactive&&emit('select',group.key,symbol.label)" @keydown.space.prevent="interactive&&emit('select',group.key,symbol.label)">
               <svg class="map-symbol" viewBox="0 0 40 26" aria-hidden="true" :data-mode="symbol.mode">
                 <defs v-if="symbol.pattern && symbol.mode === 'filled'">
                   <pattern :id="`${patternId}-${groupIndex}-${index}`" width="36" height="36" patternUnits="userSpaceOnUse">
@@ -161,3 +162,5 @@ h3 { margin: 0 0 calc(7px * var(--legend-density)); font-size: max(14px, calc(14
 .is-compact .map-symbol-row + .map-symbol-row { margin-top: calc(3px * var(--legend-density)); }
 .is-compact .map-symbol { width: calc(32px * var(--legend-density)); height: calc(22px * var(--legend-density)); }
 </style>
+
+<style scoped>.map-symbol-row.interactive{cursor:pointer;pointer-events:auto;border-radius:4px}.map-symbol-row.interactive:hover,.map-symbol-row.interactive:focus-visible{background:#072941bb;outline:1px solid #7ddde655}</style>

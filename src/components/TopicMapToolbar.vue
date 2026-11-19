@@ -146,12 +146,12 @@ onBeforeUnmount(()=>{unbind();window.removeEventListener('keydown',key)})
         <button :class="{active:menu==='draw'||isDrawingTool(tool)}" :aria-expanded="menu==='draw'" @click="toggleMenu('draw')"><Edit /><span>绘制</span><ArrowDown class="down" /></button>
         <div v-if="menu==='draw'" class="tool-menu drawing-menu" aria-label="绘制选项"><button @click="start('draw-point')">点状绘制</button><button @click="start('draw-line')">线状绘制</button><button @click="start('draw-polygon')">面状绘制</button><button v-if="isDrawingTool(tool)" @click="stopDrawing();menu=undefined">结束绘制</button><button :disabled="!drawnFeatures.length || loadingDrawing" @click="clearDrawings">清除绘制</button><hr /><small>已完成 {{ drawnFeatures.length }} 个要素</small><label>图层名称<input v-model="drawingName" maxlength="60" aria-label="绘制图层名称" :disabled="loadingDrawing" /></label><div class="drawing-color"><span>图层颜色</span><TopicLayerColorPicker :color="drawingColor" :label="drawingName" @change="changeDrawingColor" /></div><button :disabled="!drawnFeatures.length || exporting || unfinishedDrawing()" @click="exportDrawings">{{ exporting?'正在导出…':'导出图层（ZIP）' }}</button><button v-if="loadDrawing" :disabled="!drawnFeatures.length || drawingLoaded || loadingDrawing || unfinishedDrawing()" @click="loadDrawings">{{ drawingLoaded?'已加载到地图':loadingDrawing?'正在加载…':'加载到地图' }}</button></div>
       </div>
-      <div class="tool-dropdown">
+      <span class="tool-divider"></span><slot />
+    </div>
+      <div class="tool-dropdown tool-analysis">
         <button :class="{active:menu==='analysis'}" :aria-expanded="menu==='analysis'" @click="toggleMenu('analysis')"><Connection /><span>空间分析</span><ArrowDown class="down" /></button>
         <div v-if="menu==='analysis'" class="tool-menu" aria-label="空间分析选项"><button @click="stopDrawing(); menu=undefined; emit('overlay')">{{ analysisLabel || '对称差分' }}</button><button v-if="coverageEnabled" @click="stopDrawing(); menu=undefined; emit('coverage')">范围覆盖分析</button></div>
       </div>
-      <span class="tool-divider"></span><slot />
-    </div>
     <div v-if="message || (drawnFeatures.length && !drawingFeedbackClosed)" class="tool-feedback" role="status"><div class="tool-feedback-content"><span>{{ message || `已完成 ${drawnFeatures.length} 个绘制要素` }}<template v-if="isDrawingTool(tool) && tool!=='draw-point'"><button class="finish-drawing" @click="finish()">完成当前要素</button><button class="finish-drawing" @click="undoVertex">撤销顶点</button></template></span><div v-if="drawnFeatures.length" class="drawing-result-actions" role="group" aria-label="绘制成果操作"><button :disabled="exporting || unfinishedDrawing()" @click="exportDrawings">{{ exporting?'正在导出…':'导出' }}</button><button v-if="loadDrawing" :disabled="drawingLoaded || loadingDrawing || unfinishedDrawing()" @click="loadDrawings">{{ drawingLoaded?'已加载':loadingDrawing?'正在加载…':'加载到地图' }}</button></div></div><button aria-label="关闭工具提示" @click="message='';drawingFeedbackClosed=true">×</button></div>
   </nav>
 </template>

@@ -207,3 +207,22 @@
     .scene-task-ring__center b { font-size: max(12px, min(26px, var(--ring-number-size))); }
   }
 }
+
+// Expand the inspector for original/result columns; keep the other panels independent.
+#app .geographic-topics .topic-legend {max-width:min(350px,calc(100% - 30px));}
+#app .geographic-topics .topic-legend.has-result-columns {max-width:min(560px,calc(100% - 30px));}
+#app .geographic-topics .topic-legend {transition:width var(--ui-panel-motion),max-width var(--ui-panel-motion),translate var(--ui-panel-motion),opacity var(--ui-panel-motion);}
+#app .geographic-topics .layer-card-toggle b {font-size:12px;line-height:20px;font-weight:700;}
+#app .geographic-topics .legend-heading b,
+#app .geographic-topics .topic-feature-details header b,
+#app .geographic-topics .topic-farmland-stat>header {font-size:15px;line-height:24px;}
+#app .geographic-topics .topic-feature-details {width:300px;}
+#app .geographic-topics .topic-tools {display:flex;gap:8px;padding:0;background:none;border:0;box-shadow:none;backdrop-filter:none;}
+#app .geographic-topics .topic-tools .tool-actions {padding:5px;gap:4px;border:1px solid var(--ui-border);border-radius:10px;background:var(--ui-glass);box-shadow:var(--ui-shadow);backdrop-filter:blur(14px);}
+#app .geographic-topics .topic-tools .tool-analysis {padding:5px;border:1px solid #71dbe778;border-radius:10px;background:#12475af2;box-shadow:0 0 16px #54d7df20;}
+#app .geographic-topics .tool-analysis>button {display:flex;align-items:center;gap:4px;height:34px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:#9bf2f4;font:600 14px var(--ui-font);cursor:pointer;}
+#app .geographic-topics .tool-analysis svg {width:16px;height:16px;}
+#app .geographic-topics .tool-analysis .tool-menu {right:0;left:auto;background:#072941;}
+#app .geographic-topics .tool-analysis .tool-menu button {display:block;width:100%;padding:8px;border:0;border-radius:4px;background:none;text-align:left;color:#ddf6fa;font:13px var(--ui-font);cursor:pointer;}
+#app .geographic-topics .tool-analysis .tool-menu button:hover {background:#2b607b;}
+@media(prefers-reduced-motion:reduce){#app .geographic-topics .topic-legend{transition:none;}}
