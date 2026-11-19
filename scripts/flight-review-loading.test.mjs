@@ -45,6 +45,7 @@ assert.equal(regionUtil.regionPaths([{code:'32',name:'江苏省',children:[{code
 const component = load(script, {
   vue: Vue, 'vue-router': {}, 'element-plus':{ElTooltip:{}}, '@element-plus/icons-vue':{},
   '@/components/FilterActions.vue': {},
+  '@/components/RegionStepSelect.vue': {},
   '@/api/client':{isMockMode:()=>false}, '@/api/patrol':{getUavMediaSummary:async()=>({photoCount:6896,videoCount:12})},
   '@/api/metadata':{getMetadataOptions:async()=>[{code:'32',name:'江苏省',children:[{code:'3212',name:'泰州市',children:[{code:'321202',name:'海陵区'}]}]}]}, '@/utils/region-path':regionUtil,
   '@/mocks/algorithm-catalog':load(readFileSync('src/mocks/algorithm-catalog.ts','utf8'),{}),
@@ -76,6 +77,16 @@ assert.equal(resultCalls[0].pageSize, 16)
 vm.draftFilters.planKeyword = 'Plan 1'
 await flush()
 assert.equal(vm.pageRows.length, 16, 'Draft filters do not query')
+vm.draftFilters.regionFilter = '32'
+const beforeRegionQuery = resultCalls.length
+vm.applyFilters()
+await flush()
+assert.equal(resultCalls.length, beforeRegionQuery, 'A province cannot be submitted as an exact county match')
+vm.draftFilters.regionFilter = '321202'
+vm.applyFilters()
+await flush()
+assert.equal(resultCalls.at(-1).regionCode, '321202', 'A county is submitted as the exact region code')
+vm.draftFilters.regionFilter = ''
 vm.applyFilters()
 await flush()
 assert.equal(resultCalls.at(-1).keyword, 'Plan 1')

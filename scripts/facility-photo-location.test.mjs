@@ -17,19 +17,22 @@ const module = { exports: {} }
 new Function('require', 'module', 'exports', code)(name => {
   if (name === 'vue') return Vue
   if (name === '@/api/client') return { apiClient }
+  if (name === 'element-plus') return { ElTooltip: {} }
   if (name === '@/workspace-components/spot-identification/PhotoLocationControl.vue') return { default: {} }
   throw new Error(`Unexpected dependency: ${name}`)
 }, module, module.exports)
 const renderer = Vue.createRenderer({ createElement: () => ({}), createText: () => ({}), createComment: () => ({}), insert() {}, remove() {}, setText() {}, setElementText() {}, parentNode() {}, nextSibling() {}, patchProp() {} })
 const component = module.exports.default
 component.render = () => null
-const app = renderer.createApp(component, { coordinate: { longitude: 119.8, latitude: 32.4 }, geometryType: '点' })
+const locations = []
+const app = renderer.createApp(component, { coordinate: { longitude: 119.8, latitude: 32.4 }, geometryType: '点', onPhotoLocation: location => locations.push(location) })
 const vm = app.mount({})
 await vm.search()
 assert.equal(calls[0].ignoreShootTime, true, 'Empty date queries without a time limit')
 assert.equal('shootAfter' in calls[0], false, 'Unlimited query does not send a start date')
 assert.equal(vm.locationMedia.longitude, 119.85)
 assert.equal(vm.locationMedia.latitude, 32.48)
+assert.deepEqual(locations, [null, { longitude: 119.85, latitude: 32.48 }], 'Map marker uses the matched photo location')
 assert.equal(vm.locationMedia.id, '212039846837891912')
 response = { ...response, longitude: null, latitude: null }
 vm.shootAfterDate = '2025-01-02'
@@ -38,6 +41,7 @@ assert.equal(calls[1].shootAfter, '2025-01-02T00:00:00', 'The selected date is i
 assert.equal('ignoreShootTime' in calls[1], false, 'Selected date must not be overridden by unlimited mode')
 assert.equal(vm.locationMedia.longitude, undefined, 'Missing photo coordinates must not fall back to facility coordinates')
 assert.equal(vm.locationMedia.latitude, undefined)
+assert.equal(locations.at(-1), null, 'A photo without coordinates clears the previous marker')
 vm.shootAfterDate = ''
 await vm.search()
 assert.equal(calls[2].ignoreShootTime, true, 'Clearing the date restores unlimited mode')

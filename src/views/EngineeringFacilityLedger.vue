@@ -5,6 +5,7 @@ import { useUserStore } from '@/stores/user'
 import FacilityEditDialog from '@/components/FacilityEditDialog.vue'
 import FacilityReportDialog from '@/components/FacilityReportDialog.vue'
 import FacilityQrcodeDialog from '@/components/FacilityQrcodeDialog.vue'
+import FacilityDetailDialog from '@/components/FacilityDetailDialog.vue'
 import { useRouter } from 'vue-router'
 import { facilityStatisticDestination } from '@/utils/facility-navigation'
 
@@ -17,6 +18,7 @@ function openStatistic(label: string) {
 const canManage = computed(() => user.currentUser?.role === 'ADMIN' || user.isActiveDepartmentAdmin)
 const editOpen = ref(false), editRecord = ref<FacilityRecord>(), pendingDelete = ref<FacilityRecord>(), deleteBusy = ref(false), deleteError = ref('')
 const reportRecord = ref<FacilityRecord>(), qrcodeRecord = ref<FacilityRecord>()
+const detailRecord = ref<FacilityRecord>()
 const keyword = ref(''), facilityType = ref(''), bizStatus = ref('')
 const pageNum = ref(1), pageSize = ref(10)
 const applied = ref({ keyword: '', facilityType: '', bizStatus: '' })
@@ -93,7 +95,7 @@ onMounted(() => {
   updatePageSize()
 })
 onBeforeUnmount(() => { tableObserver?.disconnect(); tableObserver = undefined })
-watch(() => user.activeDeptId, () => { keyword.value = ''; facilityType.value = ''; bizStatus.value = ''; applied.value = { keyword: '', facilityType: '', bizStatus: '' }; pageNum.value = 1; void loadContext(); void loadPage() }, { immediate: true })
+watch(() => user.activeDeptId, () => { detailRecord.value = undefined; keyword.value = ''; facilityType.value = ''; bizStatus.value = ''; applied.value = { keyword: '', facilityType: '', bizStatus: '' }; pageNum.value = 1; void loadContext(); void loadPage() }, { immediate: true })
 </script>
 
 <template>
@@ -105,11 +107,12 @@ watch(() => user.activeDeptId, () => { keyword.value = ''; facilityType.value = 
     <div class="card">
       <form class="filters" @submit.prevent="search"><input class="ui-filter-search" v-model="keyword" aria-label="搜索设施" placeholder="搜索名称、编号、项目或行政村" /><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="facilityType" aria-label="设施类型"><ElOption value="" label="全部设施类型" /><ElOption v-for="option in typeOptions" :key="String(option.id)" :value="option.code" :label="String(option.name)" /></ElSelect><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="bizStatus" aria-label="设施状态"><ElOption value="" label="全部状态" /><ElOption value="NORMAL" label="正常" /><ElOption value="ABNORMAL" label="异常" /><ElOption value="CHECKING" label="核查中" /><ElOption value="DISCARDED" label="废弃" /></ElSelect><button type="submit">查询</button><button type="button" class="secondary" @click="reset">重置</button><div class="filter-actions"><button v-if="canManage" type="button" :disabled="!user.activeDeptId" @click="openAdd">＋ 新增设施</button><button type="button" class="secondary" @click="loadContext(); loadPage()">刷新数据</button></div></form>
       <p v-if="optionsError" class="notice" role="alert">设施类型加载失败：{{ optionsError }} <button @click="loadContext">重试</button></p>
-      <div ref="tableWrap" class="table-wrap"><table><thead><tr><th>设施编号</th><th>设施名称</th><th>设施类型</th><th>状态</th><th>所属区划</th><th>行政村</th><th>所属项目</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in page?.records || []" :key="String(item.id)"><td>{{ item.facilityNo || '—' }}</td><td>{{ item.name || '—' }}</td><td>{{ item.typeName || item.facilityType || '—' }}</td><td>{{ item.bizStatusName || item.bizStatus || '—' }}</td><td>{{ item.regionName || '—' }}</td><td>{{ item.villageName || '—' }}</td><td>{{ item.projectName || '—' }}</td><td>{{ item.updateTime?.replace('T', ' ') || '—' }}</td><td class="row-actions"><button type="button" class="text-action" @click="openReport(item)">上报</button><button type="button" class="text-action" @click="openQrcode(item)">二维码</button><button v-if="canManage" type="button" class="text-action" @click="openEdit(item)">编辑</button><button v-if="canManage" type="button" class="text-action danger" @click="askDelete(item)">删除</button></td></tr></tbody></table>
+      <div ref="tableWrap" class="table-wrap"><table><thead><tr><th>设施编号</th><th>设施名称</th><th>设施类型</th><th>状态</th><th>所属区划</th><th>行政村</th><th>所属项目</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="item in page?.records || []" :key="String(item.id)"><td>{{ item.facilityNo || '—' }}</td><td>{{ item.name || '—' }}</td><td>{{ item.typeName || item.facilityType || '—' }}</td><td>{{ item.bizStatusName || item.bizStatus || '—' }}</td><td>{{ item.regionName || '—' }}</td><td>{{ item.villageName || '—' }}</td><td>{{ item.projectName || '—' }}</td><td>{{ item.updateTime?.replace('T', ' ') || '—' }}</td><td class="row-actions"><button type="button" class="text-action" @click="detailRecord = item">详情</button><button type="button" class="text-action" @click="openReport(item)">上报</button><button type="button" class="text-action" @click="openQrcode(item)">二维码</button><button v-if="canManage" type="button" class="text-action" @click="openEdit(item)">编辑</button><button v-if="canManage" type="button" class="text-action danger" @click="askDelete(item)">删除</button></td></tr></tbody></table>
         <div v-if="pageLoading" class="empty" role="status">正在加载设施台账…</div><div v-else-if="pageError" class="empty" role="alert">加载失败：{{ pageError }} <button @click="loadPage">重试</button></div><div v-else-if="page && !page.records.length" class="empty">{{ applied.keyword || applied.facilityType || applied.bizStatus ? '没有符合筛选条件的设施' : '暂无设施台账数据' }}</div>
       </div>
       <footer><span>共 {{ page ? page.total : '—' }} 条</span><button class="secondary" :disabled="pageLoading || !!pageError || pageNum <= 1" @click="turnPage(pageNum - 1)">上一页</button><span>{{ pageNum }} / {{ page ? totalPages : '—' }}</span><button class="secondary" :disabled="pageLoading || !!pageError || pageNum >= totalPages" @click="turnPage(pageNum + 1)">下一页</button></footer>
     </div>
+    <FacilityDetailDialog v-if="detailRecord && user.activeDeptId" :key="`${user.activeDeptId}:${detailRecord.id}`" :dept-id="user.activeDeptId" :id="detailRecord.id" @close="detailRecord = undefined" />
     <FacilityReportDialog v-if="reportRecord && user.activeDeptId" :key="`report-${reportRecord.id}`" :record="reportRecord" :dept-id="user.activeDeptId" @close="reportRecord = undefined" @reported="afterReported" />
     <FacilityQrcodeDialog v-if="qrcodeRecord && user.activeDeptId" :key="`qrcode-${qrcodeRecord.id}`" :record="qrcodeRecord" :dept-id="user.activeDeptId" @close="qrcodeRecord = undefined" />
     <FacilityEditDialog v-if="editOpen && user.activeDeptId" :key="editRecord ? `edit-${editRecord.id}` : 'add'" :dept-id="user.activeDeptId" :record="editRecord" :type-options="typeOptions" @close="editOpen = false; editRecord = undefined" @saved="afterSaved" />

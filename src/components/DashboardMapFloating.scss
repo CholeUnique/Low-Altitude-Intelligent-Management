@@ -77,6 +77,9 @@
 .dashboard-map--floating .layer-manager-search { flex:0 0 auto;min-width:0;padding:10px 12px;border-bottom:1px solid #87badc18; }
 .dashboard-map--floating .layer-manager .map-search { position:relative;inset:auto;display:grid;grid-template-columns:minmax(0,1fr) 28px;align-items:center;width:100%;min-height:34px;padding:0 8px;border:1px solid #75badc30;border-radius:7px;background:#041e3066;color:var(--map-text);box-shadow:inset 0 1px 3px #00111e26;backdrop-filter:none; }
 .dashboard-map--floating .layer-manager .map-search:focus-within { border-color:#4bc9eb80; }
+.dashboard-map--floating .layer-manager .map-search.map-search--panel { display:block; min-height:36px; padding:0; border:0; background:transparent; box-shadow:none; }
+.dashboard-map--floating .layer-manager .map-search.map-search--panel:focus-within { border:0; }
+.dashboard-map--floating .layer-manager .map-search.map-search--panel .search-results { top:40px; }
 .dashboard-map--floating .layer-manager .map-search input { order:0;width:100%;height:34px;font-size:12px; }
 .dashboard-map--floating .layer-manager .map-search input::placeholder { color:#88aabe; }
 .dashboard-map--floating .layer-manager .map-search-toggle { order:0;width:28px;height:32px;min-width:28px;margin:0; }

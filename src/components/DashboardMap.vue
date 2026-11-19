@@ -1748,9 +1748,9 @@ onBeforeUnmount(() => {
     </div>
 
     <Teleport :to="`#${layerPanelId}-search`" :disabled="!floatingControls" defer>
-    <div class="map-search" :class="{ expanded: searchExpanded || floatingControls }">
+    <div class="map-search" :class="{ expanded: searchExpanded || floatingControls, 'map-search--panel': floatingControls }">
       <input class="ui-filter-search" v-if="searchExpanded || floatingControls" ref="searchInput" aria-label="搜索图层属性" v-model="searchKeyword" placeholder="搜索地块类型、人名或图层属性" @keydown.enter.prevent="focusFirstSearchResult" @keydown.esc="floatingControls ? searchKeyword = '' : toggleSearch()" />
-      <button class="map-search-toggle" type="button" :aria-label="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起地图搜索' : '展开地图搜索')" :title="floatingControls ? '定位搜索结果' : (searchExpanded ? '收起搜索' : '搜索地块或地点')" @click="floatingControls ? focusFirstSearchResult() : toggleSearch()">
+      <button v-if="!floatingControls" class="map-search-toggle" type="button" :aria-label="searchExpanded ? '收起地图搜索' : '展开地图搜索'" :title="searchExpanded ? '收起搜索' : '搜索地块或地点'" @click="toggleSearch()">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/></svg>
       </button>
       <div v-if="showSearchSuggestions" class="search-results" aria-live="polite">

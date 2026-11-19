@@ -2,10 +2,11 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import FilterActions from '@/components/FilterActions.vue'
 import { ElTooltip } from 'element-plus'
+import RegionStepSelect from '@/components/RegionStepSelect.vue'
 import { Calendar, FolderOpened, Picture, VideoCamera } from '@element-plus/icons-vue'
 import { isMockMode } from '@/api/client'
 import { getUavMediaSummary, type UavMediaSummary } from '@/api/patrol'
-import { getMetadataOptions } from '@/api/metadata'
+import { getMetadataOptions, type MetadataOption } from '@/api/metadata'
 import { regionPaths } from '@/utils/region-path'
 import { algorithms } from '@/mocks/algorithm-catalog'
 import type { RecognitionSpotCreateResult } from '@/api/recognition-spot'
@@ -87,6 +88,15 @@ const deviceFilter = ref('')
 /** 区划筛选的“未判定”哨兵值：后端按轨迹未判定区划时 regionCode 为空。 */
 const regionFilter = ref('')
 const regionPathLabels = ref(new Map<string, string>())
+const regionOptions = ref<MetadataOption[]>([])
+function regionLevel(code: string, nodes = regionOptions.value, level = 1): number {
+  for (const node of nodes) {
+    if (node.code === code) return level
+    const childLevel = node.children?.length ? regionLevel(code, node.children, level + 1) : 0
+    if (childLevel) return childLevel
+  }
+  return 0
+}
 const regionMetadataReady = ref(false)
 const regionMetadataAvailable = ref(false)
 const attemptedRegionPlans = new Set<string>()
@@ -99,6 +109,10 @@ const endDate = ref('')
 const resultTypeFilter = ref('')
 const draftFilters = reactive({ planKeyword: '', regionFilter: '', routeTypeFilter: '', taskTypeFilter: '', deviceFilter: '', startDate: '', endDate: '', resultTypeFilter: '' })
 function applyFilters() {
+  if (draftFilters.regionFilter && regionLevel(draftFilters.regionFilter) !== 3) {
+    actionError.value = '请选择省、市下的区县后再查询。'
+    return
+  }
   planKeyword.value = draftFilters.planKeyword; regionFilter.value = draftFilters.regionFilter; routeTypeFilter.value = draftFilters.routeTypeFilter
   taskTypeFilter.value = draftFilters.taskTypeFilter; deviceFilter.value = draftFilters.deviceFilter; startDate.value = draftFilters.startDate
   endDate.value = draftFilters.endDate; resultTypeFilter.value = draftFilters.resultTypeFilter; currentPage.value = 1
@@ -607,7 +621,6 @@ const devices = computed(() => {
   rows.value.flatMap(row => row.devices).filter(device => device.droneSn).forEach(device => values.set(device.droneSn, { sn: device.droneSn, name: device.droneName || device.droneSn }))
   return [...values.values()]
 })
-const regions = computed(() => [...regionPathLabels.value].filter(([code]) => /^\d{6}$/.test(code)).map(([code, label]) => ({ code, label })))
 const pageCount = computed(() => Math.max(1, Math.ceil(resultTotal.value / pageSize.value)))
 const pageRows = computed(() => rows.value)
 const resultsLoading = computed(() => loading.value)
@@ -627,9 +640,10 @@ watch([plans, regionMetadataReady, () => user.currentUser?.role], () => { void r
 onMounted(() => {
   window.addEventListener('keydown', handleDetailKeydown)
   void getMetadataOptions('ADMIN_REGION').then(options => {
+    regionOptions.value = options
     regionPathLabels.value = regionPaths(options)
     regionMetadataAvailable.value = true
-  }).catch(() => { regionPathLabels.value = new Map() }).finally(() => { regionMetadataReady.value = true })
+  }).catch(() => { regionOptions.value = []; regionPathLabels.value = new Map() }).finally(() => { regionMetadataReady.value = true })
 })
 onBeforeUnmount(() => {
   loadVersion += 1
@@ -744,7 +758,7 @@ async function exportList() {
     <section class="filter-panel panel">
       <div class="filter-grid">
         <label>飞行计划<input v-model="draftFilters.planKeyword" class="ui-filter-search plan-keyword-input" placeholder="计划名称" @keyup.enter="applyFilters" /></label>
-        <label>所属区划<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.regionFilter"><ElOption value="" label="全部区划" /><ElOption v-for="item in regions" :key="item.code" :value="item.code" :label="String(item.label)" /></ElSelect></label>
+        <label>所属区划<RegionStepSelect v-model="draftFilters.regionFilter" :options="regionOptions" /></label>
         <label>航线类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.routeTypeFilter"><ElOption value="" label="全部航线" /><ElOption v-for="item in routeTypes" :key="item" :value="item" :label="String(routeTypeLabel(item))" /></ElSelect></label>
         <label>任务类型<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.taskTypeFilter"><ElOption value="" label="全部类型" /><ElOption v-for="item in taskTypes" :key="item" :value="item" :label="String(taskTypeLabel(item))" /></ElSelect></label>
         <label>飞行设备<ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="draftFilters.deviceFilter"><ElOption value="" label="全部设备" /><ElOption v-for="item in devices" :key="item.sn" :value="item.sn" :label="item.name" /></ElSelect></label>
@@ -902,7 +916,7 @@ async function exportList() {
 .flight-review table { min-width: 0; }
 .flight-review th,.flight-review td { padding-inline: 7px; overflow-wrap: anywhere; }
 .flight-review td .row-actions { flex-wrap: wrap; gap: 4px; }
-.flight-review .row-actions .view-button { height: 28px; padding-inline: 6px; }
+.flight-review .row-actions .view-button { width: 68px; box-sizing: border-box; height: 28px; padding-inline: 6px; }
 .flight-review th:nth-child(1) { width: 18%; }
 .flight-review th:nth-child(2) { width: 9%; }
 .flight-review th:nth-child(3) { width: 8%; }

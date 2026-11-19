@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   getFacilityPage,
   getFacilityRegionStatistics,
@@ -12,6 +12,7 @@ import {
 import { useUserStore } from '@/stores/user'
 import { useRouter } from 'vue-router'
 import { facilityStatisticDestination } from '@/utils/facility-navigation'
+import { FACILITIES_TOPIC_ID } from '@/stores/geographic-topics'
 
 const user = useUserStore()
 const router = useRouter()
@@ -25,6 +26,33 @@ function cardDestination(label: string) {
 const statistics = ref<FacilityStatistics>()
 const regions = ref<FacilityRegionStat[]>([])
 const recent = ref<FacilityRecord[]>([])
+const recentPage = ref(0), recentTotal = ref(0), recentLoading = ref(false), recentError = ref('')
+const recentPageSize = 30
+let recentVersion = 0
+let dataVersion = 0
+async function loadRecent(reset = false) {
+  const deptId = user.activeDeptId
+  if (!deptId || (recentLoading.value && !reset)) return
+  const version = reset ? ++recentVersion : recentVersion
+  const pageNum = reset ? 1 : recentPage.value + 1
+  if (reset) { recent.value = []; recentPage.value = 0; recentTotal.value = 0 }
+  recentLoading.value = true; recentError.value = ''
+  try {
+    const result = await getFacilityPage({ deptId, pageNum, pageSize: recentPageSize })
+    if (version !== recentVersion) return
+    const records = Array.isArray(result.records) ? result.records : []
+    const existing = new Set(recent.value.map(item => String(item.id)))
+    const newRecords = reset ? records : records.filter(item => !existing.has(String(item.id)))
+    recent.value = reset ? newRecords : [...recent.value, ...newRecords]
+    recentTotal.value = result.total
+    if (!newRecords.length && recent.value.length < recentTotal.value) recentError.value = '设施列表未返回更多数据，请重试。'
+    else recentPage.value = pageNum
+  } catch (reason) { if (version === recentVersion) recentError.value = reason instanceof Error ? reason.message : '设施列表读取失败' }
+  finally { if (version === recentVersion) recentLoading.value = false }
+}
+function openFacility(record: FacilityRecord) {
+  void router.push({ name: 'recognition', params: { tab: 'topics' }, query: { topic: FACILITIES_TOPIC_ID, view: 'map', facilityId: String(record.id) } })
+}
 const loading = ref(false)
 const error = ref('')
 
@@ -106,28 +134,30 @@ function updateTime(record: FacilityRecord) {
 }
 
 async function loadData() {
+  const version = ++dataVersion
   const deptId = user.activeDeptId
-  if (!deptId) { error.value = '当前未选择部门，无法统计数据。'; return }
+  if (!deptId) { recentVersion++; recent.value = []; recentTotal.value = 0; recentLoading.value = false; error.value = '当前未选择部门，无法统计数据。'; return }
   loading.value = true
   error.value = ''
   try {
-    const [overall, regionStats, page] = await Promise.all([
+    void loadRecent(true)
+    const [overall, regionStats] = await Promise.all([
       getFacilityStatistics(deptId),
       getFacilityRegionStatistics(deptId).catch(() => []),
-      getFacilityPage({ deptId, pageNum: 1, pageSize: 6 }).catch(() => ({ records: [], total: 0, pageNum: 1, pageSize: 6 })),
     ])
+    if (version !== dataVersion) return
     statistics.value = overall
     regions.value = Array.isArray(regionStats) ? regionStats : []
-    recent.value = Array.isArray(page.records) ? page.records : []
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '设施统计读取失败'
+    if (version === dataVersion) error.value = reason instanceof Error ? reason.message : '设施统计读取失败'
   } finally {
-    loading.value = false
+    if (version === dataVersion) loading.value = false
   }
 }
 
 onMounted(() => void loadData())
 watch(() => user.activeDeptId, () => void loadData())
+onBeforeUnmount(() => { dataVersion++; recentVersion++ })
 </script>
 
 <template>
@@ -187,9 +217,9 @@ watch(() => user.activeDeptId, () => void loadData())
       </section>
 
       <section class="panel recent-panel">
-        <header><div><h2>最近更新设施</h2><p>按更新时间取最新 6 条</p></div></header>
+        <header><div><h2>最近更新设施</h2><p>按更新时间查看</p></div></header>
         <ul class="recent-list">
-          <li v-for="record in recent" :key="String(record.id)">
+          <li v-for="record in recent" :key="String(record.id)" class="recent-item" role="button" tabindex="0" :aria-label="`查看${record.name || '设施'}地图位置`" @click="openFacility(record)" @keydown.enter="openFacility(record)" @keydown.space.prevent="openFacility(record)">
             <div class="recent-main">
               <b :title="record.name || ''">{{ record.name || '未命名设施' }}</b>
               <small>{{ record.typeName || record.facilityType || '未分类' }} · {{ record.regionName || '区划未判定' }}</small>
@@ -197,8 +227,9 @@ watch(() => user.activeDeptId, () => void loadData())
             <span class="pill" :class="statusClass(record.bizStatus)">{{ statusText(record) }}</span>
             <time>{{ updateTime(record) }}</time>
           </li>
-          <li v-if="!recent.length" class="empty">暂无设施记录</li>
+          <li v-if="!recent.length && !recentLoading && !recentError" class="empty">暂无设施记录</li>
         </ul>
+        <div class="recent-pagination"><span>已显示 {{ recent.length }} / {{ recentTotal }} 条</span><button v-if="recentError || recent.length < recentTotal" type="button" :disabled="recentLoading" @click="loadRecent(!recent.length)">{{ recentLoading ? '加载中…' : recentError ? '重试' : '加载更多' }}</button><span v-else-if="recentLoading">加载中…</span><span v-if="recentError" role="alert">{{ recentError }}</span></div>
       </section>
     </div>
   </section>
@@ -252,6 +283,8 @@ watch(() => user.activeDeptId, () => void loadData())
 .recent-list{flex:1;min-height:0;display:grid;align-content:start;gap:8px;margin:0;padding:12px;list-style:none;overflow:auto}
 .recent-list li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:10px 12px;border:1px solid #1f4a60;border-radius:8px;background:linear-gradient(135deg,#0f2f42cc,#0c2536cc);transition:border-color .16s ease,background .16s ease}
 .recent-list li:hover{border-color:#3f8ca6;background:linear-gradient(135deg,#124158cc,#0e2c40cc)}
+.recent-item{cursor:pointer}.recent-item:focus-visible{outline:2px solid var(--ui-accent);outline-offset:-2px}
+.recent-pagination{flex:none;display:flex;align-items:center;gap:10px;padding:8px 12px;color:var(--ui-muted);font-size:12px}.recent-pagination button{padding:5px 10px;border:1px solid var(--ui-border);border-radius:4px;background:var(--ui-input);color:var(--ui-link);cursor:pointer}.recent-pagination button:disabled{opacity:.5;cursor:default}
 .recent-main{min-width:0;display:grid;gap:4px}
 .recent-main b{font-size:14px;color:#eaf8ff;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .recent-main small{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
