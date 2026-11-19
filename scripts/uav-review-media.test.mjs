@@ -43,7 +43,7 @@ const deps={vue:{...vue,onMounted(){},onBeforeUnmount:fn=>cleanups.push(fn)},
   '@/utils/non-grain-recheck':{recheckRoute(){}},'@/utils/non-grain-carry-forward':carries,
   '@/utils/inspection-files':{isInspectionImage:()=>true},'@/utils/task-imagery':{taskImageryService(){}},
   '@/utils/review-geotiff':{},'../shared/workbench-validation':{validateWorkbenchForm:()=>true},'./workspace.scss':{},
-  ...Object.fromEntries(['@/workspace-components/shared/WorkbenchRequiredMark.vue','@/workspace-components/shared/PhotoBoundaryDialog.vue','@/workspace-components/shared/ImageGeoreferenceDialog.vue','@/workspace-components/shared/WorkflowAssigneePicker.vue','@/workspace-components/shared/WorkbenchFeedback.vue','@/workspace-components/spot-identification/SpotDistributionMap.vue','@/components/TaskRangeMap.vue','./UavReviewPhotoPicker.vue'].map(x=>[x,{}])),
+  ...Object.fromEntries(['@/workspace-components/shared/WorkbenchRequiredMark.vue','@/workspace-components/shared/PhotoBoundaryDialog.vue','@/workspace-components/shared/ImageGeoreferenceDialog.vue','@/workspace-components/shared/WorkflowAssigneePicker.vue','@/workspace-components/shared/WorkbenchFeedback.vue','@/workspace-components/spot-identification/SpotDistributionMap.vue','@/components/TaskRangeMap.vue','./UavReviewPhotoPicker.vue','./ReviewPhotoViewport.vue'].map(x=>[x,{}])),
 }
 const flush=async()=>{await vue.nextTick();await new Promise(r=>setImmediate(r));await vue.nextTick()}
 try{
