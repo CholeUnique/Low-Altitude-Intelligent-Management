@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
+import * as vue from 'vue'
+import {renderToString} from 'vue/server-renderer'
+import {parse,compileScript} from '@vue/compiler-sfc'
 const module = {exports:{}}
 const source = ts.transpileModule(readFileSync('src/utils/topic-feature-fields.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText
 const areaModule = {exports:{}}
@@ -55,6 +58,21 @@ assert.equal(topicFeatureRows([{name:'CUSTOM_CODE',label:'一田一码',value:'0
 console.log('topic fields: mu conversion, explicit units, PDF labels and source preservation passed')
 
 const {topicFeatureSummary}=module.exports
-assert.deepEqual(topicFeatureSummary([{name:'YJJBNTTBBH',value:'001234'},{name:'DLMC',value:'水田'}],'permanent'),{label:'地类名称--一田一码',value:'水田--001234'})
+assert.deepEqual(topicFeatureSummary([{name:'YJJBNTTBBH',value:'001234'},{name:'DLMC',value:'水田'}],'permanent'),{label:'地类名称--一田一码',value:'水田--001234',landName:'水田',plotNumber:'001234',sourceFields:['DLMC','YJJBNTTBBH']})
 assert.equal(topicFeatureSummary([{name:'DCBH',value:'3212021000001'},{name:'DLMC',value:'旱地'}],'parcel').value,'旱地--3212021000001')
 assert.equal(topicFeatureSummary([{name:'OBJECTID',value:'999'}],'permanent','水田').value,'水田','OBJECTID 不能冒充一田一码')
+
+const {descriptor}=parse(readFileSync('src/components/TopicFeatureDetails.vue','utf8'))
+const componentModule={exports:{}}
+const componentCode=ts.transpileModule(compileScript(descriptor,{id:'feature-identity',inlineTemplate:true}).content,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText
+new Function('module','exports','require',componentCode)(componentModule,componentModule.exports,id=>id==='vue'?vue:module.exports)
+for(const role of ['permanent','parcel']){
+ const number=role==='permanent'?'YJJBNTTBBH':'DCBH'
+ const attributes=[{name:number,label:number,value:'0003212021234567890'},{name:'DLMC',label:'地类名称',value:'水田'},{name:'ZZSXMC',label:'种植属性名称',value:'粮食'}]
+ const html=await renderToString(vue.createSSRApp(componentModule.exports.default,{features:[{serviceId:'1',serviceName:'测试图层',rows:attributes}],selected:0,roles:{1:role},embedded:true}))
+ assert(html.includes('land-identity')&&html.includes('plot-identity'),'Identity values occupy separate highlight cards')
+ assert.equal((html.match(/>水田</g)||[]).length,1,'Land name must not be repeated in the details table')
+ assert.equal((html.match(/>0003212021234567890</g)||[]).length,1,'Long plot code and leading zeros are preserved, without a duplicate row')
+ assert(html.includes('粮食'),'Unrelated business attributes remain visible')
+}
+console.log('Feature identity: separate cards, unique land/code values and remaining business details passed')

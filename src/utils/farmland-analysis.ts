@@ -76,10 +76,25 @@ export async function partitionUploadedRange(upload:SpatialCollection,high:Spati
   const combine = (kind:FarmlandGroupKind,name:string,members:FarmlandGroupKind[],source:string):FarmlandPartition => {const selected=atoms.filter(item=>members.includes(item.kind));return {...partition(kind,name,{type:'FeatureCollection',features:selected.flatMap(item=>item.data.features)},[source],selected.reduce((sum,item)=>sum+item.areaSqm,0)),aggregate:true}}
   // 汇总分类仅复用后端裁切结果，保留四个互斥原子区域，面积和导出不重复相加。
   const partitions = [combine('IN_HIGH','高标范围内（含重叠）',['A_ONLY','OVERLAP'],sources.high.layerName),combine('IN_PERMANENT','永农范围内（含重叠）',['B_ONLY','OVERLAP'],sources.permanent.layerName),...atoms]
-  const total=atoms.reduce((sum,item)=>sum+item.areaSqm,0),tolerance=Math.max(.05,first.areaA*1e-7)
+  const numericTolerance=(inputArea:number)=>Math.max(.05,inputArea*1e-7)
+  const stages=[{name:'高标范围内',source:first.both.areaSqm,...inside},{name:'高标范围外',source:first.aOnly.areaSqm,...outside}]
+  // A chained operation exports WGS84 geometry then projects/repairs it again.
+  // Accept only measured input drift bounded by 2 ppm (absolute floor 0.05㎡).
+  // Never rescale backend statistics or allow a stage to duplicate its own input.
+  for(const stage of stages){
+    const drift=Math.abs(stage.inputArea-stage.source),limit=Math.max(.05,stage.source*2e-6)
+    if(drift>limit||(stage.source>0&&stage.crs!==first.crsUsed))throw new Error(`范围覆盖面积校验未通过：${stage.name}再次输入面积由 ${stage.source}㎡变为 ${stage.inputArea}㎡，超过坐标转换容差 ${limit}㎡或投影不一致（${first.crsUsed} / ${stage.crs}），请检查后端几何转换`)
+  }
+  const total=atoms.reduce((sum,item)=>sum+item.areaSqm,0)
+  const inheritedDrift=stages.reduce((sum,stage)=>sum+Math.max(0,stage.inputArea-stage.source),0)
+  const tolerance=numericTolerance(first.areaA)+inheritedDrift
   if(total>first.areaA+tolerance){
     const number=(value:number)=>value.toLocaleString('zh-CN',{maximumFractionDigits:6})
     throw new Error(`范围覆盖面积校验未通过：上传范围 ${number(first.areaA)}㎡，四类合计 ${number(total)}㎡，超出 ${number(total-first.areaA)}㎡（容差 ${number(tolerance)}㎡）。${atoms.map(item=>`${item.name} ${number(item.areaSqm)}㎡`).join('；')}。分阶段输入面积：高标范围内 ${number(first.both.areaSqm)}→${number(inside.inputArea)}㎡，范围外 ${number(first.aOnly.areaSqm)}→${number(outside.inputArea)}㎡；投影 ${first.crsUsed} / ${inside.crs} / ${outside.crs}`)
+  }
+  if(first.both.areaSqm+first.aOnly.areaSqm>first.areaA+numericTolerance(first.areaA))throw new Error('范围覆盖面积校验未通过：第一轮高标范围内、外面积超过上传范围，请检查后端裁切结果')
+  for(const stage of stages){
+    if(stage.insideArea+stage.outsideArea>stage.inputArea+numericTolerance(stage.inputArea))throw new Error(`范围覆盖面积校验未通过：${stage.name}本轮输出 ${stage.insideArea+stage.outsideArea}㎡超过本轮输入 ${stage.inputArea}㎡，请检查后端裁切结果`)
   }
   return {partitions,areaSqm:first.areaA,crsUsed:first.crsUsed}
 }

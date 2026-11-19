@@ -90,3 +90,24 @@ await assert.rejects(partitionUploadedRange(upload,highData,permData,0,{high,per
   if(step===1)response.both=group('OVERLAP',35,59)
   return response
 }),error=>error.message.includes('上传范围 100㎡')&&error.message.includes('四类合计 115㎡')&&error.message.includes('超出 15㎡')&&error.message.includes('投影 test'),'Actual backend group totals exceeding the range must still fail with concrete diagnostic values')
+
+const driftResponses=[
+ {areaA:431338.7107,crsUsed:'CGCS2000_3DEG_CM_120E',both:group('OVERLAP',198770.3085,1),aOnly:group('A_ONLY',232568.402,2)},
+ {areaA:198770.6139,crsUsed:'CGCS2000_3DEG_CM_120E',both:group('OVERLAP',194784.8808,3),aOnly:group('A_ONLY',3985.7324,4)},
+ {areaA:232568.2421,crsUsed:'CGCS2000_3DEG_CM_120E',both:group('OVERLAP',50027.7981,5),aOnly:group('A_ONLY',182540.4442,6)},
+]
+let driftStep=0
+const rawDrift=await partitionUploadedRange(upload,highData,permData,0,{high,permanent,uploadName:'test1'},async()=>structuredClone(driftResponses[driftStep++]))
+assert.deepEqual(rawDrift.partitions.slice(2).map(group=>group.areaSqm),[3985.7324,50027.7981,194784.8808,182540.4442],'Real WGS84 round-trip fixture keeps all unfiltered backend areas without rescaling')
+assert.equal(rawDrift.areaSqm,431338.7107,'Upload reference is never rewritten to hide drift')
+for(const mutation of ['input','offsetting-output']){
+ let step=0
+ await assert.rejects(partitionUploadedRange(upload,highData,permData,0,{high,permanent,uploadName:'回归'},async()=>{
+  const index=step++,response=structuredClone(responses[index])
+  if(mutation==='input'&&index===1)response.areaA=61
+  if(mutation==='offsetting-output'&&index===1)response.both=group('OVERLAP',21,4)
+  if(mutation==='offsetting-output'&&index===2)response.both=group('OVERLAP',9,7)
+  return response
+ }),/范围覆盖面积校验未通过/,'Large input drift and a duplicate hidden by another branch deficit must both fail')
+}
+console.log('Coverage conservation: bounded projection round-trip, unchanged backend totals and independent per-stage validation passed')

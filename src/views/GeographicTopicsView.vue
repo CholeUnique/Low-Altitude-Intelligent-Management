@@ -5,7 +5,7 @@ import { arcgisToGeoJSON } from '@terraformer/arcgis'
 import TopicAdministrativeTree from '@/components/TopicAdministrativeTree.vue'
 import type { RegionSelection } from '@/api/region-clip'
 import 'leaflet/dist/leaflet.css'
-import { FullScreen, Setting, Close, Collection, Search, Upload } from '@element-plus/icons-vue'
+import { FullScreen, Setting, Close, Collection, Search, Upload as UploadIcon } from '@element-plus/icons-vue'
 import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
 import TopicLayerCard from '@/components/TopicLayerCard.vue'
@@ -770,7 +770,7 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
 </script>
 
 <template>
-  <section ref="root" class="geographic-topics" :style="{ '--legend-space': `${legendSpace}px`, '--details-width':isFarmland?(resultLayerKeys.length?'min(560px, calc(100% - 50px))':'min(320px, calc(100% - 50px))'):undefined }" aria-label="专题地图">
+  <section ref="root" class="geographic-topics" :style="{ '--legend-space': `${legendSpace}px`, '--details-width':isFarmland?(resultLayerKeys.length?'min(500px, calc(100% - 50px))':'min(300px, calc(100% - 50px))'):undefined }" aria-label="专题地图">
     <div ref="canvas" class="topic-map" :class="{'topic-map--drawing':drawingToolActive}"></div>
     <div class="topic-map-reference">
       <div class="topic-north" role="img" aria-label="指北针：上方为北">
@@ -779,7 +779,7 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
       <OverviewMapScale :map="toolsMap" />
     </div>
     <TopicMapToolbar v-if="toolsMap" :key="uploadScope" :map="toolsMap" :load-drawing="loadDrawing" :suspended="configOpen || overlayOpen || uploadDialogOpen" :coverage-enabled="topic.id===HIGH_STANDARD_TOPIC_ID" :analysis-label="isFarmland?'高标田与永农对比分析':undefined" @drawing="setDrawingTool" @overlay="openOverlay('difference')" @coverage="openOverlay('coverage')">
-      <button v-if="topic.id===HIGH_STANDARD_TOPIC_ID" type="button" aria-label="上传 SHP 图层" title="上传 SHP 图层" @click="openUpload()"><Upload /></button>
+      <button v-if="topic.id===HIGH_STANDARD_TOPIC_ID" type="button" aria-label="上传 SHP 图层" title="上传 SHP 图层" @click="openUpload()"><UploadIcon aria-hidden="true" /><span>上传</span></button>
       <button :aria-label="fullscreen ? '退出全屏' : '全屏展示'" :title="fullscreen ? '退出全屏' : '全屏展示'" @click="toggleFullscreen"><FullScreen /></button>
       <button :class="{active:configOpen}" :aria-expanded="configOpen" title="场景配置" @click="configOpen = !configOpen"><Setting /><span>场景配置</span></button>
     </TopicMapToolbar>

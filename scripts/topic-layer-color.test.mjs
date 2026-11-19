@@ -151,6 +151,13 @@ try {
   const emitted=analysisEvents.filter(([name])=>name==='statistics').at(-1)[1][0]
   assert.equal(emitted.metrics.find(metric=>metric.label==='差异面积').areaSqm,1)
   assert.equal(emitted.fullMetrics.find(metric=>metric.label==='差异面积').areaSqm,2,'Complete backend totals reach the popup without replacing filtered panel values')
+  analysis.display(data,{sourceA:{layerName:'高标田'},sourceB:{layerName:'永农'}},[],'coverage',false,[
+    {kind:'NEITHER',name:'都不满足',color:palette[0],data,areaSqm:1},
+    {kind:'OVERLAP',name:'同时满足',color:palette[1],data,areaSqm:1},
+  ])
+  const defaults=analysis.results.value.at(-1).groups
+  assert.equal(defaults[0].mode,'boundary');assert.equal(defaults[0].layer.shapes[0].style.fillOpacity,0)
+  assert.equal(defaults[1].mode,'filled');assert(defaults[1].layer.shapes[0].style.fillOpacity>0)
   analysisProps.farmland=false
   analysis.display({type:'FeatureCollection',features:[{...feature,properties:{analysisCoverage:'INSIDE'}}]}, { sourceA: { layerName: '上传范围' }, sourceB: { layerName: '目标图层' } }, [], 'coverage', false)
   const generic=analysis.results.value[0]

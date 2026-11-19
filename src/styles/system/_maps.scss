@@ -1,6 +1,6 @@
 // Brand surfaces only: geographic fills, standard category colors and geometry stay unchanged.
 #app :is(.geographic-topics, .facilities-overview) { color: #e6f1ff; background: var(--ui-brand); }
-#app .geographic-topics { --details-width: 340px; --left-panel-top: 96px; --details-height: clamp(220px, calc(100% - var(--left-panel-top) - 92px), 660px); }
+#app .geographic-topics { --details-width: 310px; --left-panel-top: 96px; --details-height: clamp(220px, calc(100% - var(--left-panel-top) - 92px), 660px); }
 #app :is(.topic-title, .facilities-overview .page-title) { top: 20px; left: 20px; }
 #app .topic-title strong, #app .facilities-overview .page-title h1 { font-size: 24px; line-height: 32px; }
 #app .topic-title small, #app .facilities-overview .page-title p { font-size: 12px; line-height: 18px; }
@@ -36,10 +36,10 @@
 #app .topic-category em, #app .topic-category small { font-size: 12px; color: #a8c0d2; }
 #app .analysis-group-switch > span { font-size: 13px; line-height: 22px; }
 #app .analysis-group-switch > small { font-size: 12px; color: #9fb7c9; }
-#app .topic-inspector-rail { width: max-content; min-width: min(320px, calc(100% - 40px)); max-width: min(560px, calc(100% - 40px)); align-items: flex-end; }
+#app .topic-inspector-rail { width: min-content; min-width: min(300px, calc(100% - 40px)); max-width: min(480px, calc(100% - 40px)); align-items: stretch; }
 #app .topic-farmland-stat, #app .topic-farmland-stat :is(.region-statistics,.analysis-statistics,.topic-statistics) { scrollbar-width: none; -ms-overflow-style: none; }
 #app .topic-farmland-stat::-webkit-scrollbar, #app .topic-farmland-stat :is(.region-statistics,.analysis-statistics,.topic-statistics)::-webkit-scrollbar { display: none; }
-#app .topic-farmland-stat { width: max-content; min-width: min(320px, 100%); max-width: 100%; padding: 16px; }
+#app .topic-farmland-stat { width: auto; min-width: 0; max-width: 100%; padding: 16px; box-sizing: border-box; }
 #app .topic-farmland-stat > header { font-size: 16px; line-height: 24px; padding-bottom: 12px; border-color: var(--ui-divider); }
 #app :is(.analysis-statistics, .topic-statistics) {
   h3 { font-size: 16px; line-height: 22px; color: #e6f1ff; }
@@ -60,12 +60,15 @@
 #app .topic-tools .tool-feedback:has(+ .tool-menu) { top: calc(100% + 160px); }
 #app .topic-feature-details {
   font-size: 13px;
-  header { padding: 16px; border-color: var(--ui-divider); }
+  > header { padding: 8px 12px; margin: 0; gap: 8px; border-color: var(--ui-divider); }
+  > header div { gap: 0; }
+  > header button { width: 24px; height: 24px; padding: 0; line-height: 24px; }
   header b { font-size: 16px; line-height: 24px; color: #e6f1ff; }
   small { font-size: 12px; color: #9fb7c9; }
   nav button, .same-layer button { font-size: 12px; min-height: 32px; border-color: var(--ui-border); background: rgb(121 189 218 / 5%); }
   nav button[aria-selected='true'] { color: #b4f3fb; background: var(--ui-selected); border-color: #3b9fb4; }
-  section { padding: 16px; }
+  section { padding: 10px 12px; }
+  > nav { padding: 6px 12px; }
   dt { color: #9fb7c9; font-size: 13px; }
   dd { color: #e6f1ff; font-size: 13px; }
   dl > div { padding-block: 10px; border-color: var(--ui-divider); }
@@ -166,7 +169,7 @@
 }
 
 @media (max-width: 1400px) {
-  #app .geographic-topics { --details-width: 310px; }
+  #app .geographic-topics { --details-width: 300px; }
   #app .topic-tools .tool-actions button { padding-inline: 7px; font-size: 12px; }
   #app .cockpit--glass .overview-float-panel { padding: 12px; gap: 10px; }
 }
@@ -210,14 +213,14 @@
 }
 
 // Expand the inspector for original/result columns; keep the other panels independent.
-#app .geographic-topics .topic-legend {max-width:min(350px,calc(100% - 30px));}
-#app .geographic-topics .topic-legend.has-result-columns {max-width:min(560px,calc(100% - 30px));}
+#app .geographic-topics .topic-legend {max-width:min(320px,calc(100% - 30px));}
+#app .geographic-topics .topic-legend.has-result-columns {max-width:min(500px,calc(100% - 30px));}
 #app .geographic-topics .topic-legend {transition:width var(--ui-panel-motion),max-width var(--ui-panel-motion),translate var(--ui-panel-motion),opacity var(--ui-panel-motion);}
 #app .geographic-topics .layer-card-toggle b {font-size:12px;line-height:20px;font-weight:700;}
 #app .geographic-topics .legend-heading b,
 #app .geographic-topics .topic-feature-details header b,
 #app .geographic-topics .topic-farmland-stat>header {font-size:15px;line-height:24px;}
-#app .geographic-topics .topic-feature-details {width:300px;}
+#app .geographic-topics .topic-feature-details.is-embedded {width:auto;min-width:0;}
 #app .geographic-topics .topic-tools {display:flex;gap:8px;padding:0;background:none;border:0;box-shadow:none;backdrop-filter:none;}
 #app .geographic-topics .topic-tools .tool-actions {padding:5px;gap:4px;border:1px solid var(--ui-border);border-radius:10px;background:var(--ui-glass);box-shadow:var(--ui-shadow);backdrop-filter:blur(14px);}
 #app .geographic-topics .topic-tools .tool-analysis {padding:5px;border:1px solid #71dbe778;border-radius:10px;background:#12475af2;box-shadow:0 0 16px #54d7df20;}
