@@ -21,6 +21,7 @@ export interface PageQuery {
   planId?: string
   droneSn?: string
   gatewaySn?: string
+  mediaType?: 'VIDEO' | 'PHOTO'
   flightTaskId?: string
   status?: number
   waylineId?: string
