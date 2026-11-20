@@ -428,10 +428,9 @@ function routeTypeLabel(value: string) {
   return value
 }
 function taskTypeLabel(value: string) {
-  // 后端暂未提供 type 枚举说明；按当前任务数据中 type 与计划名称的对应关系展示。
-  if (value === '0') return '计划飞行'
-  if (value === '1') return '一键起飞'
-  return display(value)
+  const code = value?.trim()
+  const labels: Record<string, string> = { '1': '立即执行', '2': '定时执行', '3': '重复执行', '4': '一键起飞' }
+  return code ? labels[code] || `类型 ${code}` : '--'
 }
 
 async function readAll<T>(request: (pageNum: number) => Promise<FlightReviewPage<T>>): Promise<T[]> {
@@ -614,7 +613,7 @@ const rows = computed<PlanRow[]>(() => plans.value.map((plan) => {
   }
 }))
 const routeTypes = computed(() => [...new Set([...tasks.value.map(task => task.waylineType), ...rows.value.map(row => row.routeType)].filter(Boolean))])
-const taskTypes = computed(() => [...new Set(['0', '1', ...rows.value.map(row => row.taskType)].filter(Boolean))])
+const taskTypes = computed(() => [...new Set(['1', '2', '3', '4', taskTypeFilter.value, ...rows.value.map(row => row.taskType)].filter(Boolean))])
 const devices = computed(() => {
   const values = new Map<string, { sn: string; name: string }>()
   tasks.value.filter(task => task.sn).forEach(task => values.set(task.sn, { sn: task.sn, name: task.deviceType ? `${task.deviceType} · ${task.sn}` : task.sn }))

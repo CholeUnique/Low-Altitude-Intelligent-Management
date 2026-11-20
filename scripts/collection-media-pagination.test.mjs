@@ -21,6 +21,22 @@ const first = task('A'), second = task('B'), third = task('C')
 const all = { task: () => true, media: () => true }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
+// Backend type filters are applied before pagination and cached independently.
+{
+  const calls = []
+  const pager = pagerApi.createCollectionMediaPager([first], async params => {
+    calls.push(params)
+    return { list: [photo(params.mediaType || 'all')], total: 1 }
+  })
+  await pager.readUntil(1, all)
+  await pager.readUntil(1, { ...all, mediaType: 'VIDEO', droneSn: 'drone-1' })
+  await pager.readUntil(1, { ...all, mediaType: 'PHOTO', droneSn: 'drone-1' })
+  await pager.readUntil(1, { ...all, mediaType: 'VIDEO', droneSn: 'drone-1' })
+  assert.deepEqual(calls.map(call => call.mediaType), [undefined, 'VIDEO', 'PHOTO'])
+  assert.equal(pager.taskMedia('A', 'drone-1', 'VIDEO')[0].id, 'VIDEO')
+  assert.equal(pager.taskMedia('A', 'drone-1', 'PHOTO')[0].id, 'PHOTO')
+}
+
 // Device filters reach the media API and use a separate cache from unfiltered results.
 {
   const calls = []
@@ -106,7 +122,7 @@ async function harness(records, options = {}) {
         calls.push({ kind: 'media', ...params })
         const override = hook?.(params)
         if (override) return override
-        const rows = records[params.taskId] || []
+        const rows = (records[params.taskId] || []).filter(row => !params.mediaType || (params.mediaType === 'VIDEO' ? row.mediaType === '10' || /\.(mp4|mov)$/i.test(row.name) : row.mediaType !== '10' && !/\.(mp4|mov)$/i.test(row.name)))
         return { list: rows.slice((params.pageNum - 1) * params.pageSize, params.pageNum * params.pageSize), total: rows.length }
       },
     },
@@ -125,6 +141,48 @@ async function harness(records, options = {}) {
   return { vm, calls, props, setHook(value) { hook = value }, close: () => app.unmount() }
 }
 const mediaCalls = calls => calls.filter(call => call.kind === 'media')
+
+// Applying and resetting the UI filter sends backend type values and preserves paging.
+{
+  const h = await harness({ A: [photo('one'), { ...photo('video'), name: 'video.bin', mediaType: '10' }, photo('two')] })
+  h.vm.draftFilters.mediaTypeFilter = 'video'
+  h.vm.applyFilters()
+  await flush()
+  assert.equal(mediaCalls(h.calls).at(-1).mediaType, 'VIDEO')
+  assert.deepEqual(h.vm.pageMedia.map(entry => entry.media.id), ['video'])
+  assert.equal(h.vm.knownTotal, 1)
+  h.vm.draftFilters.mediaTypeFilter = 'image'
+  h.vm.applyFilters()
+  await flush()
+  assert.equal(mediaCalls(h.calls).at(-1).mediaType, 'PHOTO')
+  assert.deepEqual(h.vm.pageMedia.map(entry => entry.media.id), ['one', 'two'])
+  h.vm.resetFilters()
+  await flush()
+  assert.equal(h.vm.pageMedia.length, 3)
+  h.close()
+}
+
+// PHOTO results may contain non-image sidecar files; fill pages using actual images only.
+{
+  const sidecars = Array.from({ length: 44 }, (_, index) => ({ ...photo(`sidecar-${index}`), name: `sidecar-${index}.${['MRK', 'NAV', 'OBS', 'RTK'][index % 4]}`, mediaType: 'PHOTO' }))
+  const h = await harness({ A: [...sidecars, ...list('image', 45)] })
+  h.vm.draftFilters.mediaTypeFilter = 'image'
+  h.vm.applyFilters()
+  await flush()
+  assert.equal(h.vm.pageMedia.length, 40)
+  assert.equal(h.vm.pageMedia[0].media.id, 'image-0')
+  assert.equal(h.vm.pageMedia.at(-1).media.id, 'image-39')
+  assert(mediaCalls(h.calls).filter(call => call.mediaType === 'PHOTO').length >= 3)
+  const entry = h.vm.pageMedia.at(-1)
+  h.vm.openMedia(entry.media, entry.task, h.vm.filteredMedia)
+  await h.vm.switchPreview(1)
+  assert.equal(h.vm.previewMedia.id, 'image-40')
+  assert.equal(h.vm.knownTotal, 45)
+  await h.vm.loadMediaPage(2)
+  assert.equal(h.vm.pageMedia.length, 5)
+  assert(h.vm.filteredMedia.every(entry => entry.media.name.endsWith('.jpg')))
+  h.close()
+}
 
 // First page only; full-screen page boundary, cross-task boundary, last record and cached previous page.
 {

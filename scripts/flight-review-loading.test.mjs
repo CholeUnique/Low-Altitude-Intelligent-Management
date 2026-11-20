@@ -38,7 +38,7 @@ const renderer = Vue.createRenderer({
   insert(){}, remove(){}, setText(){}, setElementText(){}, parentNode(){}, nextSibling(){}, patchProp(){}
 })
 let source = readFileSync('src/workspace-components/spot-identification/FlightTaskReviewPanel.vue','utf8')
-source = source.replace('</script>', 'defineExpose({ getVersion: () => loadVersion, pageRows, rows, currentPage, loadTaskMedia, mediaByTask, departmentMediaSummary, completedMediaTaskIds, resultTypeFilter, openAiRecognition, aiPlan, selectedAlgorithmId, aiUnavailable, aiAlgorithms, draftFilters, applyFilters, resetFilters });\n</script>')
+source = source.replace('</script>', 'defineExpose({ getVersion: () => loadVersion, pageRows, rows, currentPage, loadTaskMedia, mediaByTask, departmentMediaSummary, completedMediaTaskIds, resultTypeFilter, openAiRecognition, aiPlan, selectedAlgorithmId, aiUnavailable, aiAlgorithms, taskTypes, taskTypeLabel, draftFilters, applyFilters, resetFilters });\n</script>')
 const script = compileScript(parse(source).descriptor, {id:'review-lazy-test'}).content
 const regionUtil = load(readFileSync('src/utils/region-path.ts','utf8'),{})
 assert.equal(regionUtil.regionPaths([{code:'32',name:'江苏省',children:[{code:'3212',name:'泰州市',children:[{code:'321202',name:'海陵区'}]}]}]).get('321202'), '江苏省 / 泰州市 / 海陵区')
@@ -69,6 +69,14 @@ component.render = ()=>null
 const app = renderer.createApp(component)
 const vm = app.mount({})
 const flush = async()=>{ for(let i=0;i<8;i++){await new Promise(resolve=>setImmediate(resolve));await Vue.nextTick()} }
+await flush()
+assert.deepEqual(vm.taskTypes.slice(0, 4), ['1', '2', '3', '4'])
+assert.deepEqual(['1', '2', '3', '4', '0', ''].map(vm.taskTypeLabel), ['立即执行', '定时执行', '重复执行', '一键起飞', '类型 0', '--'])
+vm.draftFilters.taskTypeFilter = '2'
+vm.applyFilters()
+await flush()
+assert.equal(resultCalls.at(-1).type, '2', 'Type filter submits the unchanged backend code')
+vm.resetFilters()
 await flush()
 assert.equal(vm.pageRows.length, 16, 'Server provides only the current page')
 assert.equal(vm.pageRows[0].fileCount, 201, 'Uses mediaFileCount, not resultCount')

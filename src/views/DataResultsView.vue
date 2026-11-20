@@ -77,10 +77,10 @@ function currentFilter(): CollectionMediaFilter {
   const selectedType = mediaTypeFilter.value
   return {
     droneSn: selectedDevice || undefined,
+    mediaType: selectedType === 'video' ? 'VIDEO' : selectedType === 'image' ? 'PHOTO' : undefined,
     task: task => !selectedTask || task.id === selectedTask,
     media: (media, task) => {
-      if (!isAerialMedia(media)) return false
-      if (selectedType && (isVideoMedia(media) ? 'video' : 'image') !== selectedType) return false
+      if (selectedType === 'image' ? !isPhotoMedia(media) : selectedType === 'video' ? !isVideoMedia(media) : !isAerialMedia(media)) return false
       const taskMatches = `${task.name}${task.waylineName}${task.deviceName}${task.id}`.toLowerCase().includes(query)
       if (query && !taskMatches && !media.name.toLowerCase().includes(query)) return false
       return !cutoff || mediaTimestamp(media, task) >= cutoff
@@ -113,7 +113,7 @@ function toReviewMedia(media: LiveMediaItem, task: UavFlightTaskOption): FlightR
 }
 function taskReviewMedia(task: UavFlightTaskOption) {
   void mediaCacheVersion.value
-  return (pager?.taskMedia(task.id, previewFilter?.droneSn) || []).map(media => toReviewMedia(media, task))
+  return (pager?.taskMedia(task.id, previewFilter?.droneSn, previewFilter?.mediaType) || []).map(media => toReviewMedia(media, task))
 }
 function openSrtInfo(media: LiveMediaItem, task: UavFlightTaskOption) {
   if (!isVideoMedia(media)) return
@@ -126,11 +126,17 @@ function mediaExtension(media: LiveMediaItem) {
 }
 function isVideoMedia(media: LiveMediaItem) {
   const declaredType = String(media.mediaType || '').toUpperCase()
-  return ['MP4', 'MOV', 'M4V', 'AVI', 'MKV', 'WEBM'].includes(mediaExtension(media)) || declaredType.includes('VIDEO')
+  return declaredType === '10' || ['MP4', 'MOV', 'M4V', 'AVI', 'MKV', 'WEBM'].includes(mediaExtension(media)) || declaredType.includes('VIDEO')
+}
+function isPhotoMedia(media: LiveMediaItem) {
+  if (isVideoMedia(media)) return false
+  const extension = mediaExtension(media)
+  if (extension) return ['JPG', 'JPEG', 'PNG', 'WEBP', 'BMP', 'TIF', 'TIFF', 'HEIC', 'HEIF'].includes(extension)
+  const type = String(media.mediaType || '').trim().toUpperCase()
+  return type === 'PHOTO' || type === 'IMAGE' || type.startsWith('IMAGE/')
 }
 function isAerialMedia(media: LiveMediaItem) {
-  const type = String(media.mediaType || '').trim().toUpperCase()
-  return isVideoMedia(media) || ['JPG', 'JPEG', 'PNG', 'WEBP', 'BMP', 'TIF', 'TIFF', 'HEIC', 'HEIF'].includes(mediaExtension(media)) || type.includes('IMAGE') || type.includes('PHOTO')
+  return isVideoMedia(media) || isPhotoMedia(media)
 }
 async function loadSummary(version: number) {
   try {
