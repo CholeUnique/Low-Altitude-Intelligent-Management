@@ -17,6 +17,7 @@
     "test:uav-review-media": "node scripts/uav-review-media.test.mjs",
     "test:workflow-display": "node scripts/workflow-display.test.mjs",
     "test:task-detail": "node scripts/task-detail-readonly.test.mjs",
+    "test:deployment": "node scripts/deployment.test.mjs",
     "test:facility-workbench": "node scripts/farmland-facility-workflow.test.mjs && node scripts/facility-task-details.test.mjs && node scripts/facility-workbench-context.test.mjs && node scripts/facility-workbench-form.test.mjs",
     "test:spatial-analysis": "node scripts/spatial-compare-task.test.mjs && node scripts/spatial-analysis.test.mjs && node scripts/spatial-full-statistics.test.mjs && node scripts/topic-upload-analysis.test.mjs && node scripts/topic-compatibility.test.mjs && node scripts/feature-hover.test.mjs && node scripts/topic-area.test.mjs && node scripts/farmland-analysis.test.mjs && node scripts/farmland-region-comparison.test.mjs && node scripts/topic-layer-color.test.mjs && node scripts/topic-layer-search.test.mjs",
     "test:region-clip": "node scripts/api-json-numbers.test.mjs && node scripts/region-clip.test.mjs && node scripts/region-clip-layer.test.mjs && node scripts/map-service-layer.test.mjs && node scripts/region-statistics.test.mjs",

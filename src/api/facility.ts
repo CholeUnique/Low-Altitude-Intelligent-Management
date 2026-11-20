@@ -70,9 +70,11 @@ export const deleteFacility = (deptId: string, id: string | number) => apiClient
 /** 移动端问题上报页地址兜底：本地 localhost 生成二维码时手机无法访问，退回该部署地址。
  *  可通过构建变量 VITE_FACILITY_REPORT_URL 覆盖。 */
 const configuredReportUrl = import.meta.env.VITE_FACILITY_REPORT_URL?.trim()
-export const FACILITY_REPORT_PAGE_URL = configuredReportUrl || 'http://223.2.41.169:8080/facility-report'
-/** 二维码里的上报页地址：优先取当前正在访问的站点（部署到哪都能扫），localhost 场景退回部署地址。 */
+const configuredAppUrl = import.meta.env.VITE_PUBLIC_APP_URL?.trim().replace(/\/+$/, '')
+export const FACILITY_REPORT_PAGE_URL = configuredReportUrl || `${configuredAppUrl || 'http://58.213.29.196:38081'}/facility-report`
+/** 二维码统一使用配置的前端入口；未配置时才根据当前站点生成。 */
 export function resolveFacilityReportUrl() {
+  if (configuredReportUrl || configuredAppUrl) return FACILITY_REPORT_PAGE_URL
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   if (!origin || /^https?:\/\/(localhost|127\.)/i.test(origin)) return FACILITY_REPORT_PAGE_URL
   return `${origin}/facility-report`

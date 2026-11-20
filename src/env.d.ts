@@ -4,6 +4,8 @@ interface ImportMetaEnv {
   readonly VITE_TIANDITU_TOKEN?: string
   readonly VITE_USE_MOCK?: string
   readonly VITE_API_BASE_URL?: string
+  readonly VITE_PUBLIC_APP_URL?: string
+  readonly VITE_FACILITY_REPORT_URL?: string
   readonly VITE_DOM_XYZ_TILE_URL?: string
   readonly VITE_DAS_FLY_EMBED?: string
   /** 低空大师直播组件地址；分享码将以 share_code 查询参数传入。 */

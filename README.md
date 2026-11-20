@@ -852,13 +852,22 @@ Vue 前端
 
 # 17.1 后端接口真源
 
-项目正式后端接口以用户开发环境中的内网 Swagger 为准：
+当前部署的后端入口为 `http://58.213.29.196:38080/`。Swagger入口（是否开放以后端配置为准）：
 
 ```text
-http://223.2.41.169:8080/swagger-ui/index.html#/
+http://58.213.29.196:38080/swagger-ui/index.html#/
 ```
 
-该地址不保证在外部环境可访问，因此正式开发时由运行 Cursor 的开发机直接读取 Swagger/OpenAPI。
+正式联调应从开发机直接读取可访问的 Swagger/OpenAPI 或后端提供的接口契约。
+
+## 17.1.1 当前前端部署入口
+
+- 浏览器入口：`http://58.213.29.196:38081/`。
+- 浏览器业务请求：同源 `/api/v1/...`，由38081服务转发到 `http://58.213.29.196:38080/api/v1/...`。
+- `.env.development`、`.env.production` 的 `API_PROXY_TARGET` 指向新后端，`VITE_PUBLIC_APP_URL` 指向上述前端入口；设施上报二维码也使用此入口。
+- `npm run build` 生成 `dist/`。将其内容部署到静态目录，并将 `deploy/nginx.conf` 中的server块加入Nginx的 `http {}`；按实际目录调整 `root`，确认38081端口开放后加载配置。
+- `npm run preview` 仅用于本地核对生产构建，默认端口38081，并代理到新后端；生产环境使用Nginx。
+- 天地图、独立ArcGIS、低空大师、对象存储等第三方服务仍使用它们各自的实际地址；历史取证文档中的旧地址不参与运行或构建。
 
 项目文档中的 API URL 若未从 Swagger 核验，应理解为：
 

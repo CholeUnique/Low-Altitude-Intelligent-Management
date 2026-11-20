@@ -4,7 +4,7 @@ import ts from 'typescript'
 
 let request, response={imageCount:2}
 const client = { post: async (...args) => { request = args; return response } }
-const source = readFileSync('src/api/facility.ts', 'utf8').replaceAll('import.meta.env.VITE_FACILITY_REPORT_URL', 'undefined')
+const source = readFileSync('src/api/facility.ts', 'utf8').replaceAll('import.meta.env.VITE_FACILITY_REPORT_URL', 'undefined').replaceAll('import.meta.env.VITE_PUBLIC_APP_URL', 'undefined')
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const module = { exports: {} }
 new Function('require', 'module', 'exports', compiled)(name => {
