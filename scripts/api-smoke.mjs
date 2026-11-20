@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 
-const baseUrl = process.env.SMOKE_BASE_URL || 'http://223.2.41.169:8080'
+const baseUrl = process.env.SMOKE_BASE_URL || 'http://58.213.29.196:38080'
 const username = process.env.SMOKE_USER || 'admin'
 const password = process.env.SMOKE_PASS
 if (!password) {
