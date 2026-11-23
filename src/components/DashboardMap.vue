@@ -8,6 +8,7 @@ import type { GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 
 import taizhouDistrictBoundaries from '@/assets/geo/taizhou-districts.json'
+import hailingBoundary from '@/assets/geo/hailing-boundary.json'
 import { getJiulongArcGisLayerBounds } from '@/utils/jiulong-arcgis-layers'
 import { getMapServiceRegionTree, listEnabledMapServices, type MapServiceItem, type MapServiceRegionGroup, type MapServiceRegionNode } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
@@ -122,7 +123,8 @@ const TAIZHOU_CENTER: L.LatLngTuple = [32.4555, 119.9255]
 const TAIZHOU_ZOOM = 10
 
 const taizhouDistrictBoundariesWgs84 = convertAdministrativeBoundary(taizhouDistrictBoundaries)
-const HAILING_DISTRICT = (taizhouDistrictBoundariesWgs84 as {
+// 用户提供的边界标注为 CRS84 经纬度，不做 GCJ-02 反算。
+const HAILING_DISTRICT = (hailingBoundary as {
   features?: Array<{ properties?: { name?: string } }>
 }).features?.find((feature) => feature.properties?.name === '海陵区')
 const token = import.meta.env.VITE_TIANDITU_TOKEN

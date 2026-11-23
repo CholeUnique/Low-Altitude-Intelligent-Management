@@ -48,6 +48,14 @@ html[data-ui-theme='dark'] .spot-datetime-panel {
 .el-table .cell { line-height: 22px; }
 .el-table th.el-table__cell { height: 40px; font-weight: 600; }
 .el-tag { border-radius: 4px; font-size: 12px; }
+
+/* 专题地图服务多选：下拉宽度跟随输入框，长名称保留悬停查看。 */
+:is(#app, html[data-ui-theme]) .el-select.topic-map-service-select .el-select__wrapper { min-height: 36px; padding: 4px 10px; }
+:is(#app, html[data-ui-theme]) .el-select.topic-map-service-select .el-select__selection { flex-wrap: nowrap; min-width: 0; gap: 4px; }
+:is(#app, html[data-ui-theme]) .el-select.topic-map-service-select .el-select__selected-item { min-width: 0; max-width: 100%; }
+:is(#app, html[data-ui-theme]) .el-select.topic-map-service-select .el-tag { max-width: 100%; background: rgba(61, 130, 155, .25); border: 1px solid rgba(105, 184, 207, .25); color: var(--ui-body); }
+:is(#app, html[data-ui-theme]) .el-select.topic-map-service-select .el-tag__content { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-ui-theme] .topic-map-service-dropdown .el-select-dropdown__item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 36px; }
 .el-dialog { max-width: calc(100vw - 40px); border: 1px solid var(--ui-border); border-radius: 18px; padding: 20px; background: var(--ui-modal-background); box-shadow: var(--ui-shadow); }
 .el-dialog__title { color: var(--ui-text); font-size: 18px; font-weight: 600; }
 .el-dialog__body { color: var(--ui-body); font-size: 14px; }
