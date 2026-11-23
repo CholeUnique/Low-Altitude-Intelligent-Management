@@ -143,11 +143,11 @@ export async function updateMapServiceStatus(id: string | number, status: 0 | 1)
  */
 export async function listEnabledMapServices(deptId?: string | number, topicCode?: string) {
   if (isMockMode()) return []
-  const services = await apiClient.post<never, MapServiceItem[]>('/v1/map/service/list', { deptId, status: 1, ...(topicCode ? { topicCode } : {}) })
+  const services = await apiClient.post<never, MapServiceItem[]>('/v1/map/service/list', { deptId, status: 1 })
   return (Array.isArray(services) ? services : [])
     .filter((service) => Number(service.status) === 1
       && Boolean(service.serviceUrl?.trim())
-      && (!topicCode || service.topicCode === topicCode)
+      && (!topicCode || !service.topicCode?.trim() || service.topicCode === topicCode)
       && (!deptId || !service.deptIds?.length || service.deptIds.some((id) => String(id) === String(deptId))))
     .sort(compareMapServiceTime)
 }

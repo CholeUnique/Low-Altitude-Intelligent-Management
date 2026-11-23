@@ -331,9 +331,6 @@ async function submitService() {
   if (!form.type) return showError(new Error('请选择服务类型'))
   if (!form.dataType) return showError(new Error('请选择数据类型'))
   if (editorMode.value === 'edit' && originalRegionCode.value && !form.regionCode) return showError(new Error('后端更新接口仅处理非空字段，暂不支持清空行政区划，请选择其他区划。'))
-  if (editorMode.value === 'edit' && originalTopicCode.value && !form.topicCode.trim()) {
-    return showError(new Error('后端更新接口仅处理非空字段，暂不能通过编辑清空原有适用专题'))
-  }
   if (metadataError.value || !serviceTypeOptions.value.length || !dataTypeOptions.value.length) return showError(new Error('地图服务枚举尚未加载，请重试'))
   if (form.departmentScope === 'selected' && !form.deptIds.length) return showError(new Error('请至少选择一个适用部门，或改选全部部门适用'))
   busy.value = true
@@ -344,7 +341,7 @@ async function submitService() {
       serviceUrl: form.serviceUrl.trim(),
       ...(form.type ? { type: form.type } : {}),
       dataType: form.dataType,
-      topicCode: form.topicCode.trim() || undefined,
+      topicCode: editorMode.value === 'edit' ? form.topicCode.trim() : form.topicCode.trim() || undefined,
       regionCode: form.regionCode || undefined,
       sort: Number(form.sort) || 0,
       ...(serviceTime ? { serviceTime } : {}),
@@ -352,7 +349,13 @@ async function submitService() {
       deptIds: form.departmentScope === 'all' ? [] : [...form.deptIds],
     }
     if (editorMode.value === 'add') await addMapService(payload)
-    else await updateMapService({ id: form.id, ...payload })
+    else {
+      await updateMapService({ id: form.id, ...payload })
+      if (originalTopicCode.value && !form.topicCode.trim()) {
+        const saved = await getMapServiceDetail(form.id)
+        if (saved.topicCode?.trim()) throw new Error('更新已提交，但适用专题未清空，请联系后端检查 topicCode 空字符串更新支持。')
+      }
+    }
     editorOpen.value = false
     showSuccess(editorMode.value === 'add' ? '地图服务已新增' : '地图服务已更新')
     await loadServices()
@@ -469,7 +472,7 @@ watch(() => user.activeDeptId, () => {
           <label v-else><span>服务类型</span><input :value="serviceTypeLabel(form.type)" readonly aria-readonly="true"></label>
           <label v-if="editorMode !== 'view'"><span>数据类型 *</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="form.dataType" required aria-label="数据类型"><ElOption value="" disabled label="请选择数据类型" /><ElOption v-if="form.dataType && !dataTypeOptions.some(option => option.value === form.dataType)" :value="form.dataType" :label="String(form.dataType) + '（原配置）'" /><ElOption v-for="option in dataTypeOptions" :key="option.value" :value="option.value" :label="String(option.label)" /></ElSelect></label>
           <label v-else><span>数据类型</span><input :value="dataTypeOptions.find((option) => option.value === form.dataType)?.label || form.dataType || '-'" readonly aria-readonly="true"></label>
-          <label class="wide"><span>适用专题</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="form.topicCode" :disabled="editorMode === 'view'" aria-label="适用专题"><ElOption value="" label="部门通用" :disabled="editorMode === 'edit' && !!originalTopicCode" /><ElOption v-if="form.topicCode && !topicOptions.some(option => option.value === form.topicCode)" :value="form.topicCode" :label="topicLabel(form.topicCode)" disabled /><ElOption v-for="option in topicOptions" :key="option.value" :value="option.value" :label="option.label" /></ElSelect><small v-if="editorMode === 'edit' && originalTopicCode" class="department-hint">现有专题可修改，暂不支持清空为部门通用。</small></label>
+          <label class="wide"><span>适用专题</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="form.topicCode" :disabled="editorMode === 'view'" aria-label="适用专题"><ElOption value="" label="部门通用" /><ElOption v-if="form.topicCode && !topicOptions.some(option => option.value === form.topicCode)" :value="form.topicCode" :label="topicLabel(form.topicCode)" disabled /><ElOption v-for="option in topicOptions" :key="option.value" :value="option.value" :label="option.label" /></ElSelect></label>
           <div class="wide region-field"><span class="region-field__label">所属行政区划</span><div v-if="regionLevels.length" class="region-levels"><span class="region-province" title="按业务口径固定为江苏省，不可修改">江苏省</span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-for="(level, index) in regionLevels.slice(1)" :key="index" :model-value="level.value" :disabled="editorMode === 'view'" :aria-label="['市级行政区划', '区县行政区划'][index] || '下级行政区划'" @change="selectRegionLevel(String($event), level.parent)"><ElOption value="" :label="String(['请选择市级', '请选择区县'][index] || '请选择下级')" /><ElOption v-for="option in level.options" :key="option.value" :value="option.value" :label="String(option.label)" /></ElSelect></div><p v-if="form.regionCode && !regionResolved" class="department-hint">当前编码：{{ form.regionCode }}（未在可用区划中找到）</p><small v-if="regionError" class="department-hint">{{ regionError }} <button type="button" @click="loadRegions">重试</button></small><small v-else-if="editorMode === 'edit' && originalRegionCode" class="department-hint">现有行政区划可修改；更新接口暂不支持清空。</small></div>
           <label class="wide"><span>服务地址 *</span><textarea v-model.trim="form.serviceUrl" maxlength="500" :disabled="editorMode === 'view'" required></textarea><small v-if="editorMode !== 'view'" class="department-hint">GeoServer 请按发布协议选择 WMS / WMTS，可填写服务入口或 GetCapabilities 地址；多个图层时指定 layers / LAYER，WMTS 可用 TILEMATRIXSET 指定矩阵集。ArcGIS 请填写 MapServer / ImageServer 服务根地址。</small></label>
           <div v-if="serviceUrlWarnings.length" class="wide service-config-warnings" role="status"><p v-for="warning in serviceUrlWarnings" :key="warning">{{ warning }}</p></div>
