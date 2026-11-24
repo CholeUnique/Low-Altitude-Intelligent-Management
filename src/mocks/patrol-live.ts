@@ -18,6 +18,7 @@ export interface LiveMediaItem {
   localThumbnailUrl?: string
   originalUrl?: string
   localFileUrl?: string
+  sourceCodec?: string
   transcodeStatus?: string | number
   transcodeFileUrl?: string
   mediaType?: string

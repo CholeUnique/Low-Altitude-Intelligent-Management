@@ -128,7 +128,8 @@ async function harness(records, options = {}) {
     },
     '@/utils/collection-media-pager': pagerApi,
     '@/api/flight-review': { flightReviewFileApiPath: path => path.replace(/^\/api/, '') },
-    '@/api/client': { apiClient: { defaults: { baseURL: '/api' } } },
+    '@/api/client': { apiClient: { defaults: { baseURL: '/api' } }, isMockMode: () => true },
+    '@/utils/video-transcode': { prepareTranscodedVideo: async () => { throw Error('Pagination tests must not submit live transcodes') } },
     '@/workspace-components/spot-identification/SharedVideoPlayer.vue': { default: {} },
     '@/workspace-components/spot-identification/PhotoLocationControl.vue': { default: {} },
   }).default

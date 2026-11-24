@@ -257,6 +257,7 @@ export function toMediaList(payload: unknown): { list: LiveMediaItem[]; total: n
       localThumbnailUrl: item.localThumbnailUrl ? String(item.localThumbnailUrl) : undefined,
       originalUrl: item.originalUrl ? String(item.originalUrl) : undefined,
       localFileUrl: item.localFileUrl ? String(item.localFileUrl) : undefined,
+      sourceCodec: item.sourceCodec ? String(item.sourceCodec) : undefined,
       transcodeStatus: typeof item.transcodeStatus === 'number' || typeof item.transcodeStatus === 'string' ? item.transcodeStatus : undefined,
       transcodeFileUrl: item.transcodeFileUrl ? String(item.transcodeFileUrl) : undefined,
       mediaType: item.type ? String(item.type) : undefined,
