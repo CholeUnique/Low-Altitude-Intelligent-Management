@@ -6,7 +6,7 @@ import TopicAdministrativeTree from '@/components/TopicAdministrativeTree.vue'
 import type { RegionSelection } from '@/api/region-clip'
 import 'leaflet/dist/leaflet.css'
 import { FullScreen, Setting, Close, Collection, Search, Upload as UploadIcon } from '@element-plus/icons-vue'
-import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { listAnalysisMapServices, type MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
 import TopicLayerCard from '@/components/TopicLayerCard.vue'
 import TopicLayerDisplayMode from '@/components/TopicLayerDisplayMode.vue'
@@ -711,7 +711,7 @@ async function loadData() {
   layers.value.forEach(item => item.handle?.layer.remove()); layers.value = []; featureCache.clear(); inFlight.clear()
   pending.value = true; error.value = ''
   try {
-    const sources = await listEnabledMapServices(user.activeDeptId, props.topic.id)
+    const sources = await listAnalysisMapServices(user.activeDeptId, props.topic.id)
     if (request !== version) return
     const output: TopicLayer[] = []
     for (let index = 0; index < sources.length; index += 3) {

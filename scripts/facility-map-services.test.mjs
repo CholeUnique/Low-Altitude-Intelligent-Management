@@ -14,14 +14,14 @@ const calls = [], added = [], removed = []
 let deferred
 const dependencies = {
   ...state,
-  listEnabledMapServices: async (...args) => { calls.push(args); return [{ id: 1, name: '影像' }, { id: 2, name: '矢量' }] },
+  listAnalysisMapServices: async (...args) => { calls.push(args); return [{ id: 1, name: '影像' }, { id: 2, name: '矢量' }] },
   createMapServiceLayer: async service => {
     if (service.id === 2) throw new Error('不可访问')
     if (deferred) await deferred
     return { layer: { addTo: () => added.push(service.id), remove: () => removed.push(service.id) } }
   },
 }
-const api = new Function('ctx', `const {mapServices,selectedServices,mapServiceError,mapServiceLoading,user,listEnabledMapServices,createMapServiceLayer}=ctx;
+const api = new Function('ctx', `const {mapServices,selectedServices,mapServiceError,mapServiceLoading,user,listAnalysisMapServices,createMapServiceLayer}=ctx;
   const FACILITIES_TOPIC_ID='HIGH_STANDARD_FACILITIES'; let map={}; let serviceVersion=0; const serviceLayers=new Map(),serviceRequests=new Map();
   ${code}; return {clearMapServices,loadMapServices,updateMapServices};`)(dependencies)
 await api.loadMapServices()

@@ -18,6 +18,8 @@ export interface LiveMediaItem {
   localThumbnailUrl?: string
   originalUrl?: string
   localFileUrl?: string
+  transcodeStatus?: string | number
+  transcodeFileUrl?: string
   mediaType?: string
   longitude?: number
   latitude?: number

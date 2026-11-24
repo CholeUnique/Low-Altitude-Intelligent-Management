@@ -95,6 +95,8 @@ export interface FlightReviewMedia {
   thumbnailUrl: string
   originalUrl: string
   localFileUrl: string
+  transcodeStatus?: string | number
+  transcodeFileUrl?: string
   fileSize?: number
   shootTime: string
   longitude?: number
@@ -209,6 +211,8 @@ export async function getFlightReviewMedia(taskId: string, pageNum: number, page
     thumbnailUrl: value(item, 'thumbnailUrl'),
     originalUrl: value(item, 'originalUrl'),
     localFileUrl: value(item, 'localFileUrl'),
+    transcodeStatus: typeof item.transcodeStatus === 'number' || typeof item.transcodeStatus === 'string' ? item.transcodeStatus : undefined,
+    transcodeFileUrl: value(item, 'transcodeFileUrl') || undefined,
     fileSize: item.fileSize === null || item.fileSize === undefined ? undefined : Number(item.fileSize),
     shootTime: value(item, 'shootTime'),
     longitude: coordinate(item, ['longitude', 'lng', 'lon'], 180),

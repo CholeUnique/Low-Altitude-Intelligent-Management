@@ -5,6 +5,7 @@ import { ElTooltip } from 'element-plus'
 import RegionStepSelect from '@/components/RegionStepSelect.vue'
 import { Calendar, FolderOpened, Picture, VideoCamera } from '@element-plus/icons-vue'
 import { isMockMode } from '@/api/client'
+import { prepareTranscodedVideo } from '@/utils/video-transcode'
 import { getUavMediaSummary, type UavMediaSummary } from '@/api/patrol'
 import { getMetadataOptions, type MetadataOption } from '@/api/metadata'
 import { regionPaths } from '@/utils/region-path'
@@ -131,6 +132,9 @@ const videoPlayer = ref<InstanceType<typeof SharedVideoPlayer>>()
 const srtContext = shallowRef<{ planName: string; media: FlightReviewMedia }>()
 const previewState = ref<'loading' | 'ready' | 'error'>('loading')
 const previewFailure = ref<'missing' | 'unsupported' | 'timeout' | 'image' | 'video'>('missing')
+const previewVideoUrl = ref('')
+const transcodeProgress = ref<number>()
+const transcodeError = ref('')
 const previewImageUrl = ref('')
 const previewImageSource = ref<'local' | 'original' | 'thumbnail' | ''>('')
 const imageFallbackUsed = ref(false)
@@ -238,7 +242,7 @@ function mediaKind(media: FlightReviewMedia): 'image' | 'video' | 'other' {
 function mediaKey(media: FlightReviewMedia) { return `${media.taskId}:${media.id}` }
 function mediaRank(media: FlightReviewMedia) {
   const kind = mediaKind(media)
-  if (kind === 'other' || !(media.originalUrl || (kind === 'image' && (media.localFileUrl || media.thumbnailUrl)))) return 3
+  if (kind === 'other' || !(media.originalUrl || ((media.localFileUrl || media.transcodeFileUrl || (kind === 'image' && media.thumbnailUrl))))) return 3
   const status = mediaPreviewStatus.value[mediaKey(media)]
   return status === 'ready' ? 0 : status === 'error' ? 2 : 1
 }
@@ -294,7 +298,7 @@ function handlePreviewImageError() {
   }
   markPreviewFailed('image')
 }
-async function initializePreview() {
+async function initializePreview(forceTranscode = false) {
   const version = ++previewRequestVersion
   previewAbortController?.abort()
   previewAbortController = undefined
@@ -304,6 +308,9 @@ async function initializePreview() {
   previewState.value = 'loading'
   previewFailure.value = 'missing'
   previewImageUrl.value = ''
+  previewVideoUrl.value = ''
+  transcodeProgress.value = undefined
+  transcodeError.value = ''
   previewImageSource.value = ''
   imageFallbackUsed.value = false
   downloadError.value = ''
@@ -332,7 +339,23 @@ async function initializePreview() {
     }
     return
   }
-  if (!media.originalUrl) { markPreviewFailed('missing'); return }
+  if (isMockMode()) {
+    if (!media.originalUrl) { markPreviewFailed('missing'); return }
+    previewVideoUrl.value = media.originalUrl
+  } else {
+    const controller = new AbortController()
+    previewAbortController = controller
+    try {
+      const url = await prepareTranscodedVideo(media, controller.signal, progress => { if (version === previewRequestVersion) transcodeProgress.value = progress }, forceTranscode)
+      if (version !== previewRequestVersion) return
+      previewVideoUrl.value = url
+    } catch (reason) {
+      if (version === previewRequestVersion) { transcodeError.value = reason instanceof Error ? reason.message : '视频转码失败'; markPreviewFailed('video') }
+      return
+    } finally {
+      if (version === previewRequestVersion) previewAbortController = undefined
+    }
+  }
   videoLoadTimer = setTimeout(() => {
     if (previewState.value === 'loading') markPreviewFailed('timeout')
   }, 20_000)
@@ -347,6 +370,7 @@ function previewErrorDescription() {
   if (previewFailure.value === 'missing') return '当前文件缺少预览地址；若有原文件地址，可下载后在本地打开。'
   if (previewFailure.value === 'unsupported') return '该文件不是浏览器可直接显示的图片或视频格式，请下载原文件查看。'
   if (previewFailure.value === 'timeout') return '浏览器在 20 秒内未取得可播放数据，可能与视频分段读取、服务响应或编码有关。'
+  if (previewFailure.value === 'video' && transcodeError.value) return transcodeError.value
   if (previewFailure.value === 'video') return '可能由 HEVC/H.265 编码、跨域限制或服务端响应格式异常导致，可下载原视频后使用本地播放器打开。'
   return previewMedia.value?.localFileUrl
     ? '后端文件地址、原图及缩略图均未能读取，请检查文件接口权限、地址和图片格式。'
@@ -815,18 +839,18 @@ async function exportList() {
           <main>
             <template v-if="previewMedia">
               <div class="media-stage" :class="{ 'can-expand': previewState === 'ready' && mediaKind(previewMedia) === 'image', 'image-zoomed': previewImageScale > 1, 'image-dragging': previewImageDragging }" @wheel="zoomPreviewImage" @pointerdown="startPreviewImageDrag" @pointermove="movePreviewImageDrag" @pointerup="endPreviewImageDrag" @pointercancel="endPreviewImageDrag" @dblclick="resetPreviewImageTransform">
-                <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailMedia" :src="previewMedia.originalUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
+                <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error' && previewVideoUrl" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailMedia" :src="previewVideoUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
                 <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error' && previewImageUrl" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" :style="previewImageStyle" draggable="false" @load="markPreviewReady" @error="handlePreviewImageError" />
                 <PhotoLocationControl v-if="mediaKind(previewMedia) === 'image' && previewState === 'ready'" :key="`location:${mediaKey(previewMedia)}`" :media="previewMedia" :fullscreen="mediaFullscreen" />
                 <button v-if="previewState === 'ready'" class="fullscreen-toggle" type="button" :aria-label="mediaFullscreen ? '退出全屏' : '进入全屏'" :title="mediaFullscreen ? '退出全屏' : '进入全屏'" @click="toggleMediaFullscreen">
                   <svg v-if="!mediaFullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5m13 5h5v-5" /></svg>
                   <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
                 </button>
-                <div v-if="previewState === 'loading'" class="preview-loading" role="status">正在读取{{ mediaKind(previewMedia) === 'video' ? '视频' : '图片' }}…</div>
+                <div v-if="previewState === 'loading'" class="preview-loading" role="status">{{ mediaKind(previewMedia) === 'video' && transcodeProgress !== undefined && !previewVideoUrl ? `视频转码中 ${transcodeProgress}%` : `正在读取${mediaKind(previewMedia) === 'video' ? '视频' : '图片'}…` }}</div>
                 <section v-if="previewState === 'error'" class="preview-unavailable" role="status">
                   <span class="preview-unavailable__icon">!</span>
                   <h3>{{ previewErrorTitle() }}</h3><p>{{ previewErrorDescription() }}</p>
-                  <div><button type="button" @click="initializePreview">重新尝试</button><button v-if="previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></div>
+                  <div><button type="button" @click="initializePreview(true)">重新尝试</button><button v-if="previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></div>
                   <small v-if="downloadError" class="download-error">{{ downloadError }}</small><small v-else-if="!previewMedia.localFileUrl && !previewMedia.originalUrl">后端未提供原文件地址，暂无法下载。</small>
                 </section>
                 <button v-if="mediaFullscreen && detailMedia.length > 1" type="button" class="fullscreen-nav previous" aria-label="上一个文件" title="上一项（← / ↑）" @click="switchDetailMedia(-1)">‹</button>

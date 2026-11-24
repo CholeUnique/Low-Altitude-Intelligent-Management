@@ -257,6 +257,8 @@ export function toMediaList(payload: unknown): { list: LiveMediaItem[]; total: n
       localThumbnailUrl: item.localThumbnailUrl ? String(item.localThumbnailUrl) : undefined,
       originalUrl: item.originalUrl ? String(item.originalUrl) : undefined,
       localFileUrl: item.localFileUrl ? String(item.localFileUrl) : undefined,
+      transcodeStatus: typeof item.transcodeStatus === 'number' || typeof item.transcodeStatus === 'string' ? item.transcodeStatus : undefined,
+      transcodeFileUrl: item.transcodeFileUrl ? String(item.transcodeFileUrl) : undefined,
       mediaType: item.type ? String(item.type) : undefined,
       longitude: Number.isFinite(longitude) && Math.abs(longitude) <= 180 ? longitude : undefined,
       latitude: Number.isFinite(latitude) && Math.abs(latitude) <= 90 ? latitude : undefined,
