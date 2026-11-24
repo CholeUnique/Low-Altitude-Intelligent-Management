@@ -62,6 +62,8 @@ const videoA = { id: '310987654321000001', name: 'DJI_SAME.mp4', capturedAt: '20
 const videoB = { ...videoA, id: '310987654321000002', capturedAt: '2026-10-12 12:34:12', originalUrl: 'https://video.test/b.mp4', localFileUrl: undefined, localThumbnailUrl: undefined }
 const imageA = { id: 'image', name: 'photo.jpg', capturedAt: '2026-10-11 11:00', thumbnail: '/image.jpg' }
 const noUrlVideo = { id: 'no-url', name: 'MISSING.mp4', capturedAt: '2026-10-10 11:00', thumbnail: '' }
+let mockMode = true
+const preparationCalls = []
 const attachment = { id: 'srt', name: 'DJI_SAME.SRT', capturedAt: '2026-10-09 11:00', thumbnail: '' }
 const componentPath = 'src/views/DataResultsView.vue'
 let source = readFileSync(componentPath, 'utf8')
@@ -83,8 +85,14 @@ const View = load(compileScript(descriptor, { id: 'collection-test', inlineTempl
   },
   '@/utils/collection-media-pager': load(readFileSync('src/utils/collection-media-pager.ts', 'utf8'), {}),
   '@/api/flight-review': { flightReviewFileApiPath: path => path.replace(/^\/api/, '') },
-  '@/api/client': { apiClient: { defaults: { baseURL: '/api' } }, isMockMode: () => true },
-  '@/utils/video-transcode': { prepareTranscodedVideo: async () => { throw new Error('Mock mode should not transcode') } },
+  '@/api/client': { apiClient: { defaults: { baseURL: '/api' } }, isMockMode: () => mockMode },
+  '@/utils/video-transcode': { prepareTranscodedVideo: async (media, signal, onProgress, force, options) => {
+    assert(!mockMode, 'Mock mode should not transcode')
+    preparationCalls.push({media,signal,force})
+    options.onUpdate({status:'RUNNING',sourceCodec:'h264',originalUrl:'http://localhost/api/v1/uav/media/file/'+media.id})
+    options.onSource(force?'transcoded':'original')
+    return force?'http://localhost/compatible.mp4':'http://localhost/original.mp4'
+  } },
   '@/workspace-components/spot-identification/SharedVideoPlayer.vue': { __esModule: true, default: SharedPlayer },
   '@/workspace-components/spot-identification/PhotoLocationControl.vue': { __esModule: true, default: PhotoLocation },
   '@/workspace-components/spot-identification/SrtInfoDialog.vue': { __esModule: true, default: SrtDialog },
@@ -158,6 +166,22 @@ assert.equal(byClass('collaboration-toggle').length, 0, 'Image preview never off
 assert.equal(byClass('stub-overlay').length, 0)
 vm.openSrtInfo(noUrlVideo, taskA); await flush()
 assert.equal(srtInstances.at(-1).props.media.id, 'no-url', 'SRT uses the video ID, not its URL or thumbnail')
+srtInstances.at(-1).close(); await flush()
+mockMode = false
+vm.openMedia(videoA, taskA, [{media:videoA,task:taskA}]); await flush()
+assert.equal(all(root,item=>item.type==='video')[0].props.src,'http://localhost/original.mp4')
+assert.equal(preparationCalls.length,1)
+all(root,item=>item.type==='video')[0].props.onError(); await flush()
+assert.equal(preparationCalls.length,2)
+assert.equal(preparationCalls[1].force,true)
+assert.equal(preparationCalls[0].signal.aborted,true,'Fallback cancels the previous preparation')
+assert.equal(all(root,item=>item.type==='video')[0].props.src,'http://localhost/compatible.mp4')
+assert.equal(vm.previewMedia.id,videoA.id,'Fallback preserves video identity and associated SRT context')
+assert.equal(byClass('preview-video-download')[0].props.href,'http://localhost/api/v1/uav/media/file/'+videoA.id)
+all(root,item=>item.type==='video')[0].props.onError(); await flush()
+assert.equal(preparationCalls.length,2,'Only one automatic fallback is allowed')
+assert.equal(vm.videoPlaybackFailed,true)
+mockMode = true
 props.activeTab = 'recognition'; await flush()
 assert.equal(vm.previewMedia, undefined)
 assert.equal(vm.srtContext, undefined)

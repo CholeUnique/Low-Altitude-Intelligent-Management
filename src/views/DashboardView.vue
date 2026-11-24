@@ -546,7 +546,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <h2>任务办理成效</h2>
                 <button v-if="user.hasPermission('task-list')" class="overview-header-link" type="button" aria-label="进入任务列表" @click="openTaskList">任务列表 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
-              <div v-if="sceneTaskChartItems.length || unitTaskSummary" class="scene-task-chart">
+              <div v-if="sceneTaskChartItems.length || unitTaskSummary" class="scene-task-chart" role="region" aria-label="任务办理成效内容" tabindex="0">
                 <div class="scene-task-hover-card" :class="{ 'is-visible': hoveredSceneTask }" role="status">
                   <i v-if="hoveredSceneTask" :style="{ backgroundColor: hoveredSceneTask.color, boxShadow: `0 0 8px ${hoveredSceneTask.color}` }"></i>
                   <span>{{ hoveredSceneTask?.name }}</span>

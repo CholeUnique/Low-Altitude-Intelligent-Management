@@ -6,7 +6,7 @@ import { createCollectionMediaPager, type CollectionMediaEntry, type CollectionM
 import type { FlightReviewMedia } from '@/api/flight-review'
 import { flightReviewFileApiPath } from '@/api/flight-review'
 import { apiClient, isMockMode } from '@/api/client'
-import { prepareTranscodedVideo } from '@/utils/video-transcode'
+import { prepareTranscodedVideo, type VideoPreparationState } from '@/utils/video-transcode'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
 import SharedVideoPlayer from '@/workspace-components/spot-identification/SharedVideoPlayer.vue'
 import PhotoLocationControl from '@/workspace-components/spot-identification/PhotoLocationControl.vue'
@@ -54,6 +54,18 @@ const previewNotice = ref('')
 const videoPlaybackUrl = ref('')
 const videoTranscodeProgress = ref<number>()
 const videoTranscodeError = ref('')
+const videoPreparation = ref<VideoPreparationState>()
+const videoOriginalUrl = ref('')
+const videoPlaybackSource = ref<'original' | 'transcoded'>()
+let videoFallbackAttempted = false
+const videoLoadingText = computed(() => {
+  if (videoPlaybackUrl.value) return '正在读取视频…'
+  const prefix = videoFallbackAttempted ? '原片暂时无法播放，正在准备兼容版本' : '正在准备视频'
+  if (videoPreparation.value?.status === 'PENDING') return `${prefix}（等待后端处理）`
+  if (videoPreparation.value?.status === 'RUNNING' && !videoOriginalUrl.value && !videoPreparation.value.sourceCodec && (videoTranscodeProgress.value === undefined || videoTranscodeProgress.value === 0)) return '后端尚未提供可播放文件，正在等待处理结果…'
+  if (videoPreparation.value?.status === 'RUNNING') return videoTranscodeProgress.value === undefined ? `${prefix}（后端处理中，暂未提供进度）` : `${prefix} · 转码 ${videoTranscodeProgress.value}%`
+  return `${prefix}…`
+})
 let videoTranscodeAbort: AbortController | undefined
 const videoPlaybackReady = ref(false)
 const videoPlaybackFailed = ref(false)
@@ -235,6 +247,10 @@ function resetVideoPlayback() {
   videoPlaybackUrl.value = ''
   videoTranscodeProgress.value = undefined
   videoTranscodeError.value = ''
+  videoPreparation.value = undefined
+  videoOriginalUrl.value = ''
+  videoPlaybackSource.value = undefined
+  videoFallbackAttempted = false
   window.clearTimeout(videoLoadTimer)
   videoPlaybackReady.value = false
   videoPlaybackFailed.value = false
@@ -244,15 +260,18 @@ function beginVideoPlaybackCheck() {
   window.clearTimeout(videoLoadTimer)
   videoLoadTimer = window.setTimeout(() => {
     if (videoPlaybackReady.value) return
-    videoFailureReason.value = 'timeout'
-    videoPlaybackFailed.value = true
+    handleVideoFailure('timeout')
   }, 20_000)
 }
 async function startVideoPlayback(media: LiveMediaItem, forceTranscode = false) {
+  videoTranscodeAbort?.abort()
   const controller = new AbortController()
   videoTranscodeAbort = controller
   try {
-    const url = isMockMode() ? videoSource(media) : await prepareTranscodedVideo(media, controller.signal, progress => { if (!controller.signal.aborted) videoTranscodeProgress.value = progress }, forceTranscode)
+    const url = isMockMode() ? videoSource(media) : await prepareTranscodedVideo(media, controller.signal, progress => { if (!controller.signal.aborted) videoTranscodeProgress.value = progress }, forceTranscode, {
+      onUpdate: state => { if (!controller.signal.aborted) { videoPreparation.value = state; videoTranscodeProgress.value = state.progress; videoOriginalUrl.value = state.originalUrl || videoOriginalUrl.value } },
+      onSource: source => { if (!controller.signal.aborted) videoPlaybackSource.value = source },
+    })
     if (controller.signal.aborted) return
     if (!url) throw new Error('后端未返回视频播放地址。')
     videoPlaybackUrl.value = url
@@ -334,10 +353,24 @@ function markVideoReady() {
   videoFailureReason.value = ''
 }
 function markVideoFailed() {
+  handleVideoFailure('unsupported')
+}
+function handleVideoFailure(reason: 'timeout' | 'unsupported') {
   window.clearTimeout(videoLoadTimer)
   videoPlaybackReady.value = false
+  if (!isMockMode() && videoPlaybackSource.value === 'original' && !videoFallbackAttempted && previewMedia.value) {
+    videoFallbackAttempted = true
+    videoPlayer.value?.pause()
+    videoPlayerVersion.value++
+    videoPlaybackUrl.value = ''
+    videoTranscodeProgress.value = undefined
+    videoPlaybackFailed.value = false
+    videoFailureReason.value = ''
+    void startVideoPlayback(previewMedia.value, true)
+    return
+  }
   videoPlaybackFailed.value = true
-  videoFailureReason.value = 'unsupported'
+  videoFailureReason.value = reason
 }
 function retryVideoPlayback() {
   resetVideoPlayback()
@@ -515,7 +548,7 @@ onBeforeUnmount(() => {
       <button class="preview-nav preview-prev" :disabled="previewSwitching" title="上一张（← / ↑）" aria-label="上一张" @click.stop="switchPreview(-1)">‹</button>
       <section v-if="isVideoMedia(previewMedia)" class="preview-video-stage" @click.stop>
         <SharedVideoPlayer v-if="videoPlaybackUrl && previewReviewMedia && !videoPlaybackFailed" ref="videoPlayer" :key="`${previewTask?.id}:${previewMedia.id}:${videoPlayerVersion}`" :media="previewReviewMedia" :media-list="previewTaskMedia" :src="videoPlaybackUrl" autoplay fullscreen @ready="markVideoReady" @error="markVideoFailed" />
-        <div v-if="!videoPlaybackReady && !videoPlaybackFailed" class="video-loading"><i></i><span>{{ videoTranscodeProgress !== undefined && !videoPlaybackUrl ? `视频转码中 ${videoTranscodeProgress}%` : '正在读取视频…' }}</span></div>
+        <div v-if="!videoPlaybackReady && !videoPlaybackFailed" class="video-loading" role="status"><i></i><span>{{ videoLoadingText }}</span></div>
         <section v-if="videoPlaybackFailed" class="hevc-notice">
           <i>!</i>
           <h2>{{ videoTranscodeError ? '视频转码失败' : videoFailureReason === 'timeout' ? '视频分段读取超时' : '当前浏览器无法播放该视频' }}</h2>
@@ -540,7 +573,7 @@ onBeforeUnmount(() => {
       </div>
       <button class="preview-nav preview-next" :disabled="previewSwitching" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
       <p v-if="previewNotice" class="preview-notice" role="status">{{ previewNotice }}</p>
-      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}{{ hasMoreMedia ? '+' : '' }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small><a v-if="isVideoMedia(previewMedia) && videoSource(previewMedia)" class="preview-video-download" :href="videoSource(previewMedia)" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" download>下载原视频</a></footer>
+      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}{{ hasMoreMedia ? '+' : '' }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small><a v-if="isVideoMedia(previewMedia) && (videoOriginalUrl || videoSource(previewMedia))" class="preview-video-download" :href="videoOriginalUrl || videoSource(previewMedia)" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" download>下载原视频</a></footer>
     </div>
     <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" @close="srtContext = undefined" />
   </div>
