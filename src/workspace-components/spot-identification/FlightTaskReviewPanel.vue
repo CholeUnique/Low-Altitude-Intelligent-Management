@@ -133,6 +133,7 @@ const srtContext = shallowRef<{ planName: string; media: FlightReviewMedia }>()
 const previewState = ref<'loading' | 'ready' | 'error'>('loading')
 const previewFailure = ref<'missing' | 'unsupported' | 'timeout' | 'image' | 'video'>('missing')
 const previewVideoUrl = ref('')
+let previewVideoOriginal = false
 const transcodeProgress = ref<number>()
 const transcodeError = ref('')
 const previewImageUrl = ref('')
@@ -259,6 +260,12 @@ function markPreviewReady() {
 }
 function markPreviewFailed(reason: 'missing' | 'unsupported' | 'timeout' | 'image' | 'video') {
   clearVideoTimer()
+  if ((reason === 'video' || reason === 'timeout') && previewVideoOriginal && !isMockMode()) {
+    previewVideoOriginal = false
+    videoPlayer.value?.pause()
+    void initializePreview(true)
+    return
+  }
   previewState.value = 'error'
   previewFailure.value = reason
   const media = previewMedia.value
@@ -309,6 +316,7 @@ async function initializePreview(forceTranscode = false) {
   previewFailure.value = 'missing'
   previewImageUrl.value = ''
   previewVideoUrl.value = ''
+  previewVideoOriginal = false
   transcodeProgress.value = undefined
   transcodeError.value = ''
   previewImageSource.value = ''
@@ -346,7 +354,9 @@ async function initializePreview(forceTranscode = false) {
     const controller = new AbortController()
     previewAbortController = controller
     try {
-      const url = await prepareTranscodedVideo(media, controller.signal, progress => { if (version === previewRequestVersion) transcodeProgress.value = progress }, forceTranscode)
+      const url = await prepareTranscodedVideo(media, controller.signal, progress => { if (version === previewRequestVersion) transcodeProgress.value = progress }, forceTranscode, {
+        onSource: source => { if (version === previewRequestVersion) previewVideoOriginal = source === 'original' },
+      })
       if (version !== previewRequestVersion) return
       previewVideoUrl.value = url
     } catch (reason) {

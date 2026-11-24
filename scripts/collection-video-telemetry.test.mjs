@@ -90,6 +90,7 @@ const View = load(compileScript(descriptor, { id: 'collection-test', inlineTempl
     assert(!mockMode, 'Mock mode should not transcode')
     preparationCalls.push({media,signal,force})
     options.onUpdate({status:'RUNNING',sourceCodec:'h264',originalUrl:'http://localhost/api/v1/uav/media/file/'+media.id})
+    if (media.id === 'missing-source') throw Error('原视频读取失败（10201）：素材尚未下载到本地')
     options.onSource(force?'transcoded':'original')
     return force?'http://localhost/compatible.mp4':'http://localhost/original.mp4'
   } },
@@ -181,6 +182,13 @@ assert.equal(byClass('preview-video-download')[0].props.href,'http://localhost/a
 all(root,item=>item.type==='video')[0].props.onError(); await flush()
 assert.equal(preparationCalls.length,2,'Only one automatic fallback is allowed')
 assert.equal(vm.videoPlaybackFailed,true)
+vm.openMedia({...videoA,id:'missing-source'},taskA,[{media:{...videoA,id:'missing-source'},task:taskA}]); await flush()
+assert.equal(vm.videoPlaybackFailed,true)
+assert(all(byClass('hevc-notice')[0],item=>/10201.*素材尚未下载到本地/.test(item.text)).length,'Preview displays the actual file-service error')
+assert.equal(preparationCalls.length,3,'Missing local file reports the backend reason without entering transcode polling')
+vm.retryVideoPlayback(); await flush()
+assert.equal(preparationCalls.length,4)
+assert.equal(preparationCalls.at(-1).force,false,'Retry a missing original through the file interface rather than enqueueing a transcode')
 mockMode = true
 props.activeTab = 'recognition'; await flush()
 assert.equal(vm.previewMedia, undefined)

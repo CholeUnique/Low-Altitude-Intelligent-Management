@@ -5,57 +5,81 @@ import ts from 'typescript'
 globalThis.window = { location: { origin: 'http://localhost:5173' } }
 globalThis.localStorage = { getItem: () => 'test-token' }
 let replies = [], calls = []
+let fileReply, fileCancelled = 0
+const fileRequests = []
+globalThis.fetch = async (url, options) => {
+  fileRequests.push({ url, ...options })
+  return fileReply || new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array([0])) },
+    cancel() { fileCancelled++ },
+  }), { status: 206, headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 0-0/1000000000' } })
+}
 const apiClient = { defaults: { baseURL: '/api' }, post: async (path, body, config) => { calls.push({ path, body, signal: config.signal }); return replies.shift() } }
 const output = ts.transpileModule(readFileSync('src/utils/video-transcode.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const module = { exports: {} }
 new Function('require', 'module', 'exports', output)(name => { assert.equal(name, '@/api/client'); return { apiClient } }, module, module.exports)
-const { prepareTranscodedVideo, transcodeVideoUrl, originalVideoUrl, canPlayOriginalVideo } = module.exports
+const { prepareTranscodedVideo, transcodeVideoUrl, originalVideoUrl } = module.exports
 const media = { id: '310987654321000001' }
 const path = `/api/v1/uav/media/transcode/file/${media.id}`
-assert.equal(await prepareTranscodedVideo({ ...media, transcodeStatus: 1, transcodeFileUrl: path }, new AbortController().signal, () => {}), `http://localhost:5173${path}?token=test-token`)
-assert.equal(calls.length, 0)
+const originalPath = `/api/v1/uav/media/file/${media.id}`
+const original = `http://localhost:5173${originalPath}?token=test-token`
+let selectedSource
+const states = []
+for (const source of [media, { ...media, localFileUrl: null, sourceCodec: null, transcodeStatus: 0 },
+  { ...media, sourceCodec: 'hevc' }, { ...media, transcodeStatus: 1, transcodeFileUrl: path }]) {
+  assert.equal(await prepareTranscodedVideo(source, new AbortController().signal, () => assert.fail('Original playback never waits for transcoding'), false, {
+    onSource: value => selectedSource = value, onUpdate: value => states.push(value),
+  }), original)
+}
+assert.equal(calls.length, 0, 'Always try GET /media/file/{id} without starting or polling a transcode, even with missing URL/codec')
+assert.equal(fileRequests.length, 4)
+assert.equal(fileCancelled, 4, 'Cancel each probe stream immediately instead of downloading a whole video')
+assert(fileRequests.every(request => request.headers.Range === 'bytes=0-0' && request.url === original))
+assert.equal(selectedSource, 'original')
+assert.equal(states.at(-1).originalUrl, original, 'Direct original download is available immediately')
+assert.equal(originalVideoUrl(media.id), original)
+assert.equal(originalVideoUrl(media.id, `https://untrusted.example${originalPath}?token=foreign`), original, 'Only use configured API origin and current session')
+assert.throws(() => originalVideoUrl(media.id, '/api/v1/uav/media/file/123'))
 assert.throws(() => transcodeVideoUrl(media.id, '/api/v1/uav/media/transcode/file/123'))
+await assert.rejects(prepareTranscodedVideo({ id: 'invalid' }, new AbortController().signal, () => {}), /编号无效/)
+apiClient.defaults.baseURL = 'http://api.example/api'
+assert.equal(originalVideoUrl(media.id), `http://api.example${originalPath}?token=test-token`)
+apiClient.defaults.baseURL = '/api'
+fileReply = new Response(JSON.stringify({ code: '10201', msg: '素材尚未下载到本地' }), { headers: { 'content-type': 'application/json' } })
+await assert.rejects(prepareTranscodedVideo(media, new AbortController().signal, () => {}), /10201.*素材尚未下载到本地/)
+assert.equal(calls.length, 0, 'A missing source file must not silently enter an endless transcode wait')
+fileReply = new Response('proxy unavailable', { status: 502, headers: { 'content-type': 'text/html' } })
+await assert.rejects(prepareTranscodedVideo(media, new AbortController().signal, () => {}), /HTTP 502/)
+fileReply = undefined
+const streamFetch = globalThis.fetch
+globalThis.fetch = (url, options) => new Promise((resolve, reject) => {
+  options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+})
+const reading = new AbortController()
+const pendingRead = prepareTranscodedVideo(media, reading.signal, () => {})
+reading.abort()
+await assert.rejects(pendingRead, { name: 'AbortError' })
+globalThis.fetch = streamFetch
+
 replies = [{ status: 'RUNNING', progress: 30 }, { status: 'SUCCEEDED', transcodeFileUrl: path }]
 const progress = []
-assert.equal(await prepareTranscodedVideo(media, new AbortController().signal, n => progress.push(n)), `http://localhost:5173${path}?token=test-token`)
+assert.equal(await prepareTranscodedVideo(media, new AbortController().signal, n => progress.push(n), true, { pollMs: 0 }), `http://localhost:5173${path}?token=test-token`)
 assert.deepEqual(progress, [30])
 assert.deepEqual(calls.map(x => x.path), ['/v1/uav/media/transcode', '/v1/uav/media/transcode/status'])
 assert.equal(calls[0].body.mediaId, media.id)
 replies = [{ status: 'FAILED', error: '转码失败原因' }]
-await assert.rejects(prepareTranscodedVideo(media, new AbortController().signal, () => {}), /转码失败原因/)
+await assert.rejects(prepareTranscodedVideo(media, new AbortController().signal, () => {}, true), /转码失败原因/)
 replies = [{ status: 'RUNNING', progress: 10 }]
 const controller = new AbortController()
-const pending = prepareTranscodedVideo(media, controller.signal, () => controller.abort())
-await assert.rejects(pending, { name: 'AbortError' })
-console.log('Video transcode cache, polling, error, cancellation and URL checks passed')
-const originalPath = `/api/v1/uav/media/file/${media.id}`
-const original = `http://localhost:5173${originalPath}?token=test-token`
-assert.equal(originalVideoUrl(media.id, `https://untrusted.example${originalPath}?token=foreign`), original, 'Only use the configured API origin and the current session, never the returned host')
-assert.throws(() => originalVideoUrl(media.id, '/api/v1/uav/media/file/123'))
-assert(canPlayOriginalVideo('h264', () => ''))
-assert(canPlayOriginalVideo('HEVC', type => type.includes('hvc1.1.') ? 'probably' : ''))
-assert(!canPlayOriginalVideo('hevc', () => ''))
-assert(!canPlayOriginalVideo(null, () => 'probably'))
-calls = []; replies = [{ status: 'RUNNING', progress: 0, localFileUrl: originalPath, sourceCodec: 'h264' }]
-let selectedSource
-const states = []
-assert.equal(await prepareTranscodedVideo(media, new AbortController().signal, () => { throw Error('Playable original should not wait for transcode') }, false, { onSource: value => selectedSource = value, onUpdate: value => states.push(value) }), original)
-assert.equal(calls.length, 1); assert.equal(selectedSource, 'original'); assert.equal(states.at(-1).originalUrl, original)
-calls = []; replies = [{ status: 'FAILED', error: '硬编失败', localFileUrl: originalPath, sourceCodec: 'hevc' }]
-assert.equal(await prepareTranscodedVideo(media, new AbortController().signal, () => {}, false, { canPlayType: () => 'maybe' }), original, 'A playable original is independent of background transcoding failures')
-calls = []; replies = [{ status: 'RUNNING', localFileUrl: originalPath, sourceCodec: 'hevc' }, { status: 'SUCCEEDED', transcodeFileUrl: path }]
-const unknownProgress = [], unknownStates = []
-assert.equal(await prepareTranscodedVideo(media, new AbortController().signal, n => unknownProgress.push(n), false, { canPlayType: () => '', pollMs: 0, onUpdate: state => unknownStates.push(state) }), `http://localhost:5173${path}?token=test-token`)
-assert.deepEqual(unknownProgress, [], 'A missing progress field must never be fabricated as zero')
-assert.equal(unknownStates.at(-1).originalUrl, original, 'Download stays available when a later status response omits the original URL')
-calls = []; replies = [{ status: 'PENDING', sourceCodec: null, localFileUrl: null }, { status: 'RUNNING', sourceCodec: 'h264', localFileUrl: originalPath }]
-assert.equal(await prepareTranscodedVideo(media, new AbortController().signal, () => {}, false, { pollMs: 0 }), original, 'Switch to the original when the source finishes downloading during polling')
-calls = []; replies = [{ status: 'RUNNING', progress: 0, localFileUrl: originalPath, sourceCodec: 'h264' }, { status: 'SUCCEEDED', transcodeFileUrl: path }]
-assert.equal(await prepareTranscodedVideo({ ...media, sourceCodec: 'h264', localFileUrl: originalPath }, new AbortController().signal, () => {}, true, { pollMs: 0 }), `http://localhost:5173${path}?token=test-token`, 'Actual original-playback failure forces the compatible result instead of looping back to the original')
-assert.equal(calls.length, 2)
-calls = []; replies = []
-assert.equal(await prepareTranscodedVideo({ ...media, sourceCodec: 'h264', localFileUrl: originalPath }, new AbortController().signal, () => {}), original)
-assert.equal(calls.length, 0, 'Known playable local originals do not enqueue an unnecessary transcode')
+await assert.rejects(prepareTranscodedVideo(media, controller.signal, () => controller.abort(), true), { name: 'AbortError' })
+calls = []; replies = [{ status: 'PENDING', localFileUrl: null }, { status: 'RUNNING', sourceCodec: 'h264', localFileUrl: originalPath }, { status: 'SUCCEEDED', transcodeFileUrl: path }]
+const fallbackStates = [], unknownProgress = []
+assert.equal(await prepareTranscodedVideo(media, new AbortController().signal, n => unknownProgress.push(n), true, { pollMs: 0, onUpdate: state => fallbackStates.push(state) }), `http://localhost:5173${path}?token=test-token`)
+assert.deepEqual(unknownProgress, [], 'Missing progress must not be fabricated as zero')
+assert.equal(fallbackStates.at(-1).originalUrl, original, 'Download remains available during fallback')
+assert.equal(calls.length, 3, 'Fallback never switches back to a failing original, even if backend says H264')
 replies = [{ status: 'RUNNING', progress: 0 }]
-await assert.rejects(prepareTranscodedVideo(media, new AbortController().signal, () => {}, false, { timeoutMs: 0 }), /长时间未完成/)
-console.log('Original-first playback: new fields, H264/HEVC capability, source download, real progress, authenticated URLs, timeout and forced fallback passed')
+await assert.rejects(prepareTranscodedVideo(media, new AbortController().signal, () => {}, true, { timeoutMs: 0 }), /长时间未完成/)
+const aborted = new AbortController(); aborted.abort()
+await assert.rejects(prepareTranscodedVideo(media, aborted.signal, () => {}), { name: 'AbortError' })
+console.log('Video direct file playback: GET/Range URL, unknown codec, no transcode wait, download, safe auth, fallback, real progress, timeout and cancellation passed')

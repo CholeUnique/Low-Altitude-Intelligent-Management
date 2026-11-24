@@ -373,8 +373,10 @@ function handleVideoFailure(reason: 'timeout' | 'unsupported') {
   videoFailureReason.value = reason
 }
 function retryVideoPlayback() {
+  const forceTranscode = videoFallbackAttempted || videoPlaybackSource.value === 'transcoded'
   resetVideoPlayback()
-  if (previewMedia.value) void startVideoPlayback(previewMedia.value, true)
+  videoFallbackAttempted = forceTranscode
+  if (previewMedia.value) void startVideoPlayback(previewMedia.value, forceTranscode)
 }
 function zoomPreview(event: WheelEvent) {
   if (!previewMedia.value || isVideoMedia(previewMedia.value)) return
@@ -551,7 +553,7 @@ onBeforeUnmount(() => {
         <div v-if="!videoPlaybackReady && !videoPlaybackFailed" class="video-loading" role="status"><i></i><span>{{ videoLoadingText }}</span></div>
         <section v-if="videoPlaybackFailed" class="hevc-notice">
           <i>!</i>
-          <h2>{{ videoTranscodeError ? '视频转码失败' : videoFailureReason === 'timeout' ? '视频分段读取超时' : '当前浏览器无法播放该视频' }}</h2>
+          <h2>{{ videoTranscodeError ? (videoFallbackAttempted ? '视频转码失败' : '视频读取失败') : videoFailureReason === 'timeout' ? '视频分段读取超时' : '当前浏览器无法播放该视频' }}</h2>
           <p>{{ videoTranscodeError || (videoFailureReason === 'timeout' ? '浏览器已尝试边缓冲边播放，但未能在 20 秒内取得可播放数据。请检查视频服务是否支持 HTTP Range、Content-Length 及 MP4 Fast Start。' : '可能由 HEVC/H.265 编码、视频地址跨域或服务端响应格式异常导致，可下载原视频后使用本地播放器打开。') }}</p>
           <button type="button" @click="retryVideoPlayback">重新尝试</button>
         </section>
