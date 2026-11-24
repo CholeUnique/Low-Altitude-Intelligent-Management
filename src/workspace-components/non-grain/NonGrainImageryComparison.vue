@@ -18,7 +18,7 @@ const rangeView = ref<{ center: [number, number]; zoom: number }>()
 const hasTaskMap = computed(() => Boolean(props.geometry?.features.length || props.abnormals?.length))
 const viewport = ref<HTMLElement>()
 const choices = computed(() => {
-  const images = props.images.filter(image => !image.mapService || Number(image.mapService.status) === 1)
+  const images = [...props.images]
   if (props.spot?.imageUrl && !images.some(image => image.imageUrl === props.spot?.imageUrl)) {
     images.push({ id: `spot-image-${props.spot.id}`, label: `${props.spot.title} · 问题图斑影像`, imageUrl: props.spot.imageUrl })
   }
@@ -26,7 +26,7 @@ const choices = computed(() => {
 })
 const selectedImages = computed(() => [choices.value.find(image => image.id === historyId.value), choices.value.find(image => image.id === currentId.value)])
 watch([() => props.spot?.id, () => props.spot?.imageUrl, () => props.images], () => {
-  const references = props.images.filter(image => !image.mapService || Number(image.mapService.status) === 1)
+  const references = [...props.images]
   historyId.value = references[0]?.id || ''
   currentId.value = choices.value.find(image => image.id === `spot-image-${props.spot?.id}`)?.id || references[references.length - 1]?.id || ''
   view.value = undefined

@@ -138,7 +138,7 @@ export async function updateMapServiceStatus(id: string | number, status: 0 | 1)
 }
 
 /**
- * 业务页面只读取当前部门可用且已启用的地图服务。请求参数和前端二次过滤
+ * 首页只读取当前部门可用且已启用的地图服务。请求参数和前端二次过滤
  * 同时生效，避免后端忽略筛选条件时显示其他部门或已停用的服务。
  */
 export async function listEnabledMapServices(deptId?: string | number, topicCode?: string) {
@@ -150,4 +150,12 @@ export async function listEnabledMapServices(deptId?: string | number, topicCode
       && (!topicCode || !service.topicCode?.trim() || service.topicCode === topicCode)
       && (!deptId || !service.deptIds?.length || service.deptIds.some((id) => String(id) === String(deptId))))
     .sort(compareMapServiceTime)
+}
+
+/** 智能研判使用当前部门全部状态的服务，保留部门和专题范围。 */
+export async function listAnalysisMapServices(deptId?: string | number, topicCode?: string) {
+  const services = await listMapServices({ deptId })
+  return services.filter((service) => Boolean(service.serviceUrl?.trim())
+    && (!topicCode || !service.topicCode?.trim() || service.topicCode === topicCode)
+    && (!deptId || !service.deptIds?.length || service.deptIds.some((id) => String(id) === String(deptId))))
 }

@@ -177,7 +177,7 @@ function toggleMapServiceSelection(serviceId: string | number, checked: boolean)
         <div v-if="mapServices.length" class="reference-service-list">
           <label v-for="service in mapServices" :key="service.id"><input type="checkbox" :checked="selectedMapServiceIds.some((id) => String(id) === String(service.id))" @change="toggleMapServiceSelection(service.id, ($event.target as HTMLInputElement).checked)" /><span :title="service.name">{{ service.name }}</span><small v-if="selectedMapServiceIds.some((id) => String(id) === String(service.id))">第 {{ selectedMapServiceIds.findIndex((id) => String(id) === String(service.id)) + 1 }} 期</small></label>
         </div>
-        <small v-else>暂无已启用的影像地图服务</small>
+        <small v-else>暂无影像地图服务</small>
         </div>
       </div>
       <label class="field field--wide"><span>图斑描述</span><textarea v-model="description" maxlength="500" placeholder="请输入图斑描述"></textarea></label>

@@ -6,7 +6,7 @@ import { getTaskAbnormalPage } from '@/api/governance-task'
 import type { GovernanceTask, TaskAbnormal } from '@/api/governance-task'
 import { getRecognitionSpotDetail, getRecognitionSpotPage, ignoreRecognitionSpots, reviewRecognitionSpots, revokeRecognitionSpots, type RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import { ApiBusinessError } from '@/api/client'
-import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { listAnalysisMapServices, type MapServiceItem } from '@/api/map-service'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
 import { inspectMapService } from '@/utils/map-service-layer'
 import { useUserStore } from '@/stores/user'
@@ -274,7 +274,7 @@ function handleMapFullscreenKeydown(event: KeyboardEvent) {
 }
 async function loadImageryMapServices() {
   const requestVersion = ++imageryServiceRequestVersion
-  const services = await listEnabledMapServices(user.activeDeptId)
+  const services = await listAnalysisMapServices(user.activeDeptId)
   const inspections = await Promise.allSettled(services.map((service) => inspectMapService(service)))
   if (requestVersion !== imageryServiceRequestVersion) return
   imageryMapServices.value = services.filter((service, index) => {
@@ -822,13 +822,13 @@ onBeforeUnmount(() => {
     <div v-if="servicePickerVisible" class="service-picker-mask" @click.self="servicePickerVisible = false">
       <section class="service-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="service-picker-title">
         <header>
-          <div><h3 id="service-picker-title">添加参考影像</h3><p>从后端已启用的非矢量地图服务中选择影像</p></div>
+          <div><h3 id="service-picker-title">添加参考影像</h3><p>从后端非矢量地图服务中选择影像</p></div>
           <button type="button" aria-label="关闭" @click="servicePickerVisible = false">×</button>
         </header>
         <div class="service-picker-body">
           <div v-if="servicePickerLoading" class="service-picker-state">正在读取参考影像地图服务…</div>
           <div v-else-if="servicePickerError" class="service-picker-state service-picker-state--error">{{ servicePickerError }}</div>
-          <div v-else-if="!imageryMapServices.length" class="service-picker-state">暂无已启用的非矢量影像地图服务</div>
+          <div v-else-if="!imageryMapServices.length" class="service-picker-state">暂无非矢量影像地图服务</div>
           <fieldset v-else>
             <legend>参考影像地图服务 <WorkbenchRequiredMark /></legend>
             <label v-for="service in imageryMapServices" :key="service.id" :class="{ added: isMapServiceAdded(service) }">
@@ -836,7 +836,7 @@ onBeforeUnmount(() => {
               <span><b>{{ service.name }}</b><small>{{ isMapServiceAdded(service) ? '已关联到当前图斑' : service.type }}</small></span>
             </label>
           </fieldset>
-          <p class="service-picker-tip">只展示已启用且通过影像类型检查的地图服务，矢量、图斑和边界服务不会出现在此列表中。</p>
+          <p class="service-picker-tip">只展示通过影像类型检查的地图服务，矢量、图斑和边界服务不会出现在此列表中。</p>
         </div>
         <footer><button type="button" class="cancel" @click="servicePickerVisible = false">取消</button><button type="button" class="primary" :disabled="servicePickerLoading || !selectedMapServiceIds.length" @click="addSelectedMapServices">确认添加（{{ selectedMapServiceIds.length }}）</button></footer>
       </section>

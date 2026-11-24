@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { getFacilityPage, getFacilityGeoJson, getFacilityDetail, type FacilityRecord } from '@/api/facility'
-import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { listAnalysisMapServices, type MapServiceItem } from '@/api/map-service'
 import { createMapServiceLayer, MAP_SERVICE_IMAGERY_PANE, MAP_SERVICE_VECTOR_PANE, type MapServiceLayerHandle } from '@/utils/map-service-layer'
 import { FACILITIES_TOPIC_ID } from '@/stores/geographic-topics'
 import { useUserStore } from '@/stores/user'
@@ -43,7 +43,7 @@ async function loadMapServices() {
   mapServiceError.value = ''
   mapServiceLoading.value = true
   try {
-    const services = await listEnabledMapServices(user.activeDeptId, FACILITIES_TOPIC_ID)
+    const services = await listAnalysisMapServices(user.activeDeptId, FACILITIES_TOPIC_ID)
     if (request === serviceVersion) mapServices.value = services
   } catch (reason) {
     if (request === serviceVersion) mapServiceError.value = reason instanceof Error ? reason.message : '地图服务列表读取失败'

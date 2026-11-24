@@ -512,8 +512,8 @@ watch(() => user.activeDeptId, () => {
         <div class="status-confirm-icon" :class="statusConfirm.nextStatus ? 'enable' : 'disable'">{{ statusConfirm.nextStatus ? '✓' : '!' }}</div>
         <div class="status-confirm-copy">
           <h3 id="status-confirm-title">确认{{ statusConfirm.nextStatus ? '启用' : '停用' }}地图服务</h3>
-          <p v-if="statusConfirm.nextStatus">启用后，该服务将重新出现在相关业务的影像服务列表中。</p>
-          <p v-else>停用后，该服务将不再出现在业务页面，但不会删除服务配置和已有业务数据。</p>
+          <p v-if="statusConfirm.nextStatus">启用后，该服务可出现在首页图层管理中。</p>
+          <p v-else>停用后，该服务不再出现在首页图层管理中；智能研判仍可查询使用，服务配置和已有业务数据不会删除。</p>
           <div class="status-confirm-service"><span>服务名称</span><strong>{{ statusConfirm.service.name }}</strong></div>
         </div>
         <footer><button type="button" :disabled="busy" @click="statusConfirm = undefined">取消</button><button type="button" class="confirm" :class="statusConfirm.nextStatus ? 'enable' : 'disable'" :disabled="busy" @click="confirmToggleService">{{ busy ? '处理中…' : `确认${statusConfirm.nextStatus ? '启用' : '停用'}` }}</button></footer>

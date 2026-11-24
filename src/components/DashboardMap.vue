@@ -125,8 +125,8 @@ const TAIZHOU_ZOOM = 10
 const taizhouDistrictBoundariesWgs84 = convertAdministrativeBoundary(taizhouDistrictBoundaries)
 // 用户提供的边界标注为 CRS84 经纬度，不做 GCJ-02 反算。
 const HAILING_DISTRICT = (hailingBoundary as {
-  features?: Array<{ properties?: { name?: string } }>
-}).features?.find((feature) => feature.properties?.name === '海陵区')
+  features?: Array<{ properties?: { name?: string; adcode?: string | number } }>
+}).features?.find((feature) => String(feature.properties?.adcode ?? '') === '321202' || feature.properties?.name === '海陵区')
 const token = import.meta.env.VITE_TIANDITU_TOKEN
 const user = useUserStore()
 
@@ -517,7 +517,7 @@ function mapServiceViewBounds(service: MapServiceItem, handle: MapServiceLayerHa
   return handle.bounds?.isValid() ? handle.bounds : taizhouServiceBounds(service)
 }
 
-async function toggleMapService(service: MapServiceItem) {
+async function toggleMapService(service: MapServiceItem, expandCategories = true) {
   if (!map) return
   const id = String(service.id)
   const existing = mapServiceLayers.get(id)
@@ -576,7 +576,7 @@ async function toggleMapService(service: MapServiceItem) {
         apply: handle.categoryFilter.setVisibleValues,
         locateValue: handle.categoryFilter.locateValue,
       }]
-      if (!expandedCategoryIds.value.includes(id)) expandedCategoryIds.value = [...expandedCategoryIds.value, id]
+      if (expandCategories && !expandedCategoryIds.value.includes(id)) expandedCategoryIds.value = [...expandedCategoryIds.value, id]
     }
   } catch (reason) {
     if (requestVersion === mapServiceRequestVersion && visibilityVersion === mapServiceVisibilityVersions.get(id)) showToolMessage(`${service.name}：${reason instanceof Error ? reason.message : '加载失败'}`, 6500)
@@ -835,7 +835,7 @@ async function toggleMapServiceGroup(group: MapServiceGroup) {
     ? expandedMapServiceGroupIds.value.filter((id) => id !== group.id)
     : [...expandedMapServiceGroupIds.value, group.id]
   const targets = hideGroup || group.layers.some(service => visibleMapServiceIds.value.includes(String(service.id))) ? [] : group.layers.slice(0, 1)
-  await Promise.all(targets.map(toggleMapService))
+  await Promise.all(targets.map(service => toggleMapService(service, false)))
 }
 
 async function toggleMapServiceGroupVisibility(group: MapServiceGroup) {
@@ -844,7 +844,7 @@ async function toggleMapServiceGroupVisibility(group: MapServiceGroup) {
     if (jiulongAdminSourceId.value === group.id) closeJiulongBoundary()
     group.layers.forEach(hideMapService)
   } else {
-    await Promise.all(group.layers.map(toggleMapService))
+    await Promise.all(group.layers.map(service => toggleMapService(service, false)))
   }
 }
 

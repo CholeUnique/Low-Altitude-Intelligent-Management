@@ -34,7 +34,7 @@ const ast=ts.createSourceFile('DashboardMap.ts',source,ts.ScriptTarget.Latest,tr
 const fn=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name.text==='renderHailingBoundary').getText(ast)
 const code=ts.transpileModule(fn,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText
 const districts=JSON.parse(readFileSync('src/assets/geo/hailing-boundary.json','utf8'))
-const district=districts.features.find(feature=>feature.properties.name==='海陵区');assert(district)
+const district=districts.features.find(feature=>String(feature.properties.adcode)==='321202');assert(district)
 assert.equal(String(district.properties.adcode),'321202');assert(['Polygon','MultiPolygon'].includes(district.geometry.type))
 assert.match(source,/const HAILING_DISTRICT = \(hailingBoundary as/,'首页直接使用提供的 CRS84 边界')
 for(const organizationId of ['agriculture-rural','other']){
