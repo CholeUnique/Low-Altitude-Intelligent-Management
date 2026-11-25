@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
 import { computed, ref, watch } from 'vue'
-import { addRecognitionSpot, getRecognitionSpotTypes } from '@/api/recognition-spot'
+import { addRecognitionSpot, getRecognitionSpotTypes, recognitionSpotServiceError } from '@/api/recognition-spot'
 import type { RecognitionAbnormalType, RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import type { MapServiceItem } from '@/api/map-service'
 import type { SceneDictionaryItem } from '@/api/scene'
@@ -115,7 +115,7 @@ async function submitSpot() {
     description.value = ''
     foundTime.value = ''
   } catch (error) {
-    submitError.value = error instanceof Error ? error.message : '异常图斑新增失败。'
+    submitError.value = recognitionSpotServiceError(error, '异常图斑新增失败。')
   } finally {
     submitting.value = false
   }

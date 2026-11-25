@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { reportFacilityIssue, type FacilityRecord, type FacilityReportResult } from '@/api/facility'
 import FacilityReportPhotos from './FacilityReportPhotos.vue'
+import { ensureFacilityWorkflowStarted } from '@/api/task-workflow'
 
 const props = defineProps<{ record: FacilityRecord; deptId?: string }>()
 const emit = defineEmits<{ close: []; reported: [FacilityReportResult] }>()
@@ -13,6 +14,7 @@ const photos = ref<File[]>([])
 const busy = ref(false)
 const error = ref('')
 const result = ref<FacilityReportResult>()
+const workflowMessage = ref('')
 
 async function submit() {
   if (busy.value) return
@@ -31,6 +33,13 @@ async function submit() {
     })
     result.value = payload
     emit('reported', payload)
+    try {
+      const flow = await ensureFacilityWorkflowStarted(String(payload.taskId ?? ''))
+      workflowMessage.value = flow.currentNode?.assigneeId ? '工作流已启动，可由当前办理人在我的待办中处理。' : '工作流已启动，但当前节点未返回办理人，请在任务中心核查。'
+      window.dispatchEvent(new Event('workflow-todos-changed'))
+    } catch (reason) {
+      workflowMessage.value = `上报已成功，但工作流启动或状态核查未完成：${reason instanceof Error ? reason.message : '请求失败'}。请到任务中心核查，勿重复上报。`
+    }
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '问题上报失败，请稍后重试'
   } finally {
@@ -57,8 +66,8 @@ async function submit() {
           <div><dt>设施最新状态</dt><dd class="status">{{ result.facilityBizStatusName || result.facilityBizStatus || '异常' }}</dd></div>
           <div><dt>上报照片</dt><dd>{{ result.imageCount ?? 0 }} 张</dd></div>
         </dl>
-        <p>任务已进入任务中心，可在「任务中心 / 我的待办」中跟进处置进度。</p>
-        <footer><button type="button" class="primary" @click="emit('close')">完成</button></footer>
+        <p>{{ busy ? '正在核查任务工作流…' : workflowMessage }}</p>
+        <footer><button type="button" class="primary" :disabled="busy" @click="emit('close')">完成</button></footer>
       </div>
 
       <form v-else @submit.prevent="submit">

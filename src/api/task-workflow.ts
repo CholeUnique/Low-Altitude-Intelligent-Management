@@ -85,6 +85,23 @@ export async function getTaskWorkflow(bizTaskId: string): Promise<TaskWorkflow |
   }
 }
 
+/** 上报接口通常已启动流程；仅在后端确认未启动时补启动。 */
+export async function ensureFacilityWorkflowStarted(bizTaskId: string): Promise<TaskWorkflow> {
+  if (!bizTaskId) throw new Error('上报结果缺少任务 ID。')
+  let flow = await getTaskWorkflow(bizTaskId)
+  if (!flow) {
+    try {
+      await apiClient.post('/v1/workflow/start', { bizTaskId })
+    } catch (error) {
+      // 上报接口或其他操作可能在查询后并发启动。
+      if (!(error instanceof ApiBusinessError && error.code === '10508')) throw error
+    }
+    flow = await getTaskWorkflow(bizTaskId)
+  }
+  if (!flow) throw new Error('后端未返回已启动的工作流。')
+  return flow
+}
+
 export async function getWorkflowTodos(deptId?: string): Promise<WorkflowNode[]> {
   const records: WorkflowNode[] = []
   for (let pageNum = 1; ; pageNum++) {
