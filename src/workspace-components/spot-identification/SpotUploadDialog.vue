@@ -7,6 +7,7 @@ import { inspectMapService } from '@/utils/map-service-layer'
 import { ApiBusinessError } from '@/api/client'
 import {
   confirmRecognitionSpotUpload,
+  recognitionSpotServiceError,
   getRecognitionSpotTypes,
   previewRecognitionSpotUpload,
   type RecognitionSpotCreateResult,
@@ -176,7 +177,7 @@ async function confirmUpload() {
       invalidatePreview()
       error.value = '预览批次已过期，请重新解析文件后再确认。'
     } else {
-      error.value = reason instanceof Error ? reason.message : '线下AI识别结果上传失败。'
+      error.value = recognitionSpotServiceError(reason, '线下AI识别结果上传失败。')
     }
   } finally {
     uploading.value = false

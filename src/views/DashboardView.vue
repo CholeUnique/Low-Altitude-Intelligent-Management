@@ -29,6 +29,45 @@ import { findOrganizationScene, isTaskVisibleForOrganization } from '@/utils/sce
 import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
 import type { DashboardMapLayer } from '@/types'
 
+const recognitionTypesElement = ref<HTMLElement>()
+let recognitionScrollTimer: ReturnType<typeof setInterval> | undefined
+let recognitionScrollDirection = 1
+let recognitionScrollPosition = 0
+let recognitionScrollPauseUntil = 0
+let recognitionScrollPaused = false
+watch(recognitionTypesElement, (element, _previous, onCleanup) => {
+  if (!element) return
+  recognitionScrollPosition = element.scrollTop
+  const pause = () => { recognitionScrollPaused = true }
+  const resume = () => { recognitionScrollPaused = false; recognitionScrollPosition = element.scrollTop; recognitionScrollPauseUntil = Date.now() + 1500 }
+  const delay = () => { recognitionScrollPosition = element.scrollTop; recognitionScrollPauseUntil = Date.now() + 2500 }
+  element.addEventListener('mouseenter', pause)
+  element.addEventListener('mouseleave', resume)
+  element.addEventListener('focusin', pause)
+  element.addEventListener('focusout', resume)
+  element.addEventListener('wheel', delay, { passive: true })
+  recognitionScrollTimer = setInterval(() => {
+    if (recognitionScrollPaused || document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches || Date.now() < recognitionScrollPauseUntil) return
+    const max = element.scrollHeight - element.clientHeight
+    if (max <= 1) { recognitionScrollPosition = element.scrollTop; return }
+    recognitionScrollPosition = Math.max(0, Math.min(max, recognitionScrollPosition + recognitionScrollDirection))
+    element.scrollTop = recognitionScrollPosition
+    if (recognitionScrollPosition >= max || recognitionScrollPosition <= 0) {
+      recognitionScrollDirection *= -1
+      recognitionScrollPauseUntil = Date.now() + 1200
+    }
+  }, 50)
+  onCleanup(() => {
+    clearInterval(recognitionScrollTimer)
+    recognitionScrollTimer = undefined
+    element.removeEventListener('mouseenter', pause)
+    element.removeEventListener('mouseleave', resume)
+    element.removeEventListener('focusin', pause)
+    element.removeEventListener('focusout', resume)
+    element.removeEventListener('wheel', delay)
+  })
+}, { flush: 'post' })
+
 const router = useRouter()
 const route = useRoute()
 const user = useUserStore()
@@ -532,7 +571,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <div class="recognition-summary"><DashboardCategoryRing :value="statistics?.abnormalSummary?.total ?? '—'" label="识别图斑" :total="statistics?.abnormalSummary?.total" :items="recognitionItems" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview?.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatRecognitionArea }}<small>亩</small></dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview?.resultCount ?? '—'" /></dd></div></dl></div>
-              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary?.total || 1, 1) * 100}%`, background: item.color }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">{{ statistics?.abnormalSummary ? '暂无识别分类数据' : '识别统计暂不可用' }}</div></div>
+              <div ref="recognitionTypesElement" class="recognition-types" role="region" aria-label="识别分类统计" tabindex="0"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary?.total || 1, 1) * 100}%`, background: item.color }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">{{ statistics?.abnormalSummary ? '暂无识别分类数据' : '识别统计暂不可用' }}</div></div>
             </section>
             <section v-if="isAgricultureTopicDepartment(user)" class="overview-float-panel topic-data-panel">
               <header>
