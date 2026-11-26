@@ -86,7 +86,7 @@ const View = load(compileScript(descriptor, { id: 'collection-test', inlineTempl
   '@/utils/collection-media-pager': load(readFileSync('src/utils/collection-media-pager.ts', 'utf8'), {}),
   '@/api/flight-review': { flightReviewFileApiPath: path => path.replace(/^\/api/, '') },
   '@/api/client': { apiClient: { defaults: { baseURL: '/api' } }, isMockMode: () => mockMode },
-  '@/utils/video-transcode': { prepareTranscodedVideo: async (media, signal, onProgress, force, options) => {
+  '@/utils/video-transcode': { originalVideoUrl: id => 'http://localhost/api/v1/uav/media/file/'+id, prepareTranscodedVideo: async (media, signal, onProgress, force, options) => {
     assert(!mockMode, 'Mock mode should not transcode')
     preparationCalls.push({media,signal,force})
     options.onUpdate({status:'RUNNING',sourceCodec:'h264',originalUrl:'http://localhost/api/v1/uav/media/file/'+media.id})

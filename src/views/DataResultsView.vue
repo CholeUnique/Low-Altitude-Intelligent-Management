@@ -6,7 +6,7 @@ import { createCollectionMediaPager, type CollectionMediaEntry, type CollectionM
 import type { FlightReviewMedia } from '@/api/flight-review'
 import { flightReviewFileApiPath } from '@/api/flight-review'
 import { apiClient, isMockMode } from '@/api/client'
-import { prepareTranscodedVideo, type VideoPreparationState } from '@/utils/video-transcode'
+import { prepareTranscodedVideo, originalVideoUrl, type VideoPreparationState } from '@/utils/video-transcode'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
 import SharedVideoPlayer from '@/workspace-components/spot-identification/SharedVideoPlayer.vue'
 import PhotoLocationControl from '@/workspace-components/spot-identification/PhotoLocationControl.vue'
@@ -126,6 +126,7 @@ const previewTaskMedia = computed(() => previewTask.value ? taskReviewMedia(prev
 function toReviewMedia(media: LiveMediaItem, task: UavFlightTaskOption): FlightReviewMedia {
   return { id: media.id, taskId: task.id, fileName: media.name, type: isVideoMedia(media) ? 'video' : media.mediaType || 'image',
     thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: media.localFileUrl || '', transcodeStatus: media.transcodeStatus, transcodeFileUrl: media.transcodeFileUrl, shootTime: media.capturedAt,
+    downloadStatus: media.downloadStatus, fileCleaned: media.fileCleaned,
     longitude: media.longitude, latitude: media.latitude }
 }
 function taskReviewMedia(task: UavFlightTaskOption) {
@@ -227,6 +228,22 @@ function thumbnailFailed(event: Event, media: LiveMediaItem) {
   } else image.style.visibility = 'hidden'
 }
 function videoSource(media: LiveMediaItem) { return localMediaUrl(media) || media.originalUrl || '' }
+function videoDownloadUrl(media: LiveMediaItem) {
+  if (isMockMode()) return videoSource(media)
+  return /^\d+$/.test(media.id) ? originalVideoUrl(media.id) : ''
+}
+/**
+ * 后端本地副本状态提示：本地已可读取时不显示。
+ * 用于点击下载前说明原片是否需要后端先补下载，避免只能靠 10201 兜底猜。
+ */
+function mediaCacheHint(media?: LiveMediaItem) {
+  if (!media || media.localFileUrl) return ''
+  if (media.fileCleaned === 1) return '后端本地文件已清理'
+  if (media.downloadStatus === 1) return '后端正在缓存原文件'
+  if (media.downloadStatus === 3) return '后端缓存原文件失败'
+  if (media.downloadStatus === 0) return '后端尚未缓存原文件'
+  return ''
+}
 function mediaTimestamp(media: LiveMediaItem, task: UavFlightTaskOption) {
   const captured = Date.parse((media.capturedAt || '').replace(' ', 'T'))
   if (Number.isFinite(captured)) return captured
@@ -575,7 +592,7 @@ onBeforeUnmount(() => {
       </div>
       <button class="preview-nav preview-next" :disabled="previewSwitching" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
       <p v-if="previewNotice" class="preview-notice" role="status">{{ previewNotice }}</p>
-      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}{{ hasMoreMedia ? '+' : '' }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small><a v-if="isVideoMedia(previewMedia) && (videoOriginalUrl || videoSource(previewMedia))" class="preview-video-download" :href="videoOriginalUrl || videoSource(previewMedia)" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" download>下载原视频</a></footer>
+      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}{{ hasMoreMedia ? '+' : '' }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small><small v-if="isVideoMedia(previewMedia) && mediaCacheHint(previewMedia)" class="preview-cache-hint" :title="mediaCacheHint(previewMedia)">{{ mediaCacheHint(previewMedia) }}</small><a v-if="isVideoMedia(previewMedia) && videoDownloadUrl(previewMedia)" class="preview-video-download" :href="videoDownloadUrl(previewMedia)" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" download>下载原视频</a></footer>
     </div>
     <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" @close="srtContext = undefined" />
   </div>
@@ -702,6 +719,7 @@ onBeforeUnmount(() => {
 .preview-caption strong { min-width:0; max-width:56vw; overflow:hidden; padding:0; font-size:15px; text-overflow:ellipsis; white-space:nowrap; }
 .preview-caption span { padding:4px 10px; border-radius:12px; background:#ffffff1d; font-size:12px; }
 .preview-caption small { color:#aebdcd; font-size:12px; }
+.preview-cache-hint { flex:none; padding:2px 8px; border:1px solid #f0c98766; border-radius:10px; color:#f3c98b !important; white-space:nowrap; }
 .hevc-notice { width:min(620px,72vw); padding:52px 48px; border:1px solid #47657d; border-radius:12px; color:#fff; background:linear-gradient(145deg,#172a3bea,#0b1722f2); box-shadow:0 20px 70px #000a; text-align:center; }
 .hevc-notice>i { width:68px; height:68px; display:grid; place-items:center; margin:0 auto 22px; border:1px solid #72b9e7; border-radius:50%; color:#9fd8ff; background:#2b77a735; font-size:28px; font-style:normal; }
 .hevc-notice h2 { margin:0; font-size:22px; }

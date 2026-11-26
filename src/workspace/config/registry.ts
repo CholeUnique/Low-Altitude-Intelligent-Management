@@ -30,11 +30,17 @@ export function getWorkspaceConfig(sceneId: string): SceneWorkspaceConfig | unde
 }
 
 /**
- * 所有场景统一复用已完成的“林业执法监管”五节点工作台流程与页面。
+ * 所有场景统一复用已完成的"林业执法监管"五节点工作台流程与页面。
  * 场景名称、任务、范围和异常图斑数据仍按当前任务自身读取。
+ *
+ * 林业执法在共享流程上额外多一个「实地考察」节点（见 forestry.ts），
+ * 该节点只由林业执法工作台渲染，其他场景沿用原五节点布局。
  */
 export function getSharedWorkspaceConfig(): SceneWorkspaceConfig {
-  return forestryConfig
+  return {
+    ...forestryConfig,
+    nodes: forestryConfig.nodes.filter((node) => node.key !== 'field-inspection'),
+  }
 }
 
 /**

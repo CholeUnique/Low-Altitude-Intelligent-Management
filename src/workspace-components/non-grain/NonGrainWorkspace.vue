@@ -104,7 +104,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
           :aria-disabled="!node.viewable"
           @click="selectNode(node)"
         >
-          <div class="workflow-step-symbol"><i>{{ node.status === 'completed' ? '✓' : node.order }}</i><WorkflowActorBadge v-if="node.key !== 'task-acceptance'" :node="node.instance" :user-id="String(user.currentUser?.id || '')" /></div>
+          <div class="workflow-step-symbol"><i aria-hidden="true"></i><WorkflowActorBadge v-if="node.key !== 'task-acceptance'" :node="node.instance" :user-id="String(user.currentUser?.id || '')" /></div>
           <span>{{ node.name }}</span>
         </button>
       </nav>

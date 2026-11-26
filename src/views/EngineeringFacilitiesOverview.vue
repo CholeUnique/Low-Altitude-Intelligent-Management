@@ -340,7 +340,9 @@ onBeforeUnmount(() => { version++; clearMapServices(); observer?.disconnect(); c
 .feature-details dd { color: var(--ui-body, #d8edf0); }
 .filter-row select:focus-visible { border-color: #a2c9d1; }
 @media(max-width:1100px){.facilities-overview{--details-width:270px}}
-@media(max-width:700px){.facilities-overview{--details-width:230px}.facilities-overview :deep(.map-symbol-legend){left:10px}}
+@media(max-width:700px){.facilities-overview{--details-width:230px}}
+.facilities-overview :deep(.map-symbol-legend){left:auto;right:14px;bottom:10px}
+.facilities-overview :deep(.overview-scale){left:14px;right:auto}
 
 .facility-drawer { width: var(--details-width); height: 568px; max-height: calc(100% - 40px); bottom: auto; box-sizing: border-box; transition: translate var(--ui-panel-motion, .24s ease), opacity var(--ui-panel-motion, .24s ease); }
 .facility-drawer.is-collapsed { width: var(--details-width); bottom: auto; translate: calc(-100% - 24px) 0; opacity: 0; pointer-events: none; }

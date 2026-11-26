@@ -16,9 +16,10 @@ import {
   type RecognitionSpotItem,
 } from '@/api/recognition-spot'
 import { ApiBusinessError } from '@/api/client'
+import { startCreatedSpotTask } from '@/utils/start-created-spot-task'
 import { getDepartmentOptions, type DepartmentOption } from '@/api/auth'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
-import { assignNonGrainReview, getNonGrainReviewerId, isNonGrainScene } from '@/api/non-grain-assignment'
+import { getNonGrainReviewerId, isNonGrainScene } from '@/api/non-grain-assignment'
 import type { MapServiceItem } from '@/api/map-service'
 import { useUserStore } from '@/stores/user'
 import { useSpotAddress } from '@/composables/useSpotAddress'
@@ -540,16 +541,16 @@ async function createSelectedTasks() {
     } catch (error) {
       issues.push(`任务名称未能安全匹配图斑：${error instanceof Error ? error.message : '关联信息读取失败'}`)
     }
-    if (reviewerId) {
-      for (const task of tasks.filter(task => isNonGrainScene(task.sceneCode))) {
-        const deptId = task.deptId || user.activeDeptId
-        if (!deptId) { issues.push(`任务 ${task.id} 未返回处理部门，无法启动工作流`); continue }
-        try { await assignNonGrainReview(task.id, deptId, reviewerId) }
-        catch (error) { issues.push(`任务 ${task.id} 工作流分派失败：${error instanceof Error ? error.message : '接口分派失败'}`) }
+    for (const task of tasks) {
+      try {
+        await startCreatedSpotTask(task, selectedSpots[0]?.sceneCode || '', user.activeDeptId, reviewerId)
+      } catch (error) {
+        issues.push(`任务 ${task.id} 工作流启动或分派失败：${error instanceof Error ? error.message : '接口请求失败'}`)
       }
     }
+    if (tasks.length) window.dispatchEvent(new Event('workflow-todos-changed'))
     if (issues.length) operationError.value = `已创建 ${tasks.length} 个核查任务，但${issues.join('；')}。请到任务列表核对，勿重复创建。`
-    else operationMessage.value = `已创建 ${tasks.length} 个核查任务并保存名称，图斑已从原任务移出。`
+    else operationMessage.value = `已创建 ${tasks.length} 个核查任务并启动工作流，图斑已从原任务移出。`
   } catch (error) {
     const message = error instanceof Error ? error.message : '核查任务创建失败。'
     if (createAcknowledged) operationError.value = `任务已创建（ID：${createdTasks.map(task => task.id).join('、') || '接口未返回'}），但后续处理未完成：${message}。请到任务列表核对，勿重复创建。`
