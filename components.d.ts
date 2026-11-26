@@ -21,6 +21,7 @@ declare module 'vue' {
     DashboardTopicOverview: typeof import('./src/components/DashboardTopicOverview.vue')['default']
     DomainProgressChart: typeof import('./src/components/DomainProgressChart.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
+    ElCalendar: typeof import('element-plus/es')['ElCalendar']
     ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElOption: typeof import('element-plus/es')['ElOption']

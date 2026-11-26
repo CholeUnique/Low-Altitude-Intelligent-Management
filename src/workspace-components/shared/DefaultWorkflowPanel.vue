@@ -21,8 +21,8 @@ const busy = ref(false), error = ref(''), activeId = ref(''), deadline = ref('')
 const recipient = ref<WorkbenchUser>()
 const plots = ref<Array<{ abnormalId: string; result: string; description: string }>>([])
 const archive = computed(() => props.nodeKey === 'FINISH_DEFAULT')
-const acceptance = computed(() => props.nodeKey === 'REVIEW_OWNER')
-const pageName = computed(() => acceptance.value ? '业务受理' : archive.value ? '结案归档' : '现场核查')
+const acceptance = computed(() => props.nodeKey === 'REVIEW_OWNER' || props.nodeKey === 'DISTRICT_DISPATCH')
+const pageName = computed(() => props.nodeKey === 'DISTRICT_DISPATCH' ? '区县分局派发' : acceptance.value ? '业务受理' : archive.value ? '结案归档' : '现场核查')
 const canEdit = computed(() => !props.readonly && !busy.value && !loading.value && canOperateWorkflowNode(selectedNode.value, String(user.currentUser?.id || '')) && selectedNode.value?.id === flow.value?.currentNode?.id)
 const evidenceFiles = computed(() => archive.value ? (flow.value?.timeline || []).flatMap(node => node.files || []).filter((file, index, files) => files.findIndex(item => item.id === file.id) === index) : selectedNode.value?.files || [])
 const saved = computed(() => (selectedNode.value?.resultData || {}) as Record<string, unknown>)
@@ -83,11 +83,17 @@ async function submit() {
   <TaskAcceptancePanel v-if="!selectedNode && !loading" :task-id="taskId" />
   <div v-else class="ng-page default-page" :class="{ 'default-page--acceptance': acceptance, 'default-page--archive': archive }">
     <WorkbenchFeedback :message="[...errors, error].filter(Boolean).join('；')" />
+    <p v-if="nodeKey === 'DISTRICT_DISPATCH'" class="default-tip" role="status">当前节点暂可查看；派发提交规则尚待确认。</p>
     <section class="ng-summary ng-summary--compact default-summary" aria-label="任务概况">
       <article v-for="item in summaries" :key="item.label" class="ng-summary-card">
         <i>{{ item.icon }}</i><span><small>{{ item.label }}</small><b :title="item.value || '—'">{{ item.value || '—' }}</b></span>
       </article>
     </section>
+    <slot
+      v-if="$slots.context"
+      name="context"
+      v-bind="{ task, abnormals, selectedSpot: activeSpot, selectedNode, imageryPeriod, pageName }"
+    />
     <div class="default-columns">
       <aside class="default-sidebar">
         <section class="ng-card plot-guide-card default-plots">

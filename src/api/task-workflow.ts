@@ -102,6 +102,20 @@ export async function ensureFacilityWorkflowStarted(bizTaskId: string): Promise<
   return flow
 }
 
+/**
+ * 启动业务任务的工作流。
+ * 任务接口未自动启动流程时（`/flow/detail` 返回 10501），由工作台显式发起；
+ * 10508 表示流程已存在，视为成功，交由调用方重新读取流程。
+ */
+export async function startTaskWorkflow(bizTaskId: string, deptId?: string): Promise<void> {
+  if (!bizTaskId) throw new Error('缺少任务 ID，无法启动工作流。')
+  try {
+    await apiClient.post('/v1/workflow/start', { bizTaskId, deptId })
+  } catch (error) {
+    if (!(error instanceof ApiBusinessError && error.code === '10508')) throw error
+  }
+}
+
 export async function getWorkflowTodos(deptId?: string): Promise<WorkflowNode[]> {
   const records: WorkflowNode[] = []
   for (let pageNum = 1; ; pageNum++) {

@@ -140,7 +140,7 @@ function administrativeCodeField(fields:{name?:string;alias?:string}[],layerName
 }
 
 /** 行政边界使用真实服务几何，在地图上绘制双层描边，不依赖影像导出的样式。 */
-export async function createAdministrativeBoundaryLayer(service: MapServiceItem, color = /村级|行政村|村界/.test(service.name)?'#ffcf70':'#74dfff'): Promise<MapServiceLayerHandle> {
+export async function createAdministrativeBoundaryLayer(service: MapServiceItem, color = /村级|行政村|村界/.test(service.name)?'#ffcf70':'#74dfff', options: { showNames?: boolean } = {}): Promise<MapServiceLayerHandle> {
   const url = serviceRoot(service.serviceUrl)
   const layerId = Number(service.arcGisLayerId)
   const metadata = await getMapServiceLayerMetadata(service)
@@ -184,6 +184,44 @@ export async function createAdministrativeBoundaryLayer(service: MapServiceItem,
   categories.forEach(category=>{
     if(duplicateNames.has(category.label))category.label+=`（${category.value.replace(/^[^:]+:/,'')}）`
   })
+  const labels: { value: string; marker: L.Marker; bounds: L.LatLngBounds; minWidth: number }[] = []
+  let labelMap: L.Map | undefined
+  const refreshLabels = () => {
+    if (!labelMap) return
+    for (const label of labels) {
+      const nw = labelMap.latLngToContainerPoint(label.bounds.getNorthWest())
+      const se = labelMap.latLngToContainerPoint(label.bounds.getSouthEast())
+      const visible = selected.has(label.value) && Math.abs(se.x - nw.x) >= label.minWidth && Math.abs(se.y - nw.y) >= 24
+      if (visible && !group.hasLayer(label.marker)) group.addLayer(label.marker)
+      else if (!visible && group.hasLayer(label.marker)) group.removeLayer(label.marker)
+    }
+  }
+  if (options.showNames && !/村级|行政村|村界/.test(service.name)) {
+    const [{ arcgisToGeoJSON }, { polygonLabelPoint }] = await Promise.all([import('@terraformer/arcgis'), import('./administrative-label')])
+    for (const entry of entries) {
+      const geometry = arcgisToGeoJSON({ geometry: entry.geometry, attributes: {} }).geometry
+      const polygons = geometry?.type === 'Polygon' ? [geometry.coordinates] : geometry?.type === 'MultiPolygon' ? geometry.coordinates : []
+      for (const rings of polygons) {
+        const point = polygonLabelPoint(rings)
+        if (!point) continue
+        const partBounds = L.latLngBounds(rings[0]!.map(([lng, lat]) => L.latLng(lat!, lng!)))
+        if (!partBounds.isValid()) continue
+        const text = document.createElement('span')
+        text.textContent = entry.label
+        const marker = L.marker([point[1], point[0]], {
+          pane: 'administrative-boundaries', interactive: false, keyboard: false,
+          icon: L.divIcon({ className: 'admin-region-label', html: text, iconSize: [0, 0] }),
+        })
+        labels.push({ value: entry.value, marker, bounds: partBounds, minWidth: Math.max(50, entry.label.length * 14 + 12) })
+      }
+    }
+    group.on('add', event => {
+      labelMap = (event.target as L.Layer & { _map?: L.Map })._map
+      labelMap?.on('zoomend resize', refreshLabels)
+      refreshLabels()
+    })
+    group.on('remove', () => { labelMap?.off('zoomend resize', refreshLabels); labelMap = undefined })
+  }
   return {
     layer: group, bounds, color,
     setColor: next => { fills.forEach(path => path.setStyle({ color: next, fillColor: next })); return [] },
@@ -195,6 +233,7 @@ export async function createAdministrativeBoundaryLayer(service: MapServiceItem,
         values:categories,
         setVisibleValues:(values:string[])=>{
           selected=new Set(values)
+          refreshLabels()
           entries.forEach(entry=>{
             if(selected.has(entry.value)){if(!group.hasLayer(entry.outline))group.addLayer(entry.outline);if(!group.hasLayer(entry.fill))group.addLayer(entry.fill)}
             else {group.removeLayer(entry.outline);group.removeLayer(entry.fill)}

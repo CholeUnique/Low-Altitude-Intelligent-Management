@@ -249,6 +249,11 @@ export function toMediaList(payload: unknown): { list: LiveMediaItem[]; total: n
   const list = records.map((item, index) => {
     const longitude = Number(item.longitude ?? item.lng ?? item.lon)
     const latitude = Number(item.latitude ?? item.lat)
+    // 小整数枚举（downloadStatus/fileCleaned）：空值与非数字都当缺失，不把 0 误判成缺失。
+    const numeric = (key: string) => {
+      const raw = item[key]
+      return raw === null || raw === undefined || raw === '' || !Number.isFinite(Number(raw)) ? undefined : Number(raw)
+    }
     return {
       id: String(item.id ?? item.mediaId ?? `MEDIA-${index + 1}`),
       name: String(item.fileName ?? item.name ?? `IMG_${index + 1}.JPG`),
@@ -263,6 +268,8 @@ export function toMediaList(payload: unknown): { list: LiveMediaItem[]; total: n
       mediaType: item.type ? String(item.type) : undefined,
       longitude: Number.isFinite(longitude) && Math.abs(longitude) <= 180 ? longitude : undefined,
       latitude: Number.isFinite(latitude) && Math.abs(latitude) <= 90 ? latitude : undefined,
+      downloadStatus: numeric('downloadStatus'),
+      fileCleaned: numeric('fileCleaned'),
     }
   })
   return { list, total: totalOf(payload, list.length) }

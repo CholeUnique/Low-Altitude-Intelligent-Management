@@ -15,7 +15,7 @@
     "test:map-service-editor": "node scripts/map-service-editor.test.mjs",
     "test:map-drawing": "node scripts/map-drawing.test.mjs && node scripts/topic-drawing-load.test.mjs",
     "test:uav-review-media": "node scripts/uav-review-media.test.mjs",
-    "test:workflow-display": "node scripts/workflow-display.test.mjs",
+    "test:workflow-display": "node scripts/forestry-workflow.test.mjs && node scripts/workflow-display.test.mjs",
     "test:task-detail": "node scripts/task-detail-readonly.test.mjs",
     "test:deployment": "node scripts/deployment.test.mjs",
     "test:facility-workbench": "node scripts/farmland-facility-workflow.test.mjs && node scripts/facility-task-details.test.mjs && node scripts/facility-workbench-context.test.mjs && node scripts/facility-workbench-form.test.mjs",
