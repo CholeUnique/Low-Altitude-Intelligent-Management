@@ -7,6 +7,8 @@
 #app .task-center-content .content-heading p { font-size: 12px; line-height: 18px; color: var(--ui-muted); }
 #app .task-center-content .content-body { flex: 1; min-height: 0; padding: 16px 20px; overflow: auto; }
 #app .task-list-page .content-body { display: flex; flex-direction: column; overflow: hidden; }
+#app .task-todo-page .task-center-content { overflow: clip; }
+#app .task-todo-page .content-body { display: flex; overflow: clip; }
 
 #app :is(.task-filters, .todo-filters) {
   flex: none; height: auto; gap: 12px; padding: 16px;
@@ -20,18 +22,18 @@
 #app .task-list-page .task-filters { grid-template-columns: minmax(130px, 1.15fr) minmax(105px, .9fr) minmax(95px, .8fr) minmax(200px, 1.6fr) minmax(110px, .9fr) minmax(85px, .7fr); }
 #app .task-list-page .task-table { flex: 1; min-height: 0; margin-top: 16px; border: 1px solid var(--ui-border); border-radius: var(--ui-radius); background: var(--ui-surface); box-shadow: none; overflow-x: hidden; overflow-y: auto; }
 #app .task-list-page .task-table-row {
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, .74fr) 108px 104px minmax(0, .84fr) 94px 84px minmax(190px, 2.3fr) 54px;
+  grid-template-columns: 40px minmax(0, 1.1fr) minmax(0, .74fr) 108px 94px 104px minmax(0, .84fr) 84px minmax(190px, 2.3fr) 54px;
   min-width: 0; width: 100%; flex: 0 0 68px; height: 68px; min-height: 68px; max-height: 68px;
   background: transparent; border-bottom: 1px solid var(--ui-divider);
   transition: background-color var(--ui-motion);
-  > span { padding: 4px 7px; font-size: 13px; line-height: 20px; color: var(--ui-body); }
+  > span { padding: 4px 7px; font-size: 13px; line-height: 20px; color: var(--ui-body); text-align: center; }
   &:not(.task-table-head):hover { background: var(--ui-hover); }
   .task-name b, .task-owner b { font-size: 15px; line-height: 20px; color: var(--ui-text); font-weight: 500; }
   .task-name small, .task-owner small { font-size: 12px; line-height: 16px; color: var(--ui-muted); margin-top: 2px; }
-  .task-created { font-size: 12px; line-height: 18px; color: var(--ui-muted); }
+  .task-created { font-size: 12px; line-height: 18px; color: #80e6ee; font-weight: 600; font-variant-numeric: tabular-nums; }
   .task-actions button { min-height: 28px; padding: 3px 5px; border: 0; border-radius: 4px; color: var(--ui-link); background: transparent; font-size: 13px; }
   .task-actions button:hover { color: var(--ui-text); background: var(--ui-selected); }
-  > span:nth-child(2), > span:nth-child(3) { display: flex; align-items: center; justify-content: center; text-align: center; }
+  > span:nth-child(3), > span:nth-child(4) { display: flex; align-items: center; justify-content: center; text-align: center; }
   .scene-tag { font-size: 12px; line-height: 17px; color: #83d8ee; background: #12465c; border: 0; padding: 3px 5px; text-align: center; }
   .status-tag { @include badges.attribute; }
 }
@@ -127,11 +129,11 @@ html[data-ui-theme] .todo-filter-options .el-select-dropdown__item.is-hovering, 
 @media (max-width: 1450px) {
   #app .task-list-page .task-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   #app .task-list-page .task-filters .search-box { grid-column: auto; }
-  #app .task-list-page .task-table-row { grid-template-columns: minmax(0, .95fr) minmax(0, .62fr) 96px 92px minmax(0, .72fr) 86px 78px minmax(120px, 1.8fr) 50px; }
+  #app .task-list-page .task-table-row { grid-template-columns: 36px minmax(0, .95fr) minmax(0, .62fr) 96px 86px 92px minmax(0, .72fr) 78px minmax(120px, 1.8fr) 50px; }
   #app .task-list-page .task-table-row > span { padding-inline: 5px; }
 }
 @media (max-width: 1150px) {
-  #app .task-list-page .task-table-row { grid-template-columns: minmax(0, .85fr) minmax(0, .55fr) 84px 84px minmax(0, .62fr) 76px 72px minmax(100px, 1.4fr) 46px; }
+  #app .task-list-page .task-table-row { grid-template-columns: 32px minmax(0, .85fr) minmax(0, .55fr) 84px 76px 84px minmax(0, .62fr) 72px minmax(100px, 1.4fr) 46px; }
   #app .task-list-page .task-table-row > span { font-size: 12px; padding-inline: 4px; }
   #app .task-list-page .task-table-row :is(.task-name b, .task-owner b) { font-size: 14px; }
   #app .task-list-page .task-table-row :is(.scene-tag, .status-tag) { font-size: 12px; }
@@ -146,3 +148,9 @@ html[data-ui-theme] .todo-filter-options .el-select-dropdown__item.is-hovering, 
 
 #app .task-list-page .task-filters { grid-template-columns: minmax(95px, 1.15fr) minmax(105px, .9fr) minmax(95px, .8fr) minmax(180px, 1.6fr) minmax(105px, .9fr) minmax(85px, .7fr) auto; overflow-x: auto; }
 #app .task-list-page .task-filters .filter-actions { grid-column: auto; }
+
+#app .task-list-page .task-table-head > span:first-child { padding-inline: 2px; text-align: center; text-overflow: clip; }
+#app .task-list-page .task-table-row > .task-name { display: block; text-align: center; }
+#app .task-list-page .task-table-row > :is(.task-range,.task-actions) { justify-content:center; }
+#app .task-list-page .task-table-row > span > .workflow-progress { margin-inline:auto; }
+#app .task-list-page .task-table-row > .task-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

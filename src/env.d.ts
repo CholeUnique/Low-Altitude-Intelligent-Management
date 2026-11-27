@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string
   readonly VITE_PUBLIC_APP_URL?: string
   readonly VITE_FACILITY_REPORT_URL?: string
+  /** Enable the connected topic/task APIs in environments where they are deployed. */
+  readonly VITE_LAND_SUPERVISION_ENABLED?: string
   readonly VITE_DOM_XYZ_TILE_URL?: string
   readonly VITE_DAS_FLY_EMBED?: string
   /** 低空大师直播组件地址；分享码将以 share_code 查询参数传入。 */

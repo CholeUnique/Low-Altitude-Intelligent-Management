@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DashboardCategoryRing from '@/components/DashboardCategoryRing.vue'
 import DashboardFlipNumber from '@/components/DashboardFlipNumber.vue'
+import DashboardLoopList from '@/components/DashboardLoopList.vue'
 import DashboardSymbol from '@/components/DashboardSymbol.vue'
 import { Timer, Position } from '@element-plus/icons-vue'
 import DashboardMap from '@/components/DashboardMap.vue'
@@ -532,7 +533,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                 <button v-if="user.hasPermission('smart-recognition')" class="overview-header-link" type="button" aria-label="进入智能识别" @click="openRecognition">智能识别 <span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m6 4 4 4-4 4" /></svg></span></button>
               </header>
               <div class="recognition-summary"><DashboardCategoryRing :value="statistics?.abnormalSummary?.total ?? '—'" label="识别图斑" :total="statistics?.abnormalSummary?.total" :items="recognitionItems" /><dl><div><dt>待核查图斑</dt><dd><DashboardFlipNumber :value="statistics?.overview?.abnormalPendingCount ?? '—'" /></dd></div><div><dt>涉及面积</dt><dd>{{ formatRecognitionArea }}<small>亩</small></dd></div><div><dt>成果批次</dt><dd><DashboardFlipNumber :value="statistics?.overview?.resultCount ?? '—'" /></dd></div></dl></div>
-              <div class="recognition-types"><div v-for="item in recognitionItems" :key="item.key"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary?.total || 1, 1) * 100}%`, background: item.color }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">{{ statistics?.abnormalSummary ? '暂无识别分类数据' : '识别统计暂不可用' }}</div></div>
+              <DashboardLoopList class="recognition-types" :item-count="recognitionItems.length" aria-label="识别分类统计，悬停或聚焦暂停滚动"><div v-for="item in recognitionItems" :key="item.key" class="recognition-type-row"><span>{{ item.name }}</span><i><u :style="{ width: `${item.count / Math.max(statistics?.abnormalSummary?.total || 1, 1) * 100}%`, background: item.color }"></u></i><b><DashboardFlipNumber :value="item.count" /></b></div><div v-if="!recognitionItems.length" class="float-empty">{{ statistics?.abnormalSummary ? '暂无识别分类数据' : '识别统计暂不可用' }}</div></DashboardLoopList>
             </section>
             <section v-if="isAgricultureTopicDepartment(user)" class="overview-float-panel topic-data-panel">
               <header>
@@ -583,7 +584,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                   <div class="scene-task-ring__center"><b><DashboardFlipNumber :value="governanceCompletionRate === undefined ? '—' : `${governanceCompletionRate}%`" /></b><span>任务完成率</span></div>
                 </div>
                 <dl class="metric-legend task-state-legend"><div><dt><i class="legend-muted"></i>任务总数</dt><dd><DashboardFlipNumber :value="unitTaskSummary?.total ?? '—'" /></dd></div><div v-for="item in taskStatusLegend" :key="item.name"><dt><i :style="{ backgroundColor: item.color }"></i>{{ item.name }}</dt><dd><DashboardFlipNumber :value="item.count ?? '—'" /></dd></div></dl></div>
-                <div class="scene-task-legend" aria-label="场景任务数图例">
+                <DashboardLoopList v-slot="{ duplicate }" class="scene-task-legend" :item-count="sceneTaskChartItems.length" aria-label="场景任务数，悬停或聚焦暂停滚动">
                   <div v-if="!statistics?.sceneStats" class="float-empty">场景统计暂不可用</div>
                   <div v-else-if="!sceneTaskChartItems.length" class="float-empty">暂无场景任务数据</div>
                   <button
@@ -591,6 +592,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                     v-for="item in sceneTaskChartItems"
                     :key="item.id"
                     type="button"
+                    :tabindex="duplicate ? -1 : undefined"
                     :title="`${item.name}：${item.taskCount} 项任务`"
                     @click="openSceneTaskList(item.id)"
                     @mouseenter="hoveredSceneTaskId = item.id"
@@ -607,7 +609,7 @@ watch([() => user.token, () => user.authMode, () => user.activeDeptId, () => use
                     <span>{{ item.name }}</span>
                     <strong><DashboardFlipNumber :value="item.taskCount" /></strong>
                   </div>
-                </div>
+                </DashboardLoopList>
               </div>
               <div v-else class="float-empty">{{ statisticsLoading ? '正在读取任务统计…' : statistics?.sceneStats ? '暂无场景任务数据' : '场景统计暂不可用' }}</div>
             </section>

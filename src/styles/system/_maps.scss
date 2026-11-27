@@ -46,9 +46,9 @@
   p { font-size: 12px; line-height: 18px; color: #9fb7c9; }
   dl { gap: 16px 12px; }
   dt { font-size: 12px; line-height: 20px; color: #a8c0d2; }
-  dd { font-size: 24px; line-height: 30px; color: #80e6ee; margin-top: 4px; }
-  strong { font-size: 24px; line-height: 30px; color: #80e6ee; font-weight: 600; }
-  small { font-size: 12px; color: #a8c0d2; font-weight: 400; }
+  dd { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 4px; font-size: 20px; line-height: 28px; color: #80e6ee; margin-top: 4px; white-space: nowrap; overflow-wrap: normal; }
+  strong { flex: none; font-size: 20px; line-height: 28px; color: #80e6ee; font-weight: 600; white-space: nowrap; overflow-wrap: normal; }
+  small { flex: none; margin-left: 0; font-size: 12px; color: #a8c0d2; font-weight: 400; white-space: nowrap; }
 }
 #app .topic-tools { padding: 6px; background: var(--ui-glass); border: 1px solid var(--ui-border); border-radius: var(--ui-radius); box-shadow: var(--ui-shadow); backdrop-filter: blur(14px) saturate(1.08); }
 #app .topic-tools .tool-actions button { min-height: 34px; height: 34px; font-size: 13px; padding-inline: 9px; color: #c4d6e6; }
@@ -143,7 +143,7 @@
   .resource-states b { font-size: 20px; }
   .scene-task-ring__center b { font-size: max(12px, min(32px, var(--ring-number-size))); }
   .scene-task-legend span { font-size: 12px; }
-  .recognition-types > div:not(.float-empty) { font-size: 13px; }
+  .recognition-types .recognition-type-row { font-size: 13px; }
 }
 #app .dashboard-map--floating {
   --map-panel: linear-gradient(135deg, rgb(19 61 81 / 82%), rgb(7 34 52 / 68%));
@@ -204,7 +204,7 @@
     .overview-header-link { font-size: 12px; line-height: 20px; }
     .recognition-summary dl > div { min-height: 24px; padding-block: 2px; font-size: 12px; line-height: 20px; }
     .recognition-types { min-height: 26px; }
-    .recognition-types > div:not(.float-empty) { margin-block: 4px; font-size: 12px; line-height: 18px; }
+    .recognition-types .recognition-type-row { margin-block: 4px; font-size: 12px; line-height: 18px; }
     .scene-task-main { min-height: 80px; }
     .task-state-legend > div { min-height: 20px; padding-block: 0; }
     .scene-task-legend { min-height: 24px; }
@@ -230,3 +230,11 @@
 #app .geographic-topics .tool-analysis .tool-menu button {display:block;width:100%;padding:8px;border:0;border-radius:4px;background:none;text-align:left;color:#ddf6fa;font:13px var(--ui-font);cursor:pointer;}
 #app .geographic-topics .tool-analysis .tool-menu button:hover {background:#2b607b;}
 @media(prefers-reduced-motion:reduce){#app .geographic-topics .topic-legend{transition:none;}}
+
+// Geographic labels are independent of business layer visibility and cannot intercept clicks.
+.township-map-label{pointer-events:none!important;background:none!important;border:0!important;text-align:center;white-space:nowrap}.township-map-label span{display:inline-block;color:#fff3cf;font:700 14px/24px var(--ui-font);letter-spacing:1px;text-shadow:-1px -1px 2px #09283a,1px 1px 2px #09283a,0 0 5px #001523;pointer-events:none}
+#app .map-symbol-legend{left:auto;right:20px;bottom:10px;width:300px;z-index:440;max-height:none;overflow:visible;scrollbar-width:none}#app .map-symbol-legend::-webkit-scrollbar{display:none}
+#app .topic-inspector-rail{bottom:60px;z-index:525}
+#app .topic-farmland-stat.is-collapsed{flex:none;min-height:0;padding-bottom:0}#app .topic-farmland-stat.is-collapsed>:not(header){display:none}#app .topic-farmland-stat.is-collapsed>header{margin-bottom:0;border-bottom:0}
+#app .statistics-collapse-toggle,#app .details-collapse-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}#app .statistics-collapse-toggle b,#app .details-collapse-toggle span{font-size:18px;font-weight:400}#app .topic-feature-details.is-embedded.is-collapsed{flex:none;min-height:0}#app .topic-feature-details.is-collapsed>:not(header){display:none}#app .topic-feature-details .details-collapse-toggle{flex:1}
+.task-location-popover.el-popper{padding:0!important;overflow:hidden;border:1px solid #538ca7!important;background:#0c3044!important;box-shadow:0 8px 26px #001b3755}.task-location-popover .el-popper__arrow:before{background:#0c3044!important;border-color:#538ca7!important}

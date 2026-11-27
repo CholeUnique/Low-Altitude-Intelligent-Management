@@ -1,0 +1,14 @@
+---
+description: 所有任务工作台必须复用统一header和右侧悬浮工具球
+globs: "src/views/WorkspaceView.vue,src/workspace-components/**,src/workspace/config/**,src/components/TaskLocationPreview.vue"
+alwaysApply: false
+---
+
+新增或修改工作台前，先读取 `docs/workbench-layout.md`。
+
+- header 必须复用 `shared/WorkbenchHeader.vue`，真实步骤使用 `WorkflowSteps.vue`，实际操作人/提交时间使用 `WorkflowActorBadge.vue`；不得复制另一套场景header。
+- 所有工作台的位置工具由 `WorkspaceView.vue` 统一挂载一个 `WorkspaceToolBall.vue`，场景和节点组件不能另挂一个工具球或位置悬浮窗。
+- 工具球只在右侧上下拖动并限制可见边界，点击展开工具条；位置图标再次点击收起。工具层不改变主页面布局。
+- 工作台坐标显示为 CGCS2000 / EPSG:4490，后端WGS84输入不改写；导航直接复用现有 `NavigationQrDialog.vue`，提供高德/腾讯/百度及百度网页/App码。
+- 仅当前节点指定办理人可提交，历史只读；不得用任务可见权限代替办理权限。处理时间缺失不可用创建时间顶替。
+- 适用于通用、非粮化、工程设施、违法用地预警及整改等全部场景。新场景沿用公共布局，只新增业务内容。

@@ -1,0 +1,303 @@
+[
+  {
+    "flow_id": 5,
+    "node_key": "DISTRICT_DISPATCH",
+    "node_name": "区县分局派发",
+    "node_type": "REVIEW",
+    "form": [
+      {
+        "key": "opinion",
+        "label": "派发意见",
+        "type": "TEXTAREA",
+        "required": false
+      }
+    ],
+    "route": {
+      "routes": {
+        "FORWARD": {
+          "next": "SECTION_DISPATCH",
+          "defaultAssignee": "manual"
+        }
+      }
+    },
+    "assign": {
+      "defaultAssignee": "sceneOwner"
+    },
+    "seq": 1
+  },
+  {
+    "flow_id": 5,
+    "node_key": "FIELD_COLLECT",
+    "node_name": "实地采集",
+    "node_type": "IMPLEMENT",
+    "form": [
+      {
+        "key": "checkTime",
+        "label": "采集时间",
+        "type": "DATE",
+        "required": true,
+        "defaultValue": "now"
+      },
+      {
+        "key": "checker",
+        "label": "采集人员",
+        "type": "TEXT",
+        "required": true,
+        "defaultValue": "operator"
+      },
+      {
+        "key": "description",
+        "label": "实地说明",
+        "type": "TEXTAREA",
+        "required": true
+      },
+      {
+        "key": "attachment",
+        "label": "实地照片/凭证附件",
+        "type": "ATTACH",
+        "required": true
+      }
+    ],
+    "route": {
+      "routes": {
+        "FORWARD": {
+          "next": "SECTION_AUDIT"
+        }
+      }
+    },
+    "assign": {
+      "defaultAssignee": "manual"
+    },
+    "seq": 3
+  },
+  {
+    "flow_id": 5,
+    "node_key": "FINISH_EARLYWARN",
+    "node_name": "结束",
+    "node_type": "FINISH",
+    "form": null,
+    "route": null,
+    "assign": null,
+    "seq": 5
+  },
+  {
+    "flow_id": 5,
+    "node_key": "SECTION_AUDIT",
+    "node_name": "科室审核",
+    "node_type": "REVIEW",
+    "form": [
+      {
+        "key": "opinion",
+        "label": "审核意见",
+        "type": "TEXTAREA",
+        "required": false
+      },
+      {
+        "key": "result",
+        "label": "审核结论",
+        "type": "RADIO",
+        "required": true,
+        "options": [
+          "NO_PROBLEM",
+          "PROBLEM"
+        ]
+      }
+    ],
+    "route": {
+      "routes": {
+        "NO_PROBLEM": {
+          "next": "FINISH_EARLYWARN"
+        },
+        "PROBLEM": {
+          "next": "FINISH_EARLYWARN"
+        }
+      }
+    },
+    "assign": {
+      "defaultAssignee": "manual"
+    },
+    "seq": 4
+  },
+  {
+    "flow_id": 5,
+    "node_key": "SECTION_DISPATCH",
+    "node_name": "科室派发",
+    "node_type": "REVIEW",
+    "form": [
+      {
+        "key": "opinion",
+        "label": "派发意见",
+        "type": "TEXTAREA",
+        "required": false
+      }
+    ],
+    "route": {
+      "routes": {
+        "FORWARD": {
+          "next": "FIELD_COLLECT",
+          "defaultAssignee": "manual"
+        }
+      }
+    },
+    "assign": {
+      "defaultAssignee": "manual"
+    },
+    "seq": 2
+  },
+  {
+    "flow_id": 6,
+    "node_key": "DISTRICT_DISPATCH",
+    "node_name": "区县分局派发",
+    "node_type": "REVIEW",
+    "form": [
+      {
+        "key": "opinion",
+        "label": "派发意见",
+        "type": "TEXTAREA",
+        "required": false
+      }
+    ],
+    "route": {
+      "routes": {
+        "FORWARD": {
+          "next": "SECTION_DISPATCH",
+          "defaultAssignee": "manual"
+        }
+      }
+    },
+    "assign": {
+      "defaultAssignee": "sceneOwner"
+    },
+    "seq": 1
+  },
+  {
+    "flow_id": 6,
+    "node_key": "FIELD_RECTIFY",
+    "node_name": "实地监测整改",
+    "node_type": "IMPLEMENT",
+    "form": [
+      {
+        "key": "checkTime",
+        "label": "整改时间",
+        "type": "DATE",
+        "required": true,
+        "defaultValue": "now"
+      },
+      {
+        "key": "checker",
+        "label": "整改人员",
+        "type": "TEXT",
+        "required": true,
+        "defaultValue": "operator"
+      },
+      {
+        "key": "description",
+        "label": "整改说明",
+        "type": "TEXTAREA",
+        "required": true
+      },
+      {
+        "key": "attachment",
+        "label": "实地整改照片/凭证附件",
+        "type": "ATTACH",
+        "required": true
+      }
+    ],
+    "route": {
+      "routes": {
+        "FORWARD": {
+          "next": "SECTION_AUDIT"
+        }
+      }
+    },
+    "assign": {
+      "defaultAssignee": "manual"
+    },
+    "seq": 3
+  },
+  {
+    "flow_id": 6,
+    "node_key": "FINISH_RECTIFY",
+    "node_name": "结束",
+    "node_type": "FINISH",
+    "form": null,
+    "route": null,
+    "assign": null,
+    "seq": 5
+  },
+  {
+    "flow_id": 6,
+    "node_key": "SECTION_AUDIT",
+    "node_name": "科室审核",
+    "node_type": "REVIEW",
+    "form": [
+      {
+        "key": "opinion",
+        "label": "审核意见",
+        "type": "TEXTAREA",
+        "required": false
+      },
+      {
+        "key": "inDeadline",
+        "label": "是否在整改限期前",
+        "type": "RADIO",
+        "required": false,
+        "options": [
+          "YES",
+          "NO"
+        ]
+      },
+      {
+        "key": "result",
+        "label": "审核结论",
+        "type": "RADIO",
+        "required": true,
+        "options": [
+          "NO_PROBLEM",
+          "PROBLEM"
+        ]
+      }
+    ],
+    "route": {
+      "routes": {
+        "NO_PROBLEM": {
+          "next": "FINISH_RECTIFY"
+        },
+        "PROBLEM": {
+          "next": "FIELD_RECTIFY",
+          "defaultAssignee": "prevAssignee"
+        }
+      }
+    },
+    "assign": {
+      "defaultAssignee": "manual"
+    },
+    "seq": 4
+  },
+  {
+    "flow_id": 6,
+    "node_key": "SECTION_DISPATCH",
+    "node_name": "科室派发",
+    "node_type": "REVIEW",
+    "form": [
+      {
+        "key": "opinion",
+        "label": "派发意见",
+        "type": "TEXTAREA",
+        "required": false
+      }
+    ],
+    "route": {
+      "routes": {
+        "FORWARD": {
+          "next": "FIELD_RECTIFY",
+          "defaultAssignee": "manual"
+        }
+      }
+    },
+    "assign": {
+      "defaultAssignee": "manual"
+    },
+    "seq": 2
+  }
+]

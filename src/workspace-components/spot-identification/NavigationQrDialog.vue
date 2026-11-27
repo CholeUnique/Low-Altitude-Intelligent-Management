@@ -72,7 +72,7 @@ const links = computed<Record<QrKey, string>>(() => {
   const baidu = new URL('https://api.map.baidu.com/marker')
   baidu.searchParams.set('location', `${bdLat},${bdLng}`)
   baidu.searchParams.set('title', address)
-  baidu.searchParams.set('content', '林草核查目标点')
+  baidu.searchParams.set('content', '导航目标位置')
   baidu.searchParams.set('output', 'html')
   baidu.searchParams.set('coord_type', 'bd09ll')
   baidu.searchParams.set('zoom', '17')

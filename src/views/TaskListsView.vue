@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import FilterActions from '@/components/FilterActions.vue'
 import { useRoute, useRouter } from 'vue-router'
 import TaskCenterLayout from '@/layouts/TaskCenterLayout.vue'
+import TaskLocationPreview from '@/components/TaskLocationPreview.vue'
 import TaskRangeThumbnail from '@/components/TaskRangeThumbnail.vue'
 import TaskWorkflowProgress from '@/components/task-center/TaskWorkflowProgress.vue'
 import { collectPages } from '@/api/pagination'
@@ -354,17 +355,17 @@ onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRe
 
     <section ref="tableElement" class="task-table">
       <div class="task-table-row task-table-head">
-        <span>任务名称</span><span>所属场景</span><span>当前状态</span><span>当前处理人</span><span>创建单位 / 负责人</span><span>创建时间</span><span>任务范围</span><span>任务进度</span><span>操作</span>
+        <span>序号</span><span>任务名称</span><span>所属场景</span><span>当前状态</span><span>创建时间</span><span>当前处理人</span><span>创建单位 / 负责人</span><span>任务范围</span><span>任务进度</span><span>操作</span>
       </div>
-      <div v-for="task in taskRows" :key="task.id" class="task-table-row">
-        <span class="task-name"><b :title="task.name">{{ task.name }}</b><small>{{ task.taskNo }}</small></span>
+      <div v-for="(task, index) in taskRows" :key="task.id" class="task-table-row">
+        <span class="task-sequence">{{ (currentPage-1)*requestPageSize+index+1 }}</span><span class="task-name"><b :title="task.name">{{ task.name }}</b><small :title="task.taskNo">{{ task.taskNo }}</small></span>
         <span><em class="scene-tag">{{ task.sceneName }}</em></span>
         <span><em class="status-tag" :class="taskStatusClass(task)" :title="task.taskStatusDesc">{{ task.taskStatusDesc }}</em></span>
+        <span class="task-created" :title="formatTime(task.createTime)">{{ formatTime(task.createTime) }}</span>
         <span class="task-handler" :title="handlerName(task)">{{ handlerName(task) }}</span>
         <span class="task-owner"><b>{{ task.deptName }}</b><small v-if="task.assigneeName || task.assigneeId">{{ task.assigneeName || `负责人 #${task.assigneeId}` }}</small></span>
-        <span class="task-created" :title="formatTime(task.createTime)">{{ formatTime(task.createTime) }}</span>
         <span class="task-range">
-          <TaskRangeThumbnail v-if="taskRangeGeometries[task.id]" :geo-json="taskRangeGeometries[task.id]!" />
+          <ElPopover v-if="taskRangeGeometries[task.id]" trigger="hover" placement="left" :width="350" :show-after="180" :hide-after="150" :persistent="false" popper-class="task-location-popover"><template #reference><button class="task-range-preview-trigger" :aria-label="`查看${task.name}的位置和坐标`"><TaskRangeThumbnail :geo-json="taskRangeGeometries[task.id]!" /></button></template><template #default><TaskLocationPreview :geo-json="taskRangeGeometries[task.id]" :title="task.name" /></template></ElPopover>
           <i v-else class="range-thumb range-thumb--empty" :title="taskRangePreviewLoading ? '正在读取真实任务范围' : '暂无任务范围'">{{ taskRangePreviewLoading ? '…' : '—' }}</i>
         </span>
         <span><TaskWorkflowProgress :task="task" compact /></span>
@@ -516,3 +517,5 @@ onBeforeUnmount(()=>{latestRequest++;latestRangePreviewRequest++;latestHandlerRe
 .task-list-page .task-table-row>span:nth-child(4){white-space:normal}
 @media(max-width:1100px){.task-list-page .task-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.task-list-page .task-filters .search-box{grid-column:auto}}
 </style>
+
+<style scoped>.task-range-preview-trigger{padding:0;border:0;background:transparent;cursor:zoom-in}.task-sequence{font-variant-numeric:tabular-nums;text-align:center}</style>

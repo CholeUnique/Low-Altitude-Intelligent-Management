@@ -22,6 +22,7 @@ const facilities = shallowRef<Facility[]>([])
 const reportTarget = ref<FacilityRecord>(), qrcodeTarget = ref<FacilityRecord>()
 const pending = ref(false), error = ref(''), keyword = ref(''), typeFilter = ref(''), statusFilter = ref(''), page = ref(1), selectedKey = ref(''), detailError = ref('')
 const selectionNotice = ref('')
+const detailsCollapsed = ref(false)
 const mapServices = ref<MapServiceItem[]>([])
 const selectedServices = ref<string[]>([])
 const mapServiceError = ref('')
@@ -313,8 +314,8 @@ onBeforeUnmount(() => { version++; clearMapServices(); observer?.disconnect(); c
         <footer><span>{{ pageSize }} 条/页　{{ page }} / {{ pages }} 页</span><div><button type="button" :disabled="page<=1" @click="page--">上一页</button><button type="button" :disabled="page>=pages" @click="page++">下一页</button></div></footer>
       </div>
     </aside>
-    <aside v-if="selected" class="category-panel" aria-label="要素详情">
-      <div class="category-header"><div><small>FEATURE DETAILS</small><h2>要素详情</h2></div><button class="icon-button" type="button" title="关闭要素详情" aria-label="关闭要素详情" @click="closeFacilityDetail">×</button></div>
+    <aside v-if="selected" class="category-panel" :class="{'is-collapsed':detailsCollapsed}" aria-label="要素详情">
+      <div class="category-header"><button type="button" class="facility-details-toggle" :aria-expanded="!detailsCollapsed" @click="detailsCollapsed=!detailsCollapsed"><h2>要素详情</h2><span>{{ detailsCollapsed?'＋':'−' }}</span></button><button class="icon-button" type="button" title="关闭要素详情" aria-label="关闭要素详情" @click="closeFacilityDetail">×</button></div>
       <div class="feature-details"><p v-if="detailError" role="alert">{{ detailError }}</p><dl><div><dt>设施类型</dt><dd>{{ selected.category }}</dd></div><div><dt>几何类型</dt><dd>{{ selected.geometryType }}</dd></div><div v-for="row in detailRows" :key="row.name"><dt :title="row.name">{{ row.label }}</dt><dd>{{ row.value }}</dd></div></dl><p v-if="!detailRows.length" class="empty">暂无要素属性信息</p><FacilityNearbyPhoto :key="`${user.activeDeptId}:${selected.key}`" :coordinate="photoCoordinate" :geometry-type="selected.geometryType" @photo-location="showPhotoLocation" /></div>
       <div class="feature-actions"><button type="button" @click="openReport">问题上报</button><button type="button" @click="openQrcode">设施二维码</button></div>
     </aside>
@@ -353,3 +354,5 @@ onBeforeUnmount(() => { version++; clearMapServices(); observer?.disconnect(); c
 .category-panel .feature-actions button{flex:1;padding:8px 10px;border:1px solid #3a7386;border-radius:5px;background:#123a4c;color:#d7eef4;font-size:12px;cursor:pointer}
 .category-panel .feature-actions button:hover{background:#17506a;border-color:#4b93a8}
 </style>
+
+<style scoped>.category-panel{z-index:525}.category-panel.is-collapsed{bottom:auto}.category-panel.is-collapsed>:not(.category-header){display:none}.facility-details-toggle{display:flex;align-items:center;justify-content:space-between;flex:1;border:0;padding:0;background:transparent;color:inherit;text-align:left}.facility-details-toggle h2{font-size:15px}.facility-details-toggle span{font-size:18px}@media(max-width:700px){.facilities-overview :deep(.map-symbol-legend){left:auto;right:10px}}</style>

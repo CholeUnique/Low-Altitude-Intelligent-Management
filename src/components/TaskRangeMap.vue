@@ -9,6 +9,7 @@ import { createMapServiceLayer, MAP_SERVICE_IMAGERY_PANE, MAP_SERVICE_VECTOR_PAN
 type TaskMapView = { center: [number, number]; zoom: number }
 
 const props = withDefaults(defineProps<{
+  basemap?: 'vector' | 'imagery'
   coordinates?: [number, number][]
   geoJson?: TaskGeometryFeatureCollection
   /** 编辑任务范围时使用：保留异常图斑作为只读红色参考图层。 */
@@ -44,10 +45,6 @@ const container = ref<HTMLElement>()
 const error = ref('')
 const drawingFinished = ref(false)
 const isDrawing = computed(() => props.editable && !drawingFinished.value)
-const hasAreaGeometry = computed(() => props.geoJson?.features.some((feature) => {
-  const geometryType = feature.geometry?.type.toUpperCase()
-  return geometryType === 'POLYGON' || geometryType === 'MULTIPOLYGON'
-}) ?? false)
 let map: L.Map | undefined
 let resizeObserver: ResizeObserver | undefined
 let resizeFrame: number | undefined
@@ -67,7 +64,7 @@ let autoFitFrame: number | undefined
 const token = import.meta.env.VITE_TIANDITU_TOKEN
 const subdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
 
-function tileUrl(layer: 'img' | 'cia') {
+function tileUrl(layer: 'img' | 'cia' | 'vec' | 'cva') {
   return `https://t{s}.tianditu.gov.cn/${layer}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={x}&TILEROW={y}&TILEMATRIX={z}&tk=${token}`
 }
 
@@ -166,7 +163,7 @@ function isTaskRangeFeature(feature: TaskGeometryFeatureCollection['features'][n
   // 这些都表示该面是任务本身的范围，而非成果或异常图斑。
   const isEmptyReference = (value: unknown) => value === undefined || value === null
     || value === '' || value === 'null' || value === 'undefined'
-  return (geometryType === 'POLYGON' || geometryType === 'MULTIPOLYGON')
+  return ['POLYGON','MULTIPOLYGON','LINESTRING','MULTILINESTRING','POINT','MULTIPOINT'].includes(geometryType || '')
     && isEmptyReference(abnormalId)
     && isEmptyReference(resultId)
 }
@@ -332,6 +329,7 @@ function renderGeoJson() {
         fillOpacity: .1,
         dashArray: '10 6',
       },
+      pointToLayer: (_feature, point) => L.circleMarker(point,{pane:'task-range-pane',radius:7,color:'#147db4',weight:2,fillColor:'#2ce5ef',fillOpacity:.9}),
       onEachFeature: (_feature, layer) => {
         layer.bindTooltip('任务范围', { sticky: true, className: 'task-range-label', pane: 'task-range-pane' })
       },
@@ -494,13 +492,13 @@ onMounted(async () => {
   await nextTick()
   map = L.map(container.value, { center: [32.455, 119.923], zoom: 10, maxZoom: 22, zoomControl: false, attributionControl: false })
   // 地图本身不限制放大级别；18 级以上复用最高级底图瓦片进行放大。
-  const base = L.tileLayer(tileUrl('img'), { subdomains, maxNativeZoom: 18, maxZoom: 22 }).addTo(map)
+  const base = L.tileLayer(tileUrl(props.basemap === 'vector' ? 'vec' : 'img'), { subdomains, maxNativeZoom: 18, maxZoom: 22 }).addTo(map)
   map.createPane(MAP_SERVICE_IMAGERY_PANE).style.zIndex = '250'
   map.createPane(MAP_SERVICE_VECTOR_PANE).style.zIndex = '350'
   const labelsPane = map.createPane('labels')
   labelsPane.style.zIndex = '450'
   labelsPane.style.pointerEvents = 'none'
-  L.tileLayer(tileUrl('cia'), { subdomains, maxNativeZoom: 18, maxZoom: 22, pane: 'labels' }).addTo(map)
+  L.tileLayer(tileUrl(props.basemap === 'vector' ? 'cva' : 'cia'), { subdomains, maxNativeZoom: 18, maxZoom: 22, pane: 'labels' }).addTo(map)
   renderDomImagery()
   base.once('tileerror', () => { error.value = '天地图加载失败' })
   // move / zoom 会在拖拽、滚轮缩放过程中持续触发，两个窗口无需等鼠标松开便能同步。
@@ -569,7 +567,7 @@ watch(() => props.view, applyExternalView, { deep: true })
       <button @click="map?.zoomIn()">＋</button><button @click="map?.zoomOut()">－</button>
     </div>
     <div v-if="geoJson && !geoJson.features.length" class="map-empty">暂无任务范围数据</div>
-    <div v-else-if="geoJson && !hasAreaGeometry" class="map-empty map-empty--notice">后端当前仅返回图斑点位，尚未提供任务范围面</div>
+    <div v-else-if="geoJson && !geoJson.features.some(feature=>feature.geometry)" class="map-empty map-empty--notice">暂无有效任务位置</div>
     <div v-if="!geoJson" class="range-area">所选区域面积<br><b>约 {{ Math.round(polygonAreaSquareMeters(coordinates)).toLocaleString() }} 平方米</b></div>
   </div>
 </template>

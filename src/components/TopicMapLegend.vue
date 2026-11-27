@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { useId } from 'vue'
 import type { TopicDisplayMode } from '@/utils/topic-renderer'
 
 interface LegendSymbol {
@@ -14,69 +14,6 @@ interface LegendSymbol {
 interface LegendGroup { key: string; name: string; symbols: LegendSymbol[] }
 const props = defineProps<{ groups: LegendGroup[]; interactive?:boolean }>()
 const emit=defineEmits<{select:[key:string,label:string]}>()
-const legend = ref<HTMLElement>()
-const compact = ref(false)
-const density = ref(1)
-let observer: ResizeObserver | undefined
-let frame = 0
-
-// 两列显示，并在空间不足时收紧尺寸以保留完整图例。
-function fitLegend() {
-  const element = legend.value, parent = element?.parentElement
-  if (!element || !parent) return
-  const probe = element.cloneNode(true) as HTMLElement
-  probe.setAttribute('aria-hidden', 'true')
-  probe.inert = true
-  Object.assign(probe.style, { visibility: 'hidden', pointerEvents: 'none', left: '-100000px', top: 'var(--legend-top, var(--left-panel-top, 80px))', bottom: 'auto' })
-  parent.appendChild(probe)
-  try {
-    const top = Math.max(0, parent.getBoundingClientRect().top + parseFloat(getComputedStyle(probe).top))
-    const available = Math.max(1, element.getBoundingClientRect().bottom - top)
-    const measure = (scale: number) => {
-      probe.style.setProperty('--legend-density', String(scale))
-      return probe.getBoundingClientRect().height
-    }
-    probe.classList.remove('is-compact')
-    const needsCompact = measure(1) > available
-    probe.classList.toggle('is-compact', needsCompact)
-    let scale = needsCompact ? 11 / 12 : 1
-    if (needsCompact && measure(scale) > available) {
-      let lower = 0, upper = scale
-      // 字号、符号和留白一起收紧，保留全部条目，不滚动、不裁剪。
-      for (let step = 0; step < 12; step++) {
-        const middle = (lower + upper) / 2
-        if (measure(middle) <= available) lower = middle
-        else upper = middle
-      }
-      scale = lower
-    }
-    compact.value = needsCompact
-    density.value = scale
-  } finally { probe.remove() }
-}
-function scheduleFit() {
-  cancelAnimationFrame(frame)
-  frame = requestAnimationFrame(fitLegend)
-}
-watch(() => props.groups, scheduleFit, { deep: true, flush: 'post' })
-watch(legend, element => {
-  observer?.disconnect()
-  if (element?.parentElement) {
-    observer = new ResizeObserver(scheduleFit)
-    observer.observe(element.parentElement)
-    scheduleFit()
-  }
-}, { flush: 'post' })
-onMounted(() => {
-  window.addEventListener('resize', scheduleFit)
-  document.fonts?.addEventListener('loadingdone', scheduleFit)
-})
-onBeforeUnmount(() => {
-  cancelAnimationFrame(frame)
-  observer?.disconnect()
-  window.removeEventListener('resize', scheduleFit)
-  document.fonts?.removeEventListener('loadingdone', scheduleFit)
-})
 const patternId = useId()
 const isPoint = (symbol: LegendSymbol) => /point/i.test(symbol.geometry)
 const isLine = (symbol: LegendSymbol) => /polyline/i.test(symbol.geometry)
@@ -86,7 +23,7 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
 </script>
 
 <template>
-  <aside v-if="groups.length" ref="legend" class="map-symbol-legend" :class="{ 'is-compact': compact }" :style="{ '--legend-density': density }" aria-label="地图图例">
+  <aside v-if="groups.length" class="map-symbol-legend" style="--legend-density:1" aria-label="地图图例">
     <header><h2>图例</h2></header>
     <div class="map-symbol-content" aria-label="图例符号列表">
       <div class="map-symbol-columns">
@@ -128,7 +65,8 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
 .map-symbol-legend {
   position: absolute;
   z-index: 440;
-  left: 20px;
+  right: 20px;
+  left: auto;
   bottom: 10px;
   width: var(--details-width, 320px);
   max-width: calc(100% - 40px);
@@ -136,6 +74,7 @@ const stroke = (symbol: LegendSymbol) => symbol.standard && symbol.mode === 'fil
   flex-direction: column;
   box-sizing: border-box;
   overflow: visible;
+  max-height: none;
   border: 1px solid #d6e0e2;
   border-radius: 6px;
   background: #fff;

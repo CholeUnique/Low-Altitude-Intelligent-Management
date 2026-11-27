@@ -50,6 +50,8 @@ assert.equal(calls.at(-1).body.geometryA,data,'Uploaded analysis sends complete 
 handle=async(path,body)=>{assert.equal(body.deptId,'1');return path.endsWith('/status')?{resultId:'9007199254740993',status:'SUCCEEDED',areaA:20,areaB:10,both:{},aOnly:{},bOnly:{}}:{resultId:'9007199254740993',status:'RUNNING',progress:10}}
 assert.equal((await api.compareSpatialGeometries({geometryA:data,geometryB:data,minAreaSqm:4},{signal,deptId:'1',pollMs:0})).areaA,20)
 assert.equal(calls.at(-1).body.resultId,'9007199254740993')
+handle=async(path)=>path.endsWith('/status')?{status:'SUCCEEDED',data:{areaA:20,areaB:10,both:{},aOnly:{},bOnly:{}}}:{resultId:'9007199254740995',status:'RUNNING'}
+assert.equal((await api.compareSpatialGeometries({geometryA:data,geometryB:data,minAreaSqm:0},{signal,pollMs:0})).resultId,'9007199254740995','Preserve the accepted task ID when its nested result omits it, without losing long integer precision')
 const original=JSON.stringify(data);
 assert.equal(spatialDifferenceFeatures(data),data,'Use the classified backend result unchanged');
 assert.equal(spatialDifferenceFeatures(data).features[0].geometry,geometry,'Preserve multipart geometry and holes');

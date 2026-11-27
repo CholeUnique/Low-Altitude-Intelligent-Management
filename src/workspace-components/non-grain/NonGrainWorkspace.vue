@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import WorkbenchTaskNotice from '@/workspace-components/shared/WorkbenchTaskNotice.vue'
-import WorkflowActorBadge from '@/components/WorkflowActorBadge.vue'
+import WorkbenchHeader from '@/workspace-components/shared/WorkbenchHeader.vue'
 import { defaultWorkflow } from '@/utils/default-workflow'
 import DefaultWorkflowPanel from '@/workspace-components/shared/DefaultWorkflowPanel.vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { nonGrainWorkflow, nonGrainNodeKey, isNodeMine, canOperateWorkflowNode } from '@/utils/task-workflow-state'
+import { nonGrainWorkflow, nonGrainNodeKey, canOperateWorkflowNode } from '@/utils/task-workflow-state'
 import { getMyWorkflowTasks, type MyWorkflowTask } from '@/api/my-workflow-tasks'
 import { pendingWorkbenchTasks } from '@/utils/task-todo-state'
 import { getTaskWorkflow, type TaskWorkflow } from '@/api/task-workflow'
@@ -47,15 +46,9 @@ const readonlyControlHint = computed(() => {
   return selectedNode.value?.instance && !canOperate.value ? '没有工作权限' : ''
 })
 const noticeTasks = computed(() => pendingWorkbenchTasks(todos.value, props.taskId))
-function isMyNode(node: typeof workflow.value[number]) { return Boolean(node.instance && isNodeMine(node.instance, String(user.currentUser?.id || ''))) }
 function selectNode(node: typeof workflow.value[number]) {
   if (!node.viewable) return
   void router.replace({ query: { ...route.query, node: node.key } })
-}
-function nodeHint(node: typeof workflow.value[number]) {
-  if (!node.viewable) return '还未进行到此流程'
-  if (node.status === 'active' && !isMyNode(node)) return '由其他办理人处理，可查看办理页面'
-  return node.status === 'completed' ? '已处理，当前页面只读' : '本人办理节点'
 }
 function openNoticeTask(task: MyWorkflowTask) { void router.push({ name: 'workspace', params: { sceneId: task.sceneCode, taskId: task.id } }) }
 async function inspectionSubmitted() {
@@ -85,34 +78,7 @@ watch([() => props.taskId, () => user.activeDeptId], () => void loadHeader(), { 
 
 <template>
   <div class="non-grain-workspace">
-    <section class="ng-context" aria-label="任务办理操作">
-      <div class="ng-brand-area">
-        <button v-if="user.hasPermission('task-todo')" class="ng-back" @click="router.push('/tasks/todo')">‹ 返回任务</button>
-        <div class="ng-brand-text">
-          <b>{{ defaultTemplate ? '业务办理工作台' : '耕地用途监管工作台' }}</b>
-          <small :title="taskName">{{ taskName }}</small>
-        </div>
-      </div>
-
-      <nav class="ng-steps" aria-label="任务办理步骤">
-        <button
-          v-for="node in workflow"
-          :key="node.key"
-          :class="[node.status, { selected: node.key === selectedKey, mine: isMyNode(node) }]"
-
-          :aria-label="nodeHint(node)"
-          :aria-disabled="!node.viewable"
-          @click="selectNode(node)"
-        >
-          <div class="workflow-step-symbol"><i>{{ node.status === 'completed' ? '✓' : node.order }}</i><WorkflowActorBadge v-if="node.key !== 'task-acceptance'" :node="node.instance" :user-id="String(user.currentUser?.id || '')" /></div>
-          <span>{{ node.name }}</span>
-        </button>
-      </nav>
-
-      <div class="ng-header-right">
-        <WorkbenchTaskNotice v-if="user.hasPermission('task-todo')" :tasks="noticeTasks" :error="noticeError" @open-all="router.push('/tasks/todo')" @open-task="openNoticeTask" />
-      </div>
-    </section>
+    <WorkbenchHeader :title="defaultTemplate?'业务办理工作台':'耕地用途监管工作台'" :task-name="taskName" :steps="workflow" :selected-key="selectedKey" :user-id="String(user.currentUser?.id||'')" :busy="flowLoading" :show-back="user.hasPermission('task-todo')" :show-notice="user.hasPermission('task-todo')" :tasks="noticeTasks" :notice-error="noticeError" @back="router.push('/tasks/todo')" @select="key=>{const node=workflow.find(item=>item.key===key);if(node)selectNode(node)}" @open-all="router.push('/tasks/todo')" @open-task="openNoticeTask" />
 
     <WorkbenchReadonlyHint :root="workbenchBody" :message="readonlyControlHint" :page-key="selectedKey" />
     <main ref="workbenchBody" class="ng-workspace-body">

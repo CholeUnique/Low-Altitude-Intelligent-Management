@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import WorkbenchTaskNotice from '@/workspace-components/shared/WorkbenchTaskNotice.vue'
-import WorkflowActorBadge from '@/components/WorkflowActorBadge.vue'
+import WorkbenchHeader from '@/workspace-components/shared/WorkbenchHeader.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -9,7 +8,6 @@ import { getTaskEvidenceImages, type TaskEvidenceImage } from '@/api/governance-
 import { deleteWorkflowFile, getTaskWorkflow, uploadWorkflowFiles, submitWorkflowNode, type TaskWorkflow } from '@/api/task-workflow'
 import { getMyWorkflowTasks, type MyWorkflowTask } from '@/api/my-workflow-tasks'
 import { pendingWorkbenchTasks } from '@/utils/task-todo-state'
-import { isNodeMine } from '@/utils/task-workflow-state'
 import { FACILITY_CHECK_RESULTS, FACILITY_RECHECK_RESULTS, canOperateFacilityWorkflowNode, facilityArchiveConclusion, facilityHandoff, facilityNodeKey, facilityRequiredFields, facilityWorkflow, facilitySubmission, isFacilityRepairFlow } from '@/utils/farmland-facility-workflow'
 import { inspectionDocumentAccept, inspectionFileError, inspectionImageAccept, isInspectionImage } from '@/utils/inspection-files'
 import FacilityGeometryMap from './FacilityGeometryMap.vue'
@@ -130,12 +128,6 @@ function selectStep(key: string) {
   if (!step || (!step.viewable && key !== 'task-acceptance')) return
   void router.replace({ query: { ...route.query, node: key } })
 }
-function nodeHint(step: typeof steps.value[number]) {
-  if (step.key === 'task-acceptance' && !step.instance) return '查看报修任务资料；后端尚无受理节点记录'
-  if (!step.viewable) return '流程尚未到达，不能办理'
-  if (step.status === 'completed') return '已完成，可回看'
-  return isNodeMine(step.instance!, String(user.currentUser?.id || '')) ? '当前由我办理' : '由其他办理人处理，当前只读'
-}
 async function verifyCurrentNode(expectedId: string) {
   const latest = await getTaskWorkflow(props.taskId)
   if (latest?.currentNode?.id !== expectedId || !canOperateFacilityWorkflowNode(latest.currentNode,latest,String(user.currentUser?.id || ''),detail.value?.task.taskStatus)) {
@@ -238,11 +230,7 @@ onBeforeUnmount(() => { loadVersion++; clearPreviews(); if (toastTimer) clearTim
 
 <template>
   <div class="facility-workspace">
-    <header class="facility-header">
-      <div class="facility-brand"><button type="button" @click="router.push('/tasks/todo')">‹ 返回任务</button><span><b>高标田工程设施管理工作台</b><small :title="taskName">{{ taskName || detail?.task.name || '报修任务' }}</small></span></div>
-      <nav class="facility-steps" aria-label="报修处置流程"><button v-for="step in steps" :key="step.key" type="button" :class="[step.status, { selected: selectedKey === step.key, mine: step.instance && isNodeMine(step.instance, String(user.currentUser?.id || '')) }]" :aria-label="nodeHint(step)" :aria-disabled="!step.viewable && step.key !== 'task-acceptance'" @click="selectStep(step.key)"><div class="workflow-step-symbol"><i>{{ step.status === 'completed' ? '✓' : step.order }}</i><WorkflowActorBadge v-if="step.key !== 'task-acceptance'" :node="step.instance" :user-id="String(user.currentUser?.id || '')" /></div><span>{{ step.name }}</span></button></nav>
-      <WorkbenchTaskNotice v-if="user.hasPermission('task-todo')" :tasks="otherTodos" :error="noticeError" @open-all="router.push('/tasks/todo')" @open-task="router.push({ name: 'workspace', params: { sceneId: $event.sceneCode, taskId: $event.id } })" />
-    </header>
+    <WorkbenchHeader title="高标田工程设施管理工作台" :task-name="taskName||detail?.task.name" :steps="steps.map(step=>({...step,viewable:step.key==='task-acceptance'||step.viewable}))" :selected-key="selectedKey" :user-id="String(user.currentUser?.id||'')" :busy="busy" :show-back="user.hasPermission('task-todo')" :show-notice="user.hasPermission('task-todo')" :tasks="otherTodos" :notice-error="noticeError" @back="router.push('/tasks/todo')" @select="selectStep" @open-all="router.push('/tasks/todo')" @open-task="router.push({name:'workspace',params:{sceneId:$event.sceneCode,taskId:$event.id}})" />
     <main class="facility-content">
       <div v-if="message" class="facility-toast" role="status">{{ message }}</div>
       <div v-if="error" class="facility-alert" role="alert">{{ error }} <button type="button" @click="load">重试</button></div>

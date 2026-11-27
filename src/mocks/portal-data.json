@@ -63,7 +63,7 @@
         {
           "id": "existing-illegal-land-rectification",
           "name": "全程监测存量违法违规用地整改",
-          "shortName": "存量用地整改",
+          "shortName": "违法用地整改",
           "icon": "整",
           "description": "存量违法用地整改全过程监测",
           "workspaceEnabled": true

@@ -5,16 +5,17 @@ import { computed } from 'vue'
 import { useBackendTaskData } from './use-backend-task'
 import NonGrainImageryComparison from '@/workspace-components/non-grain/NonGrainImageryComparison.vue'
 import { taskPriorityLabel } from '@/api/governance-task'
+import type { LandTask } from '@/types/land-supervision'
 import '@/workspace-components/non-grain/workspace.scss'
 
-const props = defineProps<{ taskId?: string }>()
+const props = defineProps<{ taskId?: string;topicObject?:LandTask['topicObject'];embedded?:boolean }>()
 const { detail, geometry, abnormals, logs, flow, loading, errors, activeSpotId, task, selectedSpot, text, handleLabel } = useBackendTaskData({ get taskId() { return props.taskId }, readonly: true, includeMaterials: false })
 const summaries = computed(() => [
   { icon: '景', label: '所属场景', value: task.value?.sceneName },
   { icon: '时', label: '创建时间', value: task.value?.createTime },
   { icon: '位', label: '所属区域', value: task.value?.rangeName },
-  { icon: '斑', label: '问题图斑数量', value: detail.value?.abnormalCount == null ? undefined : `${detail.value.abnormalCount} 个` },
-  { icon: '积', label: '异常总面积', value: detail.value?.abnormalArea == null ? undefined : `${detail.value.abnormalArea} ㎡` },
+  { icon: '斑', label: props.topicObject?'专题对象数量':'问题图斑数量', value: props.topicObject?'1 个':detail.value?.abnormalCount == null ? undefined : `${detail.value.abnormalCount} 个` },
+  { icon: '积', label: props.topicObject?'地块范围面积':'异常总面积', value: props.topicObject?props.topicObject.areaSqm==null?undefined:`${props.topicObject.areaSqm} ㎡`:detail.value?.abnormalArea == null ? undefined : `${detail.value.abnormalArea} ㎡` },
   { icon: '态', label: '任务状态', value: task.value?.taskStatusDesc },
 ])
 const basics = computed<Array<[string, unknown]>>(() => [
@@ -40,31 +41,42 @@ const spotFields = computed<Array<[string, unknown]>>(() => [
   ['经度', selectedSpot.value?.longitude], ['纬度', selectedSpot.value?.latitude],
 ])
 const detailFields = computed(() => {
-  const fields = [...spotFields.value, ...basics.value]
+  const source=props.topicObject
+  const fields = [...(source?[
+    ['专题对象编号',source.objectNo],['专题对象名称',source.name],['对象类型',source.objectType==='SUSPECT'?'疑似违规用地':'确认违规用地'],
+    ['违法类型',source.abnormalType],['发现时间',source.foundTime],['判读说明',source.description],
+  ] as Array<[string,unknown]>:spotFields.value), ...basics.value]
   return fields.filter(([label], index) => fields.findIndex(([name]) => name === label) === index)
 })
 </script>
 
 <template>
-  <div class="ng-page task-acceptance">
+  <div class="ng-page task-acceptance" :class="{'is-embedded':embedded}">
     <WorkbenchFeedback :message="errors.join('；')" />
-    <section class="ng-summary ng-summary--acceptance acceptance-summary">
+    <section v-if="!embedded" class="ng-summary ng-summary--acceptance acceptance-summary">
       <article v-for="item in summaries" :key="item.label" class="ng-summary-card"><i>{{ item.icon }}</i><span><small>{{ item.label }}</small><b :title="text(item.value)">{{ text(item.value) }}</b></span></article>
     </section>
     <div class="acceptance-layout">
-      <section class="ng-card acceptance-plot-panel"><h3><i>斑</i>问题图斑列表 <small>共 {{ abnormals.length }} 个</small></h3>
+      <section v-if="!embedded&&topicObject" class="ng-card acceptance-plot-panel"><h3><i>斑</i>来源专题对象 <small>共 1 个</small></h3><article class="topic-source-card"><b>{{ topicObject.name }}</b><p>{{ topicObject.objectNo }} · {{ topicObject.objectType==='SUSPECT'?'疑似违规用地':'确认违规用地' }}</p><p>{{ topicObject.description }}</p><strong>{{ topicObject.areaSqm==null?'暂无面积':(topicObject.areaSqm/(2000/3)).toFixed(2)+' 亩' }}</strong></article></section>
+      <section v-else-if="!embedded" class="ng-card acceptance-plot-panel"><h3><i>斑</i>问题图斑列表 <small>共 {{ abnormals.length }} 个</small></h3>
             <div class="acceptance-plots"><button v-for="(spot, index) in abnormals" :key="spot.id" :class="{ selected: activeSpotId === spot.id }" @click="activeSpotId = spot.id"><img v-if="spot.imageUrl" :src="spot.imageUrl" :alt="spot.title" /><span v-else class="plot-placeholder">{{ index + 1 }}</span><b>{{ spot.title }}</b><small>{{ spot.spotNo || spot.id }} · {{ handleLabel(spot.handleStatus) }}</small><strong>{{ spot.area == null ? '暂无面积' : `${spot.area} ㎡` }}</strong></button></div>
             <p v-if="!abnormals.length" class="empty-copy">当前任务暂无异常图斑</p>
           </section>
-      <NonGrainImageryComparison :images="task?.comparisonImages || []" :spot="selectedSpot" :geometry="geometry" :abnormals="abnormals" :allow-image-selection="false" />
-      <section class="ng-card acceptance-detail-panel"><h3><i>详</i>疑似图斑详情</h3><div class="acceptance-scroll"><dl class="detail-pairs"><template v-for="[label, value] in detailFields" :key="label"><dt>{{ label }}</dt><dd>{{ text(value) }}</dd></template></dl></div></section>
-      <section class="ng-card acceptance-record-panel"><TaskHistory :task="task" :logs="logs" :flow="flow" :spots="abnormals" :loading="loading" /></section>
+      <NonGrainImageryComparison v-if="!embedded" :images="task?.comparisonImages || []" :spot="selectedSpot" :geometry="geometry" :abnormals="abnormals" :allow-image-selection="false" />
+      <section class="ng-card acceptance-detail-panel"><h3><i>详</i>{{ topicObject?'专题对象详情':'疑似图斑详情' }}</h3><div class="acceptance-scroll"><dl class="detail-pairs"><template v-for="[label, value] in detailFields" :key="label"><dt>{{ label }}</dt><dd>{{ text(value) }}</dd></template></dl></div></section>
+      <section v-if="!embedded" class="ng-card acceptance-record-panel"><TaskHistory :task="task" :logs="logs" :flow="flow" :spots="abnormals" :loading="loading" /></section>
     </div>
   </div>
 </template>
 
 <style scoped>
 .task-acceptance{display:flex;flex-direction:column;overflow:auto;scrollbar-width:thin}
+.task-acceptance.is-embedded{height:auto;min-height:0;padding:0!important;background:transparent!important;overflow:visible}
+.is-embedded .acceptance-layout{display:block;min-height:0}
+.is-embedded .acceptance-detail-panel{padding:0!important;border:0;box-shadow:none}
+.is-embedded .acceptance-scroll{overflow:visible}
+.is-embedded .detail-pairs{grid-template-columns:100px minmax(0,1fr) 100px minmax(0,1fr);gap:10px 12px}
+@media(max-width:1050px){.is-embedded .detail-pairs{grid-template-columns:90px minmax(0,1fr)}}
 .acceptance-summary{flex-shrink:0;min-height:72px;margin-bottom:12px;grid-template-columns:repeat(6,minmax(0,1fr))}
 .acceptance-layout{display:grid;grid-template-columns:minmax(280px,.9fr) minmax(0,1.3fr);grid-template-rows:minmax(250px,1.15fr) minmax(200px,1fr);gap:12px;flex:1;min-height:462px}
 .acceptance-layout>.ng-card{min-height:0;box-sizing:border-box}
@@ -80,6 +92,7 @@ const detailFields = computed(() => {
 .acceptance-plots b{font-size:14px}.acceptance-plots small{font-size:12px;color:#8195a6}.acceptance-plots strong{font-size:15px;color:#147dda}
 .acceptance-record-panel{padding:0!important;overflow:hidden}
 .empty-copy{margin:16px 0;color:#8195a6;font-size:12px;text-align:center}
+.topic-source-card{padding:12px;border:1px solid #477b9555;border-radius:8px;background:#17607d18;color:var(--ui-body)}.topic-source-card b{font-size:14px;color:var(--ui-text)}.topic-source-card p{font-size:12px;line-height:1.7}.topic-source-card strong{color:var(--ui-accent)}
 @media(max-width:1100px){.acceptance-summary{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:8px}}
 @media(max-width:800px){.acceptance-layout{flex:none;grid-template-columns:minmax(0,1fr);grid-template-rows:260px 360px 360px 360px}.acceptance-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
