@@ -132,7 +132,7 @@ const drawingFinished = ref(false)
 const drawingError = ref('')
 const drawingPeriod = computed<ComparisonPeriod>(() => ({ number: 3, label: '绘制复核图斑', kind: 'image', imageUrl: pendingImagery.value?.imagery.previewDataUrl, bounds: pendingImagery.value?.imagery.bounds }))
 const sourceImages = computed(() => {
-  const images = (task.value?.comparisonImages || []).filter(image => image.mapService && Number(image.mapService.status) === 1)
+  const images = (task.value?.comparisonImages || []).filter(image => image.mapService)
   return [images.length > 1 ? images[0] : undefined, images[images.length - 1]]
 })
 const periods = computed<ComparisonPeriod[]>(() => sourceImages.value.map((image,index) => ({ number: index + 1, label: image?.label || (index ? '整改前遥感影像' : '历史影像'), kind: image?.mapService ? 'map-service' : 'empty', mapService: image?.mapService })))

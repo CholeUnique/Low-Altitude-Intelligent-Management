@@ -21,6 +21,17 @@ assert(Number(panes.get(vectorPane).style.zIndex)>Number(panes.get(imagePane).st
 api.syncMapServiceStack()
 const regionFunctions = ast.statements.filter(node => ts.isFunctionDeclaration(node) && ['regionEntries','toggleRegion'].includes(node.name?.text)).map(node=>node.getText(ast)).join('\n')
 const expandedRegions = {value: []}
+const groupFunctions = ast.statements.filter(node => ts.isFunctionDeclaration(node) && ['toggleMapServiceGroup','toggleMapServiceGroupVisibility'].includes(node.name?.text)).map(node=>node.getText(ast)).join('\n')
+const groupState = { expandedMapServiceGroupIds: { value: [] }, visibleMapServiceIds: { value: [] }, jiulongAdminSourceId: { value: '' } }
+const opened = []
+const groupActions = new Function('state','opened', `const {expandedMapServiceGroupIds,visibleMapServiceIds,jiulongAdminSourceId}=state;const isMapServiceGroupExpanded=g=>expandedMapServiceGroupIds.value.includes(g.id);const isMapServiceGroupActive=()=>false;const toggleMapService=async (item,expand)=>opened.push({id:item.id,expand});const hideMapService=()=>{};const closeJiulongBoundary=()=>{};${compile(groupFunctions)};return {toggleMapServiceGroup,toggleMapServiceGroupVisibility}`)(groupState,opened)
+const parent = {id:'parent',layers:[{id:'a'},{id:'b'}]}
+await groupActions.toggleMapServiceGroupVisibility(parent)
+assert.deepEqual(opened,[{id:'a',expand:false},{id:'b',expand:false}],'Enabling a parent keeps each child category panel closed')
+opened.length=0
+await groupActions.toggleMapServiceGroup(parent)
+assert.deepEqual(opened,[{id:'a',expand:false}],'Expanding a parent keeps the initially shown child category panel closed')
+assert.match(script,/if \(expandCategories && !expandedCategoryIds\.value\.includes\(id\)\)/,'Directly enabling a child can still expand its category panel')
 const toggleRegion = new Function('expandedRegions', `const regionKey=(type,code)=>JSON.stringify([type,code]);${compile(regionFunctions)};return toggleRegion`)(expandedRegions)
 toggleRegion('image',{code:'district',children:[]}); assert.equal(expandedRegions.value.length,1,'District without children expands')
 toggleRegion('image',{code:'district',children:[]}); assert.equal(expandedRegions.value.length,0,'District collapses')

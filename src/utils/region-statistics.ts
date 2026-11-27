@@ -1,4 +1,4 @@
-import { compareSpatialGeometries,type SpatialCollection } from '@/api/spatial-analysis'
+import { compareSpatialGeometries,type SpatialCollection,type SpatialCompareGroup } from '@/api/spatial-analysis'
 import { geometryRequestInputs,spatialGeometryExtent } from './spatial-geometry-input'
 export interface RegionStatistic {areaSqm:number;highAreaSqm:number;permanentAreaSqm:number;overlapAreaSqm:number;onlyHighAreaSqm:number;onlyPermanentAreaSqm:number;diffRate:number|null}
 export interface RegionStatisticRow {id:string;name:string;status:'RUNNING'|'SUCCEEDED'|'FAILED';value?:RegionStatistic;error?:string;diagnostics?:string}
@@ -10,6 +10,17 @@ export class RegionStatisticIntegrityError extends Error {
 }
 export interface RegionGeometry {id:string;name:string;data:SpatialCollection}
 const bounds=new WeakMap<object,ReturnType<typeof spatialGeometryExtent>>()
+function fullArea(group:SpatialCompareGroup):number{
+  const value=group.fullAreaSqm ?? group.areaSqm
+  if(!Number.isFinite(value)||value<0)throw new Error('后端未返回有效的区域统计面积')
+  return value
+}
+function completeIntermediate(group:SpatialCompareGroup):number{
+  const full=fullArea(group)
+  if(!Number.isFinite(group.areaSqm)||group.areaSqm<0)throw new Error('后端未返回有效的输出图斑面积')
+  if(full-group.areaSqm>.05)throw new Error('中间图斑已被阈值过滤，无法计算完整区域重叠统计，请后端确认 minAreaSqm=0 返回完整几何')
+  return full
+}
 function candidates(data:SpatialCollection,region:SpatialCollection):SpatialCollection{
   const extent=spatialGeometryExtent(region)
   return {...data,features:data.features.filter(feature=>{
@@ -34,14 +45,14 @@ export async function calculateRegionStatistic(region:SpatialCollection,high:Spa
   if(!p.features.length)parts[1]=100
   const [hr,pr]=await Promise.all([h.features.length?invoke(region,h,0):undefined,p.features.length?invoke(region,p,1):undefined])
   const areaSqm=hr?.areaA??pr?.areaA??(await invoke(region,region,2)).areaA
-  const highAreaSqm=hr?.both.areaSqm||0,permanentAreaSqm=pr?.both.areaSqm||0
+  const highAreaSqm=hr?completeIntermediate(hr.both):0,permanentAreaSqm=pr?completeIntermediate(pr.both):0
   let overlapAreaSqm=0,onlyHighAreaSqm=highAreaSqm,onlyPermanentAreaSqm=permanentAreaSqm
   let overlapResult:Awaited<ReturnType<typeof compare>>|undefined
   if(highAreaSqm&&permanentAreaSqm){
     const result=await invoke(hr!.both.featureCollection,pr!.both.featureCollection,2)
     overlapResult=result
-    overlapAreaSqm=result.both.areaSqm
-    onlyHighAreaSqm=result.aOnly.areaSqm;onlyPermanentAreaSqm=result.bOnly.areaSqm
+    overlapAreaSqm=fullArea(result.both)
+    onlyHighAreaSqm=fullArea(result.aOnly);onlyPermanentAreaSqm=fullArea(result.bOnly)
   }
   if(overlapAreaSqm>Math.min(highAreaSqm,permanentAreaSqm)+.05){
     const number=(value:number|undefined)=>value==null?'未返回':value.toFixed(4)

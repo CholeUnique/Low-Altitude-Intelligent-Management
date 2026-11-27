@@ -16,19 +16,19 @@ import '../non-grain/workspace.scss'
 const props = defineProps<{ taskId?: string; nodeKey: string; readonly?: boolean }>()
 const emit = defineEmits<{ submitted: [] }>()
 const user = useUserStore()
-const { task, flow, selectedNode, abnormals, logs, loading, errors, load, text } = useBackendTaskData({ get taskId() { return props.taskId }, get nodeKey() { return props.nodeKey }, get readonly() { return props.readonly }, includeMaterials: false })
+const { task, flow, selectedNode, abnormals, logs, loading, errors, load, text, imageryPeriod } = useBackendTaskData({ get taskId() { return props.taskId }, get nodeKey() { return props.nodeKey }, get readonly() { return props.readonly }, includeMaterials: false })
 const busy = ref(false), error = ref(''), activeId = ref(''), deadline = ref(''), opinion = ref('')
 const recipient = ref<WorkbenchUser>()
 const plots = ref<Array<{ abnormalId: string; result: string; description: string }>>([])
 const archive = computed(() => props.nodeKey === 'FINISH_DEFAULT')
-const acceptance = computed(() => props.nodeKey === 'REVIEW_OWNER')
-const pageName = computed(() => acceptance.value ? '业务受理' : archive.value ? '结案归档' : '现场核查')
+const acceptance = computed(() => props.nodeKey === 'REVIEW_OWNER' || props.nodeKey === 'DISTRICT_DISPATCH')
+const pageName = computed(() => props.nodeKey === 'DISTRICT_DISPATCH' ? '区县分局派发' : acceptance.value ? '业务受理' : archive.value ? '结案归档' : '现场核查')
 const canEdit = computed(() => !props.readonly && !busy.value && !loading.value && canOperateWorkflowNode(selectedNode.value, String(user.currentUser?.id || '')) && selectedNode.value?.id === flow.value?.currentNode?.id)
 const evidenceFiles = computed(() => archive.value ? (flow.value?.timeline || []).flatMap(node => node.files || []).filter((file, index, files) => files.findIndex(item => item.id === file.id) === index) : selectedNode.value?.files || [])
 const saved = computed(() => (selectedNode.value?.resultData || {}) as Record<string, unknown>)
 const active = computed(() => plots.value.find(plot => plot.abnormalId === activeId.value))
 const displayPlots = computed(() => abnormals.value.length ? abnormals.value : [{ id: 'task', title: '任务整体', description: '此任务暂无图斑，按任务整体填报。', boundaryGeoJson: undefined, imageUrl: undefined, area: undefined }])
-const activeSpot = computed(() => displayPlots.value.find(spot => spot.id === activeId.value))
+const activeSpot = computed(() => abnormals.value.find(spot => spot.id === activeId.value))
 const summaries = computed(() => [
   { icon: '单', label: '任务编号', value: task.value?.taskNo },
   { icon: '景', label: '所属场景', value: task.value?.sceneName },
@@ -83,11 +83,17 @@ async function submit() {
   <TaskAcceptancePanel v-if="!selectedNode && !loading" :task-id="taskId" />
   <div v-else class="ng-page default-page" :class="{ 'default-page--acceptance': acceptance, 'default-page--archive': archive }">
     <WorkbenchFeedback :message="[...errors, error].filter(Boolean).join('；')" />
+    <p v-if="nodeKey === 'DISTRICT_DISPATCH'" class="default-tip" role="status">当前节点暂可查看；派发提交规则尚待确认。</p>
     <section class="ng-summary ng-summary--compact default-summary" aria-label="任务概况">
       <article v-for="item in summaries" :key="item.label" class="ng-summary-card">
         <i>{{ item.icon }}</i><span><small>{{ item.label }}</small><b :title="item.value || '—'">{{ item.value || '—' }}</b></span>
       </article>
     </section>
+    <slot
+      v-if="$slots.context"
+      name="context"
+      v-bind="{ task, abnormals, selectedSpot: activeSpot, selectedNode, imageryPeriod, pageName }"
+    />
     <div class="default-columns">
       <aside class="default-sidebar">
         <section class="ng-card plot-guide-card default-plots">

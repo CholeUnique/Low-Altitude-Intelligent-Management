@@ -22,11 +22,12 @@ const options = ast.statements.filter(ts.isVariableStatement).flatMap(node => [.
 const executable = ts.transpileModule(`const ${options.getText(ast)};\n${functions.map(node => node.getText(ast)).join('\n')}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const calls = [], errors = [], successes = []
 const state = { form: {}, editorMode: { value: 'edit' }, editorOpen: { value: true }, busy: { value: false }, departments: { value: [] }, dataTypeOptions: { value: [{ value: 'IMAGE', label: '影像' }] }, metadataError: { value: '' }, originalTopicCode: { value: '' }, originalRegionCode: { value: '' } }
-const api = new Function('context', `const {form, editorMode, editorOpen, busy, departments, dataTypeOptions, metadataError, originalTopicCode, originalRegionCode, showError, showSuccess, addMapService, updateMapService, loadServices} = context;
+let savedTopic = ''
+const api = new Function('context', `const {form, editorMode, editorOpen, busy, departments, dataTypeOptions, metadataError, originalTopicCode, originalRegionCode, showError, showSuccess, addMapService, updateMapService, getMapServiceDetail, loadServices} = context;
   const ref = value => ({ value });
   ${executable}; return {${names.join(',')}, serviceTypeOptions};`)(
   { ...state, showError: error => errors.push(error.message), showSuccess: message => successes.push(message),
-    addMapService: async payload => calls.push({ mode: 'add', payload }), updateMapService: async payload => calls.push({ mode: 'edit', payload }), loadServices: async () => {} })
+    addMapService: async payload => calls.push({ mode: 'add', payload }), updateMapService: async payload => calls.push({ mode: 'edit', payload }), getMapServiceDetail: async () => ({ topicCode: savedTopic }), loadServices: async () => {} })
 
 api.serviceTypeOptions.value = [{ value: 'ARCGIS_MAPSERVER', label: 'ArcGIS MapServer' }, { value: 'WMS', label: 'WMS' }, { value: 'WMTS', label: 'WMTS' }]
 api.fillForm({ id: 9, name: '测试图层', type: 'ARCGIS_MAPSERVER', dataType: 'IMAGE', topicCode: '', serviceUrl: 'https://maps.example.com/geoserver/wms?layers=workspace:plots', status: 1, sort: 3, serviceTime: '2026-10-21T07:06:17.529Z', deptIds: [2], deptNames: ['农业农村局'] })
@@ -35,7 +36,7 @@ assert.equal(api.toServiceTime(state.form.serviceTime), '2026-10-21T07:06:00.000
 state.form.type = 'WMS'
 await api.submitService()
 assert.equal(calls[0].mode, 'edit')
-assert.deepEqual(calls[0].payload, { id: 9, name: '测试图层', type: 'WMS', dataType: 'IMAGE', topicCode: undefined, regionCode: undefined, serviceUrl: state.form.serviceUrl, sort: 3, serviceTime: '2026-10-21T07:06:00.000Z', remark: undefined, deptIds: ['2'] })
+assert.deepEqual(calls[0].payload, { id: 9, name: '测试图层', type: 'WMS', dataType: 'IMAGE', topicCode: '', regionCode: undefined, serviceUrl: state.form.serviceUrl, sort: 3, serviceTime: '2026-10-21T07:06:00.000Z', remark: undefined, deptIds: ['2'] })
 assert.equal(state.editorOpen.value, false)
 assert.equal(state.busy.value, false)
 
@@ -55,6 +56,18 @@ assert.equal(calls[1].payload.id, undefined)
 state.busy.value = true
 await api.submitService()
 assert.equal(calls.length, 2, 'Repeated clicks during save cannot duplicate the request')
+state.busy.value = false
+state.editorMode.value = 'edit'
+state.originalTopicCode.value = 'TOPIC'
+state.editorOpen.value = true
+savedTopic = 'TOPIC'
+await api.submitService()
+assert.equal(calls.at(-1).payload.topicCode, '')
+assert.match(errors.at(-1), /适用专题未清空/)
+assert.equal(state.editorOpen.value, true)
+savedTopic = ''
+await api.submitService()
+assert.equal(state.editorOpen.value, false)
 
 const address = 'http://localhost:9090/geoserver/mygeoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=workspace:plots&maxFeatures=50'
 assert.equal(api.getServiceUrlWarnings(address).length, 2, 'The screenshot configuration has both WFS and localhost problems')

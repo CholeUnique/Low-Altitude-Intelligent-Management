@@ -35,6 +35,21 @@
   .category-ring .center:has(.emblem) b { font-size: max(12px, min(var(--cockpit-number-size), var(--ring-number-size))); }
   .recognition-types .recognition-type-row { min-height: 30px; align-items: center; }
   .scene-task-legend :is(button, .scene-task-legend__static) { min-height: 30px; }
+  // Keep the heading visible; scroll status totals and the scene list together.
+  .governance-panel .scene-task-chart {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    justify-content: flex-start;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .governance-panel .scene-task-chart::-webkit-scrollbar { display: none; width: 0; height: 0; }
+  .governance-panel .scene-task-chart:focus-visible { outline: 1px solid var(--cockpit-cyan); outline-offset: -1px; }
+  .governance-panel .scene-task-main { flex: 0 0 auto; }
+  .governance-panel .scene-task-legend { min-height: 0; overflow: auto; }
   .overview-float-panel .auxiliary-number { color: var(--cockpit-number-color); font-size: inherit; font-weight: 700; }
 
   // Keep the charts compact so the cycling detail rows have room at every viewport height.

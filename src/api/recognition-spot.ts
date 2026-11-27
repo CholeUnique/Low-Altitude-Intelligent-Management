@@ -1,6 +1,16 @@
-import { apiClient } from './client'
+import { apiClient, ApiBusinessError } from './client'
 import type { MapServiceItem } from './map-service'
 import type { TaskGeometryFeatureCollection } from './governance-task'
+
+/** 保留后端错误内容，补充服务关联失败的排查信息；兼容未更新的后端。 */
+export function recognitionSpotServiceError(reason: unknown, fallback: string) {
+  const message = reason instanceof Error ? reason.message : fallback
+  if (!(reason instanceof ApiBusinessError)) return message
+  if (reason.code === '10603') return `${message}。请确认后端已部署支持停用服务的版本，并检查请求是否发往正确的后端。`
+  if (reason.code === '10601') return `${message}。请刷新参考影像列表并重新选择。`
+  if (reason.code === '10605') return `${message}。请检查当前部门与所选服务的适用部门。`
+  return message
+}
 
 /** 异常类型由后端按场景动态配置，不在前端限定固定枚举。 */
 export type RecognitionAbnormalType = string

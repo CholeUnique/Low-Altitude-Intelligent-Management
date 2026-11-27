@@ -14,6 +14,7 @@ function load(source, dependencies) {
   return module.exports
 }
 const calls = []
+const preparations = []
 const user = Vue.reactive({ activeDeptId: 'dept-a', currentUser: { role: 'ADMIN' } })
 const planList = Array.from({length: 18}, (_, i) => ({id: `p${i}`, name: `Plan ${i}`, resultCount: i + 1, waylineName: '', waylineType: 'WAYPOINT', sn: 'dock', regionCode: i === 1 ? '' : '321202', regionName: i === 1 ? '' : '海陵区'}))
 const recalcCalls = []
@@ -38,7 +39,7 @@ const renderer = Vue.createRenderer({
   insert(){}, remove(){}, setText(){}, setElementText(){}, parentNode(){}, nextSibling(){}, patchProp(){}
 })
 let source = readFileSync('src/workspace-components/spot-identification/FlightTaskReviewPanel.vue','utf8')
-source = source.replace('</script>', 'defineExpose({ getVersion: () => loadVersion, pageRows, rows, currentPage, loadTaskMedia, mediaByTask, departmentMediaSummary, completedMediaTaskIds, resultTypeFilter, openAiRecognition, aiPlan, selectedAlgorithmId, aiUnavailable, aiAlgorithms, taskTypes, taskTypeLabel, draftFilters, applyFilters, resetFilters });\n</script>')
+source = source.replace('</script>', 'defineExpose({ getVersion: () => loadVersion, pageRows, rows, currentPage, loadTaskMedia, mediaByTask, departmentMediaSummary, completedMediaTaskIds, resultTypeFilter, openAiRecognition, aiPlan, selectedAlgorithmId, aiUnavailable, aiAlgorithms, taskTypes, taskTypeLabel, draftFilters, applyFilters, resetFilters, detailPlanId, previewVideoUrl, previewState, markPreviewFailed });\n</script>')
 const script = compileScript(parse(source).descriptor, {id:'review-lazy-test'}).content
 const regionUtil = load(readFileSync('src/utils/region-path.ts','utf8'),{})
 assert.equal(regionUtil.regionPaths([{code:'32',name:'江苏省',children:[{code:'3212',name:'泰州市',children:[{code:'321202',name:'海陵区'}]}]}]).get('321202'), '江苏省 / 泰州市 / 海陵区')
@@ -47,6 +48,7 @@ const component = load(script, {
   '@/components/FilterActions.vue': {},
   '@/components/RegionStepSelect.vue': {},
   '@/api/client':{isMockMode:()=>false}, '@/api/patrol':{getUavMediaSummary:async()=>({photoCount:6896,videoCount:12})},
+  '@/utils/video-transcode':{prepareTranscodedVideo:async(media, signal, progress, force, options)=>{preparations.push({media,force});options.onSource(force?'transcoded':'original');return force?'http://video.test/compatible.mp4':'http://video.test/original.mp4'}},
   '@/api/metadata':{getMetadataOptions:async()=>[{code:'32',name:'江苏省',children:[{code:'3212',name:'泰州市',children:[{code:'321202',name:'海陵区'}]}]}]}, '@/utils/region-path':regionUtil,
   '@/mocks/algorithm-catalog':load(readFileSync('src/mocks/algorithm-catalog.ts','utf8'),{}),
   '@/api/flight-review':{
@@ -111,6 +113,17 @@ const first = vm.loadTaskMedia('t0', vm.getVersion())
 await first
 await flush()
 assert.equal(vm.mediaByTask.t0.length, 201, 'Preview fetches all media pages')
+vm.mediaByTask.t0 = [{id:'2109885600509788160',taskId:'t0',type:'video',fileName:'review.mp4'}]
+vm.detailPlanId = 'p0'
+await flush()
+assert.equal(vm.previewVideoUrl,'http://video.test/original.mp4')
+vm.markPreviewFailed('video'); await flush()
+assert.equal(vm.previewVideoUrl,'http://video.test/compatible.mp4')
+assert.deepEqual(preparations.map(call=>!!call.force),[false,true])
+vm.markPreviewFailed('video'); await flush()
+assert.equal(preparations.length,2,'Review player also falls back only once')
+assert.equal(vm.previewState,'error')
+vm.detailPlanId = ''
 vm.draftFilters.resultTypeFilter = 'image'
 vm.applyFilters()
 await flush()

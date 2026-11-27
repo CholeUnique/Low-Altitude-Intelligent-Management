@@ -95,10 +95,16 @@ export interface FlightReviewMedia {
   thumbnailUrl: string
   originalUrl: string
   localFileUrl: string
+  transcodeStatus?: string | number
+  transcodeFileUrl?: string
   fileSize?: number
   shootTime: string
   longitude?: number
   latitude?: number
+  /** 后端本地是否已下载：0 未下载 / 1 下载中 / 2 已完成 / 3 失败；后端未返回时为 undefined。 */
+  downloadStatus?: number
+  /** 后端本地文件是否已被清理：0 未清理 / 1 已清理；清理后本地文件不可再读取。 */
+  fileCleaned?: number
 }
 
 export interface FlightReviewPage<T> {
@@ -116,6 +122,14 @@ function coordinate(record: RawRecord, keys: string[], limit: number): number | 
   const raw = keys.map((key) => record[key]).find((item) => item !== null && item !== undefined && item !== '')
   const parsed = Number(raw)
   return Number.isFinite(parsed) && Math.abs(parsed) <= limit ? parsed : undefined
+}
+
+/** 小整数枚举字段（如 downloadStatus/fileCleaned）；缺省或非数字时返回 undefined，避免把 0 误判成缺失。 */
+function integer(record: RawRecord, key: string): number | undefined {
+  const raw = record[key]
+  if (raw === null || raw === undefined || raw === '') return undefined
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : undefined
 }
 
 function page<T>(raw: RawPage, map: (record: RawRecord) => T): FlightReviewPage<T> {
@@ -209,10 +223,14 @@ export async function getFlightReviewMedia(taskId: string, pageNum: number, page
     thumbnailUrl: value(item, 'thumbnailUrl'),
     originalUrl: value(item, 'originalUrl'),
     localFileUrl: value(item, 'localFileUrl'),
+    transcodeStatus: typeof item.transcodeStatus === 'number' || typeof item.transcodeStatus === 'string' ? item.transcodeStatus : undefined,
+    transcodeFileUrl: value(item, 'transcodeFileUrl') || undefined,
     fileSize: item.fileSize === null || item.fileSize === undefined ? undefined : Number(item.fileSize),
     shootTime: value(item, 'shootTime'),
     longitude: coordinate(item, ['longitude', 'lng', 'lon'], 180),
     latitude: coordinate(item, ['latitude', 'lat'], 90),
+    downloadStatus: integer(item, 'downloadStatus'),
+    fileCleaned: integer(item, 'fileCleaned'),
   }))
 }
 

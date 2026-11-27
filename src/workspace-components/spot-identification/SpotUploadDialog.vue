@@ -2,11 +2,12 @@
 import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
 import { computed, reactive, ref, watch } from 'vue'
 import { getSceneDictionary, type SceneDictionaryItem } from '@/api/scene'
-import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { listAnalysisMapServices, type MapServiceItem } from '@/api/map-service'
 import { inspectMapService } from '@/utils/map-service-layer'
 import { ApiBusinessError } from '@/api/client'
 import {
   confirmRecognitionSpotUpload,
+  recognitionSpotServiceError,
   getRecognitionSpotTypes,
   previewRecognitionSpotUpload,
   type RecognitionSpotCreateResult,
@@ -73,7 +74,7 @@ async function loadOptions() {
   try {
     const [sceneList, services] = await Promise.all([
       getSceneDictionary(user.organization.scenes, user.activeDeptId),
-      listEnabledMapServices(user.activeDeptId),
+      listAnalysisMapServices(user.activeDeptId),
     ])
     if (requestVersion !== optionsRequestVersion) return
     scenes.value = sceneList.filter((scene) => scene.enabled)
@@ -176,7 +177,7 @@ async function confirmUpload() {
       invalidatePreview()
       error.value = '预览批次已过期，请重新解析文件后再确认。'
     } else {
-      error.value = reason instanceof Error ? reason.message : '线下AI识别结果上传失败。'
+      error.value = recognitionSpotServiceError(reason, '线下AI识别结果上传失败。')
     }
   } finally {
     uploading.value = false
@@ -206,7 +207,7 @@ function close() { if (!busy.value) emit('close') }
         <label><span>所属场景 <WorkbenchRequiredMark /></span><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options spot-upload-select-options" :append-to="uploadDialog" :popper-options="{ strategy: 'fixed' }" v-model="form.sceneCode" :disabled="loading || busy"><ElOption value="" disabled label="请选择场景" /><ElOption v-for="scene in scenes" :key="scene.id" :value="scene.code" :label="String(scene.name)" /></ElSelect></label>
         <label><span>图斑标题</span><input v-model="form.title" class="clear-hint-on-focus" placeholder="不填则使用默认标题" /></label>
         <label><span>发现时间</span><SpotDateTimePicker v-model="form.foundTime" /></label>
-        <fieldset class="wide"><legend>参考影像地图服务 <WorkbenchRequiredMark /></legend><label v-for="service in imageryMapServices" :key="service.id"><input v-model="form.mapServiceIds" type="checkbox" :value="service.id" />{{ service.name }}</label><small v-if="!imageryMapServices.length">{{ loading ? '正在读取影像服务…' : '暂无已启用的影像地图服务' }}</small></fieldset>
+        <fieldset class="wide"><legend>参考影像地图服务 <WorkbenchRequiredMark /></legend><label v-for="service in imageryMapServices" :key="service.id"><input v-model="form.mapServiceIds" type="checkbox" :value="service.id" />{{ service.name }}</label><small v-if="!imageryMapServices.length">{{ loading ? '正在读取影像服务…' : '暂无影像地图服务' }}</small></fieldset>
         <label class="wide"><span>图斑描述</span><textarea v-model="form.description" class="clear-hint-on-focus" placeholder="请输入图斑情况或判定依据"></textarea></label>
         <section v-if="previewResult" class="preview-panel wide" aria-label="图斑解析预览">
           <div class="preview-heading"><div><b>解析预览</b><small>共 {{ previewResult.featureCount }} 条要素，以下最多展示前 50 条；批次有效期为 30 分钟。</small></div><span>尚未入库</span></div>

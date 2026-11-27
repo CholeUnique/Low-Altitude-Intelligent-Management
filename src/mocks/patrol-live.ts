@@ -18,6 +18,13 @@ export interface LiveMediaItem {
   localThumbnailUrl?: string
   originalUrl?: string
   localFileUrl?: string
+  sourceCodec?: string
+  transcodeStatus?: string | number
+  transcodeFileUrl?: string
+  /** 后端本地是否已下载：0 未下载 / 1 下载中 / 2 已完成 / 3 失败；后端未返回时为 undefined。 */
+  downloadStatus?: number
+  /** 后端本地文件是否已被清理：0 未清理 / 1 已清理。 */
+  fileCleaned?: number
   mediaType?: string
   longitude?: number
   latitude?: number

@@ -5,7 +5,8 @@ import { getFlightTaskMedia, getUavFlightTaskOptions, getUavMediaSummary, type U
 import { createCollectionMediaPager, type CollectionMediaEntry, type CollectionMediaFilter } from '@/utils/collection-media-pager'
 import type { FlightReviewMedia } from '@/api/flight-review'
 import { flightReviewFileApiPath } from '@/api/flight-review'
-import { apiClient } from '@/api/client'
+import { apiClient, isMockMode } from '@/api/client'
+import { prepareTranscodedVideo, originalVideoUrl, type VideoPreparationState } from '@/utils/video-transcode'
 import type { LiveMediaItem } from '@/mocks/patrol-live'
 import SharedVideoPlayer from '@/workspace-components/spot-identification/SharedVideoPlayer.vue'
 import PhotoLocationControl from '@/workspace-components/spot-identification/PhotoLocationControl.vue'
@@ -50,6 +51,22 @@ const previewOffsetY = ref(0)
 const previewDragging = ref(false)
 const previewSwitching = ref(false)
 const previewNotice = ref('')
+const videoPlaybackUrl = ref('')
+const videoTranscodeProgress = ref<number>()
+const videoTranscodeError = ref('')
+const videoPreparation = ref<VideoPreparationState>()
+const videoOriginalUrl = ref('')
+const videoPlaybackSource = ref<'original' | 'transcoded'>()
+let videoFallbackAttempted = false
+const videoLoadingText = computed(() => {
+  if (videoPlaybackUrl.value) return '正在读取视频…'
+  const prefix = videoFallbackAttempted ? '原片暂时无法播放，正在准备兼容版本' : '正在准备视频'
+  if (videoPreparation.value?.status === 'PENDING') return `${prefix}（等待后端处理）`
+  if (videoPreparation.value?.status === 'RUNNING' && !videoOriginalUrl.value && !videoPreparation.value.sourceCodec && (videoTranscodeProgress.value === undefined || videoTranscodeProgress.value === 0)) return '后端尚未提供可播放文件，正在等待处理结果…'
+  if (videoPreparation.value?.status === 'RUNNING') return videoTranscodeProgress.value === undefined ? `${prefix}（后端处理中，暂未提供进度）` : `${prefix} · 转码 ${videoTranscodeProgress.value}%`
+  return `${prefix}…`
+})
+let videoTranscodeAbort: AbortController | undefined
 const videoPlaybackReady = ref(false)
 const videoPlaybackFailed = ref(false)
 const videoFailureReason = ref<'timeout' | 'unsupported' | ''>('')
@@ -108,7 +125,8 @@ const previewTaskMedia = computed(() => previewTask.value ? taskReviewMedia(prev
 
 function toReviewMedia(media: LiveMediaItem, task: UavFlightTaskOption): FlightReviewMedia {
   return { id: media.id, taskId: task.id, fileName: media.name, type: isVideoMedia(media) ? 'video' : media.mediaType || 'image',
-    thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: media.localFileUrl || '', shootTime: media.capturedAt,
+    thumbnailUrl: media.thumbnail, originalUrl: media.originalUrl || '', localFileUrl: media.localFileUrl || '', transcodeStatus: media.transcodeStatus, transcodeFileUrl: media.transcodeFileUrl, shootTime: media.capturedAt,
+    downloadStatus: media.downloadStatus, fileCleaned: media.fileCleaned,
     longitude: media.longitude, latitude: media.latitude }
 }
 function taskReviewMedia(task: UavFlightTaskOption) {
@@ -210,6 +228,22 @@ function thumbnailFailed(event: Event, media: LiveMediaItem) {
   } else image.style.visibility = 'hidden'
 }
 function videoSource(media: LiveMediaItem) { return localMediaUrl(media) || media.originalUrl || '' }
+function videoDownloadUrl(media: LiveMediaItem) {
+  if (isMockMode()) return videoSource(media)
+  return /^\d+$/.test(media.id) ? originalVideoUrl(media.id) : ''
+}
+/**
+ * 后端本地副本状态提示：本地已可读取时不显示。
+ * 用于点击下载前说明原片是否需要后端先补下载，避免只能靠 10201 兜底猜。
+ */
+function mediaCacheHint(media?: LiveMediaItem) {
+  if (!media || media.localFileUrl) return ''
+  if (media.fileCleaned === 1) return '后端本地文件已清理'
+  if (media.downloadStatus === 1) return '后端正在缓存原文件'
+  if (media.downloadStatus === 3) return '后端缓存原文件失败'
+  if (media.downloadStatus === 0) return '后端尚未缓存原文件'
+  return ''
+}
 function mediaTimestamp(media: LiveMediaItem, task: UavFlightTaskOption) {
   const captured = Date.parse((media.capturedAt || '').replace(' ', 'T'))
   if (Number.isFinite(captured)) return captured
@@ -225,6 +259,15 @@ function resetPreviewTransform() {
 }
 function resetVideoPlayback() {
   videoPlayerVersion.value += 1
+  videoTranscodeAbort?.abort()
+  videoTranscodeAbort = undefined
+  videoPlaybackUrl.value = ''
+  videoTranscodeProgress.value = undefined
+  videoTranscodeError.value = ''
+  videoPreparation.value = undefined
+  videoOriginalUrl.value = ''
+  videoPlaybackSource.value = undefined
+  videoFallbackAttempted = false
   window.clearTimeout(videoLoadTimer)
   videoPlaybackReady.value = false
   videoPlaybackFailed.value = false
@@ -234,24 +277,42 @@ function beginVideoPlaybackCheck() {
   window.clearTimeout(videoLoadTimer)
   videoLoadTimer = window.setTimeout(() => {
     if (videoPlaybackReady.value) return
-    videoFailureReason.value = 'timeout'
-    videoPlaybackFailed.value = true
+    handleVideoFailure('timeout')
   }, 20_000)
 }
+async function startVideoPlayback(media: LiveMediaItem, forceTranscode = false) {
+  videoTranscodeAbort?.abort()
+  const controller = new AbortController()
+  videoTranscodeAbort = controller
+  try {
+    const url = isMockMode() ? videoSource(media) : await prepareTranscodedVideo(media, controller.signal, progress => { if (!controller.signal.aborted) videoTranscodeProgress.value = progress }, forceTranscode, {
+      onUpdate: state => { if (!controller.signal.aborted) { videoPreparation.value = state; videoTranscodeProgress.value = state.progress; videoOriginalUrl.value = state.originalUrl || videoOriginalUrl.value } },
+      onSource: source => { if (!controller.signal.aborted) videoPlaybackSource.value = source },
+    })
+    if (controller.signal.aborted) return
+    if (!url) throw new Error('后端未返回视频播放地址。')
+    videoPlaybackUrl.value = url
+    beginVideoPlaybackCheck()
+  } catch (reason) {
+    if (controller.signal.aborted) return
+    videoTranscodeError.value = reason instanceof Error ? reason.message : '视频转码失败。'
+    videoPlaybackFailed.value = true
+  }
+}
 function openMedia(media: LiveMediaItem, task: UavFlightTaskOption, items: CollectionMediaEntry[]) {
-  if (!media.originalUrl && !media.thumbnail && !media.localFileUrl) return
+  if (!media.originalUrl && !media.thumbnail && !media.localFileUrl && !media.transcodeFileUrl) return
   previewVersion++
   previewFilter = currentFilter()
   previewSwitching.value = false
   previewNotice.value = ''
-  previewItems.value = items.filter(({ media: item }) => item.originalUrl || item.thumbnail || item.localFileUrl)
+  previewItems.value = items.filter(({ media: item }) => item.originalUrl || item.thumbnail || item.localFileUrl || item.transcodeFileUrl)
   previewIndex.value = previewItems.value.findIndex((item) => item.task.id === task.id && item.media.id === media.id)
   const entry = previewItems.value[previewIndex.value]
   previewMedia.value = entry?.media || media
   previewTask.value = entry?.task || task
   resetPreviewTransform()
   resetVideoPlayback()
-  if (isVideoMedia(previewMedia.value)) beginVideoPlaybackCheck()
+  if (isVideoMedia(previewMedia.value)) void startVideoPlayback(previewMedia.value)
 }
 function closePreview() {
   previewVersion++
@@ -283,7 +344,7 @@ async function switchPreview(step: number) {
       filteredMedia.value = result.entries
       hasMoreMedia.value = result.hasMore
       mediaCacheVersion.value++
-      previewItems.value = result.entries.filter(({ media }) => media.originalUrl || media.thumbnail || media.localFileUrl)
+      previewItems.value = result.entries.filter(({ media }) => media.originalUrl || media.thumbnail || media.localFileUrl || media.transcodeFileUrl)
       index = previewIndex.value + step
     }
     if (!active()) return
@@ -295,7 +356,7 @@ async function switchPreview(step: number) {
     previewNotice.value = ''
     resetPreviewTransform()
     resetVideoPlayback()
-    if (isVideoMedia(entry.media)) beginVideoPlaybackCheck()
+    if (isVideoMedia(entry.media)) void startVideoPlayback(entry.media)
   } catch (reason) {
     if (active()) previewNotice.value = `${reason instanceof Error ? reason.message : '素材读取失败'}，请再次切换重试`
   } finally {
@@ -309,14 +370,30 @@ function markVideoReady() {
   videoFailureReason.value = ''
 }
 function markVideoFailed() {
+  handleVideoFailure('unsupported')
+}
+function handleVideoFailure(reason: 'timeout' | 'unsupported') {
   window.clearTimeout(videoLoadTimer)
   videoPlaybackReady.value = false
+  if (!isMockMode() && videoPlaybackSource.value === 'original' && !videoFallbackAttempted && previewMedia.value) {
+    videoFallbackAttempted = true
+    videoPlayer.value?.pause()
+    videoPlayerVersion.value++
+    videoPlaybackUrl.value = ''
+    videoTranscodeProgress.value = undefined
+    videoPlaybackFailed.value = false
+    videoFailureReason.value = ''
+    void startVideoPlayback(previewMedia.value, true)
+    return
+  }
   videoPlaybackFailed.value = true
-  videoFailureReason.value = 'unsupported'
+  videoFailureReason.value = reason
 }
 function retryVideoPlayback() {
+  const forceTranscode = videoFallbackAttempted || videoPlaybackSource.value === 'transcoded'
   resetVideoPlayback()
-  beginVideoPlaybackCheck()
+  videoFallbackAttempted = forceTranscode
+  if (previewMedia.value) void startVideoPlayback(previewMedia.value, forceTranscode)
 }
 function zoomPreview(event: WheelEvent) {
   if (!previewMedia.value || isVideoMedia(previewMedia.value)) return
@@ -438,6 +515,7 @@ onBeforeUnmount(() => {
   queryVersion++
   previewVersion++
   clearTimeout(filterTimer)
+  videoTranscodeAbort?.abort()
   window.clearTimeout(videoLoadTimer)
   window.removeEventListener('keydown', handlePreviewKey)
 })
@@ -488,13 +566,13 @@ onBeforeUnmount(() => {
       <button class="preview-close" title="退出全屏（Esc）" aria-label="退出全屏" @click="closePreview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
       <button class="preview-nav preview-prev" :disabled="previewSwitching" title="上一张（← / ↑）" aria-label="上一张" @click.stop="switchPreview(-1)">‹</button>
       <section v-if="isVideoMedia(previewMedia)" class="preview-video-stage" @click.stop>
-        <SharedVideoPlayer v-if="videoSource(previewMedia) && previewReviewMedia && !videoPlaybackFailed" ref="videoPlayer" :key="`${previewTask?.id}:${previewMedia.id}:${videoPlayerVersion}`" :media="previewReviewMedia" :media-list="previewTaskMedia" :src="videoSource(previewMedia)" autoplay fullscreen @ready="markVideoReady" @error="markVideoFailed" />
-        <div v-if="videoSource(previewMedia) && !videoPlaybackReady && !videoPlaybackFailed" class="video-loading"><i></i><span>正在读取原视频…</span></div>
-        <section v-if="videoPlaybackFailed || !videoSource(previewMedia)" class="hevc-notice">
+        <SharedVideoPlayer v-if="videoPlaybackUrl && previewReviewMedia && !videoPlaybackFailed" ref="videoPlayer" :key="`${previewTask?.id}:${previewMedia.id}:${videoPlayerVersion}`" :media="previewReviewMedia" :media-list="previewTaskMedia" :src="videoPlaybackUrl" autoplay fullscreen @ready="markVideoReady" @error="markVideoFailed" />
+        <div v-if="!videoPlaybackReady && !videoPlaybackFailed" class="video-loading" role="status"><i></i><span>{{ videoLoadingText }}</span></div>
+        <section v-if="videoPlaybackFailed" class="hevc-notice">
           <i>!</i>
-          <h2>{{ !videoSource(previewMedia) ? '后端未返回视频播放地址' : videoFailureReason === 'timeout' ? '视频分段读取超时' : '当前浏览器无法播放该视频' }}</h2>
-          <p>{{ !videoSource(previewMedia) ? '当前仅有视频缩略图，需后端提供原视频或网页兼容预览地址。' : videoFailureReason === 'timeout' ? '浏览器已尝试边缓冲边播放，但未能在 20 秒内取得可播放数据。请检查视频服务是否支持 HTTP Range、Content-Length 及 MP4 Fast Start。' : '可能由 HEVC/H.265 编码、视频地址跨域或服务端响应格式异常导致，可下载原视频后使用本地播放器打开。' }}</p>
-          <button v-if="videoSource(previewMedia)" type="button" @click="retryVideoPlayback">重新尝试</button>
+          <h2>{{ videoTranscodeError ? (videoFallbackAttempted ? '视频转码失败' : '视频读取失败') : videoFailureReason === 'timeout' ? '视频分段读取超时' : '当前浏览器无法播放该视频' }}</h2>
+          <p>{{ videoTranscodeError || (videoFailureReason === 'timeout' ? '浏览器已尝试边缓冲边播放，但未能在 20 秒内取得可播放数据。请检查视频服务是否支持 HTTP Range、Content-Length 及 MP4 Fast Start。' : '可能由 HEVC/H.265 编码、视频地址跨域或服务端响应格式异常导致，可下载原视频后使用本地播放器打开。') }}</p>
+          <button type="button" @click="retryVideoPlayback">重新尝试</button>
         </section>
       </section>
       <div
@@ -514,7 +592,7 @@ onBeforeUnmount(() => {
       </div>
       <button class="preview-nav preview-next" :disabled="previewSwitching" title="下一张（→ / ↓）" aria-label="下一张" @click.stop="switchPreview(1)">›</button>
       <p v-if="previewNotice" class="preview-notice" role="status">{{ previewNotice }}</p>
-      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}{{ hasMoreMedia ? '+' : '' }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small><a v-if="isVideoMedia(previewMedia) && videoSource(previewMedia)" class="preview-video-download" :href="videoSource(previewMedia)" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" download>下载原视频</a></footer>
+      <footer class="preview-caption"><strong>{{ previewMedia.name }}</strong><span>{{ previewIndex + 1 }} / {{ previewItems.length }}{{ hasMoreMedia ? '+' : '' }}</span><small>{{ isVideoMedia(previewMedia) ? '方向键切换　Esc 退出' : `滚轮缩放　拖拽平移　双击复位　${Math.round(previewScale * 100)}%` }}</small><small v-if="isVideoMedia(previewMedia) && mediaCacheHint(previewMedia)" class="preview-cache-hint" :title="mediaCacheHint(previewMedia)">{{ mediaCacheHint(previewMedia) }}</small><a v-if="isVideoMedia(previewMedia) && videoDownloadUrl(previewMedia)" class="preview-video-download" :href="videoDownloadUrl(previewMedia)" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" download>下载原视频</a></footer>
     </div>
     <SrtInfoDialog v-if="srtContext" :plan-name="srtContext.planName" :media="srtContext.media" @close="srtContext = undefined" />
   </div>
@@ -641,6 +719,7 @@ onBeforeUnmount(() => {
 .preview-caption strong { min-width:0; max-width:56vw; overflow:hidden; padding:0; font-size:15px; text-overflow:ellipsis; white-space:nowrap; }
 .preview-caption span { padding:4px 10px; border-radius:12px; background:#ffffff1d; font-size:12px; }
 .preview-caption small { color:#aebdcd; font-size:12px; }
+.preview-cache-hint { flex:none; padding:2px 8px; border:1px solid #f0c98766; border-radius:10px; color:#f3c98b !important; white-space:nowrap; }
 .hevc-notice { width:min(620px,72vw); padding:52px 48px; border:1px solid #47657d; border-radius:12px; color:#fff; background:linear-gradient(145deg,#172a3bea,#0b1722f2); box-shadow:0 20px 70px #000a; text-align:center; }
 .hevc-notice>i { width:68px; height:68px; display:grid; place-items:center; margin:0 auto 22px; border:1px solid #72b9e7; border-radius:50%; color:#9fd8ff; background:#2b77a735; font-size:28px; font-style:normal; }
 .hevc-notice h2 { margin:0; font-size:22px; }

@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { getFacilityPage, getFacilityGeoJson, getFacilityDetail, type FacilityRecord } from '@/api/facility'
-import { listEnabledMapServices, type MapServiceItem } from '@/api/map-service'
+import { listAnalysisMapServices, type MapServiceItem } from '@/api/map-service'
 import { createMapServiceLayer, MAP_SERVICE_IMAGERY_PANE, MAP_SERVICE_VECTOR_PANE, type MapServiceLayerHandle } from '@/utils/map-service-layer'
 import { FACILITIES_TOPIC_ID } from '@/stores/geographic-topics'
 import { useUserStore } from '@/stores/user'
@@ -44,7 +44,7 @@ async function loadMapServices() {
   mapServiceError.value = ''
   mapServiceLoading.value = true
   try {
-    const services = await listEnabledMapServices(user.activeDeptId, FACILITIES_TOPIC_ID)
+    const services = await listAnalysisMapServices(user.activeDeptId, FACILITIES_TOPIC_ID)
     if (request === serviceVersion) mapServices.value = services
   } catch (reason) {
     if (request === serviceVersion) mapServiceError.value = reason instanceof Error ? reason.message : '地图服务列表读取失败'
@@ -307,7 +307,7 @@ onBeforeUnmount(() => { version++; clearMapServices(); observer?.disconnect(); c
     <aside class="facility-drawer" :class="{'is-collapsed':!listOpen}" :aria-hidden="!listOpen" :inert="!listOpen" aria-label="设施清单">
       <div class="drawer-header"><div><small>FACILITY DIRECTORY</small><h2>工程设施 <span>{{ filtered.length.toLocaleString() }}</span></h2></div></div>
       <div class="drawer-content">
-        <div class="map-service-picker"><label>地图服务</label><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" :model-value="selectedServices" multiple collapse-tags collapse-tags-tooltip :loading="mapServiceLoading" placeholder="选择地图服务" aria-label="地图服务" @change="updateMapServices"><ElOption v-for="service in mapServices" :key="String(service.id)" :value="String(service.id)" :label="service.name" /></ElSelect><small v-if="mapServiceError" role="alert">{{ mapServiceError }} <button type="button" @click="loadMapServices">重试</button></small><small v-else-if="!mapServiceLoading && !mapServices.length">当前专题暂无可用地图服务</small></div>
+        <div class="map-service-picker"><label>地图服务</label><ElSelect :empty-values="[null, undefined]" class="system-select topic-map-service-select" popper-class="system-select-options topic-map-service-dropdown" :model-value="selectedServices" multiple collapse-tags collapse-tags-tooltip fit-input-width :loading="mapServiceLoading" placeholder="选择地图服务" aria-label="地图服务" @change="updateMapServices"><ElOption v-for="service in mapServices" :key="String(service.id)" :value="String(service.id)" :label="service.name" :title="service.name" /></ElSelect><small v-if="mapServiceError" role="alert">{{ mapServiceError }} <button type="button" @click="loadMapServices">重试</button></small><small v-else-if="!mapServiceLoading && !mapServices.length">当前专题暂无可用地图服务</small></div>
         <div class="filters"><label class="search-field"><span aria-hidden="true">⌕</span><input class="ui-filter-search" v-model="keyword" type="search" placeholder="搜索名称、编号、项目或行政村" aria-label="搜索设施" /></label><div class="filter-row"><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="statusFilter" aria-label="设施状态"><ElOption value="" label="全部状态" /><ElOption value="NORMAL" label="正常" /><ElOption value="ABNORMAL" label="异常" /><ElOption value="CHECKING" label="核查中" /><ElOption value="DISCARDED" label="废弃" /></ElSelect><ElSelect :empty-values="[null, undefined]" class="system-select" popper-class="system-select-options" v-model="typeFilter" aria-label="设施分类"><ElOption value="" label="全部分类" /><ElOption v-for="[name,count] in types" :key="name" :value="name" :label="String(name) + '（' + String(count) + '）'" /></ElSelect></div></div>
         <div class="list-heading"><b>设施清单</b><span>点击定位</span></div>
         <div ref="listElement" class="facility-list"><button v-for="item in pageRows" :key="item.key" type="button" class="facility-item" :class="{active:selectedKey===item.key}" @click="selectFacility(item)"><span class="facility-symbol" :style="{color:categoryColor(item.category)}">{{ item.geometryType }}</span><span class="facility-copy"><strong :title="item.name">{{ item.name }}</strong><small>{{ item.category }} · {{ item.record.bizStatusName || item.record.bizStatus || '状态未知' }}</small></span><span v-if="!item.geometry" class="facility-action">无位置</span></button><p v-if="!pageRows.length" class="empty">{{ pending ? '正在读取设施…' : '暂无符合条件的设施' }}</p></div>
@@ -341,7 +341,9 @@ onBeforeUnmount(() => { version++; clearMapServices(); observer?.disconnect(); c
 .feature-details dd { color: var(--ui-body, #d8edf0); }
 .filter-row select:focus-visible { border-color: #a2c9d1; }
 @media(max-width:1100px){.facilities-overview{--details-width:270px}}
-@media(max-width:700px){.facilities-overview{--details-width:230px}.facilities-overview :deep(.map-symbol-legend){left:10px}}
+@media(max-width:700px){.facilities-overview{--details-width:230px}}
+.facilities-overview :deep(.map-symbol-legend){left:auto;right:14px;bottom:10px}
+.facilities-overview :deep(.overview-scale){left:14px;right:auto}
 
 .facility-drawer { width: var(--details-width); height: 568px; max-height: calc(100% - 40px); bottom: auto; box-sizing: border-box; transition: translate var(--ui-panel-motion, .24s ease), opacity var(--ui-panel-motion, .24s ease); }
 .facility-drawer.is-collapsed { width: var(--details-width); bottom: auto; translate: calc(-100% - 24px) 0; opacity: 0; pointer-events: none; }

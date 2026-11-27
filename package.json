@@ -16,7 +16,7 @@
     "test:map-drawing": "node scripts/map-drawing.test.mjs && node scripts/topic-drawing-load.test.mjs",
     "test:uav-review-media": "node scripts/uav-review-media.test.mjs",
     "test:workspace-tools": "node scripts/workspace-tools.test.mjs && node scripts/workflow-display.test.mjs",
-    "test:workflow-display": "node scripts/workflow-display.test.mjs",
+    "test:workflow-display": "node scripts/forestry-workflow.test.mjs && node scripts/workflow-display.test.mjs",
     "test:task-detail": "node scripts/task-detail-readonly.test.mjs",
     "test:deployment": "node scripts/deployment.test.mjs",
     "test:land-supervision": "node scripts/land-supervision.test.mjs && node scripts/land-supervision-api.test.mjs && node scripts/land-recognition.test.mjs && node scripts/land-workflow-upload.test.mjs && node scripts/land-shp-coordinate.test.mjs && node scripts/land-topic-interaction.test.mjs && node scripts/land-workbench-context.test.mjs",

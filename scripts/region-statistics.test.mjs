@@ -19,6 +19,12 @@ assert(requests.every(input=>input.minAreaSqm===0),'统计不以碎斑阈值丢�
 assert.equal(requests[0].geometryB.features.length,1,'包围盒排除远处候选，具体裁切仍由后端完成')
 assert.equal(requests[0].geometryA.features[0].geometry,region.features[0].geometry,'前端不修改几何')
 assert.deepEqual(requests[0].geometryA.features[0].properties,{})
+const fullResponses=[{areaA:100,both:{...group(60),fullAreaSqm:60}},{areaA:100,both:{...group(70),fullAreaSqm:70}},{areaA:60,both:{...group(39),fullAreaSqm:40},aOnly:{...group(19),fullAreaSqm:20},bOnly:{...group(29),fullAreaSqm:30}}]
+const fullResult=await calculateRegionStatistic(region,high,permanent,new AbortController().signal,async()=>fullResponses.shift())
+assert.equal(fullResult.overlapAreaSqm,40,'完整统计使用 fullAreaSqm 而非过滤后的输出面积')
+assert.equal(fullResult.onlyHighAreaSqm,20)
+const incomplete=[{areaA:100,both:{...group(50),fullAreaSqm:60}},{areaA:100,both:group(70)}]
+await assert.rejects(calculateRegionStatistic(region,high,permanent,new AbortController().signal,async()=>incomplete.shift()),/中间图斑已被阈值过滤/)
 const empty=await calculateRegionStatistic(region,fc([]),fc([]),new AbortController().signal,async()=>({areaA:100,both:group(100)}))
 assert.deepEqual(empty,{areaSqm:100,highAreaSqm:0,permanentAreaSqm:0,overlapAreaSqm:0,onlyHighAreaSqm:0,onlyPermanentAreaSqm:0,diffRate:null},'无基准地块仍从后端计算区划面积，不能使用原地物属性相加')
 const abort=new AbortController();abort.abort()

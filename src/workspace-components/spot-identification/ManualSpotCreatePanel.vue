@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import WorkbenchRequiredMark from '@/workspace-components/shared/WorkbenchRequiredMark.vue'
 import { computed, ref, watch } from 'vue'
-import { addRecognitionSpot, getRecognitionSpotTypes } from '@/api/recognition-spot'
+import { addRecognitionSpot, getRecognitionSpotTypes, recognitionSpotServiceError } from '@/api/recognition-spot'
 import type { RecognitionAbnormalType, RecognitionSpotCreateResult } from '@/api/recognition-spot'
 import type { MapServiceItem } from '@/api/map-service'
 import type { SceneDictionaryItem } from '@/api/scene'
@@ -115,7 +115,7 @@ async function submitSpot() {
     description.value = ''
     foundTime.value = ''
   } catch (error) {
-    submitError.value = error instanceof Error ? error.message : '异常图斑新增失败。'
+    submitError.value = recognitionSpotServiceError(error, '异常图斑新增失败。')
   } finally {
     submitting.value = false
   }
@@ -177,7 +177,7 @@ function toggleMapServiceSelection(serviceId: string | number, checked: boolean)
         <div v-if="mapServices.length" class="reference-service-list">
           <label v-for="service in mapServices" :key="service.id"><input type="checkbox" :checked="selectedMapServiceIds.some((id) => String(id) === String(service.id))" @change="toggleMapServiceSelection(service.id, ($event.target as HTMLInputElement).checked)" /><span :title="service.name">{{ service.name }}</span><small v-if="selectedMapServiceIds.some((id) => String(id) === String(service.id))">第 {{ selectedMapServiceIds.findIndex((id) => String(id) === String(service.id)) + 1 }} 期</small></label>
         </div>
-        <small v-else>暂无已启用的影像地图服务</small>
+        <small v-else>暂无影像地图服务</small>
         </div>
       </div>
       <label class="field field--wide"><span>图斑描述</span><textarea v-model="description" maxlength="500" placeholder="请输入图斑描述"></textarea></label>

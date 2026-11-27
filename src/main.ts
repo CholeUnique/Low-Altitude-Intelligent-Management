@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import './utils/map-interaction'
 import './styles/index.scss'
 import './styles/system.scss'
 import App from './App.vue'

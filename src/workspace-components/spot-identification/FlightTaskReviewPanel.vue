@@ -5,6 +5,7 @@ import { ElTooltip } from 'element-plus'
 import RegionStepSelect from '@/components/RegionStepSelect.vue'
 import { Calendar, FolderOpened, Picture, VideoCamera } from '@element-plus/icons-vue'
 import { isMockMode } from '@/api/client'
+import { prepareTranscodedVideo, originalVideoUrl } from '@/utils/video-transcode'
 import { getUavMediaSummary, type UavMediaSummary } from '@/api/patrol'
 import { getMetadataOptions, type MetadataOption } from '@/api/metadata'
 import { regionPaths } from '@/utils/region-path'
@@ -131,6 +132,10 @@ const videoPlayer = ref<InstanceType<typeof SharedVideoPlayer>>()
 const srtContext = shallowRef<{ planName: string; media: FlightReviewMedia }>()
 const previewState = ref<'loading' | 'ready' | 'error'>('loading')
 const previewFailure = ref<'missing' | 'unsupported' | 'timeout' | 'image' | 'video'>('missing')
+const previewVideoUrl = ref('')
+let previewVideoOriginal = false
+const transcodeProgress = ref<number>()
+const transcodeError = ref('')
 const previewImageUrl = ref('')
 const previewImageSource = ref<'local' | 'original' | 'thumbnail' | ''>('')
 const imageFallbackUsed = ref(false)
@@ -139,6 +144,7 @@ const downloadError = ref('')
 const mediaPreviewStatus = ref<Record<string, 'ready' | 'error'>>({})
 const uploadVisible = ref(false)
 const uploadMessage = ref('')
+let uploadToastTimer: ReturnType<typeof setTimeout> | undefined
 const aiPlan = ref<FlightReviewPlan | null>(null)
 const selectedAlgorithmId = ref('')
 const aiUnavailable = ref(false)
@@ -225,6 +231,8 @@ function showAiUnavailable() {
 function handleSpotUploaded(result: RecognitionSpotCreateResult) {
   uploadVisible.value = false
   uploadMessage.value = `成功导入 ${result.count || result.spotNos?.length || 0} 个疑似图斑，当前为待人工审核状态。可前往场景异常识别查看。`
+  if (uploadToastTimer) clearTimeout(uploadToastTimer)
+  uploadToastTimer = setTimeout(() => { uploadMessage.value = '' }, 5000)
 }
 
 function mediaKind(media: FlightReviewMedia): 'image' | 'video' | 'other' {
@@ -238,7 +246,7 @@ function mediaKind(media: FlightReviewMedia): 'image' | 'video' | 'other' {
 function mediaKey(media: FlightReviewMedia) { return `${media.taskId}:${media.id}` }
 function mediaRank(media: FlightReviewMedia) {
   const kind = mediaKind(media)
-  if (kind === 'other' || !(media.originalUrl || (kind === 'image' && (media.localFileUrl || media.thumbnailUrl)))) return 3
+  if (kind === 'other' || !(media.originalUrl || ((media.localFileUrl || media.transcodeFileUrl || (kind === 'image' && media.thumbnailUrl))))) return 3
   const status = mediaPreviewStatus.value[mediaKey(media)]
   return status === 'ready' ? 0 : status === 'error' ? 2 : 1
 }
@@ -255,6 +263,12 @@ function markPreviewReady() {
 }
 function markPreviewFailed(reason: 'missing' | 'unsupported' | 'timeout' | 'image' | 'video') {
   clearVideoTimer()
+  if ((reason === 'video' || reason === 'timeout') && previewVideoOriginal && !isMockMode()) {
+    previewVideoOriginal = false
+    videoPlayer.value?.pause()
+    void initializePreview(true)
+    return
+  }
   previewState.value = 'error'
   previewFailure.value = reason
   const media = previewMedia.value
@@ -294,7 +308,7 @@ function handlePreviewImageError() {
   }
   markPreviewFailed('image')
 }
-async function initializePreview() {
+async function initializePreview(forceTranscode = false) {
   const version = ++previewRequestVersion
   previewAbortController?.abort()
   previewAbortController = undefined
@@ -304,6 +318,10 @@ async function initializePreview() {
   previewState.value = 'loading'
   previewFailure.value = 'missing'
   previewImageUrl.value = ''
+  previewVideoUrl.value = ''
+  previewVideoOriginal = false
+  transcodeProgress.value = undefined
+  transcodeError.value = ''
   previewImageSource.value = ''
   imageFallbackUsed.value = false
   downloadError.value = ''
@@ -332,7 +350,25 @@ async function initializePreview() {
     }
     return
   }
-  if (!media.originalUrl) { markPreviewFailed('missing'); return }
+  if (isMockMode()) {
+    if (!media.originalUrl) { markPreviewFailed('missing'); return }
+    previewVideoUrl.value = media.originalUrl
+  } else {
+    const controller = new AbortController()
+    previewAbortController = controller
+    try {
+      const url = await prepareTranscodedVideo(media, controller.signal, progress => { if (version === previewRequestVersion) transcodeProgress.value = progress }, forceTranscode, {
+        onSource: source => { if (version === previewRequestVersion) previewVideoOriginal = source === 'original' },
+      })
+      if (version !== previewRequestVersion) return
+      previewVideoUrl.value = url
+    } catch (reason) {
+      if (version === previewRequestVersion) { transcodeError.value = reason instanceof Error ? reason.message : '视频转码失败'; markPreviewFailed('video') }
+      return
+    } finally {
+      if (version === previewRequestVersion) previewAbortController = undefined
+    }
+  }
   videoLoadTimer = setTimeout(() => {
     if (previewState.value === 'loading') markPreviewFailed('timeout')
   }, 20_000)
@@ -347,10 +383,27 @@ function previewErrorDescription() {
   if (previewFailure.value === 'missing') return '当前文件缺少预览地址；若有原文件地址，可下载后在本地打开。'
   if (previewFailure.value === 'unsupported') return '该文件不是浏览器可直接显示的图片或视频格式，请下载原文件查看。'
   if (previewFailure.value === 'timeout') return '浏览器在 20 秒内未取得可播放数据，可能与视频分段读取、服务响应或编码有关。'
+  if (previewFailure.value === 'video' && transcodeError.value) return transcodeError.value
   if (previewFailure.value === 'video') return '可能由 HEVC/H.265 编码、跨域限制或服务端响应格式异常导致，可下载原视频后使用本地播放器打开。'
   return previewMedia.value?.localFileUrl
     ? '后端文件地址、原图及缩略图均未能读取，请检查文件接口权限、地址和图片格式。'
     : '原图及可用缩略图均未能读取，可能是文件地址失效、跨域限制或图片格式不受浏览器支持。'
+}
+/**
+ * 后端本地副本状态提示：本地已可读取时不显示。
+ * 展示本地缓存状态；后端仍可能通过云端提供原文件。
+ */
+function mediaCacheHint(media?: FlightReviewMedia) {
+  if (!media || media.localFileUrl) return ''
+  if (media.fileCleaned === 1) return '后端本地文件已清理'
+  if (media.downloadStatus === 1) return '后端正在缓存原文件'
+  if (media.downloadStatus === 3) return '后端缓存原文件失败'
+  if (media.downloadStatus === 0) return '后端尚未缓存原文件'
+  return ''
+}
+function videoDownloadUrl(media: FlightReviewMedia) {
+  if (isMockMode()) return media.originalUrl
+  return /^\d+$/.test(media.id) ? originalVideoUrl(media.id) : ''
 }
 async function downloadPreviewMedia() {
   const media = previewMedia.value
@@ -650,6 +703,7 @@ onBeforeUnmount(() => {
   if (aiNoticeTimer) clearTimeout(aiNoticeTimer)
   if (errorToastTimer) clearTimeout(errorToastTimer)
   if (noticeToastTimer) clearTimeout(noticeToastTimer)
+  if (uploadToastTimer) clearTimeout(uploadToastTimer)
   clearVideoTimer()
   previewAbortController?.abort()
   releasePreviewFile()
@@ -777,7 +831,6 @@ async function exportList() {
         <button type="button" class="summary-upload-button" @click="uploadVisible = true">线下AI识别结果上传</button>
       </div>
     </section>
-    <p v-if="uploadMessage" class="upload-success" role="status">{{ uploadMessage }}</p>
 
     <section class="result-panel panel">
       <header><div><h2>全部飞行结果</h2><span>{{ resultsLoading ? '正在读取成果…' : `符合条件的计划 · ${resultTotal} 条` }}</span></div><button type="button" class="outline-button" :disabled="resultsLoading || exporting || !resultTotal" @click="exportList">{{ exporting ? '正在生成…' : '导出清单' }}</button></header>
@@ -815,24 +868,24 @@ async function exportList() {
           <main>
             <template v-if="previewMedia">
               <div class="media-stage" :class="{ 'can-expand': previewState === 'ready' && mediaKind(previewMedia) === 'image', 'image-zoomed': previewImageScale > 1, 'image-dragging': previewImageDragging }" @wheel="zoomPreviewImage" @pointerdown="startPreviewImageDrag" @pointermove="movePreviewImageDrag" @pointerup="endPreviewImageDrag" @pointercancel="endPreviewImageDrag" @dblclick="resetPreviewImageTransform">
-                <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error'" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailMedia" :src="previewMedia.originalUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
+                <SharedVideoPlayer v-if="mediaKind(previewMedia) === 'video' && previewState !== 'error' && previewVideoUrl" ref="videoPlayer" :key="mediaKey(previewMedia)" :media="previewMedia" :media-list="detailMedia" :src="previewVideoUrl" :fullscreen="mediaFullscreen" :collaboration-available="previewState === 'ready'" @ready="markPreviewReady" @error="markPreviewFailed('video')" />
                 <img v-else-if="mediaKind(previewMedia) === 'image' && previewState !== 'error' && previewImageUrl" :key="`${mediaKey(previewMedia)}:${previewImageUrl}`" :src="previewImageUrl" :alt="previewMedia.fileName" :style="previewImageStyle" draggable="false" @load="markPreviewReady" @error="handlePreviewImageError" />
                 <PhotoLocationControl v-if="mediaKind(previewMedia) === 'image' && previewState === 'ready'" :key="`location:${mediaKey(previewMedia)}`" :media="previewMedia" :fullscreen="mediaFullscreen" />
                 <button v-if="previewState === 'ready'" class="fullscreen-toggle" type="button" :aria-label="mediaFullscreen ? '退出全屏' : '进入全屏'" :title="mediaFullscreen ? '退出全屏' : '进入全屏'" @click="toggleMediaFullscreen">
                   <svg v-if="!mediaFullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5m13 5h5v-5" /></svg>
                   <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
                 </button>
-                <div v-if="previewState === 'loading'" class="preview-loading" role="status">正在读取{{ mediaKind(previewMedia) === 'video' ? '视频' : '图片' }}…</div>
+                <div v-if="previewState === 'loading'" class="preview-loading" role="status">{{ mediaKind(previewMedia) === 'video' && transcodeProgress !== undefined && !previewVideoUrl ? `视频转码中 ${transcodeProgress}%` : `正在读取${mediaKind(previewMedia) === 'video' ? '视频' : '图片'}…` }}</div>
                 <section v-if="previewState === 'error'" class="preview-unavailable" role="status">
                   <span class="preview-unavailable__icon">!</span>
                   <h3>{{ previewErrorTitle() }}</h3><p>{{ previewErrorDescription() }}</p>
-                  <div><button type="button" @click="initializePreview">重新尝试</button><button v-if="previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></div>
-                  <small v-if="downloadError" class="download-error">{{ downloadError }}</small><small v-else-if="!previewMedia.localFileUrl && !previewMedia.originalUrl">后端未提供原文件地址，暂无法下载。</small>
+                  <div><button type="button" @click="initializePreview(true)">重新尝试</button><a v-if="mediaKind(previewMedia) === 'video' && videoDownloadUrl(previewMedia)" class="preview-download" :href="videoDownloadUrl(previewMedia)" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">下载原视频</a><button v-else-if="mediaKind(previewMedia) !== 'video' && previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="mediaKind(previewMedia) !== 'video' && previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></div>
+                  <small v-if="downloadError" class="download-error">{{ downloadError }}</small><small v-else-if="!previewMedia.localFileUrl && !previewMedia.originalUrl">后端未提供原文件地址，暂无法下载。</small><small v-if="mediaCacheHint(previewMedia)" class="media-cache-hint">{{ mediaCacheHint(previewMedia) }}</small>
                 </section>
                 <button v-if="mediaFullscreen && detailMedia.length > 1" type="button" class="fullscreen-nav previous" aria-label="上一个文件" title="上一项（← / ↑）" @click="switchDetailMedia(-1)">‹</button>
                 <button v-if="mediaFullscreen && detailMedia.length > 1" type="button" class="fullscreen-nav next" aria-label="下一个文件" title="下一项（→ / ↓）" @click="switchDetailMedia(1)">›</button>
               </div>
-              <footer><span :title="previewMedia.fileName">{{ display(previewMedia.fileName) }}<small v-if="mediaFullscreen">　{{ previewOrdinal }} / {{ detailMedia.length }} · 方向键切换 · Esc 退出</small><small v-else-if="imageFallbackUsed && previewState === 'ready'">　未提供原图或原图无法加载，当前显示缩略图</small><small v-if="downloadError" class="download-error">　{{ downloadError }}</small></span><button v-if="previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></footer>
+              <footer><span :title="previewMedia.fileName">{{ display(previewMedia.fileName) }}<small v-if="mediaFullscreen">　{{ previewOrdinal }} / {{ detailMedia.length }} · 方向键切换 · Esc 退出</small><small v-else-if="imageFallbackUsed && previewState === 'ready'">　未提供原图或原图无法加载，当前显示缩略图</small><small v-if="downloadError" class="download-error">　{{ downloadError }}</small><small v-if="mediaCacheHint(previewMedia)" class="media-cache-hint">　{{ mediaCacheHint(previewMedia) }}</small></span><a v-if="mediaKind(previewMedia) === 'video' && videoDownloadUrl(previewMedia)" class="preview-download" :href="videoDownloadUrl(previewMedia)" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">下载原视频</a><button v-else-if="mediaKind(previewMedia) !== 'video' && previewMedia.localFileUrl" class="preview-download" type="button" :disabled="downloadBusy" @click="downloadPreviewMedia">{{ downloadBusy ? '下载中…' : `下载原${mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件'}` }}</button><a v-else-if="mediaKind(previewMedia) !== 'video' && previewMedia.originalUrl" :href="previewMedia.originalUrl" :download="previewMedia.fileName" target="_blank" rel="noopener noreferrer">下载原{{ mediaKind(previewMedia) === 'video' ? '视频' : mediaKind(previewMedia) === 'image' ? '图片' : '文件' }}</a></footer>
             </template>
             <div v-else class="preview-empty">该飞行计划暂无可浏览成果</div>
           </main>
@@ -847,6 +900,7 @@ async function exportList() {
       </div>
       <template #footer><div class="ai-selection-actions"><button type="button" @click="aiPlan = null">取消</button><ElTooltip :visible="aiUnavailable" placement="right" effect="light" popper-class="ai-pending-popper" :popper-style="{ padding: '0', border: '1px solid #c4dde8', borderRadius: '8px', boxShadow: '0 10px 28px #123b5240' }"><template #content><div class="ai-pending-tip" role="status">该功能暂未开放</div></template><button type="button" class="primary" :disabled="!selectedAlgorithmId" @click="showAiUnavailable">确认</button></ElTooltip></div></template>
     </ElDialog>
+    <div v-if="uploadMessage" class="action-toast success" role="status">{{ uploadMessage }}<button type="button" aria-label="关闭提示" @click="uploadMessage = ''">×</button></div>
     <div v-if="actionError" class="action-toast error" role="alert">{{ actionError }}<button type="button" aria-label="关闭提示" @click="actionError = ''">×</button></div>
     <div v-if="actionNotice" class="action-toast notice" role="status">{{ actionNotice }}<button type="button" aria-label="关闭提示" @click="actionNotice = ''">×</button></div>
     <SpotUploadDialog v-if="uploadVisible" @close="uploadVisible = false" @uploaded="handleSpotUploaded" />
@@ -929,6 +983,7 @@ async function exportList() {
 .flight-review td:nth-child(10) { white-space: normal; }
 /* 操作反馈用浮动提示，不再占用表格内的一行高度。 */
 .action-toast { position: fixed; top: 82px; left: 50%; z-index: 3200; width: max-content; min-width: 220px; max-width: min(560px, calc(100vw - 32px)); padding: 11px 40px; transform: translateX(-50%); border: 1px solid; border-radius: 4px; box-shadow: 0 10px 30px #00131faa; color: #fff; font-size: 13px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; }
+.action-toast.success { background: #167b6a; border-color: #42c9a8; }
 .action-toast.error { background: #8e3544; border-color: #e26d7b; }
 .action-toast.notice { background: #7c5a1f; border-color: #dcb264; }
 .action-toast button { position: absolute; top: 4px; right: 7px; border: 0; background: transparent; color: #fff; font-size: 20px; line-height: 1; cursor: pointer; }
@@ -944,7 +999,6 @@ async function exportList() {
 .ai-selection-actions button { min-width: 76px; padding: 8px 16px; color: var(--ui-body); background: var(--ui-input); border: 1px solid var(--ui-border); border-radius: 5px; cursor: pointer; }
 .ai-selection-actions button.primary { color: #fff; background: var(--ui-action); border-color: var(--ui-action); }
 .ai-selection-actions button:disabled { opacity: .45; cursor: not-allowed; }
-.upload-success { margin: 0; padding: 8px 12px; color: #147254; background: #def4eb; border-radius: 5px; font-size: 12px; }
 @media(max-width:1500px) { .flight-review .summary-grid { grid-template-columns: repeat(4,minmax(0,1fr)) 220px; } .flight-review .summary-actions { grid-column: auto; } }
 @media(max-width:1050px) { .flight-review .summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .flight-review .summary-actions { grid-column: 1/-1; flex-direction: row; } }
 .detail-dialog { position: relative; width: min(1280px,100%); height: min(800px,100%); }
@@ -971,6 +1025,7 @@ async function exportList() {
 .preview-unavailable button.preview-download:disabled { opacity: .65; cursor: wait; }
 .preview-unavailable small { display: block; margin-top: 12px; color: #8499a4; font-size: 12px; }
 .preview-unavailable small.download-error { color: #b04747; }
+.preview-unavailable small.media-cache-hint { color: #a9741f; }
 .fullscreen-toggle { position: absolute; z-index: 9; top: 12px; right: 14px; display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 1px solid #8eb9c9; border-radius: 4px; color: #dff4fc; background: #0b3449e8; box-shadow: 0 3px 10px #00152355; cursor: pointer; }
 .fullscreen-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .fullscreen-toggle:hover { border-color: #4ed6e8; color: #fff; background: #187f9f; }
@@ -981,6 +1036,7 @@ async function exportList() {
 .detail-body main footer .preview-download { flex: none; padding: 0; border: 0; color: #168eae; background: transparent; font: inherit; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .detail-body main footer .preview-download:disabled { opacity: .6; cursor: wait; }
 .detail-body main footer .download-error { color: #b04747; }
+.detail-body main footer .media-cache-hint { color: #a9741f; }
 .detail-backdrop.is-fullscreen { padding: 0; background: #07131deb; }
 .detail-dialog.is-fullscreen { width: 100vw; height: 100dvh; max-width: none; border-radius: 0; background: #081822; }
 .detail-dialog.is-fullscreen > header,.detail-dialog.is-fullscreen .detail-body aside { display: none; }
