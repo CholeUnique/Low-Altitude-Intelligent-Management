@@ -2,6 +2,7 @@ import { apiClient, isMockMode } from './client'
 import type { Scene } from '@/types'
 
 export interface BizSceneMetric {
+  key?: string
   code?: string
   name?: string
   unit?: string
@@ -11,6 +12,7 @@ export interface BizSceneMetric {
 export interface BizSceneResultType {
   code?: string
   name?: string
+  geometryType?: string
   [key: string]: unknown
 }
 

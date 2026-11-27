@@ -1,7 +1,13 @@
 import { compareSpatialGeometries,type SpatialCollection,type SpatialCompareGroup } from '@/api/spatial-analysis'
 import { geometryRequestInputs,spatialGeometryExtent } from './spatial-geometry-input'
 export interface RegionStatistic {areaSqm:number;highAreaSqm:number;permanentAreaSqm:number;overlapAreaSqm:number;onlyHighAreaSqm:number;onlyPermanentAreaSqm:number;diffRate:number|null}
-export interface RegionStatisticRow {id:string;name:string;status:'RUNNING'|'SUCCEEDED'|'FAILED';value?:RegionStatistic;error?:string}
+export interface RegionStatisticRow {id:string;name:string;status:'RUNNING'|'SUCCEEDED'|'FAILED';value?:RegionStatistic;error?:string;diagnostics?:string}
+export class RegionStatisticIntegrityError extends Error {
+  constructor(public readonly diagnostics:string,excessSqm:number){
+    super(`后端区域统计不一致：重叠面积超过基准面积约 ${(excessSqm*.0015).toFixed(2)} 亩，未展示不一致的统计。`)
+    this.name='RegionStatisticIntegrityError'
+  }
+}
 export interface RegionGeometry {id:string;name:string;data:SpatialCollection}
 const bounds=new WeakMap<object,ReturnType<typeof spatialGeometryExtent>>()
 function fullArea(group:SpatialCompareGroup):number{
@@ -41,12 +47,19 @@ export async function calculateRegionStatistic(region:SpatialCollection,high:Spa
   const areaSqm=hr?.areaA??pr?.areaA??(await invoke(region,region,2)).areaA
   const highAreaSqm=hr?completeIntermediate(hr.both):0,permanentAreaSqm=pr?completeIntermediate(pr.both):0
   let overlapAreaSqm=0,onlyHighAreaSqm=highAreaSqm,onlyPermanentAreaSqm=permanentAreaSqm
+  let overlapResult:Awaited<ReturnType<typeof compare>>|undefined
   if(highAreaSqm&&permanentAreaSqm){
     const result=await invoke(hr!.both.featureCollection,pr!.both.featureCollection,2)
+    overlapResult=result
     overlapAreaSqm=fullArea(result.both)
     onlyHighAreaSqm=fullArea(result.aOnly);onlyPermanentAreaSqm=fullArea(result.bOnly)
   }
-  if(overlapAreaSqm>Math.min(highAreaSqm,permanentAreaSqm)+.05)throw new Error('后端区域重叠统计超过基准面积')
+  if(overlapAreaSqm>Math.min(highAreaSqm,permanentAreaSqm)+.05){
+    const number=(value:number|undefined)=>value==null?'未返回':value.toFixed(4)
+    const stage=(result:typeof overlapResult)=>`${result?.resultId??'未返回'}（${result?.crsUsed??'未返回投影'}）`
+    const excessSqm=overlapAreaSqm-Math.min(highAreaSqm,permanentAreaSqm)
+    throw new RegionStatisticIntegrityError(`后端区域重叠统计超过基准面积：高标田 ${number(highAreaSqm)}㎡，永农 ${number(permanentAreaSqm)}㎡，重叠 ${number(overlapAreaSqm)}㎡，超出 ${number(excessSqm)}㎡（容差 0.05㎡）；第三阶段输入高标田 ${number(overlapResult?.areaA)}㎡、永农 ${number(overlapResult?.areaB)}㎡，仅高标 ${number(onlyHighAreaSqm)}㎡、仅永农 ${number(onlyPermanentAreaSqm)}㎡；统计任务（高标/永农/重叠）：${stage(hr)} / ${stage(pr)} / ${stage(overlapResult)}`,excessSqm)
+  }
   if(![onlyHighAreaSqm,onlyPermanentAreaSqm].every(value=>Number.isFinite(value)&&value>=0))throw new Error('后端未返回有效的独有区域面积')
   progress?.(100)
   return {areaSqm,highAreaSqm,permanentAreaSqm,overlapAreaSqm,onlyHighAreaSqm,onlyPermanentAreaSqm,diffRate:highAreaSqm?(onlyHighAreaSqm+onlyPermanentAreaSqm)/highAreaSqm:null}

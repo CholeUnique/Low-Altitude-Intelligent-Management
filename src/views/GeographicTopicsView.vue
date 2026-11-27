@@ -25,7 +25,8 @@ import { readPublishedSpatialGeometry } from '@/utils/spatial-geometry-input'
 import TopicMapLegend from '@/components/TopicMapLegend.vue'
 import type { SpatialResultLegend, SpatialInput, SpatialCollection } from '@/api/spatial-analysis'
 import OverviewMapScale from '@/components/OverviewMapScale.vue'
-import { identifyVectorFeatures, setMapHoverSelection, type IdentifiedMapFeature } from '@/utils/map-service-layer'
+import { identifyVectorFeatures, setMapHoverSelection, administrativeNameField, type IdentifiedMapFeature } from '@/utils/map-service-layer'
+import { topicAdministrativeLabels, layoutAdministrativeLabels, type AdministrativeLabelSource } from '@/utils/topic-administrative-labels'
 import { HIGH_STANDARD_TOPIC_ID, FACILITIES_TOPIC_ID, useGeographicTopicsStore, type GeographicTopic } from '@/stores/geographic-topics'
 import { createMapServiceLayer, createAdministrativeBoundaryLayer, expandMapServiceSublayers, getMapServiceLayerMetadata, queryMapServiceFeatures, MAP_SERVICE_IMAGERY_PANE, MAP_SERVICE_VECTOR_PANE, type MapServiceLayerHandle } from '@/utils/map-service-layer'
 import { resolveC5Style, c5Pattern, type C5Style } from '@/utils/land-survey-c5'
@@ -39,7 +40,7 @@ import type { RegionClipRequest } from '@/api/region-clip'
 import { createRegionClipLayer } from '@/utils/region-clip-layer'
 import TopicRegionStatistics from '@/components/TopicRegionStatistics.vue'
 import TopicAnalysisProgress from '@/components/TopicAnalysisProgress.vue'
-import { calculateRegionStatistic,type RegionStatisticRow,type RegionGeometry } from '@/utils/region-statistics'
+import { calculateRegionStatistic,RegionStatisticIntegrityError,type RegionStatisticRow,type RegionGeometry } from '@/utils/region-statistics'
 import { matchesTopicText,matchesTopicProperties,topicSearchCategories,indexTopicProperties,matchingTopicPropertyRows,type TopicPropertySearchRow } from '@/utils/topic-layer-search'
 
 interface Category { value: string; name: string; count: number; checked: boolean; style?: C5Style; color?: string; mode?: TopicDisplayMode }
@@ -54,18 +55,6 @@ function rememberAddedLayers(keys:string[]){for(const key of keys)if(detailLayer
 function updateUploads(items:UploadedTopicLayer[]){uploadedLayers.value=items;rememberAddedLayers(items.map(item=>`upload:${item.id}`))}
 const topicStore = useGeographicTopicsStore()
 const root = ref<HTMLElement>(), canvas = ref<HTMLElement>()
-const legendSpace = ref(22)
-let legendResizeObserver: ResizeObserver | undefined
-async function observeLegend() {
-  await nextTick()
-  legendResizeObserver?.disconnect()
-  const legend = root.value?.querySelector<HTMLElement>('.map-symbol-legend')
-  if (!legend) { legendSpace.value = 22; return }
-  const update = () => { legendSpace.value = legend.offsetHeight + 24 }
-  legendResizeObserver = new ResizeObserver(update)
-  legendResizeObserver.observe(legend)
-  update()
-}
 const layers = ref<TopicLayer[]>([])
 const legendCollapsed=ref(false)
 const analysisLegend=ref<SpatialResultLegend[]>([])
@@ -283,6 +272,52 @@ const farmlandStatSources = computed(() => {
   return item?[{id:item.key.split('/')[0]!,name:item.sourceName}]:[]
 })
 let map: L.Map | undefined, resizeObserver: ResizeObserver | undefined, version = 0
+let administrativeLabelsLayer:L.LayerGroup|undefined
+let administrativeLabelRows:ReturnType<typeof topicAdministrativeLabels>=[]
+function renderAdministrativeLabels(){
+  if(!map)return
+  administrativeLabelsLayer ||= L.layerGroup().addTo(map)
+  administrativeLabelsLayer.clearLayers()
+  const size=map.getSize()
+  const rows=layoutAdministrativeLabels(administrativeLabelRows,(lng,lat)=>map!.latLngToContainerPoint([lat,lng]),{width:size.x,height:size.y})
+  for(const row of rows){
+    const text=document.createElement('span');text.textContent=row.name
+    L.marker([row.lat,row.lng],{pane:'topic-administrative-labels',interactive:false,keyboard:false,icon:L.divIcon({className:'township-map-label topic-administrative-label',html:text,iconSize:[160,24],iconAnchor:[80,12]})}).addTo(administrativeLabelsLayer)
+  }
+}
+function refreshAdministrativeLabels(){
+  if(!map)return
+  const sources:AdministrativeLabelSource[]=layers.value.filter(item=>item.role==='boundary').map(item=>{
+    const source:AdministrativeLabelSource={visible:item.visible&&!item.analysisHidden,vector:/Polygon/i.test(item.service.arcGisGeometryType||'')&&!/IMAGERY|RASTER|IMAGESERVER|XYZ|WMTS|TMS|WMS/i.test(`${item.service.dataType||''} ${item.service.type||''}`),administrative:true,features:[]}
+    if(!source.visible||!source.vector||!item.handle)return source
+    const values=item.handle.categoryFilter?.values||[],checked=new Set(item.categories.filter(category=>category.checked).map(category=>category.value))
+    if(regionClipActive.value){
+      const clipped=regionClipStates.value[item.key]
+      if(clipped?.status!=='SUCCEEDED'||!clipped.data)return source
+      const nameField=administrativeNameField(item.fields.map(name=>({name})),item.service.name)
+      for(const feature of clipped.data.features){
+        const id=String(feature.properties?.sourceObjectId??'')
+        const category=values.find(value=>value.objectIds?.some(objectId=>String(objectId)===id))
+        if(category&&!checked.has(category.value))continue
+        const name=String((nameField?feature.properties?.[nameField]:undefined)||category?.label||'').trim()
+        if(feature.geometry&&name)source.features.push({name,geometry:feature.geometry})
+      }
+    }else for(const category of values.filter(value=>checked.has(value.value))){
+      for(const geometry of category.geometries||[]){
+        const feature=arcgisToGeoJSON({geometry,attributes:{}}) as GeoJSON.Feature
+        if(feature.geometry)source.features.push({name:category.label,geometry:feature.geometry})
+      }
+    }
+    return source
+  })
+  for(const item of uploadedLayers.value){
+    const names=item.fields.map(field=>field.name),nameField=administrativeNameField(names.map(name=>({name})),item.name)
+    sources.push({visible:item.selected,vector:true,administrative:/行政区划|行政村|乡级|村级|乡镇|镇街|村界/.test(item.name)||(names.includes('PAC')&&names.includes('NAME')),features:item.data.features.flatMap(feature=>feature.geometry&&nameField?[{name:String(feature.properties?.[nameField]||'').trim(),geometry:feature.geometry}]:[])})
+  }
+  administrativeLabelRows=topicAdministrativeLabels(sources)
+  renderAdministrativeLabels()
+}
+watch(()=>[regionClipActive.value,regionClipStates.value,uploadedLayers.value,layers.value.map(item=>[item.visible,item.analysisHidden,item.handle,item.categories.map(category=>[category.value,category.checked])])],refreshAdministrativeLabels,{flush:'post'})
 const featureCache = new Map<string, Awaited<ReturnType<typeof queryMapServiceFeatures>>>()
 const inFlight = new Map<string, Promise<void>>()
 function current(item: TopicLayer, request: number) { return request === version && layers.value.some(layer => layer.key === item.key) }
@@ -486,7 +521,7 @@ async function updateRegionStatistics(input:RegionClipRequest,states:Record<stri
         const value=await calculateRegionStatistic(region.data,high,permanent,abort.signal,undefined,user.activeDeptId,percent=>{if(current())regionStatisticsProgress.value=(index*100+percent)/regions.length})
         if(!current())return
         regionStatistics.value=regionStatistics.value.map(row=>row.id===region.id?{...row,status:'SUCCEEDED',value}:row)
-      }catch(error){if(!current())return;regionStatistics.value=regionStatistics.value.map(row=>row.id===region.id?{...row,status:'FAILED',error:error instanceof Error?error.message:'区域统计失败'}:row)}
+      }catch(error){if(!current())return;regionStatistics.value=regionStatistics.value.map(row=>row.id===region.id?{...row,status:'FAILED',error:error instanceof Error?error.message:'区域统计失败',diagnostics:error instanceof RegionStatisticIntegrityError?error.diagnostics:undefined}:row)}
       regionStatisticsProgress.value=(index+1)*100/regions.length
     }
     if(regionStatistics.value.every(row=>row.status==='SUCCEEDED'))regionStatisticsCache.set(fingerprint,regionStatistics.value.map(row=>({...row})))
@@ -752,6 +787,8 @@ watch(() => props.topic.id, () => {
 onMounted(() => {
   if (!canvas.value) return
   map = L.map(canvas.value, { center:[32.49,119.85], zoom:12, attributionControl:false, zoomControl:false })
+  map.createPane('topic-administrative-labels').style.zIndex='430'
+  map.on('zoomend moveend resize',renderAdministrativeLabels)
   for (const [name,zIndex] of [[MAP_SERVICE_IMAGERY_PANE,225],[MAP_SERVICE_VECTOR_PANE,335],['administrative-boundaries',350]] as const) map.createPane(name).style.zIndex = String(zIndex)
   map.createPane('topic-selection').style.zIndex = '450'
   selectionGroup = L.layerGroup().addTo(map)
@@ -764,13 +801,12 @@ onMounted(() => {
   document.addEventListener('fullscreenchange', updateFullscreen)
   void loadData()
 })
-watch(mapLegendGroups, () => void observeLegend(), { flush: 'post' })
-onMounted(() => void observeLegend())
-onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.abort();clearTimeout(propertySearchTimer);propertySearchController?.abort();clearRegionClip(false);legendResizeObserver?.disconnect(); clearFeatureSelection();featureHover?.destroy();featureHover=undefined; version++; document.removeEventListener('fullscreenchange', updateFullscreen); resizeObserver?.disconnect(); map?.remove(); map = undefined })
+onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.abort();clearTimeout(propertySearchTimer);propertySearchController?.abort();clearRegionClip(false);clearFeatureSelection();featureHover?.destroy();featureHover=undefined; version++; document.removeEventListener('fullscreenchange', updateFullscreen); resizeObserver?.disconnect(); map?.remove(); map = undefined })
+const statisticsCollapsed = ref(false)
 </script>
 
 <template>
-  <section ref="root" class="geographic-topics" :class="{ 'is-farmland': isFarmland }" :style="{ '--legend-space': isFarmland ? '22px' : `${legendSpace}px`, '--details-width':isFarmland?(resultLayerKeys.length?'min(500px, calc(100% - 50px))':'min(300px, calc(100% - 50px))'):undefined }" aria-label="专题地图">
+  <section ref="root" class="geographic-topics" data-map-labels="layer" :class="{ 'is-farmland': isFarmland }" :style="{ '--details-width':isFarmland?(resultLayerKeys.length?'min(500px, calc(100% - 50px))':'min(300px, calc(100% - 50px))'):undefined }" aria-label="专题地图">
     <div ref="canvas" class="topic-map" :class="{'topic-map--drawing':drawingToolActive}"></div>
     <div class="topic-map-reference">
       <div v-if="!isFarmland" class="topic-north" role="img" aria-label="指北针：上方为北">
@@ -788,7 +824,7 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
     <div v-else-if="topicStore.storageError" class="topic-status" role="alert">{{ topicStore.storageError }}</div>
     <div v-if="identifyPending || identifyError" class="topic-identify-status" :role="identifyError ? 'alert' : 'status'">{{ identifyError || '正在查询要素…' }}</div>
     <div v-if="!configOpen && (regionClipActive || analysisStatistics.length || farmlandStatSources.length || featureCandidates.length)" class="topic-inspector-rail" :class="{'has-details':featureCandidates.length}">
-      <aside v-if="regionClipActive || analysisStatistics.length || farmlandStatSources.length" class="topic-farmland-stat" :aria-label="regionClipActive?'区域统计':analysisStatistics.length?'分析结果':'高标准农田统计'"><header>{{ regionClipActive?'区域统计':analysisStatistics.length?'分析结果':'高标准农田数据' }}</header><template v-if="regionClipActive"><TopicRegionStatistics v-if="regionStatistics.length" :rows="regionStatistics" :active-id="activeRegionStatId" @select="highlightStatisticRegion" /><p v-else role="status">正在准备所选区域的统计数据…</p></template><TopicAnalysisStatistics v-else-if="analysisStatistics.length" :items="analysisStatistics" /><!-- 高标田专题显示部门定制统计，保留后端的实际统计范围标题；图层服务切换不改变统计范围。 --><TopicStatisticsSummary v-else area-in-mu :sources="isFarmland ? undefined : farmlandStatSources" /></aside>
+      <aside v-if="regionClipActive || analysisStatistics.length || farmlandStatSources.length" class="topic-farmland-stat" :class="{'is-collapsed':statisticsCollapsed}" :aria-label="regionClipActive?'区域统计':analysisStatistics.length?'分析结果':'高标准农田统计'"><header><button class="statistics-collapse-toggle" :aria-expanded="!statisticsCollapsed" @click="statisticsCollapsed=!statisticsCollapsed"><span>{{ regionClipActive?'区域统计':analysisStatistics.length?'分析结果':'高标准农田数据' }}</span><b>{{ statisticsCollapsed?'＋':'−' }}</b></button></header><template v-if="regionClipActive"><TopicRegionStatistics v-if="regionStatistics.length" :rows="regionStatistics" :active-id="activeRegionStatId" @select="highlightStatisticRegion" /><p v-else role="status">正在准备所选区域的统计数据…</p></template><TopicAnalysisStatistics v-else-if="analysisStatistics.length" :items="analysisStatistics" /><!-- 高标田专题显示部门定制统计，保留后端的实际统计范围标题；图层服务切换不改变统计范围。 --><TopicStatisticsSummary v-else area-in-mu :sources="isFarmland ? undefined : farmlandStatSources" /></aside>
       <TopicFeatureDetails v-if="featureCandidates.length" embedded :features="featureCandidates" :selected="selectedFeature" :roles="featureRoles" @select="selectFeature" @close="clearFeatureSelection" />
     </div>
     <button class="topic-details-toggle" :class="{collapsed:legendCollapsed}" :aria-label="legendCollapsed?'展开图层详情':'收起图层详情'" :aria-expanded="!legendCollapsed" @click="legendCollapsed=!legendCollapsed">{{ legendCollapsed?'›':'‹' }}</button>
@@ -862,7 +898,7 @@ onBeforeUnmount(() => { clearTimeout(preloadTimer);regionStatisticsController?.a
 .geographic-topics>.topic-tools{z-index:560}
 .config-body .config-service-group{margin:10px 0 0;border:1px solid #719dad29;border-radius:7px;overflow:hidden}.config-source-heading{display:flex;align-items:center;gap:8px;min-height:46px;padding:0 10px;background:#23485855}.config-source-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;padding:10px 0;border:0;background:transparent;color:#d9f1f7;font:inherit;text-align:left;cursor:pointer}.config-source-toggle b{font-size:14px;font-weight:500;line-height:1.7;overflow-wrap:anywhere}.config-source-switch{display:flex;align-items:center;gap:5px;flex:none;font-size:12px;cursor:pointer}.config-source-children{padding:0 10px 0 20px}.config-source-children .config-layer:last-child{border-bottom:0;margin-bottom:0}.legend-layer-name{display:grid;flex:1;min-width:0;gap:2px}.legend-layer-name b{color:#d6eaf1}.legend-layer-heading .legend-layer-name small{display:block;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#81a7b5;line-height:16px}
 .topic-legend{top:var(--left-panel-top);bottom:auto;width:var(--details-width);height:var(--details-height);max-height:none;box-sizing:border-box;border:1px solid #88bcd528;border-radius:10px;background:linear-gradient(145deg,#123846ed,#0a2938ed)}
-.geographic-topics{--details-top:20px}.topic-legend{top:var(--details-top);bottom:var(--legend-space,22px);height:auto}.topic-details-toggle{top:calc(var(--details-top) + 10px)}
+.geographic-topics{--details-top:20px}.topic-legend{top:var(--details-top);bottom:22px;height:auto}.topic-details-toggle{top:calc(var(--details-top) + 10px)}
 .legend-heading{min-height:50px;box-sizing:border-box;flex:0 0 50px;border-bottom:1px solid #7395a229;padding:0 15px;gap:9px;cursor:default}
 .legend-content{flex:1;min-height:0;padding:12px;overscroll-behavior:contain;scrollbar-width:none}.legend-content::-webkit-scrollbar{display:none}
 .legend-group{margin-top:8px;padding-top:0;border-top:0}.legend-layer-row{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:7px;min-height:42px;border:1px solid #719dad20;border-radius:6px;background:#153746;padding:0 8px}.legend-layer-row:hover{background:#1b4353}

@@ -26,7 +26,7 @@ export type SpatialCollection = GeoJSON.FeatureCollection<SpatialGeometry>
 export type SpatialDifferenceType = 'A_ONLY' | 'B_ONLY'
 export interface SpatialResultLegend { id:string; name:string; symbols:{label:string;color:string;mode?:'filled'|'boundary'}[] }
 export interface SpatialCompareGroup {areaSqm:number;areaMu?:number;fullAreaSqm?:number;fullAreaMu?:number;spotCount:number;featureCollection:SpatialCollection}
-export interface SpatialGeometryCompare {areaA:number;areaB:number;crsUsed:string;minAreaSqm:number;both:SpatialCompareGroup;aOnly:SpatialCompareGroup;bOnly:SpatialCompareGroup;statistics?:SpatialCompleteStatistics}
+export interface SpatialGeometryCompare {resultId?:string;areaA:number;areaB:number;crsUsed:string;minAreaSqm:number;both:SpatialCompareGroup;aOnly:SpatialCompareGroup;bOnly:SpatialCompareGroup;statistics?:SpatialCompleteStatistics}
 export interface SpatialSpot { seqNo:number; diffType:string; areaSqm:number; centerLng:number; centerLat:number; geometry:SpatialGeometry }
 export interface SpatialSpotPage { records:SpatialSpot[]; total:number; pageNum:number; pageSize:number }
 interface RequestOptions { signal?:AbortSignal }
@@ -79,5 +79,7 @@ export function getSpatialOverlaySpots(resultId:string,pageNum:number,deptId?:st
 }
 export async function compareSpatialGeometries(input:{geometryA:SpatialCollection;geometryB:SpatialCollection;minAreaSqm:number},options:RequestOptions&{deptId?:string;progress?:(percent:number)=>void;pollMs?:number;timeoutMs?:number}={}) {
   const accepted=await spatialPost<unknown>('/v1/spatial/spot/compare',{...input,deptId:options.deptId},{signal:options.signal,timeout:180_000})
-  return waitForSpatialComparison(accepted,(resultId,signal)=>spatialPost('/v1/spatial/spot/compare/status',{resultId,deptId:options.deptId},{signal,timeout:30_000}),options)
+  const result=await waitForSpatialComparison(accepted,(resultId,signal)=>spatialPost('/v1/spatial/spot/compare/status',{resultId,deptId:options.deptId},{signal,timeout:30_000}),options)
+  const resultId=result.resultId??(accepted as {resultId?:string|number})?.resultId
+  return {...result,...(resultId!=null?{resultId:String(resultId)}:{})}
 }

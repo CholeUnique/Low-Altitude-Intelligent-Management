@@ -8,14 +8,17 @@ import FlightTaskReviewPanel from '@/workspace-components/spot-identification/Fl
 import AlgorithmRepositoryView from '@/views/AlgorithmRepositoryView.vue'
 import DataResultsView from '@/views/DataResultsView.vue'
 import GeographicTopicsView from '@/views/GeographicTopicsView.vue'
+import LandSupervisionTopicView from '@/views/LandSupervisionTopicView.vue'
+import LandRecognitionView from '@/views/LandRecognitionView.vue'
 import EngineeringFacilitiesOverview from '@/views/EngineeringFacilitiesOverview.vue'
 import EngineeringFacilitiesDashboard from '@/views/EngineeringFacilitiesDashboard.vue'
 import EngineeringFacilityLedger from '@/views/EngineeringFacilityLedger.vue'
-import { isAgricultureTopicDepartment } from '@/utils/topic-access'
+import { isAgricultureTopicDepartment, isNaturalResourcesTopicDepartment, isLandSupervisionTopic, resolveLandSceneCode } from '@/utils/topic-access'
+import { LAND_WARNING_SCENE, LAND_RECTIFICATION_SCENE, type LandSceneCode } from '@/types/land-supervision'
 import { getGovernanceTaskPage, toPatrolTask, type GovernanceTask } from '@/api/governance-task'
 import type { PortalTask, WorkspaceNodeConfig } from '@/types'
 import { useUserStore } from '@/stores/user'
-import { HIGH_STANDARD_TOPIC_ID, FACILITIES_TOPIC_ID, useGeographicTopicsStore } from '@/stores/geographic-topics'
+import { FACILITIES_TOPIC_ID, useGeographicTopicsStore } from '@/stores/geographic-topics'
 
 type RecognitionMode = 'spots' | 'algorithms' | 'data' | 'topics'
 type DataTab = 'collection' | 'recognition'
@@ -26,8 +29,8 @@ const router = useRouter()
 const user = useUserStore()
 const topicStore = useGeographicTopicsStore()
 const topicsExpanded = ref(true)
-const selectedTopic = computed(() => topicStore.topics.find(item => item.id === route.query.topic) || topicStore.topics[0]!)
-const canUseTopics = computed(()=>isAgricultureTopicDepartment(user)&&user.hasPermission('special-analysis'))
+const selectedTopic = computed(() => topicStore.topics.find(item => item.id === (resolveLandSceneCode(route.query.topic)||route.query.topic)) || topicStore.topics[0]!)
+const canUseTopics = computed(()=>(isAgricultureTopicDepartment(user)||isNaturalResourcesTopicDepartment(user))&&user.hasPermission('special-analysis'))
 const mapTopic=computed(()=>selectedTopic.value.id===FACILITIES_TOPIC_ID?{...selectedTopic.value,name:'工程设施地图'}:selectedTopic.value)
 const facilityPage = computed(()=>route.query.view==='map'?'map':route.query.view==='ledger'?'ledger':'overview')
 const recognitionModes: RecognitionMode[] = ['algorithms', 'spots', 'data', 'topics']
@@ -104,9 +107,15 @@ function selectTopic(id: string, view:'overview'|'map'|'ledger'='overview') {
   topicsExpanded.value=true
   void router.push({name:'recognition',params:{tab:'topics'},query:{topic:id,...(id===FACILITIES_TOPIC_ID?{view}: {})}})
 }
+function selectLandPage(id:string, recognition=false){
+  void router.push({name:'recognition',params:{tab:'topics'},query:{topic:id,...(recognition?{view:'recognition'}:{})}})
+}
+function landTopicNameParts(id:string){
+  return id===LAND_WARNING_SCENE?['新增违法违规用地','智能预警']:id===LAND_RECTIFICATION_SCENE?['全称监测','违法违规用地整改']:[]
+}
 watch(() => route.query.topic, () => { if (mode.value === 'topics') topicsExpanded.value = true })
 watch(() => user.activeDeptId, () => {
-  if(mode.value==='topics')void router.replace(canUseTopics.value?{name:'recognition',params:{tab:'topics'},query:{topic:HIGH_STANDARD_TOPIC_ID}}:{name:'recognition',params:{tab:'data'}})
+  if(mode.value==='topics')void router.replace(canUseTopics.value?{name:'recognition',params:{tab:'topics'},query:{topic:topicStore.topics[0]?.id}}:{name:'recognition',params:{tab:'data'}})
 })
 function setRecognitionMode(nextMode: RecognitionAnalysisMode) {
   const target = recognitionAnalysisItems.find((item) => item.key === nextMode)
@@ -130,7 +139,7 @@ watch([mode, () => route.query.analysis], ([nextMode]) => {
 watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
 </script>
 <template>
-  <div class="recognition-page">
+  <div class="recognition-page" :data-map-labels="mode==='topics'?'layer':undefined">
     <main>
       <aside>
         <nav>
@@ -143,11 +152,15 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
               </i><span><b>{{ item.label }}</b></span><em>›</em></button>
             <div v-if="item.key==='topics'&&mode==='topics'&&topicsExpanded" class="recognition-task-submenu topic-root-menu" aria-label="专题分析目录">
               <template v-for="topic in topicStore.topics" :key="topic.id">
-                <button class="task-button" :class="{selected:selectedTopic.id===topic.id}" :title="topic.name" :aria-current="selectedTopic.id===topic.id&&topic.id!==FACILITIES_TOPIC_ID?'page':undefined" @click="selectTopic(topic.id)"><b>{{ topic.name }}</b></button>
+                <button class="task-button" :class="{selected:selectedTopic.id===topic.id,'land-topic-button':isLandSupervisionTopic(topic.id)}" :title="topic.name" :aria-label="topic.name" :aria-current="selectedTopic.id===topic.id&&topic.id!==FACILITIES_TOPIC_ID?'page':undefined" @click="selectTopic(topic.id)"><b v-if="isLandSupervisionTopic(topic.id)"><span v-for="part in landTopicNameParts(topic.id)" :key="part" class="land-topic-name-part">{{ part }}</span></b><b v-else>{{ topic.name }}</b></button>
                 <div v-if="topic.id===FACILITIES_TOPIC_ID&&selectedTopic.id===topic.id" class="topic-scene-menu facility-submenu" aria-label="工程设施管理">
                   <button :class="{selected:facilityPage==='overview'}" :aria-current="facilityPage==='overview'?'page':undefined" @click="selectTopic(topic.id,'overview')">工程设施总览</button>
                   <button :class="{selected:facilityPage==='map'}" :aria-current="facilityPage==='map'?'page':undefined" @click="selectTopic(topic.id,'map')">工程设施地图</button>
                   <button :class="{selected:facilityPage==='ledger'}" :aria-current="facilityPage==='ledger'?'page':undefined" @click="selectTopic(topic.id,'ledger')">设施台账</button>
+                </div>
+                <div v-if="isLandSupervisionTopic(topic.id)&&selectedTopic.id===topic.id" class="topic-scene-menu" aria-label="违法用地专题页面">
+                  <button :class="{selected:route.query.view!=='recognition'}" @click="selectLandPage(topic.id)">{{ topic.id===LAND_WARNING_SCENE?'监管对象':'专题地图' }}</button>
+                  <button :class="{selected:route.query.view==='recognition'}" @click="selectLandPage(topic.id,true)">违法用地识别</button>
                 </div>
               </template>
             </div>
@@ -175,6 +188,8 @@ watch(mode,next=>{if(next==='spots')void loadTasks()},{immediate:true})
         <EngineeringFacilitiesDashboard v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='overview'" />
         <EngineeringFacilitiesOverview v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='map'" />
         <EngineeringFacilityLedger v-else-if="mode==='topics'&&canUseTopics&&selectedTopic.id===FACILITIES_TOPIC_ID&&facilityPage==='ledger'" />
+        <LandRecognitionView v-else-if="mode==='topics'&&canUseTopics&&isLandSupervisionTopic(selectedTopic.id)&&route.query.view==='recognition'" :key="`recognition:${user.activeDeptId}:${selectedTopic.id}`" :scene-code="selectedTopic.id as LandSceneCode" />
+        <LandSupervisionTopicView v-else-if="mode==='topics'&&canUseTopics&&isLandSupervisionTopic(selectedTopic.id)" :key="`${user.activeDeptId}:${selectedTopic.id}`" :scene-code="selectedTopic.id as LandSceneCode" />
         <GeographicTopicsView v-else-if="mode==='topics'&&canUseTopics" :topic="mapTopic" />
         <DataResultsView v-else embedded :active-tab="activeDataTab" />
       </section>

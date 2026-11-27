@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs'
 import ts from 'typescript'
 const load=(file,deps={})=>{const m={exports:{}};new Function('module','exports','require',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(m,m.exports,id=>deps[id]||{});return m.exports}
 const geometry=load('src/utils/spatial-geometry-input.ts',{'./topic-upload':{assertTopicGeometry(){}}})
-const {calculateRegionStatistic}=load('src/utils/region-statistics.ts',{'./spatial-geometry-input':geometry})
+const {calculateRegionStatistic,RegionStatisticIntegrityError}=load('src/utils/region-statistics.ts',{'./spatial-geometry-input':geometry})
 const feature=(x=119)=>({type:'Feature',geometry:{type:'Polygon',coordinates:[[[x,32],[x+.1,32],[x+.1,32.1],[x,32]]]},properties:{originalAreaMu:999999}})
 const fc=(features)=>({type:'FeatureCollection',features})
 const region=fc([feature()]),high=fc([feature(),feature(130)]),permanent=fc([feature()])
@@ -30,4 +30,24 @@ assert.deepEqual(empty,{areaSqm:100,highAreaSqm:0,permanentAreaSqm:0,overlapArea
 const abort=new AbortController();abort.abort()
 await assert.rejects(calculateRegionStatistic(region,high,permanent,abort.signal,async()=>{throw Error('不应调用')}))
 await assert.rejects(calculateRegionStatistic(region,high,permanent,new AbortController().signal,async()=>{throw Error('后端图斑对比失败（结果 56）：side location conflict')}),/区划与高标田叠加失败.*结果 56.*side location conflict/)
+const crsUsed='CGCS2000_3DEG_CM_120E'
+const multipart={...feature(),geometry:{type:'MultiPolygon',coordinates:[feature().geometry.coordinates,[[[119.01,32.01],[119.02,32.01],[119.02,32.02],[119.01,32.01]]]]}}
+multipart.geometry.coordinates[0].push([[119.01,32.01],[119.02,32.01],[119.02,32.02],[119.01,32.01]])
+const highOutput=fc([multipart]),permanentOutput=fc([{...multipart,properties:{areaSqm:5199896.0761}}])
+const observed=[
+ {resultId:'13',areaA:10000000,crsUsed,both:{...group(6446534.6966),featureCollection:highOutput}},
+ {resultId:'14',areaA:10000000,crsUsed,both:{...group(5199896.0761),featureCollection:permanentOutput}},
+ {resultId:'12',areaA:6552840.7998,areaB:5306206.9302,crsUsed,both:group(5226095.1525),aOnly:group(1326745.6447),bOnly:group(80111.7802)},
+]
+const forwarded=[]
+await assert.rejects(calculateRegionStatistic(region,high,permanent,new AbortController().signal,async input=>{forwarded.push(input);return observed[forwarded.length-1]}),error=>{
+ assert(error instanceof RegionStatisticIntegrityError)
+ assert.match(error.message,/39\.30 亩/)
+ for(const detail of ['6446534.6966','5199896.0761','5226095.1525','26199.0764','6552840.7998','5306206.9302',`13（${crsUsed}）`,`14（${crsUsed}）`,`12（${crsUsed}）`])assert(error.diagnostics.includes(detail),`Missing backend diagnostic: ${detail}`)
+ return true
+},'Chengdong backend geometry round-trip inconsistency must remain an error, not be clamped or hidden by a larger tolerance')
+assert.equal(forwarded[2].geometryA.features[0].geometry,highOutput.features[0].geometry)
+assert.equal(forwarded[2].geometryB.features[0].geometry,permanentOutput.features[0].geometry)
+assert.equal(forwarded[2].geometryA.features[0].geometry.coordinates[0].length,2,'Preserve holes and multipart geometry on the next request')
+assert.deepEqual(forwarded[2].geometryB.features[0].properties,{},'Strip only properties, never change the geometry to mask backend area drift')
 console.log('Regional statistics: backend areas/intersections, zero threshold, bbox candidates, unchanged geometry, empty regions and cancellation passed')

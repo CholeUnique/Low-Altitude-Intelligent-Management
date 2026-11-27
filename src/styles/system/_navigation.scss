@@ -47,6 +47,9 @@
 #app .recognition-page aside .topic-root-menu > .task-button { min-height: 38px; color: #9fb7c9; background: transparent; border: 0; border-radius: var(--ui-control-radius); }
 #app .recognition-page aside .topic-root-menu > .task-button:hover { background: var(--ui-hover); color: #e6f1ff; }
 #app .recognition-page aside .topic-root-menu > .task-button.selected { background: var(--ui-selected); color: #22d3ee; }
+#app .recognition-page aside .topic-root-menu > .land-topic-button b { font-size:14px!important; line-height:22px; }
+#app .recognition-page aside .land-topic-button b::before { display:none; }
+#app .recognition-page aside .land-topic-button .land-topic-name-part { display:block; margin:0; font:inherit; color:inherit; white-space:nowrap; }
 #app .recognition-page aside .recognition-task-submenu .task-button.selected { background: var(--ui-selected); color: #22d3ee; border-color: transparent; }
 #app :is(.task-center-sidebar button i, .uav-page aside button .nav-icon,
   .recognition-page aside nav :is(.primary-nav-button, .topic-primary-button) > i) {

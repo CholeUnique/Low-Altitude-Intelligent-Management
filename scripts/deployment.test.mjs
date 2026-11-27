@@ -9,8 +9,9 @@ for(const mode of ['development','production']){
   const {config}=await loadConfigFromFile({command:mode==='production'?'build':'serve',mode})
   assert.equal(env.VITE_API_BASE_URL,'/api','Browser business requests remain on the frontend origin')
   assert.equal(env.VITE_PUBLIC_APP_URL,frontend)
-  assert.equal(config.server.proxy['/api'].target,backend)
-  assert.equal(config.preview.proxy['/api'].target,backend)
+  const target=mode==='development'?'http://223.2.41.169:8080':backend
+  assert.equal(config.server.proxy['/api'].target,target)
+  assert.equal(config.preview.proxy['/api'].target,target)
   assert.equal(config.preview.port,38081)
   assert.equal(config.base,'/')
   const module={exports:{}}

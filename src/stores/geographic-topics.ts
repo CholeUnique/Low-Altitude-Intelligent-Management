@@ -12,21 +12,26 @@ const defaultTopics: GeographicTopic[] = [
   {id:HIGH_STANDARD_TOPIC_ID,name:'高标准农田管理',description:'展示高标准农田、耕地与国土调查数据。'},
   {id:FACILITIES_TOPIC_ID,name:'高标准农田工程设施管理',description:'展示高标准农田工程设施及相关地理数据。'},
 ]
-const emptyProfile = (): TopicProfile => ({topics:defaultTopics.map(topic=>({...topic})),preferences:{}})
+const landTopics: GeographicTopic[] = [
+  {id:'ILLEGAL_LAND_EARLY_WARN',name:'新增违法违规用地智能预警',description:'人工判读地表异动，现场核查后确认问题。'},
+  {id:'STOCK_ILLEGAL_LAND_RECTIFY',name:'全称监测违法违规用地整改',description:'跟踪整改过程、审核整改材料并销号结案。'},
+]
+const emptyProfile = (topics = defaultTopics): TopicProfile => ({topics:topics.map(topic=>({...topic})),preferences:{}})
 
 /** 专题与任务业务场景独立。独立接口上线前，配置只保存到本机、按账号及部门隔离。 */
 export const useGeographicTopicsStore = defineStore('geographic-topics', () => {
   const user = useUserStore()
+  const defaults = computed(() => user.organizationId === 'natural-resources' ? landTopics : defaultTopics)
   const storageKey = computed(() => `geographic-topics:v1:${user.currentUser?.id || 'anonymous'}:${user.activeDeptId || user.organizationId}`)
-  const profile = ref<TopicProfile>(emptyProfile())
+  const profile = ref<TopicProfile>(emptyProfile(defaults.value))
   const storageError = ref('')
-  watch(storageKey, key => {
-    profile.value = emptyProfile(); storageError.value = ''
+  watch([storageKey, defaults], ([key]) => {
+    profile.value = emptyProfile(defaults.value); storageError.value = ''
     try {
       const stored = JSON.parse(localStorage.getItem(key) || 'null')
       if (!stored || typeof stored !== 'object') return
-      const ids = new Set(defaultTopics.map(topic=>topic.id)), names = new Set(defaultTopics.map(topic=>topic.name))
-      const topics: GeographicTopic[] = defaultTopics.map(topic=>({...topic}))
+      const ids = new Set(defaults.value.map(topic=>topic.id)), names = new Set(defaults.value.map(topic=>topic.name))
+      const topics: GeographicTopic[] = defaults.value.map(topic=>({...topic}))
       for (const item of Array.isArray(stored.topics) ? stored.topics.slice(0,100) : []) {
         if (typeof item.id !== 'string' || !/^topic-[\w-]+$/.test(item.id) || typeof item.name !== 'string') continue
         const name = item.name.trim()

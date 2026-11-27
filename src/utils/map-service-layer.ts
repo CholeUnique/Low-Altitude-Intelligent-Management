@@ -119,7 +119,7 @@ export interface MapServiceLayerOptions {
 }
 
 /** 区划名称以发布字段为准；村级优先村名，乡级优先乡镇名。 */
-function administrativeNameField(fields:{name?:string;alias?:string}[],layerName:string) {
+export function administrativeNameField(fields:{name?:string;alias?:string}[],layerName:string) {
   const preferred = /村级/.test(layerName)
     ? ['CUNMC','XZCMC','CJQYMC','VILLAGE_NAME','VILLAGENAME','CUN_NAME','CUNNAME','ZLDWMC']
     : ['XZMC','TOWN_NAME','TOWNNAME','ZLDWMC']

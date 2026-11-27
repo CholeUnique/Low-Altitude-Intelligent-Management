@@ -9,7 +9,7 @@ import { useBackendTaskData } from '@/workspace-components/shared/use-backend-ta
  */
 const props = defineProps<{ task?: PortalTask; sceneName?: string; node?: WorkspaceNodeConfig }>()
 const source = computed(() => props.task?.id)
-const { task, detail, abnormals, results, loading, errors, text, load } = useBackendTaskData({ get taskId() { return source.value } })
+const { task, abnormals, results, loading, errors, text, load } = useBackendTaskData({ get taskId() { return source.value } })
 
 function parse(value?: string) {
   const time = Date.parse(String(value || '').replace(' ', 'T'))

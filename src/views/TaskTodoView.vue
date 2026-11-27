@@ -126,7 +126,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <TaskCenterLayout title="我的待办" hide-heading>
+  <TaskCenterLayout class="task-todo-page" title="我的待办" hide-heading>
     <div class="todo-layout">
       <main class="todo-main">
         <section class="todo-filters">
@@ -137,9 +137,9 @@ onBeforeUnmount(() => {
                   <FilterActions @query="applyFilters" @reset="resetFilters" />
         </section>
 
-        <p v-if="error" class="todo-warning">真实待办加载失败：{{ error }}。请重试。</p>
-        <p v-for="warning in warnings" :key="warning" class="todo-warning">部分记录未加载：{{ warning }}</p>
-        <section class="todo-list">
+        <section class="todo-list" aria-label="我的任务列表" tabindex="0">
+          <p v-if="error" class="todo-warning">真实待办加载失败：{{ error }}。请重试。</p>
+          <p v-for="warning in warnings" :key="warning" class="todo-warning">部分记录未加载：{{ warning }}</p>
           <article v-for="task in visibleTasks" :key="task.id" class="todo-item">
             <div class="task-meta">
               <div class="task-title">
@@ -183,8 +183,8 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .refresh-button { height: 34px; padding: 0 15px; color: #fff; background: #2389d3; border: 1px solid #1880c8; border-radius: 4px; cursor: pointer; }
 .refresh-button:disabled { opacity: .6; cursor: wait; }
-.todo-layout { display: grid; grid-template-columns: minmax(0, 1fr) 245px; gap: 14px; }
-.todo-main { min-width: 0; }
+.todo-layout { flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 245px; grid-template-rows: minmax(0, 1fr); gap: 14px; overflow: clip; }
+.todo-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: clip; }
 .todo-filters { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) 120px 180px; gap: 12px; padding: 13px 15px; background: #fff; border: 1px solid #e1e7ed; border-radius: 6px; }
 .todo-filters label { min-width: 0; display: grid; gap: 6px; color: #65788b; font-size: 12px; }
 .todo-filters input, .todo-filters select, .search-control > div { height: 34px; color: #33495e; background: #fff; border: 1px solid #d8e0e7; border-radius: 4px; outline: 0; }
@@ -196,7 +196,8 @@ onBeforeUnmount(() => {
 .search-control > div { display: flex; align-items: center; gap: 8px; padding: 0 10px; }
 .search-control span { color: #8c9aa8; }
 .search-control input { min-width: 0; flex: 1; height: 30px; padding: 0; border: 0; }
-.todo-list { margin-top: 12px; }
+.todo-list { flex: 1; min-height: 0; margin-top: 12px; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.todo-list::-webkit-scrollbar { display: none; }
 .todo-warning { margin: 12px 0 0; padding: 9px 12px; color: #9a681d; background: #fff8e8; border: 1px solid #efd9a9; border-radius: 5px; font-size: 12px; }
 .todo-item { margin-bottom: 10px; overflow: hidden; background: #fff; border: 1px solid #e0e7ed; border-radius: 6px; box-shadow: 0 2px 10px #24496909; }
 .task-meta { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 10px 16px; border-bottom: 1px solid #edf1f4; }

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteLocationNormalized } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { isAgricultureTopicDepartment } from '@/utils/topic-access'
+import { isAgricultureTopicDepartment, isNaturalResourcesTopicDepartment, isLandSupervisionTopic, resolveLandSceneCode } from '@/utils/topic-access'
+import { resolveWorkspaceSceneId } from '@/workspace/config/registry'
 import {
   recognitionPermissionOrder,
   recognitionTabPermission,
@@ -73,9 +74,16 @@ router.beforeEach(async (to) => {
   await user.ensureMenuPermissions()
   if(to.name==='recognition'){
     const topicRequest=to.params.tab==='topics'||(to.params.tab==='data'&&(to.query.dataTab==='topics'||to.query.analysis==='topics'))
-    if(topicRequest&&!isAgricultureTopicDepartment(user))return {name:'forbidden',query:{from:to.fullPath}}
+    if(topicRequest){
+      const natural=isNaturalResourcesTopicDepartment(user), agriculture=isAgricultureTopicDepartment(user)
+      if(!natural&&!agriculture)return {name:'forbidden',query:{from:to.fullPath}}
+      if(to.query.topic&&(isLandSupervisionTopic(to.query.topic)?!natural:!agriculture))return {name:'forbidden',query:{from:to.fullPath}}
+      const canonical=resolveLandSceneCode(to.query.topic)
+      if(canonical&&canonical!==to.query.topic)return {name:'recognition',params:{tab:'topics'},query:{...to.query,topic:canonical}}
+    }
     if(topicRequest&&to.params.tab==='data')return {name:'recognition',params:{tab:'topics'},query:{topic:to.query.topic}}
   }
+  if(to.name==='workspace'&&['new-illegal-land-warning','existing-illegal-land-rectification'].includes(resolveWorkspaceSceneId(String(to.params.sceneId||'')))&&!isNaturalResourcesTopicDepartment(user))return {name:'forbidden',query:{from:to.fullPath}}
   if (to.name === 'login') return firstAccessiblePath(user.hasPermission)
   const redirectedSection = to.redirectedFrom?.path
   if (redirectedSection === '/uav-tasks') {

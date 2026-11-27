@@ -16,7 +16,7 @@ import '../non-grain/workspace.scss'
 const props = defineProps<{ taskId?: string; nodeKey: string; readonly?: boolean }>()
 const emit = defineEmits<{ submitted: [] }>()
 const user = useUserStore()
-const { task, flow, selectedNode, abnormals, logs, loading, errors, load, text } = useBackendTaskData({ get taskId() { return props.taskId }, get nodeKey() { return props.nodeKey }, get readonly() { return props.readonly }, includeMaterials: false })
+const { task, flow, selectedNode, abnormals, logs, loading, errors, load, text, imageryPeriod } = useBackendTaskData({ get taskId() { return props.taskId }, get nodeKey() { return props.nodeKey }, get readonly() { return props.readonly }, includeMaterials: false })
 const busy = ref(false), error = ref(''), activeId = ref(''), deadline = ref(''), opinion = ref('')
 const recipient = ref<WorkbenchUser>()
 const plots = ref<Array<{ abnormalId: string; result: string; description: string }>>([])
@@ -28,7 +28,7 @@ const evidenceFiles = computed(() => archive.value ? (flow.value?.timeline || []
 const saved = computed(() => (selectedNode.value?.resultData || {}) as Record<string, unknown>)
 const active = computed(() => plots.value.find(plot => plot.abnormalId === activeId.value))
 const displayPlots = computed(() => abnormals.value.length ? abnormals.value : [{ id: 'task', title: '任务整体', description: '此任务暂无图斑，按任务整体填报。', boundaryGeoJson: undefined, imageUrl: undefined, area: undefined }])
-const activeSpot = computed(() => displayPlots.value.find(spot => spot.id === activeId.value))
+const activeSpot = computed(() => abnormals.value.find(spot => spot.id === activeId.value))
 const summaries = computed(() => [
   { icon: '单', label: '任务编号', value: task.value?.taskNo },
   { icon: '景', label: '所属场景', value: task.value?.sceneName },

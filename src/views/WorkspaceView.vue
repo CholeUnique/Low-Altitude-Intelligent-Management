@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import WorkflowActorBadge from '@/components/WorkflowActorBadge.vue'
+import WorkspaceToolBall from '@/workspace-components/shared/WorkspaceToolBall.vue'
+import WorkbenchHeader from '@/workspace-components/shared/WorkbenchHeader.vue'
+import { getMyWorkflowTasks, type MyWorkflowTask } from '@/api/my-workflow-tasks'
 import { getTaskWorkflow, startTaskWorkflow, type TaskWorkflow } from '@/api/task-workflow'
 import { isDefaultWorkflow } from '@/utils/default-workflow'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { WorkspaceNodeConfig } from '@/types'
 import {
-  getWorkflowNodeStatus,
   isWorkspaceNodeAccessible,
   resolveWorkspaceNodeKey,
 } from '@/workspace/config/workflow'
@@ -30,6 +31,8 @@ import RouteFlightPlanPanel from '@/workspace-components/route-flight-plan/Route
 import RealtimeCruisePanel from '@/workspace-components/realtime-cruise/RealtimeCruisePanel.vue'
 import NonGrainWorkspace from '@/workspace-components/non-grain/NonGrainWorkspace.vue'
 import FarmlandFacilitiesWorkspace from '@/workspace-components/farmland-facilities/FarmlandFacilitiesWorkspace.vue'
+import LandSupervisionWorkspace from '@/workspace-components/land-supervision/LandSupervisionWorkspace.vue'
+import { LAND_WARNING_SCENE, LAND_RECTIFICATION_SCENE } from '@/types/land-supervision'
 import TaskAcceptancePanel from '@/workspace-components/shared/TaskAcceptancePanel.vue'
 import { vWorkbenchValidation } from '@/workspace-components/shared/workbench-validation'
 
@@ -39,11 +42,14 @@ const user = useUserStore()
 
 const sceneId = computed(() => String(route.params.sceneId || ''))
 const task = ref<PortalTask>()
+const landLocation=ref<{taskId:string;taskName:string;geometry?:import('@/api/governance-task').TaskGeometryFeatureCollection}>()
 const taskLoading = ref(false)
 const taskError = ref('')
 const workspaceSceneId = computed(() => resolveWorkspaceSceneId(backendTask.value?.sceneCode || sceneId.value, backendTask.value?.sceneName))
 const isNonGrainWorkspace = computed(() => workspaceSceneId.value === 'non-grain-monitoring')
 const isFacilityWorkspace = computed(() => workspaceSceneId.value === 'farmland-facilities')
+const isLandWorkspace = computed(() => ['new-illegal-land-warning','existing-illegal-land-rectification'].includes(resolveWorkspaceSceneId(sceneId.value)))
+const landSceneCode = computed(() => resolveWorkspaceSceneId(sceneId.value)==='new-illegal-land-warning'?LAND_WARNING_SCENE:LAND_RECTIFICATION_SCENE)
 /** 林业执法按业务节点办理：科室下发 / 实地考察 / 验收结案，直接绑定后端默认流程三个节点。 */
 const isForestryWorkspace = computed(() => workspaceSceneId.value === 'forestry-enforcement')
 /** 土地供后巡查与履约分析：项目匹配 / 履约分析 / 核查下发 / 现场核查 / 处置归档。 */
@@ -92,7 +98,8 @@ const workspaceConfig = computed(() => {
   return { ...config, nodes: [{ key: 'task-acceptance', name: '任务受理', shortName: '任务受理', order: 0, module: 'governance' as const, component: 'TaskAcceptance' }, ...config.nodes] }
 })
 const contextFlow = ref<TaskWorkflow>()
-const useDefaultTemplate = computed(() => !isNonGrainWorkspace.value && isDefaultWorkflow(contextFlow.value))
+const headerTodos=ref<MyWorkflowTask[]>([]),headerNoticeError=ref('')
+const useDefaultTemplate = computed(() => !isLandWorkspace.value && !isNonGrainWorkspace.value && isDefaultWorkflow(contextFlow.value))
 const backendTask = ref<import('@/api/governance-task').GovernanceTask>()
 const currentScene = computed(() => getScene(user.organization, workspaceSceneId.value))
 let taskRequestVersion = 0
@@ -101,10 +108,13 @@ async function loadTaskContext() {
   const version = ++taskRequestVersion
   const taskId = typeof route.params.taskId === 'string' ? route.params.taskId : ''
   task.value = undefined
+  landLocation.value=undefined
   backendTask.value = undefined
   contextFlow.value = undefined
   taskError.value = ''
   taskLoading.value = false
+  headerTodos.value=[];headerNoticeError.value=''
+  if (isLandWorkspace.value) return
   if (!taskId) return
   taskLoading.value = true
   try {
@@ -115,6 +125,7 @@ async function loadTaskContext() {
     contextFlow.value = workflow
     backendTask.value = detail?.task
     task.value = detail ? toPatrolTask(detail.task) : undefined
+    if (!isNonGrainWorkspace.value&&!isFacilityWorkspace.value&&!useDefaultTemplate.value&&user.hasPermission('task-todo')){try{const pending=await getMyWorkflowTasks(String(user.currentUser?.id||''),user.activeDeptId);if(version===taskRequestVersion){headerTodos.value=pending.records.filter(item=>item.id!==taskId&&item.myWorkState==='pending');headerNoticeError.value=pending.warnings.join('；')}}catch(reason){headerNoticeError.value=reason instanceof Error?reason.message:'待办读取失败'}}
     if (!task.value) taskError.value = '未找到该真实业务任务，或当前账号没有查看权限。'
   } catch (error) {
     if (version !== taskRequestVersion) return
@@ -139,7 +150,6 @@ const governanceNodes = computed(() =>
   workspaceConfig.value?.nodes.filter((node) => (node.key === 'task-acceptance' || (node.module === 'governance' && node.key !== 'spot-identification')) && (!isForestryWorkspace.value || (contextFlow.value?.flowKey === 'FOREST_LAW_ENFORCE_FLOW' ? node.key !== 'review-archive' : !['section-dispatch', 'section-audit', 'forest-rectify', 'section-recheck', 'forest-finish'].includes(node.key)))) ?? [],
 )
 
-const discoveryNodes = computed<WorkspaceNodeConfig[]>(() => [])
 
 /** 真实任务只有粗粒度 taskStatus 时，映射为工作台五节点中的当前节点。 */
 const defaultNodeKey = computed(() => {
@@ -241,21 +251,6 @@ function isNodeAvailable(node: WorkspaceNodeConfig) {
     || isWorkspaceNodeAccessible(task.value?.workflow, node.key, nodeKeys.value)
 }
 
-function nodeState(key: string) {
-  if (key === 'task-acceptance') return { status: 'done', accessible: Boolean(backendTask.value), active: key === activeKey.value, done: true }
-  const flow = sceneWorkflow.value
-  const raw = flow && flow.isFlowNode(key)
-    ? flow.status(contextFlow.value, key)
-    : getWorkflowNodeStatus(task.value?.workflow, key)
-  const status = raw === 'completed' ? 'done' : raw
-  const node = workspaceConfig.value?.nodes.find((item) => item.key === key)
-  return {
-    status,
-    accessible: Boolean(node && isNodeAvailable(node)),
-    active: key === activeKey.value || (!activeKey.value && status === 'active'),
-    done: status === 'done',
-  }
-}
 
 function workflowInstance(node: WorkspaceNodeConfig) {
   const flow = sceneWorkflow.value
@@ -265,6 +260,8 @@ function workflowInstance(node: WorkspaceNodeConfig) {
   }
   return [...(contextFlow.value?.timeline || []), ...(contextFlow.value?.currentNode ? [contextFlow.value.currentNode] : [])].reverse().find(item => item.nodeKey === node.key || item.nodeName === node.name || item.nodeName === node.shortName)
 }
+
+const workspaceHeaderSteps=computed(()=>governanceNodes.value.map(node=>{const instance=workflowInstance(node);return {key:node.key,name:node.shortName||node.name,order:node.order,instance,viewable:node.key==='task-acceptance'?Boolean(backendTask.value):isNodeAvailable(node),status:node.key==='task-acceptance'&&backendTask.value||instance?.status==='COMPLETED'?'completed':instance?.status==='PROCESSING'?'active':'pending'}}))
 
 function selectNode(node: WorkspaceNodeConfig) {
   if (!isNodeAvailable(node)) return
@@ -282,7 +279,7 @@ watch(
     // 非粮化工作台由其自身七节点路由守卫维护，不能复用共享工作台的节点改写逻辑。
     // 非粮化与工程设施工作台都由内部流程维护节点路由；外层通用守卫不能
     // 把其历史节点 query 改写成共享工作台节点，否则已完成页面无法回看。
-    if (isNonGrainWorkspace.value || isFacilityWorkspace.value || (useDefaultTemplate.value && !sceneWorkflow.value)) return
+    if (isLandWorkspace.value || isNonGrainWorkspace.value || isFacilityWorkspace.value || (useDefaultTemplate.value && !sceneWorkflow.value)) return
     if (!workspaceConfig.value) return
     const queryKey = typeof route.query.node === 'string' ? route.query.node : ''
     const queryNode = workspaceConfig.value.nodes.find((item) => item.key === queryKey)
@@ -301,8 +298,10 @@ onMounted(() => void loadTaskContext())
 </script>
 
 <template>
-  <div v-if="taskLoading" class="workspace workspace-empty">
-    <section class="workspace-context" aria-label="工作台操作"><div class="workspace-brand"><div><b>场景作业工作台</b><small>正在加载真实任务</small></div></div></section>
+  <div class="workspace-host"><div class="workspace-host-content">
+  <LandSupervisionWorkspace @location="landLocation=$event" v-if="isLandWorkspace" :key="`${user.activeDeptId}:${route.params.taskId}`" :scene-code="landSceneCode" :task-id="String(route.params.taskId||'')" />
+  <div v-else-if="taskLoading" class="workspace workspace-empty">
+    <WorkbenchHeader :title="taskLoading?'场景作业工作台':(currentScene?.shortName||currentScene?.name||'场景作业')+'工作台'" :task-name="taskLoading?'正在加载真实任务':task?.name||String(route.params.taskId||'')" :steps="taskLoading?[]:workspaceHeaderSteps" :selected-key="activeKey" :user-id="String(user.currentUser?.id||'')" :show-back="user.hasPermission('task-todo')" :show-notice="user.hasPermission('task-todo')" :tasks="headerTodos" :notice-error="headerNoticeError" @back="router.push('/tasks/todo')" @select="key=>{const node=workspaceConfig.nodes.find(item=>item.key===key);if(node)selectNode(node)}" @open-all="router.push('/tasks/todo')" @open-task="router.push({name:'workspace',params:{sceneId:$event.sceneCode,taskId:$event.id}})" />
     <main class="empty-body"><div class="empty-card"><h2>正在加载任务工作台…</h2></div></main>
   </div>
 
@@ -336,16 +335,7 @@ onMounted(() => void loadTaskContext())
   <div v-else-if="taskError" class="workspace workspace-empty"><main class="empty-body"><div class="empty-card"><h2>任务读取失败</h2><p>{{ taskError }}</p><button @click="loadTaskContext">重试</button></div></main></div>
 
   <div v-else-if="!workspaceConfig" class="workspace workspace-empty">
-    <section class="workspace-context" aria-label="工作台操作">
-      <div class="workspace-brand" :class="{ 'workspace-brand--linked': user.hasPermission('unit-overview') }" @click="user.hasPermission('unit-overview') && $router.push('/dashboard')">
-
-        <div>
-          <b :title="`${currentScene?.name || '场景作业'}工作台`">{{ currentScene?.shortName || currentScene?.name || '场景作业' }}工作台</b>
-          <small>{{ taskError || sceneId || '未指定场景' }}</small>
-        </div>
-      </div>
-
-    </section>
+    <WorkbenchHeader :title="taskLoading?'场景作业工作台':(currentScene?.shortName||currentScene?.name||'场景作业')+'工作台'" :task-name="taskLoading?'正在加载真实任务':task?.name||String(route.params.taskId||'')" :steps="taskLoading?[]:workspaceHeaderSteps" :selected-key="activeKey" :user-id="String(user.currentUser?.id||'')" :show-back="user.hasPermission('task-todo')" :show-notice="user.hasPermission('task-todo')" :tasks="headerTodos" :notice-error="headerNoticeError" @back="router.push('/tasks/todo')" @select="key=>{const node=workspaceConfig.nodes.find(item=>item.key===key);if(node)selectNode(node)}" @open-all="router.push('/tasks/todo')" @open-task="router.push({name:'workspace',params:{sceneId:$event.sceneCode,taskId:$event.id}})" />
     <main class="empty-body">
       <div class="empty-card">
         <h2>该场景工作台正在建设</h2>
@@ -356,57 +346,7 @@ onMounted(() => void loadTaskContext())
   </div>
 
   <div v-else v-workbench-validation class="workspace">
-    <section class="workspace-context" aria-label="工作台操作">
-      <div class="workspace-return">
-        <el-button v-if="user.hasPermission('task-todo')" class="workspace-return-button" @click="$router.push('/tasks/todo')">‹ 返回任务</el-button>
-      </div>
-
-      <div class="workspace-brand workspace-brand--moved" :class="{ 'workspace-brand--linked': user.hasPermission('unit-overview') }" @click="user.hasPermission('unit-overview') && $router.push('/dashboard')">
-
-        <div>
-          <b :title="`${workspaceConfig.name}工作台`">{{ currentScene?.shortName || workspaceConfig.name }}工作台</b>
-          <small>{{ task?.name || route.params.taskId || '综合工作台' }}</small>
-        </div>
-      </div>
-
-      <div class="flow-nav">
-        <div v-if="discoveryNodes.length" class="flow-module">
-          <span class="module-label">低空巡查发现模块</span>
-          <div class="module-nodes">
-            <button
-              v-for="node in discoveryNodes"
-              :key="node.key"
-              :class="[nodeState(node.key), { 'acceptance-complete': node.key === 'task-acceptance' }]"
-              :data-processing="workflowInstance(node)?.status === 'PROCESSING'"
-              :disabled="!nodeState(node.key).accessible"
-              @click="selectNode(node)"
-            >
-              <div class="workflow-step-symbol"><i aria-hidden="true"></i><WorkflowActorBadge v-if="node.key !== 'task-acceptance'" :node="workflowInstance(node)" :user-id="String(user.currentUser?.id || '')" /></div>
-              <span>{{ node.shortName }}</span>
-            </button>
-          </div>
-        </div>
-        <div v-if="discoveryNodes.length" class="flow-divider"></div>
-        <div class="flow-module">
-          <span class="module-label">治理模块</span>
-          <div class="module-nodes">
-            <button
-              v-for="node in governanceNodes"
-              :key="node.key"
-              :class="[nodeState(node.key), { 'acceptance-complete': node.key === 'task-acceptance' }]"
-              :data-processing="workflowInstance(node)?.status === 'PROCESSING'"
-              :disabled="!nodeState(node.key).accessible"
-              @click="selectNode(node)"
-            >
-              <div class="workflow-step-symbol"><i aria-hidden="true"></i><WorkflowActorBadge v-if="node.key !== 'task-acceptance'" :node="workflowInstance(node)" :user-id="String(user.currentUser?.id || '')" /></div>
-              <span>{{ node.shortName }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-
-    </section>
+    <WorkbenchHeader :title="taskLoading?'场景作业工作台':(currentScene?.shortName||currentScene?.name||'场景作业')+'工作台'" :task-name="taskLoading?'正在加载真实任务':task?.name||String(route.params.taskId||'')" :steps="taskLoading?[]:workspaceHeaderSteps" :selected-key="activeKey" :user-id="String(user.currentUser?.id||'')" :show-back="user.hasPermission('task-todo')" :show-notice="user.hasPermission('task-todo')" :tasks="headerTodos" :notice-error="headerNoticeError" @back="router.push('/tasks/todo')" @select="key=>{const node=workspaceConfig.nodes.find(item=>item.key===key);if(node)selectNode(node)}" @open-all="router.push('/tasks/todo')" @open-task="router.push({name:'workspace',params:{sceneId:$event.sceneCode,taskId:$event.id}})" />
 
       <p v-if="workflowMissing" class="workflow-notice" role="status">
         <span>该任务尚未启动工作流，目前只能查看任务受理与本地分析节点。</span>
@@ -435,6 +375,7 @@ onMounted(() => void loadTaskContext())
       </div>
     </main>
   </div>
+</div><WorkspaceToolBall v-if="route.params.taskId&&!taskError" :key="`${user.activeDeptId}:${route.params.taskId}`" :task-name="task?.name||landLocation?.taskName" :geometry="landLocation?.taskId===String(route.params.taskId)?landLocation.geometry:undefined" :task-id="String(route.params.taskId)" :dept-id="backendTask?.deptId||user.activeDeptId" /></div>
 </template>
 
 <style scoped lang="scss">
@@ -670,3 +611,5 @@ onMounted(() => void loadTaskContext())
 <style scoped>
 .workflow-step-symbol{position:relative;display:grid;place-items:center;width:28px;height:28px;z-index:2;overflow:visible}
 </style>
+
+<style scoped>.workspace-host{position:relative;height:100%;min-height:0;isolation:isolate}.workspace-host-content{height:100%;min-height:0}</style>

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue'
+import { computed, ref, useId } from 'vue'
 import type { IdentifiedMapFeature } from '@/utils/map-service-layer'
 import { topicFeatureRows, topicFeatureSummary } from '@/utils/topic-feature-fields'
 const props = defineProps<{features: IdentifiedMapFeature[]; selected: number; roles: Record<string,string>; embedded?:boolean}>()
 const emit = defineEmits<{select:[index:number]; close:[]}>()
 const id = useId()
+const collapsed = ref(false)
 const active = computed(() => props.features[props.selected])
 const groups = computed(() => {
   const result = new Map<string,{id:string; name:string; indices:number[]}>()
@@ -21,8 +22,8 @@ const summary = computed(() => topicFeatureSummary(active.value?.rows||[],active
 const rows = computed(() => active.value ? topicFeatureRows(active.value.rows,activeRole.value,active.value.serviceName).filter(row=>!summary.value.sourceFields.includes(row.name||row.label)) : [])
 </script>
 <template>
-  <aside v-if="active" class="topic-feature-details" :class="{'is-embedded':embedded}" aria-label="要素详情">
-    <header><div><b>要素详情</b></div><button aria-label="关闭要素详情" @click="emit('close')">×</button></header>
+  <aside v-if="active" class="topic-feature-details" :class="{'is-embedded':embedded,'is-collapsed':collapsed}" aria-label="要素详情">
+    <header><button class="details-collapse-toggle" :aria-expanded="!collapsed" @click="collapsed=!collapsed"><b>要素详情</b><span>{{ collapsed?'＋':'−' }}</span></button><button aria-label="关闭要素详情" @click="emit('close')">×</button></header>
     <nav role="tablist" aria-label="叠加要素图层">
       <button v-for="(group,index) in groups" :id="`${id}-tab-${index}`" :key="group.id" role="tab" :aria-selected="group.id === active.serviceId" :aria-controls="`${id}-content`" :tabindex="group.id === active.serviceId ? 0 : -1" :title="group.name" @click="emit('select',group.indices[0]!)" @keydown.right.prevent="emit('select',groups[(index+1)%groups.length]!.indices[0]!)" @keydown.left.prevent="emit('select',groups[(index+groups.length-1)%groups.length]!.indices[0]!)">{{ group.name }}</button>
     </nav>

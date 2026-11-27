@@ -33,7 +33,7 @@
   }
   .category-ring .center { inset-inline: 10%; }
   .category-ring .center:has(.emblem) b { font-size: max(12px, min(var(--cockpit-number-size), var(--ring-number-size))); }
-  .recognition-types > div:not(.float-empty) { min-height: 30px; align-items: center; }
+  .recognition-types .recognition-type-row { min-height: 30px; align-items: center; }
   .scene-task-legend :is(button, .scene-task-legend__static) { min-height: 30px; }
   // Keep the heading visible; scroll status totals and the scene list together.
   .governance-panel .scene-task-chart {
@@ -49,8 +49,44 @@
   .governance-panel .scene-task-chart::-webkit-scrollbar { display: none; width: 0; height: 0; }
   .governance-panel .scene-task-chart:focus-visible { outline: 1px solid var(--cockpit-cyan); outline-offset: -1px; }
   .governance-panel .scene-task-main { flex: 0 0 auto; }
-  .governance-panel .scene-task-legend { flex: 0 0 auto; min-height: 0; max-height: none; overflow: visible; }
+  .governance-panel .scene-task-legend { min-height: 0; overflow: auto; }
   .overview-float-panel .auxiliary-number { color: var(--cockpit-number-color); font-size: inherit; font-weight: 700; }
+
+  // Keep the charts compact so the cycling detail rows have room at every viewport height.
+  :is(.recognition-panel, .governance-panel) {
+    padding: 10px 14px;
+    gap: 6px;
+    overflow: clip;
+    > header { min-height: 26px; padding-bottom: 6px; }
+    .recognition-summary, .scene-task-main {
+      --cockpit-ring-size: clamp(72px, 9vh, 88px);
+      gap: 8px;
+      min-height: 0;
+      margin: 0;
+    }
+    .scene-task-chart { padding-top: 0; gap: 6px; justify-content: flex-start; }
+    :is(.recognition-summary dl, .task-state-legend) > div {
+      min-height: 24px; padding-block: 0; gap: 4px;
+    }
+    &.overview-float-panel :is(.recognition-summary, .task-state-legend) dd {
+      font-size: 20px; line-height: 26px; white-space: nowrap;
+    }
+    .scene-task-ring__center span { white-space: nowrap; }
+    .task-state-legend {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px;
+      > div:first-child { grid-column: 1 / -1; }
+      dt { font-size: 12px; gap: 4px; white-space: nowrap; }
+    }
+    &.overview-float-panel .task-state-legend dd { font-size: 18px; }
+    .scene-task-legend, .recognition-types {
+      flex: 1 1 0; min-height: 0; padding: 4px 0 0;
+    }
+    .recognition-type-row { margin: 0; }
+    .scene-task-legend :is(button, .scene-task-legend__static) {
+      grid-template-columns: 7px minmax(0, 1fr) max-content; padding-block: 4px;
+    }
+    .recognition-type-row { grid-template-columns: minmax(72px, 1fr) 1fr max-content; }
+  }
 }
 @media (max-width: 1300px), (max-height: 700px) {
   #app .cockpit--glass { --cockpit-number-size: 20px; }

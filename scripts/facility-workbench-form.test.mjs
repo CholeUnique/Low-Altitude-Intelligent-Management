@@ -73,7 +73,7 @@ const component=evaluate(compileScript(descriptor,{id:'facility-form-test'}).con
   '@/utils/farmland-facility-workflow':workflow,
   '@/utils/inspection-files':load('src/utils/inspection-files.ts'),
   './use-facility-context':context,
-  ...Object.fromEntries(['@/workspace-components/shared/WorkbenchTaskNotice.vue','@/components/WorkflowActorBadge.vue','./FacilityGeometryMap.vue','@/components/FacilityReportImageGallery.vue','@/workspace-components/shared/WorkflowAssigneePicker.vue','@/workspace-components/shared/WorkbenchRequiredMark.vue'].map(name=>[name,{default:{}}])),
+  ...Object.fromEntries(['@/workspace-components/shared/WorkbenchHeader.vue','@/workspace-components/shared/WorkbenchTaskNotice.vue','@/components/WorkflowActorBadge.vue','./FacilityGeometryMap.vue','@/components/FacilityReportImageGallery.vue','@/workspace-components/shared/WorkflowAssigneePicker.vue','@/workspace-components/shared/WorkbenchRequiredMark.vue'].map(name=>[name,{default:{}}])),
 }).default
 const scope=vue.effectScope()
 const state=scope.run(()=>component.setup({taskId:task.id},{expose(){}}))
